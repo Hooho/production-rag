@@ -37,9 +37,7 @@
 
 > cp .env.example .env
 
-修改 `.env` 中的密码、JWT 密钥和模型配置。
-
-默认使用 `MODEL_MODE=demo`，不需要外部大模型 API Key。
+复制后即可使用默认开发密钥启动。生产环境请替换 `.env` 中的密码和 JWT 密钥；如果使用真实大模型，再填写对应的 API Key。
 
 首次启动会下载本地 Embedding 和重排模型。模型会缓存到 Docker 数据卷，后续启动不会重复下载。
 
