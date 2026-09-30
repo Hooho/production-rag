@@ -165,7 +165,8 @@ services:
       retries: 10
     restart: unless-stopped
   milvus:
-    image: milvusdb/milvus:v2.6.4
+    # v2.6.4 在当前 ARM64 环境启动时会发生段错误；升级同一大版本的补丁版本，保留原数据卷并获取后续稳定性修复。
+    image: milvusdb/milvus:v2.6.25
     command: ["milvus", "run", "standalone"]
     environment:
       ETCD_USE_EMBED: "true"
