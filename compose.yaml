@@ -164,19 +164,45 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+  # 内置 etcd 在本机 ARM64 环境启动时会在 InitEtcdServer 崩溃；改用独立 etcd，避免 Milvus 随容器反复重启。
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.18
+    command:
+      - etcd
+      - --name=etcd
+      - --data-dir=/etcd-data
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --initial-advertise-peer-urls=http://etcd:2380
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-cluster=etcd=http://etcd:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=production-rag-etcd
+      - --auto-compaction-mode=revision
+      - --auto-compaction-retention=1000
+      - --quota-backend-bytes=4294967296
+    volumes:
+      - etcd_data_recovery:/etcd-data
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
   milvus:
-    # v2.6.4 在当前 ARM64 环境启动时会发生段错误；升级同一大版本的补丁版本，保留原数据卷并获取后续稳定性修复。
+    # MySQL 保存分片原文，Milvus 索引可重建；使用独立 etcd 和新卷，保留原卷作为回滚备份。
     image: milvusdb/milvus:v2.6.25
     command: ["milvus", "run", "standalone"]
     environment:
-      ETCD_USE_EMBED: "true"
-      ETCD_DATA_DIR: /var/lib/milvus/etcd
-      ETCD_CONFIG_PATH: /milvus/configs/embedEtcd.yaml
+      ETCD_USE_EMBED: "false"
+      ETCD_ENDPOINTS: etcd:2379
       COMMON_STORAGETYPE: local
       DEPLOY_MODE: STANDALONE
+    depends_on:
+      etcd:
+        condition: service_healthy
     volumes:
-      - milvus_data:/var/lib/milvus
-      - ./infra/embedEtcd.yaml:/milvus/configs/embedEtcd.yaml:ro
+      - milvus_data_external_etcd:/var/lib/milvus
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
       interval: 10s
@@ -218,7 +244,11 @@ volumes:
   mysql_data:
   langgraph_postgres_data:
   redis_data:
+  etcd_data_recovery:
+    name: production-rag_etcd_data_recovery
   milvus_data:
+  milvus_data_external_etcd:
+    name: production-rag_milvus_data_external_etcd
   uploads_data:
   hires_cache:
   embedding_cache:
