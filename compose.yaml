@@ -1,0 +1,223 @@
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-3001}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+  # 数据库迁移：先把 MySQL 表结构升级到代码需要的版本，执行完就退出。
+  # 原来由 API 和 Worker 启动时各自 create_all 并补列，两个容器同时启动可能同时改表；
+  # 现在只在这里执行一次，API 和 Worker 等它成功结束后才启动。
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    env_file: .env
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_DATABASE: rag
+      MYSQL_USER: rag
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: "no"
+  api:
+    build: .
+    env_file: .env
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_DATABASE: rag
+      MYSQL_USER: rag
+      # 登录令牌签名密钥，没填时启动直接报错，避免用空密钥签发令牌。
+      JWT_SECRET: ${JWT_SECRET:?请填写 .env}
+      LANGGRAPH_DATABASE_URL: postgresql://langgraph:${LANGGRAPH_POSTGRES_PASSWORD:?请填写 .env}@langgraph-postgres:5432/langgraph
+      REDIS_HOST: redis
+      MILVUS_URI: http://milvus:19530
+      UPLOAD_DIR: /app/uploads
+      EMBEDDING_MODE: ${EMBEDDING_MODE:-demo}
+      EMBEDDING_URL: http://embedding:8090/v1
+      RERANK_MODE: ${RERANK_MODE:-local}
+      RERANK_URL: http://embedding:8090/v1
+      RERANK_MIN_SCORE: ${RERANK_MIN_SCORE:-0.3}
+      INTENT_MODE: ${INTENT_MODE:-local}
+      INTENT_URL: http://intent:8091/v1
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-mysql,redis,milvus,embedding,intent,localhost,127.0.0.1}
+      # 评测结果文件名里的提交号；容器里没有 .git，启动时用 GIT_COMMIT=$(git rev-parse --short HEAD) 传入。
+      GIT_COMMIT: ${GIT_COMMIT:-}
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+      langgraph-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+      embedding:
+        condition: service_healthy
+      intent:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - uploads_data:/app/uploads
+      # 评测集、语料和结果直接挂载仓库目录：改了题目不用重新构建镜像，评测结果也直接写回仓库，可以随代码提交。
+      - ./eval:/app/eval
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=20)"]
+      interval: 30s
+      timeout: 25s
+      retries: 3
+      start_period: 30s
+  worker:
+    build: .
+    command: ["python", "-m", "scripts.worker"]
+    env_file: .env
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_DATABASE: rag
+      MYSQL_USER: rag
+      REDIS_HOST: redis
+      MILVUS_URI: http://milvus:19530
+      UPLOAD_DIR: /app/uploads
+      EMBEDDING_MODE: ${EMBEDDING_MODE:-demo}
+      EMBEDDING_URL: http://embedding:8090/v1
+      RERANK_MODE: ${RERANK_MODE:-local}
+      RERANK_URL: http://embedding:8090/v1
+      INTENT_MODE: ${INTENT_MODE:-local}
+      INTENT_URL: http://intent:8091/v1
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-mysql,redis,milvus,embedding,intent,localhost,127.0.0.1}
+      HF_HOME: /home/app/.cache/huggingface
+      TRANSFORMERS_CACHE: /home/app/.cache/huggingface/transformers
+      MPLCONFIGDIR: /home/app/.cache/matplotlib
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://huggingface.co}
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      HF_HUB_DISABLE_XET: "1"
+      HF_HUB_DOWNLOAD_TIMEOUT: "120"
+      HF_HUB_ETAG_TIMEOUT: "60"
+      NLTK_DATA: /usr/local/share/nltk_data
+      AUTO_DOWNLOAD_NLTK: "false"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+      embedding:
+        condition: service_healthy
+      intent:
+        condition: service_healthy
+    volumes:
+      - uploads_data:/app/uploads
+      - hires_cache:/home/app/.cache
+    restart: unless-stopped
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: rag
+      MYSQL_USER: rag
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请填写 .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请填写 .env}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_PASSWORD mysql -h 127.0.0.1 -u rag -D rag -e 'SELECT 1'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+  langgraph-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: langgraph
+      POSTGRES_USER: langgraph
+      POSTGRES_PASSWORD: ${LANGGRAPH_POSTGRES_PASSWORD:?请填写 .env}
+    volumes:
+      - langgraph_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langgraph -d langgraph"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  redis:
+    image: redis:7.4-alpine
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?请填写 .env}
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+  milvus:
+    image: milvusdb/milvus:v2.6.4
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_USE_EMBED: "true"
+      ETCD_DATA_DIR: /var/lib/milvus/etcd
+      ETCD_CONFIG_PATH: /milvus/configs/embedEtcd.yaml
+      COMMON_STORAGETYPE: local
+      DEPLOY_MODE: STANDALONE
+    volumes:
+      - milvus_data:/var/lib/milvus
+      - ./infra/embedEtcd.yaml:/milvus/configs/embedEtcd.yaml:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+    restart: unless-stopped
+  embedding:
+    build: ./embedding
+    environment:
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-small-zh-v1.5}
+      RERANKER_MODEL: ${RERANKER_MODEL:-BAAI/bge-reranker-base}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-mysql,redis,milvus,embedding,intent,localhost,127.0.0.1}
+    volumes:
+      - embedding_cache:/home/embed/.cache
+    expose:
+      - "8090"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health', timeout=5)"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+  intent:
+    build: ./intent
+    expose:
+      - "8091"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8091/health', timeout=5)"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+volumes:
+  mysql_data:
+  langgraph_postgres_data:
+  redis_data:
+  milvus_data:
+  uploads_data:
+  hires_cache:
+  embedding_cache:

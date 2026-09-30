@@ -1,0 +1,822 @@
+// 来源带上版本号、页码和标题路径，便于确认命中的是当前版本的哪个位置。
+export type Source = { id: string; title: string; text: string; score?: number; version?: number | null; page_start?: number | null; heading?: string | null };
+export type TraceStep = {
+  id: string;
+  stage: string;
+  title: string;
+  status: "completed" | "running" | "pending" | "failed";
+  detail: string;
+  duration_ms?: number;
+  // 从请求开始到这一步完成的累计时间；duration_ms 只是这一步自己的耗时。
+  elapsed_ms?: number;
+  result?: Record<string, unknown>;
+  // result 的字段顺序。MySQL JSON 列会把对象的键重新排序，后端另存一份数组记录原来的顺序。
+  field_order?: string[];
+};
+// 检索诊断：后端记录的每张排名表、每个候选的 RRF 贡献、重排概率和最终去向。
+export type RetrievalContribution = { query: string; method: string; rank: number; raw_score: number; rrf: number };
+export type RetrievalListHit = { rank: number; chunk_id: string; title: string; raw_score: number; rrf: number };
+export type RetrievalList = { query: string; method: string; hits: RetrievalListHit[] };
+export type RetrievalCandidate = {
+  chunk_id: string;
+  chunk_key?: string | null;
+  title: string;
+  version?: number | null;
+  page_start?: number | null;
+  heading?: string | null;
+  preview: string;
+  status: "returned" | "beyond_limit" | "filtered_low_score" | "in_pool" | "not_in_pool";
+  source_id: string | null;
+  retrieval_methods: string[];
+  contributions: RetrievalContribution[];
+  rrf_score: number;
+  rrf_rank: number;
+  rerank_logit: number | null;
+  rerank_probability: number | null;
+  rerank_rank: number | null;
+};
+export type RetrievalDiagnosticsData = {
+  config: { rrf_k: number; rerank_candidates: number; return_limit: number; reranked: boolean; min_score: number | null; rerank_query: string; rerank_model: string; rerank_error?: string | null };
+  lists: RetrievalList[];
+  candidates: RetrievalCandidate[];
+  // 这次检索的权限范围：可检索的文档（当前版本）按自己上传 / 共享给我 / 公开计数；旧记录没有。
+  scope?: RetrievalScope;
+};
+export type RetrievalScope = {
+  total: number; own: number; shared: number; public: number; groups: string[];
+  documents: Array<{ document_id: string; title: string; version: number; source: "own" | "shared" | "public"; owner: string; groups: string[] }>;
+};
+export type ChatResult = {
+  answer: string;
+  route: string;
+  sources: Source[];
+  steps: TraceStep[];
+  trace_id: string;
+  request_id: string;
+  model_mode?: string;
+  // 用户对这次回答的反馈，来自 /history；新回答没有反馈。
+  feedback?: FeedbackRecord | null;
+};
+export type HistoryRun = {
+  id: string;
+  session_id: string;
+  question: string;
+  response: ChatResult;
+  created: string;
+  feedback?: FeedbackRecord | null;
+};
+// 点踩原因，与后端 FEEDBACK_REASONS 保持一致。
+export type FeedbackReason = "wrong" | "incomplete" | "missed" | "citation" | "other";
+export type FeedbackRecord = {
+  request_id: string;
+  rating: 1 | -1;
+  reason: FeedbackReason | null;
+  reason_label?: string | null;
+  comment: string | null;
+  created: string;
+  updated: string;
+};
+// 一份文档的一个版本。列表接口按逻辑文档返回当前版本，并在 pending 中给出更新但尚未生效的版本；
+// 详情接口额外返回同一文档的全部版本历史。
+export type DocumentVersionSummary = {
+  document_id: string;
+  version: number;
+  status: string;
+  error: string | null;
+  filename?: string;
+  created?: string;
+  version_note?: string | null;
+  is_current?: boolean;
+};
+export type DocumentStatus = {
+  document_id: string;
+  // 缺少上下文说明的分片数（没有说明或说明里混进了思考过程），以及服务端是否启用了 Contextual Retrieval。
+  context_missing?: number;
+  contextual_enabled?: boolean;
+  doc_key?: string;
+  title: string;
+  filename: string;
+  status: string;
+  error: string | null;
+  created?: string;
+  updated?: string;
+  version?: number;
+  version_note?: string | null;
+  is_current?: boolean;
+  version_count?: number;
+  pending?: DocumentVersionSummary | null;
+  versions?: DocumentVersionSummary[];
+  document_metadata?: DocumentMetadata;
+  steps: DocumentStep[];
+  // 文档权限：上传者、可见范围、共享部门，以及当前用户能否修改（只有上传者可以）。
+  owner?: string;
+  visibility?: DocumentVisibility;
+  groups?: string[];
+  can_edit?: boolean;
+};
+export type DocumentMetadata = {
+  mime_type?: string | null;
+  file_size_bytes?: number | null;
+  sha256?: string | null;
+  parser?: string | null;
+  parser_version?: string | null;
+  parse_strategy?: string | null;
+  table_structure_inference?: boolean | null;
+  page_count?: number | null;
+  author?: string | null;
+  author_source?: string | null;
+  parse_duration_ms?: number | null;
+  processing_duration_ms?: number | null;
+  chunking_strategy?: string | null;
+  chunk_size?: number | null;
+  overlap?: number | null;
+  embedding_model?: string | null;
+  embedding_dimension?: number | null;
+};
+export type DocumentStep = {
+  step_id: string;
+  step_order: number;
+  stage: string;
+  title: string;
+  status: "running" | "completed" | "failed";
+  detail: string;
+  result?: Record<string, unknown> | null;
+  duration_ms?: number | null;
+};
+export type DocumentChunk = {
+  chunk_id: string;
+  document_id: string;
+  position: number;
+  document_title: string;
+  title: string;
+  section_title: string | null;
+  author: string | null;
+  author_source: string | null;
+  heading_path: string[];
+  content: string;
+  // Contextual Retrieval 生成的上下文说明；旧数据或生成失败时为空。
+  context?: string | null;
+  // 向量来源、复用自上一版本的哪个分片、上下文说明来源；早于这项记录的版本为空。
+  vector_source?: ChunkSource | null;
+  reused_from?: string | null;
+  context_source?: "reused" | "cached" | "generated" | "failed" | null;
+  source: string;
+  char_count: number;
+  token_count: number | null;
+  // Token 数超过向量模型上限，超出部分被截断。
+  truncated?: boolean | null;
+  page_start: number | null;
+  page_end: number | null;
+  element_types: string[];
+  element_indexes: number[];
+  chunking_strategy: string | null;
+  chunk_size: number | null;
+  overlap: number | null;
+  effective_chunk_size: number | null;
+  effective_overlap: number | null;
+  parser: string | null;
+  parser_version: string | null;
+  parse_strategy: string | null;
+};
+export type DocumentChunkPage = {
+  document_id: string;
+  document: {
+    document_id: string;
+    title: string;
+    filename: string;
+    uploaded_at: string;
+    updated_at: string;
+    metadata: DocumentMetadata;
+  };
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
+  average_length: number;
+  // 按向量来源筛选时的来源，以及复用 / 新计算各有多少个分片（早于这项记录的版本都是 0）。
+  source?: ChunkSource | null;
+  source_counts?: { reused: number; computed: number };
+  chunks: DocumentChunk[];
+};
+export type ChunkSource = "reused" | "computed";
+
+const API_BASE = "/api";
+
+// 登录状态。原来浏览器里只保存一个永不过期的 API Key；现在保存访问令牌（30 分钟）和刷新令牌（7 天），
+// 访问令牌过期后用刷新令牌自动换新，用户感觉不到；刷新令牌也失效时才回到登录页。
+export type AuthUser = { username: string; is_admin: boolean; disabled: boolean; groups: string[]; created: string };
+type AuthTokens = { access_token: string; refresh_token: string; user: AuthUser };
+const accessStorage = "atlas-rag-access-token";
+const refreshStorage = "atlas-rag-refresh-token";
+const userStorage = "atlas-rag-user";
+// 登录失效时通知 App 回到登录页。
+export const LOGOUT_EVENT = "atlas-rag-logout";
+
+// localStorage 在隐私模式下可能不可用，读写失败时按未登录处理。
+function readStorage(key: string) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+export function storedUser(): AuthUser | null {
+  const value = readStorage(userStorage);
+  if (!value || !readStorage(refreshStorage)) return null;
+  try {
+    return JSON.parse(value) as AuthUser;
+  } catch {
+    return null;
+  }
+}
+
+function saveTokens(tokens: AuthTokens) {
+  localStorage.setItem(accessStorage, tokens.access_token);
+  localStorage.setItem(refreshStorage, tokens.refresh_token);
+  localStorage.setItem(userStorage, JSON.stringify(tokens.user));
+}
+
+export function clearTokens() {
+  localStorage.removeItem(accessStorage);
+  localStorage.removeItem(refreshStorage);
+  localStorage.removeItem(userStorage);
+}
+
+// 多个请求同时遇到 401 时只刷新一次：刷新令牌用过一次就作废，并发刷新会让后面的请求被当成重复使用，整个账号被登出。
+let refreshing: Promise<boolean> | null = null;
+
+async function refreshTokens(): Promise<boolean> {
+  const refreshToken = readStorage(refreshStorage);
+  if (!refreshToken) return false;
+  const response = await fetch(`${API_BASE}/auth/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+  if (!response.ok) return false;
+  saveTokens(await response.json() as AuthTokens);
+  return true;
+}
+
+// 带上访问令牌发请求；返回 401 时刷新令牌后重试一次，仍失败则清除登录状态并通知 App。
+async function authorizedFetch(path: string, options: RequestInit = {}): Promise<Response> {
+  function send() {
+    const headers = new Headers(options.headers);
+    const token = readStorage(accessStorage);
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    return fetch(`${API_BASE}${path}`, { ...options, headers });
+  }
+  let response = await send();
+  if (response.status !== 401) return response;
+  if (!refreshing) refreshing = refreshTokens().finally(() => { refreshing = null; });
+  if (await refreshing) {
+    response = await send();
+    if (response.status !== 401) return response;
+  }
+  clearTokens();
+  window.dispatchEvent(new Event(LOGOUT_EVENT));
+  return response;
+}
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const response = await authorizedFetch(path, options);
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({ detail: response.statusText }));
+    throw new Error(body.detail || `请求失败：${response.status}`);
+  }
+  return response.json() as Promise<T>;
+}
+
+// 登录接口不带令牌，也不走自动刷新：密码错误的 401 不能被当成"令牌过期"。
+export async function login(username: string, password: string): Promise<AuthUser> {
+  const response = await fetch(`${API_BASE}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  const body = await response.json().catch(() => ({ detail: response.statusText }));
+  if (!response.ok) throw new Error(body.detail || `登录失败：${response.status}`);
+  saveTokens(body as AuthTokens);
+  return (body as AuthTokens).user;
+}
+
+// 退出登录：通知服务端作废刷新令牌；服务端不可用也要清掉本地登录状态。
+export async function logout() {
+  const refreshToken = readStorage(refreshStorage);
+  clearTokens();
+  if (!refreshToken) return;
+  await fetch(`${API_BASE}/auth/logout`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  }).catch(() => undefined);
+}
+
+export type Group = { id: string; name: string };
+export type DocumentVisibility = "private" | "shared" | "public";
+
+export function listGroups() {
+  return request<{ groups: Group[] }>("/groups");
+}
+
+export function listUsers() {
+  return request<{ users: AuthUser[] }>("/admin/users");
+}
+
+export function createUser(payload: { username: string; password: string; is_admin: boolean; groups: string[] }) {
+  return request<AuthUser>("/admin/users", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateUser(username: string, payload: { password?: string; is_admin?: boolean; disabled?: boolean; groups?: string[] }) {
+  return request<AuthUser>(`/admin/users/${encodeURIComponent(username)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createGroup(payload: Pick<Group, "name">) {
+  return request<Group>("/admin/groups", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateGroup(id: string, payload: Pick<Group, "name">) {
+  return request<Group>(`/admin/groups/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteGroup(id: string) {
+  return request<{ id: string }>(`/admin/groups/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// 修改文档可见范围，只有上传者可以调用。
+export function updateDocumentPermission(documentId: string, visibility: DocumentVisibility, groups: string[]) {
+  return request<{ document_id: string; visibility: DocumentVisibility; groups: string[] }>(`/documents/${documentId}/permission`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ visibility, groups }),
+  });
+}
+
+export function createSession(): Promise<{ session_id: string }> {
+  return request("/sessions", { method: "POST" });
+}
+
+// 读取指定会话，确认浏览器保存的会话仍属于当前用户。
+export function getSessionHistory(sessionId: string) {
+  return request<{ messages: HistoryRun[] }>(`/sessions/${sessionId}`, {
+  });
+}
+
+// 读取当前用户最近保存的问答记录，刷新页面后恢复对话列表。
+export function listHistory() {
+  return request<{ messages: HistoryRun[] }>("/history");
+}
+
+export function sendChat(payload: { session_id: string; request_id: string; question: string }) {
+  return request<ChatResult>("/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+// 读取后端 SSE 阶段事件和回答文字片段，返回最终的完整问答结果。
+export async function sendChatStream(
+  payload: { session_id: string; request_id: string; question: string },
+  onStep: (step: TraceStep) => void,
+  onToken: (text: string) => void,
+): Promise<ChatResult> {
+  const response = await authorizedFetch("/chat/stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok || !response.body) {
+    const body = await response.json().catch(() => ({ detail: response.statusText }));
+    throw new Error(body.detail || `请求失败：${response.status}`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let complete: ChatResult | null = null;
+
+  function handle(block: string) {
+    const event = block.match(/^event: (.+)$/m)?.[1];
+    const data = block.match(/^data: (.+)$/m)?.[1];
+    if (!event || !data) return;
+    const value = JSON.parse(data) as TraceStep | ChatResult | { detail?: string } | { text: string };
+    if (event === "step") onStep(value as TraceStep);
+    // 后端逐段推送回答文字，原来要等 complete 才能看到整段回答。
+    if (event === "token") onToken((value as { text: string }).text);
+    if (event === "error") throw new Error((value as { detail?: string }).detail || "请求失败");
+    if (event === "complete") complete = value as ChatResult;
+  }
+
+  while (true) {
+    // 连接中途断开时浏览器只给出 "network error"，看不出发生了什么，换成可以理解的提示。
+    let result: ReadableStreamReadResult<Uint8Array>;
+    try {
+      result = await reader.read();
+    } catch {
+      throw new Error("与服务器的连接中断（服务重启或网络波动），请稍后重试");
+    }
+    buffer += decoder.decode(result.value ?? new Uint8Array(), { stream: !result.done });
+    const blocks = buffer.split("\n\n");
+    buffer = blocks.pop() ?? "";
+    for (const block of blocks) handle(block);
+    if (result.done) break;
+  }
+  if (!complete) throw new Error("服务未返回完整结果");
+  return complete;
+}
+
+// 提交或修改对一次回答的反馈，重复提交覆盖上一次。
+export function submitFeedback(payload: { request_id: string; rating: 1 | -1; reason?: FeedbackReason | null; comment?: string | null }) {
+  return request<FeedbackRecord>("/feedback", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+// replaceDocumentId 指定后作为该文档的新版本上传；内容与已有版本相同时返回 status=duplicate。
+// visibility 和 groups 只对新文档生效；替换为新版本时沿用原来的可见范围。
+export function uploadDocument(file: File, title: string, replaceDocumentId?: string | null, versionNote?: string, visibility: DocumentVisibility = "private", groups: string[] = []) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("visibility", visibility);
+  if (groups.length > 0) form.append("groups", groups.join(","));
+  if (title.trim()) form.append("title", title.trim());
+  if (replaceDocumentId) form.append("replace_document_id", replaceDocumentId);
+  if (versionNote?.trim()) form.append("version_note", versionNote.trim());
+  return request<{ document_id: string; status: string; filename: string; version?: number }>("/documents/upload", {
+    method: "POST",
+    body: form,
+  });
+}
+
+export function getDocument(documentId: string) {
+  return request<DocumentStatus>(`/documents/${documentId}`);
+}
+
+// 删除一个已完成或失败的文档及其检索索引。
+export function deleteDocument(documentId: string) {
+  return request<{ document_id: string; deleted: boolean; chunk_count: number }>(`/documents/${documentId}`, {
+    method: "DELETE",
+  });
+}
+
+// 让处理失败的文档版本重新进入解析队列。
+export function retryDocument(documentId: string) {
+  return request<{ document_id: string; status: string }>(`/documents/${documentId}/retry`, {
+    method: "POST",
+  });
+}
+
+// 为已完成版本里上下文说明生成失败的分片补生成说明，由 worker 在后台执行。
+export function retryDocumentContexts(documentId: string) {
+  return request<{ document_id: string; status: string }>(`/documents/${documentId}/contexts/retry`, {
+    method: "POST",
+  });
+}
+
+export function listDocuments() {
+  return request<{ documents: DocumentStatus[] }>("/documents");
+}
+
+export function listDocumentChunks(documentId: string, page: number, pageSize = 10, source?: ChunkSource | null) {
+  return request<DocumentChunkPage>(`/documents/${documentId}/chunks?page=${page}&page_size=${pageSize}${source ? `&source=${source}` : ""}`, {
+  });
+}
+
+// 评测：题目、单次评测结果、历次评测列表与两次对比，字段与后端 app/evaluation 保持一致。
+export type EvalItem = {
+  id: string;
+  question: string;
+  type: string;
+  answerable: boolean;
+  evidence: string[];
+  reference_answer: string;
+  split: string;
+  history?: string[];
+  origin?: string;
+  reviewed?: boolean;
+  pair_id?: string;
+  pair_role?: "original" | "paraphrase";
+};
+export type EvalSummary = Record<string, number | null>;
+export type EvalStage = { recall: number | null; rr: number; rank: number | null };
+export type EvalEvidence = { text: string; chunk_id: string | null; rrf_rank: number | null; rerank_rank: number | null; rerank_probability: number | null; source_id: string | null; status: string };
+export type EvalJudgement = { refused: boolean; faithfulness: number; correctness: number; citation: number; faithfulness_reason: string; correctness_reason: string; citation_reason: string; judge: string };
+export type EvalSufficiency = { checked: boolean; verdict: "sufficient" | "partial" | "insufficient" | null; missing?: string | string[] | null; retried?: boolean; retry_query?: string | null; refused?: boolean; source_count?: number | null };
+export type EvalQuestion = {
+  id: string;
+  question: string;
+  type: string;
+  answerable: boolean;
+  evidence_count: number;
+  stages: { pool: EvalStage; top: EvalStage; final: EvalStage };
+  lost_stage: "recall" | "rerank" | "threshold" | null;
+  evidence: EvalEvidence[];
+  // 历史记录的真实说明需要统计每道题实际进入候选池的 chunk 数，完整评测结果才会返回这组数据。
+  pool?: { p: number | null; ev: number[] }[];
+  returned: number;
+  max_probability: number | null;
+  latency_ms: number;
+  queries: string[];
+  rerank_query: string;
+  query_source: string;
+  diagnostics?: RetrievalDiagnosticsData;
+  sources?: Source[];
+  answer?: string;
+  cited?: string[];
+  sufficiency?: EvalSufficiency;
+  judgement?: EvalJudgement;
+  pair_id?: string | null;
+  pair_role?: "original" | "paraphrase" | null;
+};
+export type EvalParaphraseMetric = { original: number | null; paraphrase: number | null; delta: number | null };
+export type EvalParaphrasePair = {
+  pair_id: string;
+  original: { id: string; question: string };
+  paraphrase: { id: string; question: string };
+  statuses: Record<"pool" | "top" | "final", "stable" | "lost" | "gained" | "both_missed">;
+};
+export type EvalParaphraseAnalysis = {
+  pair_count: number;
+  question_count: number;
+  original: EvalSummary;
+  paraphrase: EvalSummary;
+  metrics: Record<string, EvalParaphraseMetric>;
+  retention: Record<"pool" | "top" | "final", number | null>;
+  pairs: EvalParaphrasePair[];
+};
+export type EvalSweepPoint = { threshold: number; false_reject_rate: number | null; false_accept_rate: number | null; recall_final: number | null };
+export type EvalVariant = { name: string; label: string; suite: string; options: Record<string, unknown>; summary: EvalSummary; funnel: EvalFunnel };
+export type EvalFunnel = { total: number; pool: number; top: number; final: number };
+export type EvalHistoryMetrics = {
+  answerable_questions: number;
+  unanswerable_questions: number;
+  evidence_total: number;
+  pool_chunks: number;
+  pool_hits: number;
+  top_total: number;
+  top_chunks: number;
+  top_hits: number;
+  final_remaining: number;
+  final_answerable_chunks: number;
+  final_hits: number;
+  false_reject_questions: number;
+  false_accept_questions: number;
+};
+export type EvalConfig = { split: string; suites: string[]; dataset_size?: number; rrf_k?: number; pool_size?: number; return_limit?: number; min_score?: number | null; reranked?: boolean; fusion?: string; methods?: string[]; model_mode?: string; embedding_mode?: string; embedding_model?: string; rerank_model?: string; rerank_mode?: string; query_source?: string[] };
+export type EvalRunBrief = {
+  id: string;
+  kind: "retrieval" | "generation";
+  status: "running" | "completed" | "failed" | "interrupted";
+  created: string;
+  finished: string | null;
+  commit: string;
+  config: EvalConfig;
+  summary: EvalSummary | null;
+  // 历史列表直接带回指标说明所需统计，展开指标时不再请求完整逐题结果。
+  history_metrics?: EvalHistoryMetrics | null;
+  progress: { done: number; total: number } | null;
+  error: string | null;
+};
+export type EvalRun = EvalRunBrief & {
+  by_type?: Record<string, EvalSummary>;
+  funnel?: EvalFunnel;
+  sweep?: EvalSweepPoint[];
+  variants?: EvalVariant[];
+  questions?: EvalQuestion[];
+  paraphrase?: EvalParaphraseAnalysis | null;
+  previous_id: string | null;
+};
+export type EvalComparisonRow = { key: string; label: string; direction: "higher" | "lower"; base: number | null; target: number | null; delta: number | null; change: "better" | "worse" | "same" | "unknown" };
+export type EvalComparison = { base: EvalRunBrief; target: EvalRunBrief; metrics: EvalComparisonRow[] };
+export type EvalSuite = { key: string; label: string; variants: string[] };
+export type EvalDataset = { items: EvalItem[]; types: string[]; corpus: string[]; reviewed_count?: number; pending_count?: number };
+
+export function getEvalDataset() {
+  return request<EvalDataset>("/eval/dataset");
+}
+
+// 手动写入一道题；服务端负责生成编号、校验证据并标记为已人工录入。
+export function addEvalDatasetItem(payload: Omit<EvalItem, "id" | "origin" | "reviewed">) {
+  return request<EvalItem>("/eval/dataset/items", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+// 同义改写一次提交两个问法；服务端落盘为两条独立题目，并返回共享的题对编号。
+export function addEvalDatasetPair(payload: {
+  original_question: string;
+  paraphrase_question: string;
+  answerable: boolean;
+  evidence: string[];
+  reference_answer: string;
+  split: string;
+}) {
+  return request<{ pair_id: string; items: EvalItem[] }>("/eval/dataset/pairs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+// 审核通过一道题；服务端持久化状态，之后它才会进入实际评测范围。
+export function reviewEvalDatasetItem(itemId: string) {
+  return request<EvalItem>(`/eval/dataset/items/${encodeURIComponent(itemId)}/review`, {
+    method: "POST",
+  });
+}
+
+// 请求大模型起草评测题；返回的题目会被服务端标记为待人工审核。
+export function generateEvalDatasetItems(payload: { count: number; split: string; type?: string | null }) {
+  return request<{ items: EvalItem[] }>("/eval/dataset/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listEvalRuns() {
+  return request<{ runs: EvalRunBrief[]; running: string | null; suites: EvalSuite[] }>("/eval/runs");
+}
+
+export function getEvalRun(runId: string) {
+  return request<EvalRun>(`/eval/runs/${encodeURIComponent(runId)}`);
+}
+
+// 删除单条已经完成或失败的评测记录，服务端会拒绝删除正在运行的记录。
+export function deleteEvalRun(runId: string) {
+  return request<{ id: string; deleted: boolean }>(`/eval/runs/${encodeURIComponent(runId)}`, {
+    method: "DELETE",
+  });
+}
+
+export function compareEvalRuns(base: string, target: string) {
+  return request<EvalComparison>(`/eval/compare?base=${encodeURIComponent(base)}&target=${encodeURIComponent(target)}`);
+}
+
+// 在界面上发起一次检索或生成评测；生成评测由服务端校验真实模型配置并调用大模型。
+export function startEvalRun(kind: "retrieval" | "generation", split: string, suites: string[]) {
+  return request<{ id: string; status: string }>("/eval/runs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind, split, suites }),
+  });
+}
+
+// 设置页：当前生效的聊天模型配置，密钥只返回脱敏值。
+export type LLMSettings = {
+  model_mode: string;
+  provider: string;
+  base_url: string;
+  model: string;
+  api_key_masked: string;
+  has_api_key: boolean;
+  source: "env" | "settings";
+  updated: string | null;
+};
+export type LLMSettingsInput = { provider: string; base_url: string; model: string; api_key?: string | null };
+
+export function getLLMSettings() {
+  return request<LLMSettings>("/settings/llm");
+}
+
+// 保存后后端立即切换模型，不需要重启。
+export function saveLLMSettings(payload: LLMSettingsInput) {
+  return request<LLMSettings>("/settings/llm", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+// 只发一次很短的请求检查配置是否可用，不保存。
+export function testLLMSettings(payload: LLMSettingsInput) {
+  return request<{ ok: boolean; latency_ms: number; reply: string }>("/settings/llm/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+// ---- 数据管理 ----
+// 字段和数据类型配置来自后端 app/data/schema.py，页面上的表格列、表单和校验提示都按它生成。
+export type DataAction = "read" | "create" | "update" | "delete";
+export type DataField = {
+  name: string;
+  label: string;
+  type: "string" | "text" | "int" | "float" | "enum" | "date" | "ref";
+  required?: boolean;
+  options?: string[];
+  tones?: Record<string, string>;
+  ref?: string;
+  derived?: boolean;
+  sensitive?: boolean;
+  default?: string | number;
+  min?: number;
+  max?: number;
+  max_length?: number;
+};
+export type DataType = { key: string; label: string; description: string; id_prefix: string; display: string; examples: string[]; fields: DataField[]; permissions: DataAction[] };
+export type DataValue = string | number | null;
+export type DataRow = Record<string, DataValue> & { id: string; source: "manual" | "ai"; batch_id: string | null; created_by: string; created: string };
+export type DataPage = { items: DataRow[]; total: number; page: number; page_size: number };
+export type DataPreviewRow = { values: Record<string, DataValue>; labels: Record<string, string>; errors: Record<string, string> };
+export type DataPreview = { rows: DataPreviewRow[]; generator: "llm" | "template"; note: string; label: string };
+export type DataPermissionRow = { group_id: string; data_type: string; can_read: boolean; can_create: boolean; can_update: boolean; can_delete: boolean };
+
+// 数据管理接口校验失败时除了总的原因，还按字段返回原因（errors），表单要把它们标在对应输入框上；
+// 通用的 request 只保留 detail，所以这里单独处理。
+export class DataRequestError extends Error {
+  errors: Record<string, string>;
+  constructor(message: string, errors: Record<string, string>) {
+    super(message);
+    this.errors = errors;
+  }
+}
+
+async function dataRequest<T>(path: string, method = "GET", payload?: unknown): Promise<T> {
+  const options: RequestInit = { method };
+  if (payload !== undefined) {
+    options.headers = { "Content-Type": "application/json" };
+    options.body = JSON.stringify(payload);
+  }
+  const response = await authorizedFetch(path, options);
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({ detail: response.statusText }));
+    const detail = typeof body.detail === "string" ? body.detail : `请求失败：${response.status}`;
+    throw new DataRequestError(detail, body.errors ?? {});
+  }
+  return response.json() as Promise<T>;
+}
+
+export function listDataTypes() {
+  return dataRequest<{ types: DataType[] }>("/data/types");
+}
+
+export function listDataRecords(dataType: string, params: { q?: string; source?: string; sort?: string; direction?: "asc" | "desc"; page?: number; pageSize?: number }) {
+  const query = new URLSearchParams();
+  if (params.q) query.set("q", params.q);
+  if (params.source) query.set("source", params.source);
+  if (params.sort) query.set("sort", params.sort);
+  if (params.direction) query.set("direction", params.direction);
+  query.set("page", String(params.page ?? 1));
+  query.set("page_size", String(params.pageSize ?? 20));
+  return dataRequest<DataPage>(`/data/${dataType}/records?${query.toString()}`);
+}
+
+export function listDataOptions(dataType: string, q = "") {
+  return dataRequest<{ options: { id: string; label: string }[] }>(`/data/${dataType}/options?q=${encodeURIComponent(q)}`);
+}
+
+export function createDataRecord(dataType: string, values: Record<string, DataValue>) {
+  return dataRequest<{ id: string }>(`/data/${dataType}/records`, "POST", { values });
+}
+
+export function updateDataRecord(dataType: string, id: string, values: Record<string, DataValue>) {
+  return dataRequest<{ id: string }>(`/data/${dataType}/records/${encodeURIComponent(id)}`, "PATCH", { values });
+}
+
+export function deleteDataRecord(dataType: string, id: string) {
+  return dataRequest<{ id: string }>(`/data/${dataType}/records/${encodeURIComponent(id)}`, "DELETE");
+}
+
+// AI 生成只返回预览，不写库；确认后调用 commitDataBatch 写入。
+export function generateDataPreview(dataType: string, count: number, prompt: string) {
+  return dataRequest<DataPreview>(`/data/${dataType}/generate`, "POST", { count, prompt });
+}
+
+export function commitDataBatch(dataType: string, rows: Record<string, DataValue>[]) {
+  return dataRequest<{ batch_id: string; created: string[]; failed: { index: number; message: string; errors: Record<string, string> }[] }>(`/data/${dataType}/batches`, "POST", { rows });
+}
+
+export function deleteDataBatch(dataType: string, batchId: string) {
+  return dataRequest<{ deleted: number }>(`/data/${dataType}/batches/${encodeURIComponent(batchId)}`, "DELETE");
+}
+
+export function getDataPermissions() {
+  return dataRequest<{ types: { key: string; label: string }[]; permissions: DataPermissionRow[] }>("/admin/data-permissions");
+}
+
+export function saveDataPermission(payload: { group_id: string; data_type: string; read: boolean; create: boolean; update: boolean; delete: boolean }) {
+  return dataRequest<DataPermissionRow>("/admin/data-permissions", "PUT", payload);
+}

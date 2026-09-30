@@ -1,0 +1,394 @@
+/* 数据管理页，沿用主样式的蓝白配色：边框 #cedfec，辅助文字 #5e7a95，强调色 #2563eb。 */
+.data-page {
+   max-width: 1240px;
+}
+
+.data-subtitle {
+   margin-top: 8px;
+   color: #5e7a95;
+   font-size: 13px;
+}
+
+.data-hint {
+   color: #5e7a95;
+   font-size: 12px;
+   line-height: 1.6;
+}
+
+.data-empty {
+   border: 1px dashed #cedfec;
+   background: rgba(255, 255, 255, .85);
+   color: #5e7a95;
+   padding: 28px;
+   font-size: 14px;
+}
+
+/* 数据管理的首屏和筛选请求使用表格骨架，原来的短文本加载提示无法表达真实内容结构。 */
+.data-types-skeleton {
+   margin-top: 18px;
+}
+
+.data-tabs-skeleton {
+   display: flex;
+   gap: 4px;
+}
+
+.data-tabs-skeleton .skeleton-block {
+   width: 112px;
+   height: 42px;
+   border-radius: 0;
+}
+
+.data-skeleton-table {
+   table-layout: fixed;
+}
+
+.data-skeleton-table td {
+   height: 52px;
+}
+
+.data-skeleton-table .skeleton-block {
+   width: 82%;
+}
+
+.data-tabs {
+   flex-wrap: wrap;
+   margin-bottom: 18px;
+}
+
+.data-section {
+   display: flex;
+   flex-direction: column;
+   gap: 12px;
+}
+
+.data-toolbar {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: 8px;
+}
+
+.data-toolbar input,
+.data-toolbar select,
+.data-form input,
+.data-form select,
+.data-form textarea,
+.data-generate-form input,
+.data-ref input,
+.data-ref select,
+.data-table td input,
+.data-table td select,
+.data-table td textarea {
+   border: 1px solid #cedfec;
+   background: #ffffff;
+   color: #173b5b;
+   padding: 8px 10px;
+   font-size: 13px;
+   border-radius: 3px;
+   font-family: inherit;
+}
+
+.data-search {
+   width: 260px;
+   max-width: 100%;
+}
+
+.data-toolbar-actions {
+   display: flex;
+   gap: 8px;
+   margin-left: auto;
+}
+
+.data-small {
+   /* 原来的按钮高度和输入框一样大，数据管理页操作区显得过重；收紧内边距和字号，保留足够点击区域。 */
+   padding: 6px 12px;
+   font-size: 12px;
+}
+
+.data-mini {
+   /* 表格行内操作只需承载短文本，缩小后能减少操作列占用并保持表格紧凑。 */
+   padding: 4px 8px;
+   font-size: 10px;
+   border-radius: 3px;
+}
+
+.data-actions button {
+   /* 操作列原来使用带边框按钮，视觉重量过高；改成文字按钮，让表格内容和操作层级更清楚。 */
+   border: 0;
+   background: transparent;
+   padding: 4px 2px;
+   font-size: 11px;
+   border-radius: 3px;
+}
+
+.data-actions .secondary-button {
+   color: #2563eb;
+}
+
+.data-actions .delete-button {
+   color: #c44e5e;
+}
+
+.data-actions button:hover:not(:disabled) {
+   /* 保留可发现性，但不重新引入按钮外框；下划线只在用户操作时出现。 */
+   background: transparent;
+   text-decoration: underline;
+}
+
+.data-actions .secondary-button:hover:not(:disabled) {
+   color: #1d4ed8;
+}
+
+.data-actions .delete-button:hover:not(:disabled) {
+   border-color: transparent;
+   color: #b42318;
+}
+
+.data-table-wrap {
+   overflow-x: auto;
+   border: 1px solid #cedfec;
+   background: rgba(255, 255, 255, .92);
+}
+
+.data-table {
+   width: 100%;
+   border-collapse: collapse;
+   font-size: 13px;
+   color: #173b5b;
+}
+
+.data-table th,
+.data-table td {
+   padding: 9px 12px;
+   border-bottom: 1px solid #e3eef7;
+   text-align: left;
+   white-space: nowrap;
+   vertical-align: top;
+}
+
+.data-table th {
+   background: #f4f9fd;
+   color: #5e7a95;
+   font-weight: 600;
+   font-size: 12px;
+}
+
+.data-table th button {
+   border: 0;
+   background: transparent;
+   color: inherit;
+   font: inherit;
+   padding: 0;
+   cursor: pointer;
+}
+
+.data-id {
+   font-family: 'DM Mono', monospace;
+   color: #2563eb;
+}
+
+.data-actions {
+   display: flex;
+   gap: 6px;
+}
+
+.data-empty-row {
+   text-align: center !important;
+   color: #829bb3;
+   padding: 28px !important;
+}
+
+.data-badge {
+   display: inline-block;
+   padding: 2px 7px;
+   border: 1px solid #cedfec;
+   color: #5e7a95;
+   font-size: 11px;
+   border-radius: 10px;
+}
+
+.data-badge.ai {
+   border-color: #b9ccf6;
+   background: #eef3ff;
+   color: #2563eb;
+}
+
+.data-pager {
+   display: flex;
+   align-items: center;
+   gap: 8px;
+   justify-content: flex-end;
+   color: #5e7a95;
+   font-size: 12px;
+}
+
+.data-modal-backdrop {
+   position: fixed;
+   inset: 0;
+   background: rgba(23, 59, 91, .28);
+   display: flex;
+   align-items: flex-start;
+   justify-content: center;
+   padding: 6vh 16px;
+   z-index: 50;
+   overflow-y: auto;
+}
+
+.data-modal {
+   width: 640px;
+   max-width: 100%;
+   background: #ffffff;
+   border: 1px solid #cedfec;
+   box-shadow: 0 18px 50px rgba(23, 59, 91, .18);
+   display: flex;
+   flex-direction: column;
+   gap: 14px;
+   padding: 20px 22px;
+}
+
+.data-modal-wide {
+   width: 1100px;
+}
+
+.data-modal header,
+.data-modal footer {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   gap: 8px;
+}
+
+.data-modal footer {
+   justify-content: flex-end;
+}
+
+.data-modal h2 {
+   color: #173b5b;
+   font-size: 17px;
+}
+
+.data-close {
+   border: 0;
+   background: transparent;
+   color: #5e7a95;
+   font-size: 22px;
+   cursor: pointer;
+}
+
+.data-form {
+   display: grid;
+   grid-template-columns: repeat(2, minmax(0, 1fr));
+   gap: 12px 16px;
+}
+
+/* 全局 label 样式带 17px 外边距和等宽字体（登录、上传表单用），这里的表单排得更紧凑，统一改回来。 */
+.data-form label,
+.data-generate-form label {
+   display: flex;
+   flex-direction: column;
+   gap: 5px;
+   margin: 0;
+   color: #5e7a95;
+   font-family: inherit;
+   letter-spacing: 0;
+   font-size: 12px;
+}
+
+.data-form em {
+   color: #c44e5e;
+   font-style: normal;
+   margin-left: 2px;
+}
+
+.data-form-wide {
+   grid-column: 1 / -1;
+}
+
+.data-ref {
+   display: flex;
+   gap: 6px;
+}
+
+.data-ref input {
+   width: 40%;
+}
+
+.data-ref select {
+   flex: 1;
+   min-width: 0;
+}
+
+.data-field-error {
+   display: block;
+   color: #c44e5e;
+   font-size: 11px;
+   margin-top: 3px;
+   white-space: normal;
+}
+
+.data-form-error {
+   border: 1px solid #f0c2c7;
+   background: #fff4f5;
+   color: #b42318;
+   padding: 9px 12px;
+   font-size: 13px;
+}
+
+.data-generate-form {
+   display: grid;
+   grid-template-columns: 110px minmax(0, 1fr) auto;
+   align-items: end;
+   gap: 12px;
+}
+
+.data-preview-meta {
+   display: flex;
+   align-items: center;
+   flex-wrap: wrap;
+   gap: 10px;
+}
+
+.data-preview-skeleton {
+   margin-top: 12px;
+}
+
+.data-preview-skeleton-table {
+   width: 100%;
+   height: 52px;
+   border: 1px solid #d6e4f1;
+   border-radius: 4px;
+}
+
+.data-preview {
+   max-height: 50vh;
+   overflow: auto;
+}
+
+.data-preview td input,
+.data-preview td select {
+   min-width: 110px;
+}
+
+.data-preview td textarea {
+   min-width: 220px;
+}
+
+.data-invalid td {
+   background: #fff6f7;
+}
+
+.data-ref-label {
+   color: #5e7a95;
+}
+
+@media (max-width: 720px) {
+   .data-form,
+   .data-generate-form {
+      grid-template-columns: 1fr;
+   }
+
+   .data-toolbar-actions {
+      margin-left: 0;
+   }
+}

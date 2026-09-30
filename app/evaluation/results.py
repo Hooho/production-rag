@@ -1,0 +1,297 @@
+from datetime import datetime, timezone
+import json
+import os
+import re
+import subprocess
+
+from .dataset import EVAL_DIR, QUESTION_TYPES
+from .generation import answer_question, cited_ids, judge_answer, summarize_generation
+from .retrieval import EVAL_OWNER, run_retrieval
+from ..tools.search import DocumentSearchTool
+
+
+# 每次评测保存为一个 JSON 文件，文件名是"日期时间_提交号"，一眼能看出是哪天、哪个版本的代码跑出来的。
+# 放在仓库目录而不是数据库里，是为了能和代码一起提交：以后回看某次改动时，可以同时看到当时的分数。
+RESULTS_DIR = EVAL_DIR / "results"
+RUN_ID_PATTERN = re.compile(r"^\d{8}-\d{6}_[0-9A-Za-z-]+$")
+# 对比时每个指标的方向：higher 表示越大越好，lower 表示越小越好。
+# 没有方向就无法判断"变好还是变差"，例如误杀率上升是变差，召回率上升是变好。
+METRICS = [
+    ("recall_pool", "召回 Recall@候选池", "higher"),
+    ("recall_top", "重排 Recall@返回数", "higher"),
+    ("recall_final", "过滤后 Recall", "higher"),
+    ("mrr_pool", "召回 MRR", "higher"),
+    ("mrr_top", "重排 MRR", "higher"),
+    ("mrr_final", "过滤后 MRR", "higher"),
+    ("false_reject_rate", "误杀率", "lower"),
+    ("false_accept_rate", "漏放率", "lower"),
+    ("latency_avg_ms", "平均耗时（毫秒）", "lower"),
+    ("latency_p95_ms", "P95 耗时（毫秒）", "lower"),
+    ("faithfulness", "忠实度", "higher"),
+    ("correctness", "正确性", "higher"),
+    ("refusal_accuracy", "拒答正确率", "higher"),
+    ("citation_validity", "引用有效性", "higher"),
+]
+
+
+# 读取当前代码的提交号；容器里没有 .git 时用环境变量 GIT_COMMIT，仍拿不到就记为 unknown。
+def git_commit():
+    configured = os.getenv("GIT_COMMIT")
+    if configured:
+        return configured
+    try:
+        output = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
+            timeout=5, check=True).stdout.strip()
+        return output or "unknown"
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
+# 生成一次评测的编号；提交号里只保留字母数字和连字符，保证能安全地作为文件名。
+def new_run_id(commit):
+    safe_commit = re.sub(r"[^0-9A-Za-z-]", "", commit) or "unknown"
+    return datetime.now().strftime("%Y%m%d-%H%M%S") + "_" + safe_commit
+
+
+# 当前 UTC 时间，统一用 ISO 格式保存。
+def now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+# 编号只允许固定格式，防止接口参数里带 ../ 读到结果目录以外的文件。
+def run_path(run_id):
+    if not RUN_ID_PATTERN.match(run_id):
+        raise ValueError("评测编号格式不正确")
+    return RESULTS_DIR / f"{run_id}.json"
+
+
+# 先写临时文件再改名：评测进行中会反复保存进度，直接覆盖时如果同时有人读取，可能读到写了一半的 JSON。
+def save_run(run):
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    path = run_path(run["id"])
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(run, ensure_ascii=False, indent=1), encoding="utf-8")
+    temporary.replace(path)
+
+
+# 读取一次评测的完整结果。
+def load_run(run_id):
+    path = run_path(run_id)
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+# 删除一条已经落盘的评测记录；只操作由 run_id 校验得到的单个结果文件，不影响其他评测记录。
+def delete_run(run_id):
+    path = run_path(run_id)
+    if not path.is_file():
+        return False
+    path.unlink()
+    return True
+
+
+# 历史指标说明只需要这些汇总数字；提前随列表返回，前端展开指标时不必再请求完整逐题结果。
+def summarize_history_metrics(run):
+    questions = run.get("questions")
+    if not isinstance(questions, list):
+        return None
+
+    config = run.get("config") or {}
+    return_limit = config.get("return_limit") or 6
+    answerable_questions = 0
+    unanswerable_questions = 0
+    evidence_total = 0
+    pool_chunks = 0
+    pool_hits = 0
+    top_total = 0
+    top_chunks = 0
+    top_hits = 0
+    final_remaining = 0
+    final_answerable_chunks = 0
+    final_hits = 0
+    false_reject_questions = 0
+    false_accept_questions = 0
+
+    for question in questions:
+        pool = question.get("pool")
+        configured_pool_size = config.get("pool_size") or 0
+        pool_size = len(pool) if isinstance(pool, list) else configured_pool_size
+        returned = question.get("returned") or 0
+        top_total += min(pool_size, return_limit)
+        final_remaining += returned
+
+        if question.get("answerable"):
+            answerable_questions += 1
+            evidence_count = question.get("evidence_count") or 0
+            evidence_total += evidence_count
+            pool_chunks += pool_size
+            top_chunks += min(pool_size, return_limit)
+            for stage in ("pool", "top", "final"):
+                stage_data = (question.get("stages") or {}).get(stage) or {}
+                recall = stage_data.get("recall") or 0
+                hits = int(recall * evidence_count + 0.5)
+                if stage == "pool":
+                    pool_hits += hits
+                elif stage == "top":
+                    top_hits += hits
+                else:
+                    final_hits += hits
+            final_answerable_chunks += returned
+            if returned == 0:
+                false_reject_questions += 1
+        else:
+            unanswerable_questions += 1
+            if returned > 0:
+                false_accept_questions += 1
+
+    return {
+        "answerable_questions": answerable_questions,
+        "unanswerable_questions": unanswerable_questions,
+        "evidence_total": evidence_total,
+        "pool_chunks": pool_chunks,
+        "pool_hits": pool_hits,
+        "top_total": top_total,
+        "top_chunks": top_chunks,
+        "top_hits": top_hits,
+        "final_remaining": final_remaining,
+        "final_answerable_chunks": final_answerable_chunks,
+        "final_hits": final_hits,
+        "false_reject_questions": false_reject_questions,
+        "false_accept_questions": false_accept_questions,
+    }
+
+
+# 列出历次评测，只返回列表需要的字段；逐题明细很大，列表里不带。
+def list_runs():
+    if not RESULTS_DIR.exists():
+        return []
+    runs = []
+    for path in sorted(RESULTS_DIR.glob("*.json"), reverse=True):
+        try:
+            run = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        runs.append(run_brief(run))
+    return runs
+
+
+# 一次评测的概要：编号、时间、提交号、配置、主要指标和进度。
+def run_brief(run):
+    brief = {}
+    for key in ("id", "kind", "status", "created", "finished", "commit", "config", "summary", "progress", "error"):
+        brief[key] = run.get(key)
+    # 历史页的指标解释依赖实际证据数量，和列表内容一起返回，避免展开每行时补请求完整结果。
+    brief["history_metrics"] = summarize_history_metrics(run)
+    return brief
+
+
+# 找到同类型、同一题目范围里在它之前完成的最近一次评测，作为"上一次"自动对比。
+# 题目范围不同（dev 和 holdout）时分数不可比，因此必须同 split。
+def previous_run(run, runs):
+    split = (run.get("config") or {}).get("split")
+    for candidate in runs:
+        if candidate["id"] >= run["id"] or candidate.get("status") != "completed":
+            continue
+        if candidate.get("kind") != run.get("kind"):
+            continue
+        if (candidate.get("config") or {}).get("split") != split:
+            continue
+        return candidate
+    return None
+
+
+# 逐项比较两次评测的整体指标，给出差值和"变好 / 变差 / 持平"。
+def compare_runs(base, target):
+    base_summary = base.get("summary") or {}
+    target_summary = target.get("summary") or {}
+    rows = []
+    for key, label, direction in METRICS:
+        before = base_summary.get(key)
+        after = target_summary.get(key)
+        if before is None and after is None:
+            continue
+        delta = None
+        change = "unknown"
+        if before is not None and after is not None:
+            delta = round(after - before, 6)
+            # 耗时每次运行都会有几毫秒的自然波动，差值不超过 5 毫秒或 10% 时算持平，否则会被随机抖动误报为"变差"。
+            tolerance = 1e-9
+            if key.endswith("_ms"):
+                tolerance = max(5, abs(before) * 0.1)
+            if abs(delta) <= tolerance:
+                change = "same"
+            elif (delta > 0) == (direction == "higher"):
+                change = "better"
+            else:
+                change = "worse"
+        rows.append({"key": key, "label": label, "direction": direction, "base": before, "target": after,
+            "delta": delta, "change": change})
+    return {"base": run_brief(base), "target": run_brief(target), "metrics": rows}
+
+
+# 新建一次评测记录并立即保存为 running，前端马上就能在列表里看到它和进度。
+def start_run(kind, split, suites):
+    commit = git_commit()
+    run = {"id": new_run_id(commit), "kind": kind, "status": "running", "created": now(), "finished": None,
+        "commit": commit, "config": {"split": split, "suites": list(suites)}, "summary": None,
+        "progress": {"done": 0, "total": 0}, "error": None}
+    save_run(run)
+    return run
+
+
+# 执行一次评测并把结果写回同一个文件。generate=True 时在检索之后继续生成回答并请大模型评审。
+# 任何异常都记录到结果里再抛出，避免界面上永远显示"运行中"。
+def execute_run(store, models, items, run, generate=False, memory=None):
+    last_saved = [0.0]
+
+    # 进度最多每秒写一次文件，逐题写入会让慢速磁盘上的评测明显变慢。
+    def on_progress(done, total):
+        run["progress"] = {"done": done, "total": total}
+        current = datetime.now().timestamp()
+        if current - last_saved[0] >= 1 or done == total:
+            last_saved[0] = current
+            save_run(run)
+
+    # 生成评测和线上一样先做检索充分性判断（可能补充检索或拒答），再生成回答；
+    # 检索指标仍按第一次检索计算，判断结论和最终来源数单独记在 sufficiency 里，便于看它挡掉了哪些题。
+    def on_item(item, row, retrieval):
+        if not generate:
+            return
+        check = DocumentSearchTool().check_sufficiency(store, models, EVAL_OWNER, row["queries"],
+            row["rerank_query"], retrieval)
+        coverage = {"verdict": check["verdict"], "missing": check["missing"]} if check["checked"] else None
+        sources = check["sources"]
+        answer = answer_question(models, memory, run["id"], item, row["rerank_query"], sources, coverage)
+        row["answer"] = answer
+        row["cited"] = cited_ids(answer)
+        row["sufficiency"] = {"checked": check["checked"], "verdict": check["verdict"],
+            "missing": check["missing"], "retried": check["retried"], "retry_query": check["retry_query"], "retry_used": check.get("retry_used", False),
+            "refused": check["refused"], "source_count": len(sources)}
+        row["judgement"] = judge_answer(models, item, answer, sources)
+
+    try:
+        split = run["config"]["split"]
+        suites = run["config"]["suites"]
+        result = run_retrieval(store, models, items, split, suites, on_progress, on_item)
+        run.update(result)
+        if generate:
+            generation = summarize_generation(result["questions"])
+            run["summary"].update(generation)
+            for question_type in QUESTION_TYPES:
+                selected = []
+                for row in result["questions"]:
+                    if row["type"] == question_type:
+                        selected.append(row)
+                if selected:
+                    run["by_type"][question_type].update(summarize_generation(selected))
+        run["config"]["suites"] = suites
+        run["status"] = "completed"
+    except Exception as error:
+        run["status"] = "failed"
+        run["error"] = f"{type(error).__name__}: {error}"[:500]
+        raise
+    finally:
+        run["finished"] = now()
+        save_run(run)
+    return run
