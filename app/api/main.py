@@ -31,9 +31,9 @@ from ..evaluation.dataset import QUESTION_TYPES, append_items, corpus_files, cor
 from ..evaluation.results import compare_runs, delete_run, execute_run, list_runs, load_run, previous_run, start_run
 from ..evaluation.retrieval import SUITES, VARIANTS
 from ..inspection.schedule import load_schedule, save_schedule, schedule_view
-from ..inspection.service import (KINDS as INSPECTION_KINDS, LOCK_KEY as INSPECTION_LOCK, MANUAL_STATUSES,
+from ..inspection.service import (CLOSE_REASONS, KINDS as INSPECTION_KINDS, LOCK_KEY as INSPECTION_LOCK, MANUAL_STATUSES,
     STATUSES as INSPECTION_STATUSES, InspectionBusy, get_issue, list_issues, list_runs as list_inspection_runs,
-    run_inspection, update_issue)
+    run_inspection, update_issue, verify_issue)
 from ..agent.response import ResponseAgent
 from ..models import Models
 from ..memory.service import Memory
@@ -101,6 +101,8 @@ class InspectionIssueInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     status: str | None = None
     note: str | None = Field(None, max_length=2000)
+    # status 为 ignored（无需处理）时必填，取值见 CLOSE_REASONS。
+    close_reason: str | None = Field(None, max_length=32)
 
 
 # 定时巡检设置：mode 为 daily（每天 time 执行）或 interval（每隔 interval_hours 小时），days 是扫描最近多少天的问答。
@@ -1370,12 +1372,16 @@ def create_app(store=None, models=None, jwt_secret=None):
     # 知识巡检：问题里有其他用户的提问和反馈，所有接口只允许管理员调用。
     @app.get("/inspection/issues", dependencies=[Depends(require_admin)])
     def inspection_issues_list(status: str | None = Query(None), kind: str | None = Query(None),
+                               reason: str | None = Query(None),
                                page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
         if status is not None and status not in INSPECTION_STATUSES:
             raise HTTPException(422, f"未知状态：{status}")
         if kind is not None and kind not in INSPECTION_KINDS:
             raise HTTPException(422, f"未知问题类型：{kind}")
-        result = list_issues(app.state.store, status, kind, page, page_size)
+        if reason is not None and reason != "none" and reason not in CLOSE_REASONS:
+            raise HTTPException(422, f"未知原因：{reason}")
+        result = list_issues(app.state.store, status, kind, page, page_size, reason=reason,
+            days=load_schedule(app.state.store)["days"])
         result["running"] = bool(app.state.store.cache.get(INSPECTION_LOCK))
         return result
 
@@ -1389,8 +1395,11 @@ def create_app(store=None, models=None, jwt_secret=None):
     @app.patch("/inspection/issues/{issue_id}")
     def inspection_issue_update(issue_id: str, body: InspectionIssueInput, admin=Depends(require_admin)):
         if body.status is not None and body.status not in MANUAL_STATUSES:
-            raise HTTPException(422, "只能标记为待处理、已处理或已忽略")
-        issue = update_issue(app.state.store, issue_id, body.status, body.note, admin["username"])
+            raise HTTPException(422, "只能标记为待处理、已处理或无需处理")
+        try:
+            issue = update_issue(app.state.store, issue_id, body.status, body.note, admin["username"], body.close_reason)
+        except ValueError as error:
+            raise HTTPException(422, str(error))
         if issue is None:
             raise HTTPException(404, "问题不存在")
         return issue
@@ -1407,6 +1416,18 @@ def create_app(store=None, models=None, jwt_secret=None):
         except ValueError as error:
             raise HTTPException(422, str(error))
         return schedule_view(app.state.store)
+
+    # 立即重新验证一个知识缺口：按提问人现在的权限重跑检索，规则和巡检时相同（能检索到就关闭，已处理但仍检索不到就重新打开）。
+    # 只检索不生成回答，几秒内完成，所以同步返回结果。
+    @app.post("/inspection/issues/{issue_id}/verify")
+    def inspection_issue_verify(issue_id: str, admin=Depends(require_admin)):
+        try:
+            issue = verify_issue(app.state.store, app.state.models, issue_id, admin["username"])
+        except ValueError as error:
+            raise HTTPException(422, str(error))
+        if issue is None:
+            raise HTTPException(404, "问题不存在")
+        return issue
 
     @app.get("/inspection/runs", dependencies=[Depends(require_admin)])
     def inspection_runs_list():

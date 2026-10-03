@@ -70,7 +70,7 @@ def test_handled_issue_reopens_and_ignored_stays(setup, monkeypatch):
     assert client.patch(f"/inspection/issues/{crossborder}", headers=headers("admin"),
         json={"status": "handled", "note": "补了跨境退货说明"}).status_code == 200
     assert client.patch(f"/inspection/issues/{invoice}", headers=headers("admin"),
-        json={"status": "ignored"}).status_code == 200
+        json={"status": "ignored", "close_reason": "out_of_scope"}).status_code == 200
     ask(client, "跨境商品能不能退货")
     ask(client, "发票抬头怎么修改")
     summary = inspect(client, store)
@@ -174,7 +174,7 @@ def test_inspection_api_is_admin_only(setup, monkeypatch):
     assert client.patch(f"/inspection/issues/{item['id']}", headers=headers(),
         json={"status": "ignored"}).status_code == 403
     assert client.patch("/inspection/issues/missing", headers=headers("admin"),
-        json={"status": "ignored"}).status_code == 404
+        json={"status": "ignored", "close_reason": "out_of_scope"}).status_code == 404
     assert client.get("/inspection/issues?status=bad", headers=headers("admin")).status_code == 422
 
 
@@ -396,3 +396,73 @@ def test_diagnosis_without_rerank_and_overall_category(setup, monkeypatch):
     assert overall_category(["answerable", "answerable"]) == "answerable"
     assert overall_category(["answerable", "content", "permission"]) == "permission"
     assert overall_category(["content", "content", "permission"]) == "content"
+
+
+# 详情页的"重新验证"：只诊断这一个缺口，记录是谁手动验证的；诊断结果带上重新检索到的资料和提问人能否看到。
+def test_manual_verify(setup, monkeypatch):
+    client, store = setup
+    document_id = upload(client)
+    monkeypatch.setattr(Models, "rerank", keyword_rerank(0.95))
+    ask(client, "退货期限是多久", owner="bob")
+    monkeypatch.setattr(Models, "rerank", lambda self, query, documents: [0.01] * len(documents))
+    run_inspection(store, client.app.state.models)
+    gap = issues(store, "knowledge_gap")[0]
+    assert client.post(f"/inspection/issues/{gap['id']}/verify", headers=headers()).status_code == 403
+    assert client.post("/inspection/issues/missing/verify", headers=headers("admin")).status_code == 404
+    monkeypatch.setattr(Models, "rerank", keyword_rerank(0.95))
+    verified = client.post(f"/inspection/issues/{gap['id']}/verify", headers=headers("admin")).json()
+    diagnosis = verified["detail"]["diagnosis"]
+    assert diagnosis["category"] == "permission" and diagnosis["trigger"] == "manual" and diagnosis["checked_by"] == "admin"
+    # 只保留得分最高的一段：bob 能看到的里面没有，全库里这段最高。
+    assert len(diagnosis["questions"][0]["chunks"]) == 1
+    chunk = diagnosis["questions"][0]["chunks"][0]
+    assert chunk["scope"] == "all" and chunk["visible"] is False and chunk["passed"] is True
+    assert "退货期限" in chunk["text"] and chunk["score"] == 0.95
+    assert verified["status"] == "open"
+    # 改成公开后再验证：现在能答，自动关闭。
+    assert client.put(f"/documents/{document_id}/permission", headers=headers(),
+        json={"visibility": "public", "groups": []}).status_code == 200
+    verified = client.post(f"/inspection/issues/{gap['id']}/verify", headers=headers("admin")).json()
+    assert verified["status"] == "resolved" and verified["verify_result"]["auto_resolved"] == 1
+    assert verified["detail"]["diagnosis"]["questions"][0]["chunks"][0]["visible"] is True
+    # 已解决的问题也能再验证，只更新诊断，不改状态。
+    again = client.post(f"/inspection/issues/{gap['id']}/verify", headers=headers("admin")).json()
+    assert again["status"] == "resolved"
+
+
+
+# 标记"无需处理"必须选原因，"其他"要写备注；推荐原因按诊断结论给出；列表能按原因筛选，顶部统计区分合理拒答。
+def test_close_reason_and_gap_summary(setup, monkeypatch):
+    client, store = setup
+    upload(client)
+    monkeypatch.setattr(Models, "rerank", keyword_rerank(0.95))
+    ask(client, "退货期限是多久", owner="bob")
+    monkeypatch.setattr(Models, "rerank", lambda self, query, documents: [0.01] * len(documents))
+    ask(client, "发票抬头怎么修改")
+    ask(client, "发票抬头怎么修改")
+    monkeypatch.setattr(Models, "rerank", keyword_rerank(0.95))
+    inspect(client, store)
+    listed = client.get("/inspection/issues?status=open&kind=knowledge_gap", headers=headers("admin")).json()
+    gaps = {item["title"]: item for item in listed["items"]}
+    permission, invoice = gaps["退货期限是多久"], gaps["发票抬头怎么修改"]
+    assert permission["suggested_close_reason"] == "by_design_permission"
+    assert invoice["suggested_close_reason"] == "out_of_scope"
+    assert listed["gap_summary"]["total"] == 3 and listed["gap_summary"]["pending"] == 3
+    url = f"/inspection/issues/{permission['id']}"
+    assert client.patch(url, headers=headers("admin"), json={"status": "ignored"}).status_code == 422
+    assert client.patch(url, headers=headers("admin"), json={"status": "ignored", "close_reason": "nope"}).status_code == 422
+    assert client.patch(url, headers=headers("admin"), json={"status": "ignored", "close_reason": "other"}).status_code == 422
+    closed = client.patch(url, headers=headers("admin"), json={"status": "ignored", "close_reason": "by_design_permission"}).json()
+    assert closed["status_label"] == "无需处理" and closed["close_reason_label"] == "权限限制，按设计保密"
+    assert client.patch(f"/inspection/issues/{invoice['id']}", headers=headers("admin"),
+        json={"status": "ignored", "close_reason": "other", "note": "测试数据"}).status_code == 200
+    ignored = client.get("/inspection/issues?status=ignored", headers=headers("admin")).json()
+    assert ignored["reason_counts"] == {"by_design_permission": 1, "other": 1}
+    filtered = client.get("/inspection/issues?status=ignored&reason=by_design_permission", headers=headers("admin")).json()
+    assert [item["id"] for item in filtered["items"]] == [permission["id"]]
+    summary = filtered["gap_summary"]
+    assert summary["reasonable"] == 1 and summary["reasonable_by_reason"] == {"by_design_permission": 1}
+    assert summary["other_ignored"] == 2 and summary["pending"] == 0
+    # 重新打开后原因清空。
+    reopened = client.patch(url, headers=headers("admin"), json={"status": "open"}).json()
+    assert reopened["close_reason"] is None and reopened["close_reason_label"] is None

@@ -320,6 +320,8 @@ inspection_issues = Table("inspection_issues", metadata,
     # 知识缺口的聚类中心，新问题与它比较相似度后决定归入哪个缺口；不返回给前端。
     Column("vector", JSON),
     Column("note", Text),
+    # 标记"无需处理"（status=ignored）时选择的原因，见 app/inspection/service.py 的 CLOSE_REASONS；其他状态为空。
+    Column("close_reason", String(32), index=True),
     Column("status_by", String(32)),
     Column("status_updated", String(32)),
     Column("first_seen", String(32), nullable=False),

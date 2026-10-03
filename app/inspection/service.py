@@ -23,7 +23,19 @@ from ..mysql.store import (chunks, document_chunks, document_heads, feedback, in
 logger = logging.getLogger("production-rag-inspection")
 
 KINDS = {"knowledge_gap": "知识缺口", "suspect_content": "可疑内容", "system_error": "系统问题"}
-STATUSES = {"open": "待处理", "handled": "已处理", "resolved": "已解决", "ignored": "已忽略"}
+STATUSES = {"open": "待处理", "handled": "已处理", "resolved": "已解决", "ignored": "无需处理"}
+# 标记"无需处理"时必须选的原因。原来只有"忽略"，看不出是拒答本来就对，还是懒得管；
+# 记下原因后，列表可以按原因筛选，统计也能区分"合理拒答"和"真正需要处理的问题"。
+CLOSE_REASONS = {
+    "out_of_scope": "超出业务范围",
+    "by_design_permission": "权限限制，按设计保密",
+    "not_covered": "不打算覆盖",
+    "invalid_feedback": "反馈不成立",
+    "transient": "偶发问题",
+    "other": "其他",
+}
+# 这些原因说明"系统拒答是对的"，统计时算作合理拒答。
+REASONABLE_REFUSALS = {"out_of_scope", "by_design_permission", "not_covered"}
 # 管理员可以手动设置的状态。resolved 只由巡检自动设置（例如可疑分片已不在当前版本中），
 # 避免没有验证就把问题关掉；以后接入自动验证后再开放。
 MANUAL_STATUSES = {"open", "handled", "ignored"}
@@ -434,79 +446,9 @@ class Inspector:
             top_missing.append({"text": text, "count": count})
         return {"questions": questions, "missing": top_missing, "comments": comments}
 
-    # 拒答分类和自动验证：对待处理、已处理的知识缺口重跑检索，写入诊断结论。
-    #   全部问题现在都能检索到资料：自动标为已解决（"已处理"的问题就是验证通过）；
-    #   标记"已处理"但仍有问题检索不到：验证不通过，重新打开并说明还差多少。
-    # 已忽略、已解决的不再重跑。
-    # 分三步：先读出要诊断的问题和关联问答，再逐个重跑检索（不占用事务），最后一次性写回结果。
+    # 拒答分类和自动验证，具体规则见 diagnose_gap_issues。
     def diagnose_gaps(self):
-        with self.store.engine.connect() as connection:
-            issues = connection.execute(select(inspection_issues).where(inspection_issues.c.kind == "knowledge_gap",
-                inspection_issues.c.status.in_(["open", "handled"]))).mappings().all()
-            issue_rows = {}
-            for issue in issues:
-                issue_rows[issue["id"]] = connection.execute(select(runs.c.question, runs.c.trace, runs.c.owner,
-                    inspection_issue_events.c.signals).join(inspection_issue_events,
-                        inspection_issue_events.c.source_id == runs.c.id).where(
-                            inspection_issue_events.c.issue_id == issue["id"], inspection_issue_events.c.source == "run").order_by(
-                                inspection_issue_events.c.created.desc())).mappings().all()
-        if not issues:
-            return
-        scope = full_scope(self.store)
-        updates = []
-        for issue in issues:
-            rows = issue_rows[issue["id"]]
-            checked = []
-            seen = set()
-            for row in rows:
-                rewrite = (row["trace"] or {}).get("rewrite") or {}
-                standalone = rewrite.get("standalone_query") or row["question"]
-                if (row["owner"], standalone) in seen:
-                    continue
-                seen.add((row["owner"], standalone))
-                queries = rewrite.get("queries") or [standalone]
-                result = diagnose_question(self.store, self.models, row["owner"], queries, standalone, scope,
-                    feedback_missed="feedback_missed" in (row["signals"] or []))
-                checked.append({"question": row["question"], "owner": row["owner"], **result,
-                    "label": DIAGNOSIS_LABELS[result["category"]]})
-                if len(checked) >= QUESTION_LIMIT:
-                    break
-            if not checked:
-                continue
-            category = overall_category([item["category"] for item in checked])
-            counts = Counter(item["category"] for item in checked)
-            detail = dict(issue["detail"] or {})
-            detail["diagnosis"] = {"category": category, "label": DIAGNOSIS_LABELS[category], "checked_at": self.now,
-                "counts": dict(counts), "questions": checked,
-                # 判断用的门槛，页面据此把分数解释成"差多少才算相关"。
-                "thresholds": thresholds()}
-            values = {"detail": detail, "updated": self.now}
-            self.stats["diagnosed"] += 1
-            if category == "answerable":
-                titles = []
-                for item in checked:
-                    for document in item["documents"]:
-                        if document["title"] not in titles:
-                            titles.append(document["title"])
-                verified = issue["status"] == "handled"
-                detail["resolution"] = ("验证通过：" if verified else "现在能答：") + f"这 {len(checked)} 个问题按提问人的权限都能检索到相关资料" + (
-                    "（" + "、".join(f"《{title}》" for title in titles[:3]) + "）" if titles else "") + "，自动标为已解决。"
-                detail.pop("verification", None)
-                values.update(status="resolved", status_by="system", status_updated=self.now)
-                self.stats["verified" if verified else "auto_resolved"] += 1
-            elif issue["status"] == "handled":
-                unanswered = len(checked) - counts["answerable"]
-                detail["verification"] = {"passed": False, "at": self.now, "message": (
-                    f"标记已处理后重新检索验证，{len(checked)} 个问题里还有 {unanswered} 个检索不到资料"
-                    f"（{DIAGNOSIS_LABELS[category]}），已重新打开。")}
-                values.update(status="open", status_by="system", status_updated=self.now)
-                self.stats["verification_failed"] += 1
-            updates.append((issue["id"], issue["status"], values))
-        # 诊断期间管理员可能改了状态（比如点了忽略），只在状态没变时写回，不覆盖管理员的操作。
-        with self.store.engine.begin() as connection:
-            for issue_id, status, values in updates:
-                connection.execute(inspection_issues.update().where(inspection_issues.c.id == issue_id,
-                    inspection_issues.c.status == status).values(**values))
+        diagnose_gap_issues(self.store, self.models, self.now, self.stats)
 
     # 可疑分片已经不在任何文档的当前版本中：说明内容被修改或删除了，自动标记为已解决。
     # 忽略的问题保持忽略；分片没变的问题继续保留。
@@ -522,6 +464,103 @@ class Inspector:
             connection.execute(inspection_issues.update().where(inspection_issues.c.id == issue["id"]).values(
                 status="resolved", status_by="system", status_updated=self.now, detail=detail, updated=self.now))
             self.stats["auto_resolved"] += 1
+
+
+# 拒答分类和自动验证：对知识缺口按提问人现在的权限重跑检索，写入诊断结论。
+#   全部问题现在都能检索到资料：自动标为已解决（"已处理"的问题就是验证通过）；
+#   标记"已处理"但仍有问题检索不到：验证不通过，重新打开并说明还差多少。
+# 巡检时只处理待处理、已处理的缺口；管理员在页面上点"重新验证"时传入 issue_ids，任何状态都会更新诊断，
+# 但只有待处理、已处理的会改状态。
+# 分三步：先读出要诊断的问题和关联问答，再逐个重跑检索（检索会自己开连接，不能占着事务），最后一次性写回。
+def diagnose_gap_issues(store, models, now, stats, issue_ids=None, trigger="inspection", by=None):
+    with store.engine.connect() as connection:
+        query = select(inspection_issues).where(inspection_issues.c.kind == "knowledge_gap")
+        if issue_ids is None:
+            query = query.where(inspection_issues.c.status.in_(["open", "handled"]))
+        else:
+            query = query.where(inspection_issues.c.id.in_(issue_ids))
+        issues = connection.execute(query).mappings().all()
+        issue_rows = {}
+        for issue in issues:
+            issue_rows[issue["id"]] = connection.execute(select(runs.c.question, runs.c.trace, runs.c.owner,
+                inspection_issue_events.c.signals).join(inspection_issue_events,
+                    inspection_issue_events.c.source_id == runs.c.id).where(
+                        inspection_issue_events.c.issue_id == issue["id"], inspection_issue_events.c.source == "run").order_by(
+                            inspection_issue_events.c.created.desc())).mappings().all()
+    if not issues:
+        return []
+    scope = full_scope(store)
+    updates = []
+    for issue in issues:
+        checked = []
+        seen = set()
+        for row in issue_rows[issue["id"]]:
+            rewrite = (row["trace"] or {}).get("rewrite") or {}
+            standalone = rewrite.get("standalone_query") or row["question"]
+            if (row["owner"], standalone) in seen:
+                continue
+            seen.add((row["owner"], standalone))
+            queries = rewrite.get("queries") or [standalone]
+            result = diagnose_question(store, models, row["owner"], queries, standalone, scope,
+                feedback_missed="feedback_missed" in (row["signals"] or []))
+            checked.append({"question": row["question"], "owner": row["owner"], **result,
+                "label": DIAGNOSIS_LABELS[result["category"]]})
+            if len(checked) >= QUESTION_LIMIT:
+                break
+        if not checked:
+            continue
+        category = overall_category([item["category"] for item in checked])
+        counts = Counter(item["category"] for item in checked)
+        detail = dict(issue["detail"] or {})
+        detail["diagnosis"] = {"category": category, "label": DIAGNOSIS_LABELS[category], "checked_at": now,
+            "counts": dict(counts), "questions": checked,
+            # 谁触发的验证：巡检（含定时）自动验证，或管理员手动点"重新验证"。
+            "trigger": trigger, "checked_by": by,
+            # 判断用的门槛，页面据此把分数解释成"差多少才算相关"。
+            "thresholds": thresholds()}
+        values = {"detail": detail, "updated": now}
+        stats["diagnosed"] += 1
+        if issue["status"] in ("open", "handled") and category == "answerable":
+            titles = []
+            for item in checked:
+                for document in item["documents"]:
+                    if document["title"] not in titles:
+                        titles.append(document["title"])
+            verified = issue["status"] == "handled"
+            detail["resolution"] = ("验证通过：" if verified else "现在能答：") + f"这 {len(checked)} 个问题按提问人的权限都能检索到相关资料" + (
+                "（" + "、".join(f"《{title}》" for title in titles[:3]) + "）" if titles else "") + "，自动标为已解决。"
+            detail.pop("verification", None)
+            values.update(status="resolved", status_by="system", status_updated=now)
+            stats["verified" if verified else "auto_resolved"] += 1
+        elif issue["status"] == "handled":
+            unanswered = len(checked) - counts["answerable"]
+            detail["verification"] = {"passed": False, "at": now, "message": (
+                f"标记已处理后重新检索验证，{len(checked)} 个问题里还有 {unanswered} 个检索不到资料"
+                f"（{DIAGNOSIS_LABELS[category]}），已重新打开。")}
+            values.update(status="open", status_by="system", status_updated=now)
+            stats["verification_failed"] += 1
+        updates.append((issue["id"], issue["status"], values))
+    # 诊断期间管理员可能改了状态（比如点了忽略），只在状态没变时写回，不覆盖管理员的操作。
+    with store.engine.begin() as connection:
+        for issue_id, status, values in updates:
+            connection.execute(inspection_issues.update().where(inspection_issues.c.id == issue_id,
+                inspection_issues.c.status == status).values(**values))
+    return [issue_id for issue_id, _, _ in updates]
+
+
+# 管理员在问题详情里点"重新验证"：只诊断这一个知识缺口，规则和巡检时相同，返回更新后的问题。
+def verify_issue(store, models, issue_id, username):
+    with store.engine.connect() as connection:
+        kind = connection.execute(select(inspection_issues.c.kind).where(inspection_issues.c.id == issue_id)).scalar()
+    if kind is None:
+        return None
+    if kind != "knowledge_gap":
+        raise ValueError("目前只有知识缺口支持重新验证")
+    stats = Counter()
+    diagnose_gap_issues(store, models, now_text(), stats, issue_ids=[issue_id], trigger="manual", by=username)
+    issue = get_issue(store, issue_id)
+    issue["verify_result"] = dict(stats)
+    return issue
 
 
 # 执行一次巡检并记录到 inspection_runs。同一时间只允许一次巡检（命令行和页面共用 Redis 锁）。
@@ -559,7 +598,27 @@ def issue_view(row):
         "status": row["status"], "status_label": STATUSES.get(row["status"], row["status"]), "title": row["title"],
         "occurrences": row["occurrences"], "users": row["users"], "detail": row["detail"] or {}, "note": row["note"],
         "status_by": row["status_by"], "status_updated": row["status_updated"], "first_seen": row["first_seen"],
-        "last_seen": row["last_seen"], "created": row["created"], "updated": row["updated"]}
+        "last_seen": row["last_seen"], "created": row["created"], "updated": row["updated"],
+        "close_reason": row["close_reason"],
+        "close_reason_label": CLOSE_REASONS.get(row["close_reason"], "未注明") if row["status"] == "ignored" else None,
+        "suggested_close_reason": suggest_close_reason(row)}
+
+
+# "无需处理"时默认选中的原因，按问题类型和诊断结论推测，管理员确认即可。
+def suggest_close_reason(row):
+    detail = row["detail"] or {}
+    if row["kind"] == "knowledge_gap":
+        category = (detail.get("diagnosis") or {}).get("category")
+        if category == "permission":
+            return "by_design_permission"
+        if category in ("content", "retrieval"):
+            return "not_covered"
+        return "out_of_scope"
+    if row["kind"] == "suspect_content":
+        return "invalid_feedback"
+    if re.search(r"connection|timeout|timed out|连不上|超时", detail.get("error") or "", re.I):
+        return "transient"
+    return "other"
 
 
 def run_view(row):
@@ -571,12 +630,17 @@ def run_view(row):
 
 
 # 问题列表：按出现次数和影响人数排序；同时返回各状态、各类型的数量和最近一次巡检。
-def list_issues(store, status=None, kind=None, page=1, page_size=20):
+def list_issues(store, status=None, kind=None, page=1, page_size=20, reason=None, days=None):
     conditions = []
     if status:
         conditions.append(inspection_issues.c.status == status)
     if kind:
         conditions.append(inspection_issues.c.kind == kind)
+    # reason=none 筛选没有注明原因的旧数据。
+    if reason == "none":
+        conditions.append(inspection_issues.c.close_reason.is_(None))
+    elif reason:
+        conditions.append(inspection_issues.c.close_reason == reason)
     columns = [column for column in inspection_issues.c if column.name != "vector"]
     with store.engine.connect() as connection:
         total = connection.execute(select(func.count()).select_from(inspection_issues).where(*conditions)).scalar()
@@ -589,11 +653,41 @@ def list_issues(store, status=None, kind=None, page=1, page_size=20):
         if status:
             kind_query = kind_query.where(inspection_issues.c.status == status)
         kind_counts = dict(connection.execute(kind_query).all())
+        reason_counts = {}
+        for value, count in connection.execute(select(inspection_issues.c.close_reason, func.count()).where(
+                inspection_issues.c.status == "ignored").group_by(inspection_issues.c.close_reason)).all():
+            reason_counts[value or "none"] = count
+        gap_summary = summarize_gaps(connection, days or settings()["days"])
         last_run = connection.execute(select(inspection_runs).order_by(inspection_runs.c.started.desc()).limit(
             1)).mappings().first()
     return {"items": [issue_view(row) for row in rows], "total": total, "page": page, "page_size": page_size,
-        "status_counts": status_counts, "kind_counts": kind_counts, "last_run": run_view(last_run),
-        "kinds": KINDS, "statuses": STATUSES, "signals": SIGNALS}
+        "status_counts": status_counts, "kind_counts": kind_counts, "reason_counts": reason_counts,
+        "gap_summary": gap_summary, "last_run": run_view(last_run),
+        "kinds": KINDS, "statuses": STATUSES, "signals": SIGNALS, "close_reasons": CLOSE_REASONS}
+
+
+# 页面顶部的统计：最近 N 天没答上来的问答（知识缺口关联的问答）按所属问题的处理结果分组，
+# 区分合理拒答（无需处理且原因是超出范围、权限保密、不打算覆盖）、已解决、仍需处理。
+def summarize_gaps(connection, days):
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    rows = connection.execute(select(inspection_issues.c.status, inspection_issues.c.close_reason, func.count()).join(
+        inspection_issue_events, inspection_issue_events.c.issue_id == inspection_issues.c.id).where(
+            inspection_issues.c.kind == "knowledge_gap", inspection_issue_events.c.created >= since).group_by(
+                inspection_issues.c.status, inspection_issues.c.close_reason)).all()
+    summary = {"days": days, "total": 0, "reasonable": 0, "reasonable_by_reason": {}, "other_ignored": 0,
+        "resolved": 0, "pending": 0}
+    for status, reason, count in rows:
+        summary["total"] += count
+        if status == "ignored" and reason in REASONABLE_REFUSALS:
+            summary["reasonable"] += count
+            summary["reasonable_by_reason"][reason] = summary["reasonable_by_reason"].get(reason, 0) + count
+        elif status == "ignored":
+            summary["other_ignored"] += count
+        elif status == "resolved":
+            summary["resolved"] += count
+        else:
+            summary["pending"] += count
+    return summary
 
 
 # 问题详情：问题本身和最近的关联记录（问题原文、回答摘要、反馈、缺失内容或错误信息）。
@@ -691,12 +785,19 @@ def call_summary(steps, trace=None, duration_ms=None):
 
 
 # 管理员修改问题状态和备注。
-def update_issue(store, issue_id, status, note, username):
+# 标记"无需处理"必须选原因，选"其他"时必须写备注；改成别的状态时清空原因。
+def update_issue(store, issue_id, status, note, username, close_reason=None):
     values = {"updated": now_text()}
     if status is not None:
         if status not in MANUAL_STATUSES:
             raise ValueError(f"不能手动设置为这个状态：{status}")
-        values.update({"status": status, "status_by": username, "status_updated": values["updated"]})
+        if status == "ignored":
+            if close_reason not in CLOSE_REASONS:
+                raise ValueError("标记无需处理时请选择原因")
+            if close_reason == "other" and not (note or "").strip():
+                raise ValueError("原因选择「其他」时请在备注里说明")
+        values.update({"status": status, "status_by": username, "status_updated": values["updated"],
+            "close_reason": close_reason if status == "ignored" else None})
     if note is not None:
         values["note"] = note or None
     with store.engine.begin() as connection:

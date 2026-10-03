@@ -710,14 +710,22 @@ export type InspectionIssueDetail = {
 };
 export type InspectionDiagnosisCategory = "answerable" | "permission" | "retrieval" | "content" | "out_of_scope" | "unknown";
 export type InspectionDiagnosisDocument = { title: string; doc_key: string; owner: string; visibility: string; visibility_label?: string | null; groups: string[]; score?: number | null };
+// 重新检索时得分最高的几段资料：scope=mine 是按提问人权限检索到的，all 是全库检索到、提问人看不到的。
+export type InspectionDiagnosisChunk = { chunk_id: string; scope: "mine" | "all"; title: string; version?: number | null; page_start?: number | null; heading?: string | null; score: number; passed: boolean; visible: boolean; text: string; truncated: boolean };
 export type InspectionDiagnosis = {
   category: InspectionDiagnosisCategory;
   label: string;
   checked_at: string;
   counts: Partial<Record<InspectionDiagnosisCategory, number>>;
   thresholds?: { min_score: number; near_miss: number; out_of_scope: number };
-  questions: { question: string; owner: string; category: InspectionDiagnosisCategory; label: string; reason?: string; user_top: number | null; full_top: number | null; documents: InspectionDiagnosisDocument[] }[];
+  // inspection：巡检时自动验证；manual：管理员点了"重新验证"。
+  trigger?: "inspection" | "manual";
+  checked_by?: string | null;
+  questions: { question: string; owner: string; category: InspectionDiagnosisCategory; label: string; reason?: string; user_top: number | null; full_top: number | null; documents: InspectionDiagnosisDocument[]; chunks?: InspectionDiagnosisChunk[] }[];
 };
+export type InspectionCloseReason = "out_of_scope" | "by_design_permission" | "not_covered" | "invalid_feedback" | "transient" | "other";
+// 页面顶部统计：最近 N 天没答上来的问答，按所属问题的处理结果分组。
+export type InspectionGapSummary = { days: number; total: number; reasonable: number; reasonable_by_reason: Partial<Record<InspectionCloseReason, number>>; other_ignored: number; resolved: number; pending: number };
 export type InspectionIssue = {
   id: string;
   kind: InspectionKind;
@@ -735,6 +743,10 @@ export type InspectionIssue = {
   last_seen: string;
   created: string;
   updated: string;
+  // 无需处理的原因（status=ignored 时有值）；suggested 是标记无需处理时默认选中的原因。
+  close_reason: InspectionCloseReason | null;
+  close_reason_label: string | null;
+  suggested_close_reason: InspectionCloseReason;
 };
 export type InspectionEvent = {
   source: "run" | "error";
@@ -759,7 +771,7 @@ export type InspectionEvent = {
   last_step?: string | null;
   status_code?: number;
 };
-export type InspectionIssueFull = InspectionIssue & { events: InspectionEvent[] };
+export type InspectionIssueFull = InspectionIssue & { events: InspectionEvent[]; verify_result?: Record<string, number> };
 export type InspectionRun = {
   id: string;
   status: "running" | "completed" | "failed";
@@ -778,6 +790,9 @@ export type InspectionIssuePage = {
   page_size: number;
   status_counts: Partial<Record<InspectionStatus, number>>;
   kind_counts: Partial<Record<InspectionKind, number>>;
+  reason_counts: Partial<Record<InspectionCloseReason | "none", number>>;
+  gap_summary: InspectionGapSummary;
+  close_reasons: Record<InspectionCloseReason, string>;
   last_run: InspectionRun | null;
   running: boolean;
   kinds: Record<InspectionKind, string>;
@@ -785,10 +800,11 @@ export type InspectionIssuePage = {
   signals: Record<string, string>;
 };
 
-export function listInspectionIssues(params: { status?: InspectionStatus | null; kind?: InspectionKind | null; page?: number }) {
+export function listInspectionIssues(params: { status?: InspectionStatus | null; kind?: InspectionKind | null; reason?: InspectionCloseReason | "none" | null; page?: number }) {
   const query = new URLSearchParams();
   if (params.status) query.set("status", params.status);
   if (params.kind) query.set("kind", params.kind);
+  if (params.reason) query.set("reason", params.reason);
   query.set("page", String(params.page ?? 1));
   return request<InspectionIssuePage>(`/inspection/issues?${query.toString()}`);
 }
@@ -798,7 +814,7 @@ export function getInspectionIssue(issueId: string) {
 }
 
 // 手动标记状态（待处理 / 已处理 / 已忽略）或修改备注；已解决只由巡检自动设置。
-export function updateInspectionIssue(issueId: string, payload: { status?: "open" | "handled" | "ignored"; note?: string }) {
+export function updateInspectionIssue(issueId: string, payload: { status?: "open" | "handled" | "ignored"; note?: string; close_reason?: InspectionCloseReason }) {
   return request<InspectionIssueFull>(`/inspection/issues/${encodeURIComponent(issueId)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -820,6 +836,11 @@ export function saveInspectionSchedule(payload: Pick<InspectionSchedule, "enable
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+// 立即重新验证一个知识缺口，同步返回更新后的问题。
+export function verifyInspectionIssue(issueId: string) {
+  return request<InspectionIssueFull>(`/inspection/issues/${encodeURIComponent(issueId)}/verify`, { method: "POST" });
 }
 
 // 立即巡检，在服务端后台执行；完成后问题列表的 running 变为 false。

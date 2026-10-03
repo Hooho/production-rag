@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { verifyInspectionIssue, getInspectionIssue, getInspectionSchedule, listInspectionIssues, saveInspectionSchedule, startInspection, updateInspectionIssue, type InspectionDiagnosis, type InspectionDiagnosisChunk, type InspectionEvent, type InspectionSchedule, type InspectionScheduleView, type InspectionIssue, type InspectionIssueFull, type InspectionIssuePage, type InspectionKind, type InspectionStatus } from "./api";
+import { verifyInspectionIssue, getInspectionIssue, getInspectionSchedule, listInspectionIssues, saveInspectionSchedule, startInspection, updateInspectionIssue, type InspectionCloseReason, type InspectionGapSummary, type InspectionDiagnosis, type InspectionDiagnosisChunk, type InspectionEvent, type InspectionSchedule, type InspectionScheduleView, type InspectionIssue, type InspectionIssueFull, type InspectionIssuePage, type InspectionKind, type InspectionStatus } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./Inspection.css";
 
@@ -9,7 +9,7 @@ const STATUS_TABS: { key: InspectionStatus | null; label: string }[] = [
   { key: "open", label: "待处理" },
   { key: "handled", label: "已处理" },
   { key: "resolved", label: "已解决" },
-  { key: "ignored", label: "已忽略" },
+  { key: "ignored", label: "无需处理" },
   { key: null, label: "全部" },
 ];
 const STATUS_TONES: Record<InspectionStatus, string> = { open: "orange", handled: "blue", resolved: "green", ignored: "gray" };
@@ -25,27 +25,27 @@ function explain(issue: InspectionIssue): { what: string; todo: string[] } {
     const verify = "处理后点「标记已处理」，下次巡检会用原来的问题重新检索验证：都能检索到资料就自动关闭，否则重新打开。";
     switch (detail.diagnosis?.category) {
       case "permission":
-        return { what: base + "重新检索发现：知识库里其实有相关资料，但提问人没有权限看到。", todo: ["看下面「诊断结果」里列出的文档和它们当前的可见范围，判断是该共享给提问人所在的部门，还是本来就应该保密。", "需要共享就到知识库里修改这份文档的可见范围；本来就该保密的，点「忽略」。", verify] };
+        return { what: base + "重新检索发现：知识库里其实有相关资料，但提问人没有权限看到。", todo: ["看下面「诊断结果」里列出的文档和它们当前的可见范围，判断是该共享给提问人所在的部门，还是本来就应该保密。", "需要共享就到知识库里修改这份文档的可见范围；本来就该保密的，点「无需处理」。", verify] };
       case "retrieval":
         return { what: base + "重新检索发现：提问人能看到的资料里有比较接近的内容，但相关度没达到阈值；或者用户明确反馈过「资料里有却说找不到」。问题多半出在检索，而不是缺文档。", todo: ["对照「诊断结果」里的得分和问题原文，确认资料是否确实存在。", "资料存在的话，考虑调整文档的标题和分块、补充同义说法，或者评估检索阈值 RERANK_MIN_SCORE 是否偏高。", verify] };
       case "content":
         return { what: base + "重新检索发现：整个知识库里都没有足够相关的资料，需要补充文档。", todo: ["补充或更新覆盖这些问题的文档。", verify] };
       case "out_of_scope":
-        return { what: base + "重新检索发现：整个知识库里连沾边的资料都没有，多半是闲聊、常识或与业务无关的问题，拒答是正确的。", todo: ["确认不属于业务范围的话，点「忽略」。", "如果其实应该覆盖，按内容缺口处理：补充文档后点「标记已处理」。"] };
+        return { what: base + "重新检索发现：整个知识库里连沾边的资料都没有，多半是闲聊、常识或与业务无关的问题，拒答是正确的。", todo: ["确认不属于业务范围的话，点「无需处理」。", "如果其实应该覆盖，按内容缺口处理：补充文档后点「标记已处理」。"] };
       default:
-        return { what: base + "通常说明知识库里缺少相关文档。", todo: ["先判断问题是否属于你的业务范围：闲聊、常识、和业务无关的问题，拒答是正确的，点「忽略」即可。", "属于业务范围的，补充或更新相关文档，然后点「标记已处理」。" + verify] };
+        return { what: base + "通常说明知识库里缺少相关文档。", todo: ["先判断问题是否属于你的业务范围：闲聊、常识、和业务无关的问题，拒答是正确的，点「无需处理」即可。", "属于业务范围的，补充或更新相关文档，然后点「标记已处理」。" + verify] };
     }
   }
   if (issue.kind === "suspect_content") {
     return {
       what: "下面这段文档内容被回答引用后，多次收到用户差评。内容可能已经过时、写错了，或者表述容易让人误解。",
-      todo: ["对照用户的补充说明核对原文。有问题就在知识库里上传新版本，文档更新后这个问题会自动变成「已解决」。", "核对后内容没有问题（比如用户理解错了），点「忽略」。"],
+      todo: ["对照用户的补充说明核对原文。有问题就在知识库里上传新版本，文档更新后这个问题会自动变成「已解决」。", "核对后内容没有问题（比如用户理解错了），点「无需处理」。"],
     };
   }
   if (detail.signals?.citation_failure) {
     return {
       what: "系统检索到了资料并交给模型（编号为 S1、S2…），要求模型在回答里用编号标明每句话的依据。下面这些回答要么没有引用任何一段资料，要么引用了根本不存在的编号（虚构来源）。为了防止编造，系统拦下了回答，用户只看到一句提示，没有拿到答案。",
-      todo: ["看每条关联记录的具体原因和模型原话：没有引用，多半是模型没遵守格式；引用了不存在的编号，说明模型在编造来源。", "偶尔出现可以忽略；反复出现时，检查回答模型的提示词，或者在设置页换一个更听指令的模型。"],
+      todo: ["看每条关联记录的具体原因和模型原话：没有引用，多半是模型没遵守格式；引用了不存在的编号，说明模型在编造来源。", "偶尔出现可以标记无需处理（偶发问题）；反复出现时，检查回答模型的提示词，或者在设置页换一个更听指令的模型。"],
     };
   }
   const error = detail.error ?? "";
@@ -72,6 +72,8 @@ function formatTime(value: string | null | undefined) {
 export default function Inspection({ onToast }: { onToast: ShowToast }) {
   const [status, setStatus] = useState<InspectionStatus | null>("open");
   const [kind, setKind] = useState<InspectionKind | null>(null);
+  // "无需处理"标签页里按原因筛选；none 是没有注明原因的旧数据。
+  const [reason, setReason] = useState<InspectionCloseReason | "none" | null>(null);
   const [page, setPage] = useState(1);
   const [data, setData] = useState<InspectionIssuePage | null>(null);
   const [loading, setLoading] = useState(true);
@@ -91,7 +93,7 @@ export default function Inspection({ onToast }: { onToast: ShowToast }) {
   async function reload(quiet = false) {
     if (!quiet) setLoading(true);
     try {
-      setData(await listInspectionIssues({ status, kind, page }));
+      setData(await listInspectionIssues({ status, kind, reason: status === "ignored" ? reason : null, page }));
     } catch (reason) {
       onToast("error", (reason as Error).message);
     } finally {
@@ -101,7 +103,7 @@ export default function Inspection({ onToast }: { onToast: ShowToast }) {
 
   useEffect(() => {
     void reload();
-  }, [status, kind, page]);
+  }, [status, kind, reason, page]);
 
   // 巡检在后台执行，运行期间每 3 秒刷新一次，结束后自动显示新结果。
   const running = data?.running ?? false;
@@ -109,7 +111,7 @@ export default function Inspection({ onToast }: { onToast: ShowToast }) {
     if (!running) return;
     const timer = window.setInterval(() => void reload(true), 3000);
     return () => window.clearInterval(timer);
-  }, [running, status, kind, page]);
+  }, [running, status, kind, reason, page]);
 
   async function runNow() {
     setStarting(true);
@@ -152,10 +154,12 @@ export default function Inspection({ onToast }: { onToast: ShowToast }) {
 
     <ScheduleBar running={running} onToast={onToast} />
 
+    {data && <GapSummary summary={data.gap_summary} reasons={data.close_reasons} />}
+
     <div className="document-detail-tabs inspection-tabs" role="tablist">
       {STATUS_TABS.map((tab) => {
         const count = tab.key ? data?.status_counts[tab.key] ?? 0 : null;
-        return <button key={tab.label} role="tab" aria-selected={status === tab.key} className={status === tab.key ? "active" : ""} onClick={() => { setStatus(tab.key); setPage(1); setExpanded(new Set()); }}>{tab.label}{count !== null && <span>{count}</span>}</button>;
+        return <button key={tab.label} role="tab" aria-selected={status === tab.key} className={status === tab.key ? "active" : ""} onClick={() => { setStatus(tab.key); setReason(null); setPage(1); setExpanded(new Set()); }}>{tab.label}{count !== null && <span>{count}</span>}</button>;
       })}
     </div>
 
@@ -163,6 +167,12 @@ export default function Inspection({ onToast }: { onToast: ShowToast }) {
       <button type="button" className={`inspection-chip ${kind === null ? "is-selected" : ""}`} onClick={() => { setKind(null); setPage(1); }}>全部类型</button>
       {data && (Object.keys(data.kinds) as InspectionKind[]).map((key) => <button key={key} type="button" className={`inspection-chip ${kind === key ? "is-selected" : ""}`} onClick={() => { setKind(key); setPage(1); }}>{data.kinds[key]}<span>{data.kind_counts[key] ?? 0}</span></button>)}
     </div>
+
+    {status === "ignored" && data && <div className="inspection-kinds" role="group" aria-label="无需处理的原因">
+      <button type="button" className={`inspection-chip ${reason === null ? "is-selected" : ""}`} onClick={() => { setReason(null); setPage(1); }}>全部原因</button>
+      {(Object.keys(data.close_reasons) as InspectionCloseReason[]).filter((key) => data.reason_counts[key]).map((key) => <button key={key} type="button" className={`inspection-chip ${reason === key ? "is-selected" : ""}`} onClick={() => { setReason(key); setPage(1); }}>{data.close_reasons[key]}<span>{data.reason_counts[key]}</span></button>)}
+      {data.reason_counts.none ? <button type="button" className={`inspection-chip ${reason === "none" ? "is-selected" : ""}`} onClick={() => { setReason("none"); setPage(1); }}>未注明<span>{data.reason_counts.none}</span></button> : null}
+    </div>}
 
     {loading && !data ? <InspectionSkeleton /> : data && data.items.length === 0 ? <div className="inspection-empty">{status === "open" ? "没有待处理的问题。" : "没有符合条件的问题。"}{!lastRun && " 点击「立即巡检」开始第一次巡检。"}</div> : <ul className="inspection-list">
       {data?.items.map((issue) => <IssueRow key={issue.id} issue={issue} signals={data.signals} open={expanded.has(issue.id)} onToggle={() => toggle(issue.id)} onChanged={handleChanged} onToast={onToast} />)}
@@ -274,6 +284,48 @@ function ScheduleBar({ running, onToast }: { running: boolean; onToast: ShowToas
   </section>;
 }
 
+const CLOSE_REASON_OPTIONS: { key: InspectionCloseReason; label: string; hint: string }[] = [
+  { key: "out_of_scope", label: "超出业务范围", hint: "闲聊、常识、和业务无关的问题，拒答是对的" },
+  { key: "by_design_permission", label: "权限限制，按设计保密", hint: "资料存在，但提问人本来就不该看到" },
+  { key: "not_covered", label: "不打算覆盖", hint: "和业务相关，但决定不在知识库里提供这类内容" },
+  { key: "invalid_feedback", label: "反馈不成立", hint: "用户理解错了，内容本身没问题" },
+  { key: "transient", label: "偶发问题", hint: "网络抖动、服务临时不可用等，之后没再出现" },
+  { key: "other", label: "其他", hint: "需要在上面的备注里说明" },
+];
+
+// 标记"无需处理"时选择原因；系统推测的原因标"推荐"并默认选中。
+function CloseReasonPicker({ value, suggested, onChange, busy, noteEmpty, onCancel, onConfirm }: { value: InspectionCloseReason; suggested: InspectionCloseReason; onChange: (value: InspectionCloseReason) => void; busy: boolean; noteEmpty: boolean; onCancel: () => void; onConfirm: () => void }) {
+  const needNote = value === "other" && noteEmpty;
+  return <div className="inspection-close">
+    <div className="inspection-close-title">为什么无需处理？</div>
+    <div className="inspection-close-options" role="radiogroup">
+      {CLOSE_REASON_OPTIONS.map((option) => <label key={option.key} className={`inspection-close-option ${value === option.key ? "is-selected" : ""}`}>
+        <input type="radio" name="inspection-close-reason" checked={value === option.key} onChange={() => onChange(option.key)} />
+        <span className="inspection-close-label">{option.label}{option.key === suggested && <em>推荐</em>}</span>
+        <span className="inspection-close-hint">{option.hint}</span>
+      </label>)}
+    </div>
+    {needNote && <p className="inspection-hint inspection-close-warning">选择「其他」时，请先在上面的备注里写明原因。</p>}
+    <div className="inspection-action-buttons">
+      <button type="button" className="secondary-button" onClick={onCancel} disabled={busy}>取消</button>
+      <button type="button" className="primary-button" onClick={onConfirm} disabled={busy || needNote}>确认无需处理</button>
+    </div>
+  </div>;
+}
+
+// 页面顶部统计：最近 N 天没答上来的问答里，多少是合理拒答、多少已解决、多少还要处理。
+function GapSummary({ summary, reasons }: { summary: InspectionGapSummary; reasons: Record<InspectionCloseReason, string> }) {
+  if (!summary.total) return null;
+  const parts = (Object.entries(summary.reasonable_by_reason) as [InspectionCloseReason, number][]).map(([key, count]) => `${reasons[key]} ${count}`);
+  return <div className="inspection-summary">
+    <span>最近 {summary.days} 天有 <strong>{summary.total}</strong> 次问答没答上来：</span>
+    <span>合理拒答 <strong>{summary.reasonable}</strong> 次{parts.length > 0 && `（${parts.join("，")}）`}</span>
+    <span>· 已解决 <strong>{summary.resolved}</strong> 次</span>
+    <span>· 还需处理 <strong className="is-pending">{summary.pending}</strong> 次</span>
+    {summary.other_ignored > 0 && <span>· 其他无需处理 {summary.other_ignored} 次</span>}
+  </div>;
+}
+
 function InspectionSkeleton() {
   return <LoadingSkeleton className="inspection-skeleton" label="正在加载巡检问题">
     {[0, 1, 2, 3].map((index) => <div key={index} className="inspection-skeleton-row"><SkeletonBlock className="skeleton-line-short" /><SkeletonBlock className="skeleton-line" /></div>)}
@@ -294,7 +346,7 @@ function IssueRow({ issue, signals, open, onToggle, onChanged, onToast }: { issu
       <div className="inspection-item-main">
         <div className="inspection-item-tags">
           <span className={`inspection-kind is-${issue.kind}`}>{issue.kind_label}</span>
-          <span className={`status-tag is-${STATUS_TONES[issue.status]}`}>{issue.status_label}</span>
+          <span className={`status-tag is-${STATUS_TONES[issue.status]}`}>{issue.status_label}{issue.close_reason_label && ` · ${issue.close_reason_label}`}</span>
           {issue.detail.diagnosis && issue.status !== "resolved" && <span className={`inspection-category is-${issue.detail.diagnosis.category}`} title="离线重跑检索得出的拒答原因">{issue.detail.diagnosis.label}</span>}
           {issue.status === "open" && issue.detail.reopened && <span className="status-tag is-red">处理后再次出现</span>}
           {issue.status === "open" && issue.detail.verification && <span className="status-tag is-red">验证未通过</span>}
@@ -349,11 +401,16 @@ function IssueDetail({ issueId, signals, onChanged, onToast }: { issueId: string
     }
   }
 
-  async function save(status?: "open" | "handled" | "ignored") {
+  // 标记"无需处理"前先选原因，默认选中系统推测的原因。
+  const [closing, setClosing] = useState(false);
+  const [closeReason, setCloseReason] = useState<InspectionCloseReason>("other");
+
+  async function save(status?: "open" | "handled" | "ignored", reason?: InspectionCloseReason) {
     if (!issue) return;
     setBusy(true);
     try {
-      const value = await updateInspectionIssue(issue.id, { status, note });
+      const value = await updateInspectionIssue(issue.id, { status, note, close_reason: reason });
+      setClosing(false);
       setIssue(value);
       onToast("success", status ? `已标记为${value.status_label}` : "备注已保存");
       onChanged(value);
@@ -391,17 +448,18 @@ function IssueDetail({ issueId, signals, onChanged, onToast }: { issueId: string
       {!detail.signals?.citation_failure && <Fact label="错误信息"><code>{detail.error ?? "—"}</code></Fact>}
     </div>}
 
-    <div className="inspection-meta">首次出现 {formatTime(issue.first_seen)} · 最近 {formatTime(issue.last_seen)}{issue.status_by && <> · {issue.status_by === "system" ? "巡检" : issue.status_by} 于 {formatTime(issue.status_updated)} 标记为{issue.status_label}</>}</div>
+    <div className="inspection-meta">首次出现 {formatTime(issue.first_seen)} · 最近 {formatTime(issue.last_seen)}{issue.status_by && <> · {issue.status_by === "system" ? "巡检" : issue.status_by} 于 {formatTime(issue.status_updated)} 标记为{issue.status_label}{issue.close_reason_label && `（${issue.close_reason_label}）`}</>}</div>
 
     <div className="inspection-actions">
       <textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={2000} rows={2} placeholder="处理备注：补了哪份文档、改了什么配置（可选）" />
       <div className="inspection-action-buttons">
         <button type="button" className="secondary-button" disabled={busy || note === (issue.note ?? "")} onClick={() => void save()}>保存备注</button>
         {issue.status !== "open" && <button type="button" className="secondary-button" disabled={busy} onClick={() => void save("open")}>重新打开</button>}
-        {issue.status !== "ignored" && <button type="button" className="secondary-button" disabled={busy} onClick={() => void save("ignored")}>忽略</button>}
+        {issue.status !== "ignored" && <button type="button" className="secondary-button" disabled={busy} onClick={() => { setCloseReason(issue.suggested_close_reason); setClosing(!closing); }}>无需处理</button>}
         {issue.status !== "handled" && issue.status !== "resolved" && <button type="button" className="primary-button" disabled={busy} onClick={() => void save("handled")}>标记已处理</button>}
       </div>
-      <p className="inspection-hint">标记已处理后，如果又出现同类问答，下次巡检会自动重新打开；忽略的问题不会再提醒。</p>
+      {closing && <CloseReasonPicker value={closeReason} suggested={issue.suggested_close_reason} onChange={setCloseReason} busy={busy} noteEmpty={!note.trim()} onCancel={() => setClosing(false)} onConfirm={() => void save("ignored", closeReason)} />}
+      <p className="inspection-hint">标记已处理后，如果又出现同类问答，下次巡检会自动重新打开；标记无需处理的问题不会再提醒。</p>
     </div>
 
     <h3 className="inspection-section-title">关联记录（{issue.occurrences}）</h3>

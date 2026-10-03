@@ -132,6 +132,24 @@
    font-size: 12px;
 }
 
+.inspection-summary {
+   display: flex;
+   flex-wrap: wrap;
+   gap: 6px;
+   margin-bottom: 14px;
+   color: #4b6580;
+   font-size: 13px;
+}
+
+.inspection-summary strong {
+   color: #1d3550;
+   font-family: 'DM Mono', monospace;
+}
+
+.inspection-summary strong.is-pending {
+   color: #b45309;
+}
+
 .inspection-tabs {
    margin-bottom: 14px;
    overflow-x: auto;
@@ -346,6 +364,16 @@
 .inspection-diagnosis-meta {
    color: #6c88a3;
    font-size: 12px;
+}
+
+.inspection-verify-button {
+   margin-left: auto;
+   font-size: 12px;
+}
+
+.inspection-source-tag.is-hidden {
+   background: #fdecec;
+   color: #b42318;
 }
 
 .inspection-diagnosis-sentence {
@@ -772,4 +800,76 @@
       grid-template-columns: 1fr;
       gap: 2px;
    }
+}
+
+/* 标记"无需处理"时的原因选择。 */
+.inspection-close {
+   margin-top: 12px;
+   border: 1px solid #e3edf5;
+   border-radius: 6px;
+   background: #fbfdff;
+   padding: 12px 14px;
+}
+
+.inspection-close-title {
+   margin-bottom: 8px;
+   color: #1d3550;
+   font-size: 13px;
+   font-weight: 700;
+}
+
+.inspection-close-options {
+   display: grid;
+   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+   gap: 8px;
+}
+
+/* 全局 label 是上下排列的小号等宽字，这里改回正常排版。 */
+.inspection-close-option {
+   display: grid;
+   grid-template-columns: auto 1fr;
+   column-gap: 8px;
+   row-gap: 2px;
+   align-items: center;
+   margin: 0;
+   border: 1px solid #e3edf5;
+   border-radius: 6px;
+   background: #fff;
+   padding: 8px 10px;
+   color: #1d3550;
+   font-family: inherit;
+   font-size: 13px;
+   letter-spacing: normal;
+   cursor: pointer;
+}
+
+.inspection-close-option.is-selected {
+   border-color: #2563eb;
+   background: #f3f7ff;
+}
+
+.inspection-close-option input {
+   width: auto;
+   margin: 0;
+   padding: 0;
+}
+
+.inspection-close-label em {
+   margin-left: 6px;
+   border-radius: 3px;
+   background: #eaf1ff;
+   color: #2563eb;
+   padding: 0 5px;
+   font-size: 11px;
+   font-style: normal;
+}
+
+.inspection-close-hint {
+   grid-column: 2;
+   color: #6c88a3;
+   font-size: 12px;
+}
+
+.inspection-close-warning {
+   color: #b45309;
 }

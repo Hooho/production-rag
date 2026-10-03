@@ -9,7 +9,7 @@ import os
 
 from sqlalchemy import select
 
-from ..mysql.store import document_heads
+from ..mysql.store import chunks, document_heads
 from ..tools.search import DEFAULT_RERANK_MIN_SCORE, DocumentSearchTool
 
 
@@ -26,6 +26,11 @@ PRIORITY = ["permission", "retrieval", "content", "out_of_scope", "unknown"]
 VISIBILITY_LABELS = {"private": "仅上传者可见", "shared": "共享给部门", "public": "所有人可见"}
 # 每个缺口最多重跑几个问题：取最近的几个不重复的问题，控制巡检耗时。
 QUESTION_LIMIT = 5
+# 诊断结果里保留得分最高的那一段资料，页面折叠显示，管理员能看到分数对应的是什么内容。
+CHUNK_LIMIT = 1
+# 分片原文一般不超过 1500 字（800 字正文加上下文说明和标题路径），完整保存；
+# 只有一段，不用为了控制大小截断。上限只防异常数据。
+CHUNK_CHARACTERS = 6000
 
 
 def thresholds():
@@ -87,6 +92,34 @@ def matched_documents(store, sources, scope):
     return documents
 
 
+# 检索结果里得分最高的几段资料（不论是否达标），带上原文和"提问人能不能看到"。
+# 诊断信息里候选只有 80 字预览，原文按分片编号从 MySQL 取。
+def top_chunks(store, result, scope_name, visible_versions, limit=CHUNK_LIMIT):
+    candidates = []
+    for item in (result.get("diagnostics") or {}).get("candidates") or []:
+        if item.get("rerank_probability") is not None:
+            candidates.append(item)
+    candidates.sort(key=lambda item: item["rerank_probability"], reverse=True)
+    candidates = candidates[:limit]
+    texts = {}
+    if candidates:
+        with store.engine.connect() as connection:
+            for chunk_id, text in connection.execute(select(chunks.c.id, chunks.c.text).where(
+                    chunks.c.id.in_([item["chunk_id"] for item in candidates]))).all():
+                texts[chunk_id] = text
+    minimum = thresholds()["min_score"]
+    items = []
+    for item in candidates:
+        document_id = str(item["chunk_id"]).rsplit(":", 1)[0]
+        text = texts.get(item["chunk_id"]) or item.get("preview") or ""
+        items.append({"chunk_id": item["chunk_id"], "scope": scope_name, "title": item.get("title"),
+            "version": item.get("version"), "page_start": item.get("page_start"), "heading": item.get("heading"),
+            "score": round(item["rerank_probability"], 4), "passed": item["rerank_probability"] >= minimum,
+            "visible": document_id in visible_versions, "text": text[:CHUNK_CHARACTERS],
+            "truncated": len(text) > CHUNK_CHARACTERS})
+    return items
+
+
 # 判断一个问题现在属于哪一类。feedback_missed：用户反馈过"资料里有却说找不到"。
 def diagnose_question(store, models, owner, queries, rerank_query, scope, feedback_missed=False):
     tool = DocumentSearchTool()
@@ -95,14 +128,20 @@ def diagnose_question(store, models, owner, queries, rerank_query, scope, feedba
     user_top = top_score(mine)
     if user_top is None:
         return {"category": "unknown", "reason": "重排模型不可用，无法按相关度判断", "user_top": None, "full_top": None,
-            "documents": []}
+            "documents": [], "chunks": []}
+    visible = set(store.readable_scope(owner)["versions"]) if hasattr(store, "readable_scope") else set(scope["versions"])
+    found = top_chunks(store, mine, "mine", visible)
     if mine["sources"]:
         return {"category": "answerable", "user_top": user_top, "full_top": None,
-            "documents": matched_documents(store, mine["sources"], scope)}
+            "documents": matched_documents(store, mine["sources"], scope), "chunks": found}
     everything = tool.execute(store, models, owner, queries, rerank_query, parent=False,
         scope={"versions": scope["versions"], "documents": scope["documents"]})
     full_top = top_score(everything)
-    result = {"user_top": user_top, "full_top": full_top, "documents": []}
+    # 只保留得分最高的一段：全库里有比提问人能看到的更高的（提问人看不到），就换成它。
+    best_all = top_chunks(store, everything, "all", visible)
+    if best_all and (not found or best_all[0]["score"] > found[0]["score"]):
+        found = best_all
+    result = {"user_top": user_top, "full_top": full_top, "documents": [], "chunks": found}
     if everything["sources"]:
         result.update(category="permission", documents=matched_documents(store, everything["sources"], scope))
     elif feedback_missed or user_top >= limits["near_miss"]:
