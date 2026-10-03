@@ -3,7 +3,7 @@
    display: flex;
    flex-direction: column;
    gap: 16px;
-   color: #1d3550;
+   color: var(--t-1d3550);
    font-size: 13px;
 }
 
@@ -16,7 +16,7 @@
 
 .rg-intro p {
    margin: 0 0 6px;
-   color: #5e7a95;
+   color: var(--t-5e7a95);
    line-height: 1.7;
 }
 
@@ -25,14 +25,14 @@
 }
 
 .rg-muted {
-   color: #7d95ac;
+   color: var(--t-7d95ac);
 }
 
 .rg-empty {
-   border: 1px dashed #d5e2ee;
+   border: 1px dashed var(--t-d5e2ee);
    border-radius: 6px;
    padding: 24px;
-   color: #7d95ac;
+   color: var(--t-7d95ac);
    text-align: center;
 }
 
@@ -53,7 +53,7 @@
    align-items: flex-start;
    gap: 4px;
    width: 100%;
-   border: 1px solid #e3edf5;
+   border: 1px solid var(--t-e3edf5);
    border-radius: 6px;
    background: #fff;
    padding: 12px 16px;
@@ -64,7 +64,7 @@
 }
 
 .rg-set:hover {
-   border-color: #b9cde3;
+   border-color: var(--t-b9cde3);
 }
 
 .rg-set-name {
@@ -73,7 +73,7 @@
 }
 
 .rg-set-description {
-   color: #5e7a95;
+   color: var(--t-5e7a95);
 }
 
 .rg-set-meta,
@@ -83,7 +83,7 @@
    flex-wrap: wrap;
    align-items: center;
    gap: 6px 14px;
-   color: #5e7a95;
+   color: var(--t-5e7a95);
    font-size: 12px;
 }
 
@@ -103,7 +103,7 @@
    display: flex;
    flex-direction: column;
    gap: 10px;
-   border: 1px solid #e3edf5;
+   border: 1px solid var(--t-e3edf5);
    border-radius: 6px;
    background: #fbfdff;
    padding: 14px 16px;
@@ -124,7 +124,7 @@
 }
 
 .rg-field > span {
-   color: #5e7a95;
+   color: var(--t-5e7a95);
 }
 
 /* 输入框、下拉框和巡检页的备注框同一套样式：浅色边框、圆角、白底。 */
@@ -135,10 +135,10 @@
    width: 100%;
    max-width: 520px;
    margin: 0;
-   border: 1px solid #cedfec;
+   border: 1px solid var(--t-cedfec);
    border-radius: 6px;
    background-color: #fff;
-   color: #1d3550;
+   color: var(--t-1d3550);
    padding: 6px 10px;
    outline: 0;
    font-family: inherit;
@@ -166,7 +166,7 @@
 .rg-field input:focus,
 .rg-field textarea:focus,
 .rg-field select:focus {
-   border-color: #2563eb;
+   border-color: var(--t-2563eb);
 }
 
 .rg-field.is-top {
@@ -200,9 +200,9 @@
    display: inline-flex;
    align-items: center;
    gap: 2px;
-   border: 1px solid #cedfec;
+   border: 1px solid var(--t-cedfec);
    border-radius: 3px;
-   background: #f3f7ff;
+   background: var(--t-f3f7ff);
    padding: 3px 4px 3px 6px;
 }
 
@@ -210,7 +210,7 @@
    border: 0;
    background: none;
    padding: 0 4px;
-   color: #6c88a3;
+   color: var(--t-6c88a3);
    font-size: 14px;
    line-height: 1;
    cursor: pointer;
@@ -228,7 +228,7 @@
 }
 
 .rg-link.is-edit:hover {
-   color: #2563eb;
+   color: var(--t-2563eb);
 }
 
 .rg-radios {
@@ -240,7 +240,7 @@
    display: flex;
    align-items: center;
    gap: 6px;
-   color: #1d3550;
+   color: var(--t-1d3550);
    font-size: 13px;
    cursor: pointer;
 }
@@ -263,14 +263,14 @@
    border: 0;
    background: none;
    padding: 0;
-   color: #2563eb;
+   color: var(--t-2563eb);
    font: inherit;
    cursor: pointer;
 }
 
 .rg-link {
    flex: none;
-   color: #7d95ac;
+   color: var(--t-7d95ac);
    font-size: 12px;
 }
 
@@ -303,14 +303,14 @@
 
 .rg-title p {
    margin: 4px 0 0;
-   color: #5e7a95;
+   color: var(--t-5e7a95);
 }
 
 .rg-launch {
    display: flex;
    flex-direction: column;
    gap: 8px;
-   border: 1px solid #e3edf5;
+   border: 1px solid var(--t-e3edf5);
    border-radius: 6px;
    background: #fff;
    padding: 12px 16px;
@@ -328,11 +328,11 @@
 }
 
 .rg-launch-option span {
-   color: #5e7a95;
+   color: var(--t-5e7a95);
 }
 
 .rg-progress {
-   color: #2563eb;
+   color: var(--t-2563eb);
 }
 
 .rg-section h4 {
@@ -363,19 +363,19 @@
    display: flex;
    align-items: center;
    gap: 8px;
-   border: 1px solid #e3edf5;
+   border: 1px solid var(--t-e3edf5);
    border-radius: 3px;
    background: #fff;
    padding: 6px 10px;
-   color: #1d3550;
+   color: var(--t-1d3550);
    font: inherit;
    font-size: 12px;
    cursor: pointer;
 }
 
 .rg-run.is-selected {
-   border-color: #2563eb;
-   background: #f3f7ff;
+   border-color: var(--t-2563eb);
+   background: var(--t-f3f7ff);
 }
 
 .rg-results {
@@ -388,7 +388,7 @@
 .rg-result {
    display: flex;
    gap: 12px;
-   border: 1px solid #e3edf5;
+   border: 1px solid var(--t-e3edf5);
    border-radius: 6px;
    background: #fff;
    padding: 10px 14px;
@@ -441,8 +441,8 @@
 }
 
 .rg-expect.is-refuse {
-   background: #f1f3f6;
-   color: #475569;
+   background: var(--t-f1f3f6);
+   color: var(--t-475569);
 }
 
 .rg-change {
@@ -461,18 +461,18 @@
 }
 
 .rg-change.is-gray {
-   color: #64748b;
+   color: var(--t-64748b);
 }
 
 .rg-details summary {
-   color: #2563eb;
+   color: var(--t-2563eb);
    font-size: 12px;
    cursor: pointer;
 }
 
 .rg-text {
    margin-top: 6px;
-   color: #334e68;
+   color: var(--t-334e68);
    line-height: 1.7;
    white-space: pre-wrap;
    word-break: break-word;
@@ -498,11 +498,11 @@
    max-height: 240px;
    overflow-y: auto;
    margin: 0;
-   border: 1px solid #cedfec;
+   border: 1px solid var(--t-cedfec);
    border-radius: 6px;
    background: #fff;
    padding: 4px 0;
-   box-shadow: 0 8px 24px rgba(23, 59, 91, 0.12);
+   box-shadow: 0 8px 24px rgb(var(--t-173b5b-rgb) / 0.12);
    list-style: none;
 }
 
@@ -519,20 +519,20 @@
 }
 
 .rg-picker-list li span {
-   color: #7d95ac;
+   color: var(--t-7d95ac);
    font-size: 12px;
 }
 
 .rg-picker-list li.is-active {
-   background: #f3f7ff;
+   background: var(--t-f3f7ff);
 }
 
 .rg-picker-list li.is-selected strong {
-   color: #2563eb;
+   color: var(--t-2563eb);
 }
 
 .rg-picker-list li.rg-picker-empty {
-   color: #7d95ac;
+   color: var(--t-7d95ac);
    cursor: default;
 }
 

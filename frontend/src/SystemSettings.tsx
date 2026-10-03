@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { getRuntimeSettings, saveRuntimeSettings, type RuntimeSettingItem, type RuntimeSettingValue, type RuntimeSettingsView } from "./api";
+import { applyTheme } from "./theme";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./SystemSettings.css";
 
@@ -106,6 +107,11 @@ const META: Record<string, Meta> = {
     what: "数据查询里的「今天」「本周」，以及定时巡检的「每天几点」，都按它算。", why: "业务在中国。",
     effect: "「今天」「本周」的边界和定时巡检的执行时刻跟着移动。已有记录都按 UTC 存，不受影响。",
     when: "下一次查询；定时巡检的下次执行时间立即重算。" },
+  ui_theme: { label: "界面配色", impact: "now",
+    what: "整个系统的主色调：按钮、链接、选中状态、文字、边框和背景的色调一起换。表示状态的颜色（通过是绿、失败是红、警告是橙）和图表里的数据颜色不变。",
+    why: "原来的界面就是蓝调；绿调是把每个颜色转成同样深浅的青绿色，浅色、渐变和透明度都和蓝调一致。",
+    effect: "所有用户的界面一起切换，只影响显示，不影响数据和问答。",
+    when: "保存后当前页面立即切换；其他人刷新页面后生效。" },
   embedding_timeout: { label: "向量请求超时", unit: "秒", step: 10, impact: "now",
     what: "调用向量模型最多等多久。",
     why: "原来是 20 秒。开启 Contextual Retrieval 后分片变长，CPU 上一批 64 段会超过 20 秒，整份文档导入失败，所以放宽到 120 秒。",
@@ -125,6 +131,7 @@ const IMPACT_TAGS: Record<Impact, { label: string; tone: string }> = {
   judgement: { label: "影响评测与巡检判断", tone: "judge" },
 };
 const SOURCE_LABELS: Record<string, string> = { settings: "设置页", env: ".env", default: "默认" };
+const THEME_LABELS: Record<string, string> = { blue: "蓝调", green: "绿调（青绿）" };
 const TIMEZONE_LABELS: Record<string, string> = { "Asia/Shanghai": "北京时间", "Asia/Hong_Kong": "香港", "Asia/Taipei": "台北", "Asia/Tokyo": "东京", "Asia/Singapore": "新加坡", "Europe/London": "伦敦", "Europe/Berlin": "柏林", "America/New_York": "纽约", "America/Los_Angeles": "洛杉矶", UTC: "UTC" };
 
 function formatValue(item: RuntimeSettingItem, value: RuntimeSettingValue | null | undefined) {
@@ -132,6 +139,7 @@ function formatValue(item: RuntimeSettingItem, value: RuntimeSettingValue | null
   if (typeof value === "boolean") return value ? "开" : "关";
   const meta = META[item.key];
   if (typeof value === "number" && meta?.percent) return `${Math.round(value * 100)}%`;
+  if (item.key === "ui_theme") return THEME_LABELS[String(value)] ?? String(value);
   if (item.key === "business_tz") return `${TIMEZONE_LABELS[String(value)] ?? value}（${value}）`;
   return `${value}${meta?.unit ? ` ${meta.unit}` : ""}`;
 }
@@ -179,6 +187,9 @@ export default function SystemSettings({ onToast }: { onToast: ShowToast }) {
     try {
       const value = await saveRuntimeSettings(changes);
       setData(value);
+      // 改了界面配色就在当前页面立即切换。
+      const theme = value.items.find((item) => item.key === "ui_theme");
+      if (theme) applyTheme(String(theme.value));
       setDrafts((all) => ({ ...all, [group]: {} }));
       onToast("success", value.changed?.length ? `已保存 ${value.changed.length} 项，${value.cache_seconds} 秒内所有服务生效` : "没有需要保存的修改");
     } catch (reason) {
@@ -277,7 +288,7 @@ function SettingRow({ item, value, dirty, disabled, onChange }: { item: RuntimeS
       </span>
       {item.type === "bool" ? <button type="button" role="switch" aria-checked={Boolean(shown)} aria-label={meta.label} disabled={disabled} className={`sys-switch ${shown ? "is-on" : ""}`} onClick={() => onChange(!shown)}><span /></button>
         : item.type === "choice" ? <select value={String(shown)} disabled={disabled} onChange={(event) => onChange(event.target.value)}>
-          {(item.choices ?? []).concat(item.choices?.includes(String(shown)) ? [] : [String(shown)]).map((choice) => <option key={choice} value={choice}>{TIMEZONE_LABELS[choice] ? `${TIMEZONE_LABELS[choice]}（${choice}）` : choice}</option>)}
+          {(item.choices ?? []).concat(item.choices?.includes(String(shown)) ? [] : [String(shown)]).map((choice) => <option key={choice} value={choice}>{THEME_LABELS[choice] ?? (TIMEZONE_LABELS[choice] ? `${TIMEZONE_LABELS[choice]}（${choice}）` : choice)}</option>)}
         </select>
         : <label className="sys-number">
           <input type="number" value={text} disabled={disabled} step={meta.percent ? 5 : meta.step ?? 1} min={meta.percent ? (item.min ?? 0) * 100 : item.min} max={meta.percent ? (item.max ?? 1) * 100 : item.max} onChange={(event) => commitNumber(event.target.value)} aria-label={meta.label} />

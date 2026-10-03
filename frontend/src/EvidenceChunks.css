@@ -8,7 +8,7 @@
 
 .evc-note {
    margin: 0;
-   color: #7d95ac;
+   color: var(--t-7d95ac);
    font-size: 12px;
    line-height: 1.6;
 }
@@ -19,12 +19,12 @@
 
 .evc-evidence {
    margin-bottom: 4px;
-   color: #334e68;
+   color: var(--t-334e68);
    font-size: 12px;
 }
 
 .evc-chunk {
-   border: 1px solid #e3edf5;
+   border: 1px solid var(--t-e3edf5);
    border-radius: 6px;
    background: #fbfdff;
    padding: 10px 12px;
@@ -40,12 +40,12 @@
    align-items: center;
    gap: 4px 10px;
    margin-bottom: 6px;
-   color: #5e7a95;
+   color: var(--t-5e7a95);
    font-size: 12px;
 }
 
 .evc-chunk-head strong {
-   color: #1d3550;
+   color: var(--t-1d3550);
 }
 
 .evc-tag {
@@ -65,7 +65,7 @@
 
 .evc-prefix {
    margin-bottom: 6px;
-   color: #7d95ac;
+   color: var(--t-7d95ac);
    font-size: 12px;
 }
 
@@ -79,7 +79,7 @@
 }
 
 .evc-content {
-   color: #334e68;
+   color: var(--t-334e68);
    font-size: 13px;
    line-height: 1.8;
    white-space: pre-wrap;
@@ -89,7 +89,7 @@
 .evc-match {
    border-radius: 2px;
    background: #fde68a;
-   color: #1d3550;
+   color: var(--t-1d3550);
 }
 
 
@@ -99,15 +99,15 @@
 }
 
 .evc-details > summary {
-   color: #2563eb;
+   color: var(--t-2563eb);
    cursor: pointer;
 }
 
 /* 没参与向量计算的部分只把字调浅，原文照样好读；落在这部分的证据仍按正常颜色高亮。 */
 .evc-cut {
-   color: #8aa0b6;
+   color: var(--t-8aa0b6);
 }
 
 .evc-match.evc-cut {
-   color: #1d3550;
+   color: var(--t-1d3550);
 }

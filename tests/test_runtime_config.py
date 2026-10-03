@@ -111,3 +111,12 @@ def test_memory_eval_dialogue(setup):
     assert dialogue_suite["item_count"] >= 3
     response = client.post("/eval/runs", headers=admin(), json={"kind": "special", "suite_ids": [dialogue_suite["id"]]})
     assert response.status_code == 422 and "真实大模型" in response.json()["detail"]
+
+
+# 界面配色：不登录也能读（登录页也要用）；管理员在设置页改了以后立即返回新值，只接受蓝调和绿调。
+def test_ui_theme_setting(setup):
+    client, store = setup
+    assert client.get("/settings/ui").json() == {"theme": "blue"}
+    assert client.put("/settings/runtime", headers=admin(), json={"changes": {"ui_theme": "red"}}).status_code == 422
+    assert client.put("/settings/runtime", headers=admin(), json={"changes": {"ui_theme": "green"}}).status_code == 200
+    assert client.get("/settings/ui").json() == {"theme": "green"}

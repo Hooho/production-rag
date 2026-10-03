@@ -34,7 +34,7 @@
 
 .sp-method-field small {
    max-width: 520px;
-   color: #7d95ac;
+   color: var(--t-7d95ac);
    font-size: 12px;
    line-height: 1.6;
 }
@@ -44,7 +44,7 @@
    display: flex;
    align-items: flex-start;
    gap: 10px;
-   color: #5e7a95;
+   color: var(--t-5e7a95);
    font-size: 12px;
    line-height: 1.7;
 }
@@ -56,7 +56,7 @@
    height: 22px;
    border: 0;
    border-radius: 999px;
-   background: #cbd5e1;
+   background: var(--t-cbd5e1);
    padding: 0;
    cursor: pointer;
    transition: background 0.15s;
@@ -70,12 +70,12 @@
    height: 16px;
    border-radius: 50%;
    background: #fff;
-   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.2);
+   box-shadow: 0 1px 2px rgb(var(--t-0f172a-rgb) / 0.2);
    transition: left 0.15s;
 }
 
 .sp-switch.is-on {
-   background: #2563eb;
+   background: var(--t-2563eb);
 }
 
 .sp-switch.is-on span {
@@ -95,7 +95,7 @@
 
 .sp-evidence-text {
    display: block;
-   color: #334e68;
+   color: var(--t-334e68);
    line-height: 1.6;
 }
 
@@ -103,7 +103,7 @@
    display: flex;
    flex-wrap: wrap;
    gap: 4px 12px;
-   color: #5e7a95;
+   color: var(--t-5e7a95);
 }
 
 .sp-evidence-ranks .is-miss {
@@ -132,16 +132,16 @@
    gap: 4px 16px;
    border-radius: 4px;
    padding: 6px 10px;
-   color: #5e7a95;
+   color: var(--t-5e7a95);
 }
 
 .sp-variants li.is-current {
-   background: #f4f8fc;
+   background: var(--t-f4f8fc);
 }
 
 .sp-variants strong {
    min-width: 200px;
-   color: #1d3550;
+   color: var(--t-1d3550);
 }
 
 /* 专项评测的历史记录：每个专项一张卡片。 */
@@ -152,7 +152,7 @@
 }
 
 .sp-run-section {
-   border: 1px solid #e3edf5;
+   border: 1px solid var(--t-e3edf5);
    border-radius: 6px;
    background: #fff;
    padding: 14px 18px;
@@ -165,14 +165,14 @@
 
 .sp-run-section > p {
    margin: 0 0 8px;
-   color: #5e7a95;
+   color: var(--t-5e7a95);
    font-size: 13px;
 }
 
 /* 发起评测：调参 / 专项的切换和专项勾选列表。 */
 .sp-mode {
    display: inline-flex;
-   border: 1px solid #cedfec;
+   border: 1px solid var(--t-cedfec);
    border-radius: 6px;
    overflow: hidden;
 }
@@ -181,17 +181,17 @@
    border: 0;
    background: #fff;
    padding: 6px 16px;
-   color: #334e68;
+   color: var(--t-334e68);
    font-size: 13px;
    cursor: pointer;
 }
 
 .sp-mode button + button {
-   border-left: 1px solid #cedfec;
+   border-left: 1px solid var(--t-cedfec);
 }
 
 .sp-mode button.is-selected {
-   background: #2563eb;
+   background: var(--t-2563eb);
    color: #fff;
 }
 
@@ -211,7 +211,7 @@
    align-items: start;
    gap: 10px;
    margin: 0;
-   color: #1d3550;
+   color: var(--t-1d3550);
    font-family: inherit;
    font-size: 13px;
    letter-spacing: normal;
@@ -237,14 +237,14 @@
 }
 
 .sp-pick-name em {
-   color: #7d95ac;
+   color: var(--t-7d95ac);
    font-size: 12px;
    font-style: normal;
    font-weight: 400;
 }
 
 .sp-pick-text small {
-   color: #7d95ac;
+   color: var(--t-7d95ac);
    font-size: 12px;
    line-height: 1.6;
 }
@@ -265,7 +265,7 @@
 }
 
 .sp-evidence-label {
-   color: #7d95ac;
+   color: var(--t-7d95ac);
 }
 
 .sp-legend {
@@ -278,10 +278,10 @@
 .sp-search {
    display: inline-block;
    margin-left: 6px;
-   border: 1px solid #cedfec;
+   border: 1px solid var(--t-cedfec);
    border-radius: 3px;
    padding: 0 6px;
-   color: #5e7a95;
+   color: var(--t-5e7a95);
    font-size: 11px;
    font-weight: 400;
    vertical-align: middle;

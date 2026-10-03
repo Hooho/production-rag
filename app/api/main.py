@@ -1619,6 +1619,11 @@ def create_app(store=None, models=None, jwt_secret=None):
             raise HTTPException(404, "运行记录不存在")
         return result
 
+    # 界面配色（蓝调 / 绿调）：所有页面启动时读取，登录页也要用，所以不需要登录。只返回这一项。
+    @app.get("/settings/ui")
+    def ui_settings():
+        return {"theme": runtime_config.value("ui_theme")}
+
     # 设置页「系统参数」：检索、回答流程、对话记忆、知识巡检和通用参数。
     # 返回每一项的当前值、来源（设置页 / .env / 默认）、默认值和允许范围，以及最近的修改记录。
     @app.get("/settings/runtime", dependencies=[Depends(require_admin)])

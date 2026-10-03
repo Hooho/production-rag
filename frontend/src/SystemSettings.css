@@ -11,7 +11,7 @@
 }
 
 .sys-group {
-   border: 1px solid #e3edf5;
+   border: 1px solid var(--t-e3edf5);
    border-radius: 6px;
    background: #fff;
    padding: 16px 20px;
@@ -34,7 +34,7 @@
    display: grid;
    grid-template-columns: minmax(0, 1fr) 240px;
    gap: 24px;
-   border-top: 1px solid #eef3f8;
+   border-top: 1px solid var(--t-eef3f8);
    padding: 14px 0;
 }
 
@@ -51,7 +51,7 @@
    flex-wrap: wrap;
    align-items: center;
    gap: 8px;
-   color: #1d3550;
+   color: var(--t-1d3550);
    font-size: 14px;
 }
 
@@ -78,7 +78,7 @@
 
 .sys-what {
    margin: 6px 0;
-   color: #334e68;
+   color: var(--t-334e68);
    font-size: 13px;
    line-height: 1.7;
 }
@@ -99,12 +99,12 @@
 }
 
 .sys-notes dt {
-   color: #7d95ac;
+   color: var(--t-7d95ac);
 }
 
 .sys-notes dd {
    margin: 0;
-   color: #5e7a95;
+   color: var(--t-5e7a95);
 }
 
 .sys-disabled-note {
@@ -128,8 +128,8 @@
 }
 
 .sys-source.is-settings {
-   background: #eaf1ff;
-   color: #1d4ed8;
+   background: var(--t-eaf1ff);
+   color: var(--t-1d4ed8);
 }
 
 .sys-source.is-env {
@@ -143,8 +143,8 @@
 }
 
 .sys-source.is-default {
-   background: #f1f3f6;
-   color: #64748b;
+   background: var(--t-f1f3f6);
+   color: var(--t-64748b);
 }
 
 .sys-switch {
@@ -153,7 +153,7 @@
    height: 24px;
    border: 0;
    border-radius: 999px;
-   background: #cbd5e1;
+   background: var(--t-cbd5e1);
    padding: 0;
    cursor: pointer;
    transition: background 0.15s;
@@ -167,12 +167,12 @@
    height: 18px;
    border-radius: 50%;
    background: #fff;
-   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.2);
+   box-shadow: 0 1px 2px rgb(var(--t-0f172a-rgb) / 0.2);
    transition: left 0.15s;
 }
 
 .sys-switch.is-on {
-   background: #2563eb;
+   background: var(--t-2563eb);
 }
 
 .sys-switch.is-on span {
@@ -188,10 +188,10 @@
 .sys-number input {
    box-sizing: border-box;
    height: 34px;
-   border: 1px solid #cedfec;
+   border: 1px solid var(--t-cedfec);
    border-radius: 6px;
    background-color: #fff;
-   color: #1d3550;
+   color: var(--t-1d3550);
    padding: 6px 10px;
    outline: 0;
    font-family: inherit;
@@ -210,7 +210,7 @@
 
 .sys-item-control select:focus,
 .sys-number input:focus {
-   border-color: #2563eb;
+   border-color: var(--t-2563eb);
 }
 
 /* 全局 label 是上下排列的小号等宽字，这里改回横排。 */
@@ -219,7 +219,7 @@
    align-items: center;
    gap: 8px;
    margin: 0;
-   color: #5e7a95;
+   color: var(--t-5e7a95);
    font-family: inherit;
    font-size: 13px;
    letter-spacing: normal;
@@ -230,7 +230,7 @@
 }
 
 .sys-range {
-   color: #7d95ac;
+   color: var(--t-7d95ac);
    font-size: 12px;
 }
 
@@ -242,7 +242,7 @@
    border: 0;
    background: none;
    padding: 0;
-   color: #2563eb;
+   color: var(--t-2563eb);
    font-size: 12px;
    cursor: pointer;
 }
@@ -252,7 +252,7 @@
 }
 
 .sys-advanced summary {
-   color: #2563eb;
+   color: var(--t-2563eb);
    font-size: 13px;
    cursor: pointer;
 }
@@ -262,9 +262,9 @@
    flex-direction: column;
    gap: 6px;
    margin-top: 12px;
-   border-top: 1px solid #eef3f8;
+   border-top: 1px solid var(--t-eef3f8);
    padding-top: 12px;
-   color: #334e68;
+   color: var(--t-334e68);
    font-size: 13px;
 }
 
@@ -279,7 +279,7 @@
    margin: 8px 0 0;
    padding: 0;
    list-style: none;
-   color: #334e68;
+   color: var(--t-334e68);
    font-size: 13px;
 }
 
@@ -290,7 +290,7 @@
 }
 
 .sys-history-time {
-   color: #7d95ac;
+   color: var(--t-7d95ac);
 }
 
 @media (max-width: 760px) {

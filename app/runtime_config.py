@@ -74,6 +74,9 @@ SPECS = [
         "default": 5, "min": 0, "max": 20},
     {"key": "business_tz", "group": "general", "type": "choice", "env": "BUSINESS_TZ", "default": "Asia/Shanghai",
         "choices": TIMEZONES},
+    # 界面配色：blue 蓝调（默认），green 绿调（青绿）。只影响页面显示，所有用户一起切换。
+    {"key": "ui_theme", "group": "general", "type": "choice", "env": "UI_THEME", "default": "blue",
+        "choices": ["blue", "green"]},
     {"key": "embedding_timeout", "group": "general", "type": "int", "env": "EMBEDDING_TIMEOUT_SECONDS", "default": 120,
         "min": 10, "max": 600, "advanced": True},
     {"key": "rerank_timeout", "group": "general", "type": "int", "env": "RERANK_TIMEOUT_SECONDS", "default": 60,
