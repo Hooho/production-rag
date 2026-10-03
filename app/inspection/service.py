@@ -34,6 +34,16 @@ CLOSE_REASONS = {
     "transient": "偶发问题",
     "other": "其他",
 }
+# 标记"已处理"时选择做了什么修复，方便以后回看哪类修复有效；验证失败重新打开时保留，便于看出"上次这么修没修好"。
+FIX_TYPES = {
+    "add_content": "补了资料",
+    "update_content": "改了资料",
+    "grant_permission": "调了权限",
+    "tune_retrieval": "调了检索",
+    "update_prompt": "改了提示词",
+    "fix_system": "修了系统配置",
+    "other": "其他",
+}
 # 这些原因说明"系统拒答是对的"，统计时算作合理拒答。
 REASONABLE_REFUSALS = {"out_of_scope", "by_design_permission", "not_covered"}
 # 管理员可以手动设置的状态。resolved 只由巡检自动设置（例如可疑分片已不在当前版本中），
@@ -601,7 +611,27 @@ def issue_view(row):
         "last_seen": row["last_seen"], "created": row["created"], "updated": row["updated"],
         "close_reason": row["close_reason"],
         "close_reason_label": CLOSE_REASONS.get(row["close_reason"], "未注明") if row["status"] == "ignored" else None,
-        "suggested_close_reason": suggest_close_reason(row)}
+        "suggested_close_reason": suggest_close_reason(row),
+        "fix_type": row["fix_type"],
+        "fix_type_label": FIX_TYPES.get(row["fix_type"]) or ("未注明" if row["status"] == "handled" else None),
+        "suggested_fix_type": suggest_fix_type(row)}
+
+
+# "已处理"时默认选中的修复方式，按问题类型和诊断结论推测。
+def suggest_fix_type(row):
+    detail = row["detail"] or {}
+    if row["kind"] == "knowledge_gap":
+        category = (detail.get("diagnosis") or {}).get("category")
+        if category == "permission":
+            return "grant_permission"
+        if category == "retrieval":
+            return "tune_retrieval"
+        return "add_content"
+    if row["kind"] == "suspect_content":
+        return "update_content"
+    if (detail.get("signals") or {}).get("citation_failure"):
+        return "update_prompt"
+    return "fix_system"
 
 
 # "无需处理"时默认选中的原因，按问题类型和诊断结论推测，管理员确认即可。
@@ -663,7 +693,7 @@ def list_issues(store, status=None, kind=None, page=1, page_size=20, reason=None
     return {"items": [issue_view(row) for row in rows], "total": total, "page": page, "page_size": page_size,
         "status_counts": status_counts, "kind_counts": kind_counts, "reason_counts": reason_counts,
         "gap_summary": gap_summary, "last_run": run_view(last_run),
-        "kinds": KINDS, "statuses": STATUSES, "signals": SIGNALS, "close_reasons": CLOSE_REASONS}
+        "kinds": KINDS, "statuses": STATUSES, "signals": SIGNALS, "close_reasons": CLOSE_REASONS, "fix_types": FIX_TYPES}
 
 
 # 页面顶部的统计：最近 N 天没答上来的问答（知识缺口关联的问答）按所属问题的处理结果分组，
@@ -785,8 +815,9 @@ def call_summary(steps, trace=None, duration_ms=None):
 
 
 # 管理员修改问题状态和备注。
-# 标记"无需处理"必须选原因，选"其他"时必须写备注；改成别的状态时清空原因。
-def update_issue(store, issue_id, status, note, username, close_reason=None):
+# 标记"无需处理"必须选原因，标记"已处理"必须选修复方式，选"其他"时都要写备注；
+# 改成别的状态时清空不相关的那一项。
+def update_issue(store, issue_id, status, note, username, close_reason=None, fix_type=None):
     values = {"updated": now_text()}
     if status is not None:
         if status not in MANUAL_STATUSES:
@@ -796,8 +827,14 @@ def update_issue(store, issue_id, status, note, username, close_reason=None):
                 raise ValueError("标记无需处理时请选择原因")
             if close_reason == "other" and not (note or "").strip():
                 raise ValueError("原因选择「其他」时请在备注里说明")
+        if status == "handled":
+            if fix_type not in FIX_TYPES:
+                raise ValueError("标记已处理时请选择做了什么修复")
+            if fix_type == "other" and not (note or "").strip():
+                raise ValueError("修复方式选择「其他」时请在备注里说明")
         values.update({"status": status, "status_by": username, "status_updated": values["updated"],
-            "close_reason": close_reason if status == "ignored" else None})
+            "close_reason": close_reason if status == "ignored" else None,
+            "fix_type": fix_type if status == "handled" else None})
     if note is not None:
         values["note"] = note or None
     with store.engine.begin() as connection:

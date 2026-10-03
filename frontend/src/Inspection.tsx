@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { verifyInspectionIssue, getInspectionIssue, getInspectionSchedule, listInspectionIssues, saveInspectionSchedule, startInspection, updateInspectionIssue, type InspectionCloseReason, type InspectionGapSummary, type InspectionDiagnosis, type InspectionDiagnosisChunk, type InspectionEvent, type InspectionSchedule, type InspectionScheduleView, type InspectionIssue, type InspectionIssueFull, type InspectionIssuePage, type InspectionKind, type InspectionStatus } from "./api";
+import { verifyInspectionIssue, getInspectionIssue, getInspectionSchedule, listInspectionIssues, saveInspectionSchedule, startInspection, updateInspectionIssue, type InspectionCloseReason, type InspectionFixType, type InspectionGapSummary, type InspectionDiagnosis, type InspectionDiagnosisChunk, type InspectionEvent, type InspectionSchedule, type InspectionScheduleView, type InspectionIssue, type InspectionIssueFull, type InspectionIssuePage, type InspectionKind, type InspectionStatus } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./Inspection.css";
 
@@ -293,22 +293,34 @@ const CLOSE_REASON_OPTIONS: { key: InspectionCloseReason; label: string; hint: s
   { key: "other", label: "其他", hint: "需要在上面的备注里说明" },
 ];
 
-// 标记"无需处理"时选择原因；系统推测的原因标"推荐"并默认选中。
-function CloseReasonPicker({ value, suggested, onChange, busy, noteEmpty, onCancel, onConfirm }: { value: InspectionCloseReason; suggested: InspectionCloseReason; onChange: (value: InspectionCloseReason) => void; busy: boolean; noteEmpty: boolean; onCancel: () => void; onConfirm: () => void }) {
+const FIX_TYPE_OPTIONS: { key: InspectionFixType; label: string; hint: string }[] = [
+  { key: "add_content", label: "补了资料", hint: "上传了新文档，覆盖这类问题" },
+  { key: "update_content", label: "改了资料", hint: "修正了文档里错误或过期的内容" },
+  { key: "grant_permission", label: "调了权限", hint: "把文档共享给了提问人所在的部门" },
+  { key: "tune_retrieval", label: "调了检索", hint: "改了分片、阈值、同义词等检索设置" },
+  { key: "update_prompt", label: "改了提示词", hint: "调整了回答模型的提示词或换了模型" },
+  { key: "fix_system", label: "修了系统配置", hint: "网络、代理、密钥、服务地址等" },
+  { key: "other", label: "其他", hint: "需要在上面的备注里说明" },
+];
+
+type PickerOption<T extends string> = { key: T; label: string; hint: string };
+
+// 标记"无需处理"选原因、标记"已处理"选修复方式；系统推测的一项标"推荐"并默认选中，选"其他"要先写备注。
+function ChoicePicker<T extends string>({ title, name, options, value, suggested, onChange, busy, noteEmpty, confirmLabel, onCancel, onConfirm }: { title: string; name: string; options: PickerOption<T>[]; value: T; suggested: T; onChange: (value: T) => void; busy: boolean; noteEmpty: boolean; confirmLabel: string; onCancel: () => void; onConfirm: () => void }) {
   const needNote = value === "other" && noteEmpty;
   return <div className="inspection-close">
-    <div className="inspection-close-title">为什么无需处理？</div>
+    <div className="inspection-close-title">{title}</div>
     <div className="inspection-close-options" role="radiogroup">
-      {CLOSE_REASON_OPTIONS.map((option) => <label key={option.key} className={`inspection-close-option ${value === option.key ? "is-selected" : ""}`}>
-        <input type="radio" name="inspection-close-reason" checked={value === option.key} onChange={() => onChange(option.key)} />
+      {options.map((option) => <label key={option.key} className={`inspection-close-option ${value === option.key ? "is-selected" : ""}`}>
+        <input type="radio" name={name} checked={value === option.key} onChange={() => onChange(option.key)} />
         <span className="inspection-close-label">{option.label}{option.key === suggested && <em>推荐</em>}</span>
         <span className="inspection-close-hint">{option.hint}</span>
       </label>)}
     </div>
-    {needNote && <p className="inspection-hint inspection-close-warning">选择「其他」时，请先在上面的备注里写明原因。</p>}
+    {needNote && <p className="inspection-hint inspection-close-warning">选择「其他」时，请先在上面的备注里写明。</p>}
     <div className="inspection-action-buttons">
       <button type="button" className="secondary-button" onClick={onCancel} disabled={busy}>取消</button>
-      <button type="button" className="primary-button" onClick={onConfirm} disabled={busy || needNote}>确认无需处理</button>
+      <button type="button" className="primary-button" onClick={onConfirm} disabled={busy || needNote}>{confirmLabel}</button>
     </div>
   </div>;
 }
@@ -346,7 +358,7 @@ function IssueRow({ issue, signals, open, onToggle, onChanged, onToast }: { issu
       <div className="inspection-item-main">
         <div className="inspection-item-tags">
           <span className={`inspection-kind is-${issue.kind}`}>{issue.kind_label}</span>
-          <span className={`status-tag is-${STATUS_TONES[issue.status]}`}>{issue.status_label}{issue.close_reason_label && ` · ${issue.close_reason_label}`}</span>
+          <span className={`status-tag is-${STATUS_TONES[issue.status]}`}>{issue.status_label}{(issue.close_reason_label || (issue.status !== "open" && issue.fix_type_label)) && ` · ${issue.close_reason_label || issue.fix_type_label}`}</span>
           {issue.detail.diagnosis && issue.status !== "resolved" && <span className={`inspection-category is-${issue.detail.diagnosis.category}`} title="离线重跑检索得出的拒答原因">{issue.detail.diagnosis.label}</span>}
           {issue.status === "open" && issue.detail.reopened && <span className="status-tag is-red">处理后再次出现</span>}
           {issue.status === "open" && issue.detail.verification && <span className="status-tag is-red">验证未通过</span>}
@@ -401,16 +413,17 @@ function IssueDetail({ issueId, signals, onChanged, onToast }: { issueId: string
     }
   }
 
-  // 标记"无需处理"前先选原因，默认选中系统推测的原因。
-  const [closing, setClosing] = useState(false);
+  // 标记"无需处理"前先选原因、标记"已处理"前先选修复方式，默认选中系统推测的一项。
+  const [picking, setPicking] = useState<"ignored" | "handled" | null>(null);
   const [closeReason, setCloseReason] = useState<InspectionCloseReason>("other");
+  const [fixType, setFixType] = useState<InspectionFixType>("other");
 
-  async function save(status?: "open" | "handled" | "ignored", reason?: InspectionCloseReason) {
+  async function save(status?: "open" | "handled" | "ignored", choice?: { close_reason?: InspectionCloseReason; fix_type?: InspectionFixType }) {
     if (!issue) return;
     setBusy(true);
     try {
-      const value = await updateInspectionIssue(issue.id, { status, note, close_reason: reason });
-      setClosing(false);
+      const value = await updateInspectionIssue(issue.id, { status, note, ...choice });
+      setPicking(null);
       setIssue(value);
       onToast("success", status ? `已标记为${value.status_label}` : "备注已保存");
       onChanged(value);
@@ -425,9 +438,9 @@ function IssueDetail({ issueId, signals, onChanged, onToast }: { issueId: string
   const detail = issue.detail;
   return <div className="inspection-detail">
     {issue.status === "resolved" && detail.resolution && <div className="inspection-notice is-green">{detail.resolution}</div>}
-    {issue.status === "open" && detail.verification && <div className="inspection-notice is-red">{detail.verification.message}（{formatTime(detail.verification.at)}）</div>}
+    {issue.status === "open" && detail.verification && <div className="inspection-notice is-red">{issue.fix_type_label && `上次处理：${issue.fix_type_label}。`}{detail.verification.message}（{formatTime(detail.verification.at)}）</div>}
     <Explanation issue={issue} />
-    {issue.status === "open" && detail.reopened && <div className="inspection-notice is-red">标记为{detail.reopened.previous_status === "handled" ? "已处理" : "已解决"}之后又出现了 {detail.reopened.new_occurrences} 次，已重新打开（{formatTime(detail.reopened.at)}）。</div>}
+    {issue.status === "open" && detail.reopened && <div className="inspection-notice is-red">{issue.fix_type_label && !detail.verification && `上次处理：${issue.fix_type_label}。`}标记为{detail.reopened.previous_status === "handled" ? "已处理" : "已解决"}之后又出现了 {detail.reopened.new_occurrences} 次，已重新打开（{formatTime(detail.reopened.at)}）。</div>}
 
     {issue.kind === "knowledge_gap" && <DiagnosisDetail diagnosis={detail.diagnosis} verifying={verifying} onVerify={() => void verify()} />}
     {issue.kind === "knowledge_gap" && <div className="inspection-facts">
@@ -448,17 +461,18 @@ function IssueDetail({ issueId, signals, onChanged, onToast }: { issueId: string
       {!detail.signals?.citation_failure && <Fact label="错误信息"><code>{detail.error ?? "—"}</code></Fact>}
     </div>}
 
-    <div className="inspection-meta">首次出现 {formatTime(issue.first_seen)} · 最近 {formatTime(issue.last_seen)}{issue.status_by && <> · {issue.status_by === "system" ? "巡检" : issue.status_by} 于 {formatTime(issue.status_updated)} 标记为{issue.status_label}{issue.close_reason_label && `（${issue.close_reason_label}）`}</>}</div>
+    <div className="inspection-meta">首次出现 {formatTime(issue.first_seen)} · 最近 {formatTime(issue.last_seen)}{issue.status_by && <> · {issue.status_by === "system" ? "巡检" : issue.status_by} 于 {formatTime(issue.status_updated)} 标记为{issue.status_label}{(issue.close_reason_label || (issue.status !== "open" && issue.fix_type_label)) && `（${issue.close_reason_label || issue.fix_type_label}）`}</>}</div>
 
     <div className="inspection-actions">
       <textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={2000} rows={2} placeholder="处理备注：补了哪份文档、改了什么配置（可选）" />
       <div className="inspection-action-buttons">
         <button type="button" className="secondary-button" disabled={busy || note === (issue.note ?? "")} onClick={() => void save()}>保存备注</button>
         {issue.status !== "open" && <button type="button" className="secondary-button" disabled={busy} onClick={() => void save("open")}>重新打开</button>}
-        {issue.status !== "ignored" && <button type="button" className="secondary-button" disabled={busy} onClick={() => { setCloseReason(issue.suggested_close_reason); setClosing(!closing); }}>无需处理</button>}
-        {issue.status !== "handled" && issue.status !== "resolved" && <button type="button" className="primary-button" disabled={busy} onClick={() => void save("handled")}>标记已处理</button>}
+        {issue.status !== "ignored" && <button type="button" className="secondary-button" disabled={busy} onClick={() => { setCloseReason(issue.suggested_close_reason); setPicking(picking === "ignored" ? null : "ignored"); }}>无需处理</button>}
+        {issue.status !== "handled" && issue.status !== "resolved" && <button type="button" className="primary-button" disabled={busy} onClick={() => { setFixType(issue.suggested_fix_type); setPicking(picking === "handled" ? null : "handled"); }}>标记已处理</button>}
       </div>
-      {closing && <CloseReasonPicker value={closeReason} suggested={issue.suggested_close_reason} onChange={setCloseReason} busy={busy} noteEmpty={!note.trim()} onCancel={() => setClosing(false)} onConfirm={() => void save("ignored", closeReason)} />}
+      {picking === "ignored" && <ChoicePicker title="为什么无需处理？" name="inspection-close-reason" options={CLOSE_REASON_OPTIONS} value={closeReason} suggested={issue.suggested_close_reason} onChange={setCloseReason} busy={busy} noteEmpty={!note.trim()} confirmLabel="确认无需处理" onCancel={() => setPicking(null)} onConfirm={() => void save("ignored", { close_reason: closeReason })} />}
+      {picking === "handled" && <ChoicePicker title="做了什么修复？" name="inspection-fix-type" options={FIX_TYPE_OPTIONS} value={fixType} suggested={issue.suggested_fix_type} onChange={setFixType} busy={busy} noteEmpty={!note.trim()} confirmLabel="确认已处理" onCancel={() => setPicking(null)} onConfirm={() => void save("handled", { fix_type: fixType })} />}
       <p className="inspection-hint">标记已处理后，如果又出现同类问答，下次巡检会自动重新打开；标记无需处理的问题不会再提醒。</p>
     </div>
 
@@ -493,7 +507,6 @@ function CitationDetail({ event }: { event: InspectionEvent }) {
     const count = event.returned ? `${event.returned} 段` : "";
     return <div className="inspection-citation">
       <div><span className="inspection-event-label">拦截原因：</span>检索返回了 {count}资料，但模型的回答没有引用它们，或者引用了不存在的编号。</div>
-      <div className="inspection-event-line">这条记录早于"保存模型原话"功能，看不到模型原话，也分不清是哪一种情况。</div>
     </div>;
   }
   const ids = citation.source_ids.join("、");

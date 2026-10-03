@@ -322,6 +322,8 @@ inspection_issues = Table("inspection_issues", metadata,
     Column("note", Text),
     # 标记"无需处理"（status=ignored）时选择的原因，见 app/inspection/service.py 的 CLOSE_REASONS；其他状态为空。
     Column("close_reason", String(32), index=True),
+    # 标记"已处理"时选择的修复方式，见 FIX_TYPES；验证后自动变成已解决或重新打开时保留，手动改成其他状态时清空。
+    Column("fix_type", String(32)),
     Column("status_by", String(32)),
     Column("status_updated", String(32)),
     Column("first_seen", String(32), nullable=False),

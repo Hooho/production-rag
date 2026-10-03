@@ -68,7 +68,7 @@ def test_handled_issue_reopens_and_ignored_stays(setup, monkeypatch):
     gaps = {row["title"]: row["id"] for row in issues(store, "knowledge_gap")}
     crossborder, invoice = gaps["跨境商品能不能退货"], gaps["发票抬头怎么修改"]
     assert client.patch(f"/inspection/issues/{crossborder}", headers=headers("admin"),
-        json={"status": "handled", "note": "补了跨境退货说明"}).status_code == 200
+        json={"status": "handled", "fix_type": "add_content", "note": "补了跨境退货说明"}).status_code == 200
     assert client.patch(f"/inspection/issues/{invoice}", headers=headers("admin"),
         json={"status": "ignored", "close_reason": "out_of_scope"}).status_code == 200
     ask(client, "跨境商品能不能退货")
@@ -345,7 +345,7 @@ def test_permission_gap_and_verification(setup, monkeypatch):
     assert question["documents"][0]["title"] == "售后" and question["documents"][0]["owner"] == "alice"
     assert question["documents"][0]["visibility"] == "private"
     # 只点了已处理、没改权限：验证不通过，重新打开。
-    assert client.patch(f"/inspection/issues/{gap['id']}", headers=headers("admin"), json={"status": "handled"}).status_code == 200
+    assert client.patch(f"/inspection/issues/{gap['id']}", headers=headers("admin"), json={"status": "handled", "fix_type": "add_content"}).status_code == 200
     summary = inspect(client, store)
     assert summary["verification_failed"] == 1
     reopened = issues(store, "knowledge_gap")[0]
@@ -353,7 +353,7 @@ def test_permission_gap_and_verification(setup, monkeypatch):
     # 改成公开后验证通过。
     assert client.put(f"/documents/{document_id}/permission", headers=headers(),
         json={"visibility": "public", "groups": []}).status_code == 200
-    assert client.patch(f"/inspection/issues/{gap['id']}", headers=headers("admin"), json={"status": "handled"}).status_code == 200
+    assert client.patch(f"/inspection/issues/{gap['id']}", headers=headers("admin"), json={"status": "handled", "fix_type": "add_content"}).status_code == 200
     summary = inspect(client, store)
     assert summary["verified"] == 1
     resolved = issues(store, "knowledge_gap")[0]
@@ -466,3 +466,35 @@ def test_close_reason_and_gap_summary(setup, monkeypatch):
     # 重新打开后原因清空。
     reopened = client.patch(url, headers=headers("admin"), json={"status": "open"}).json()
     assert reopened["close_reason"] is None and reopened["close_reason_label"] is None
+
+
+# 标记"已处理"必须选修复方式，"其他"要写备注；推荐修复方式按诊断结论给出；验证失败重新打开时保留修复方式，手动重新打开时清空。
+def test_fix_type(setup, monkeypatch):
+    client, store = setup
+    upload(client)
+    monkeypatch.setattr(Models, "rerank", keyword_rerank(0.95))
+    ask(client, "退货期限是多久", owner="bob")
+    monkeypatch.setattr(Models, "rerank", lambda self, query, documents: [0.01] * len(documents))
+    ask(client, "发票抬头怎么修改")
+    monkeypatch.setattr(Models, "rerank", keyword_rerank(0.95))
+    inspect(client, store)
+    listed = client.get("/inspection/issues?status=open&kind=knowledge_gap", headers=headers("admin")).json()
+    gaps = {item["title"]: item for item in listed["items"]}
+    permission, invoice = gaps["退货期限是多久"], gaps["发票抬头怎么修改"]
+    assert permission["suggested_fix_type"] == "grant_permission"
+    assert invoice["suggested_fix_type"] == "add_content"
+    assert listed["fix_types"]["add_content"] == "补了资料"
+    url = f"/inspection/issues/{invoice['id']}"
+    assert client.patch(url, headers=headers("admin"), json={"status": "handled"}).status_code == 422
+    assert client.patch(url, headers=headers("admin"), json={"status": "handled", "fix_type": "nope"}).status_code == 422
+    assert client.patch(url, headers=headers("admin"), json={"status": "handled", "fix_type": "other"}).status_code == 422
+    handled = client.patch(url, headers=headers("admin"), json={"status": "handled", "fix_type": "add_content"}).json()
+    assert handled["fix_type"] == "add_content" and handled["fix_type_label"] == "补了资料"
+    # 没有真的补资料，验证不通过，重新打开但保留上次的修复方式。
+    inspect(client, store)
+    reopened = client.get(url, headers=headers("admin")).json()
+    assert reopened["status"] == "open" and reopened["detail"]["verification"]["passed"] is False
+    assert reopened["fix_type"] == "add_content"
+    # 改成无需处理时清空修复方式。
+    ignored = client.patch(url, headers=headers("admin"), json={"status": "ignored", "close_reason": "out_of_scope"}).json()
+    assert ignored["fix_type"] is None and ignored["fix_type_label"] is None

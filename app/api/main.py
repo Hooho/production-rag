@@ -103,6 +103,8 @@ class InspectionIssueInput(BaseModel):
     note: str | None = Field(None, max_length=2000)
     # status 为 ignored（无需处理）时必填，取值见 CLOSE_REASONS。
     close_reason: str | None = Field(None, max_length=32)
+    # status 为 handled（已处理）时必填，取值见 FIX_TYPES。
+    fix_type: str | None = Field(None, max_length=32)
 
 
 # 定时巡检设置：mode 为 daily（每天 time 执行）或 interval（每隔 interval_hours 小时），days 是扫描最近多少天的问答。
@@ -1397,7 +1399,7 @@ def create_app(store=None, models=None, jwt_secret=None):
         if body.status is not None and body.status not in MANUAL_STATUSES:
             raise HTTPException(422, "只能标记为待处理、已处理或无需处理")
         try:
-            issue = update_issue(app.state.store, issue_id, body.status, body.note, admin["username"], body.close_reason)
+            issue = update_issue(app.state.store, issue_id, body.status, body.note, admin["username"], body.close_reason, body.fix_type)
         except ValueError as error:
             raise HTTPException(422, str(error))
         if issue is None:

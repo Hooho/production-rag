@@ -723,6 +723,7 @@ export type InspectionDiagnosis = {
   checked_by?: string | null;
   questions: { question: string; owner: string; category: InspectionDiagnosisCategory; label: string; reason?: string; user_top: number | null; full_top: number | null; documents: InspectionDiagnosisDocument[]; chunks?: InspectionDiagnosisChunk[] }[];
 };
+export type InspectionFixType = "add_content" | "update_content" | "grant_permission" | "tune_retrieval" | "update_prompt" | "fix_system" | "other";
 export type InspectionCloseReason = "out_of_scope" | "by_design_permission" | "not_covered" | "invalid_feedback" | "transient" | "other";
 // 页面顶部统计：最近 N 天没答上来的问答，按所属问题的处理结果分组。
 export type InspectionGapSummary = { days: number; total: number; reasonable: number; reasonable_by_reason: Partial<Record<InspectionCloseReason, number>>; other_ignored: number; resolved: number; pending: number };
@@ -747,6 +748,10 @@ export type InspectionIssue = {
   close_reason: InspectionCloseReason | null;
   close_reason_label: string | null;
   suggested_close_reason: InspectionCloseReason;
+  // 已处理时选的修复方式（验证后变成已解决或重新打开时保留）；suggested 是标记已处理时默认选中的修复方式。
+  fix_type: InspectionFixType | null;
+  fix_type_label: string | null;
+  suggested_fix_type: InspectionFixType;
 };
 export type InspectionEvent = {
   source: "run" | "error";
@@ -793,6 +798,7 @@ export type InspectionIssuePage = {
   reason_counts: Partial<Record<InspectionCloseReason | "none", number>>;
   gap_summary: InspectionGapSummary;
   close_reasons: Record<InspectionCloseReason, string>;
+  fix_types: Record<InspectionFixType, string>;
   last_run: InspectionRun | null;
   running: boolean;
   kinds: Record<InspectionKind, string>;
@@ -814,7 +820,7 @@ export function getInspectionIssue(issueId: string) {
 }
 
 // 手动标记状态（待处理 / 已处理 / 已忽略）或修改备注；已解决只由巡检自动设置。
-export function updateInspectionIssue(issueId: string, payload: { status?: "open" | "handled" | "ignored"; note?: string; close_reason?: InspectionCloseReason }) {
+export function updateInspectionIssue(issueId: string, payload: { status?: "open" | "handled" | "ignored"; note?: string; close_reason?: InspectionCloseReason; fix_type?: InspectionFixType }) {
   return request<InspectionIssueFull>(`/inspection/issues/${encodeURIComponent(issueId)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
