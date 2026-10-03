@@ -26,8 +26,9 @@ def normalized_index(text):
 
 
 # 证据在原文里的起止位置（忽略空白和全半角差异）；找不到返回 None。
-def find_in(text, evidence):
-    folded, positions = normalized_index(text)
+# indexed 是分片正文规范化后的结果（normalized_index 的返回值），一次查询里每个分片只算一次。
+def find_in(indexed, evidence):
+    folded, positions = indexed
     target = normalize(evidence)
     start = folded.find(target) if target else -1
     if start < 0:
@@ -63,12 +64,15 @@ def locate_evidence(store, models, texts):
     imported = bool(pool)
     if not imported:
         pool = file_chunks()
+    # 每个分片的正文只规范化一次，几条证据共用；不存进数据库（原文要用来显示、算向量，规则改了也不用回填）。
+    for chunk in pool:
+        chunk["indexed"] = normalized_index(chunk["content"])
     items = []
     found = []
     for text in texts:
         matches = []
         for chunk in pool:
-            span = find_in(chunk["content"], text)
+            span = find_in(chunk["indexed"], text)
             if span is None:
                 continue
             metadata = chunk["metadata"]
