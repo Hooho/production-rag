@@ -27,7 +27,7 @@ from ..business.service import (DataError, can_pick, create_batch, create_record
     permission_matrix, ref_options, require, save_permission, update_record, user_permissions)
 from ..auth import (authenticate, check_groups, create_user, decode_access_token, hash_password, issue_tokens,
     load_user, revoke_refresh_token, revoke_user_tokens, rotate_refresh_token, seed_users, set_user_groups)
-from ..evaluation.dataset import QUESTION_TYPES, append_items, corpus_files, corpus_text, generate_items, load_dataset, mark_reviewed, next_item_id, next_pair_id, select_split, validate_dataset
+from ..evaluation.dataset import GENERATED_TYPES, QUESTION_TYPES, append_items, corpus_files, corpus_text, generate_items, load_dataset, mark_reviewed, next_item_id, next_pair_id, select_split, validate_dataset
 from ..evaluation.results import compare_runs, delete_run, execute_run, list_runs, load_run, previous_run, start_run
 from ..evaluation.retrieval import SUITES, VARIANTS
 from ..evaluation import regression
@@ -1237,7 +1237,7 @@ def create_app(store=None, models=None, jwt_secret=None):
             corpus.append(path.stem)
         items = load_dataset()
         reviewed_count = len(select_split(items, "all"))
-        return {"items": items, "types": QUESTION_TYPES, "corpus": corpus,
+        return {"items": items, "types": QUESTION_TYPES, "generated_types": GENERATED_TYPES, "corpus": corpus,
             "reviewed_count": reviewed_count, "pending_count": len(items) - reviewed_count}
 
     # 手动新增评测题：先验证题型、证据和语料一致性，再追加到项目评测集。
@@ -1308,6 +1308,8 @@ def create_app(store=None, models=None, jwt_secret=None):
             raise HTTPException(422, "AI 生成题目需要真实大模型：请设置 MODEL_MODE=openai 和 LLM_API_KEY")
         if body.type and body.type not in QUESTION_TYPES:
             raise HTTPException(422, f"未知题型：{body.type}")
+        if body.type and body.type not in GENERATED_TYPES:
+            raise HTTPException(422, "截断题要按分片实际的 token 数挑证据，不能用 AI 生成，请手动添加")
         with app.state.eval_dataset_lock:
             existing = load_dataset()
             try:

@@ -30,8 +30,8 @@ def corpus_text():
     return "\n".join(parts)
 
 
-# 评测集字段完整、证据都能在语料里找到，无法回答题约占两成，并且五种题型都有。
-# 上限从 50 放宽到 60：加了 9 道证据在「分片超长被截断部分」的题（origin 为 claude:截断尾部）。
+# 评测集字段完整、证据都能在语料里找到，无法回答题约占两成，并且六种题型都有。
+# 上限从 50 放宽到 60：加了 9 道「截断」题，证据在分片超长被截断的部分。
 def test_dataset_is_valid():
     items = load_dataset()
     assert 30 <= len(items) <= 60
@@ -181,6 +181,9 @@ def test_eval_dataset_ai_generation(setup, eval_dir):
     reviewed = client.post(f"/eval/dataset/items/{item['id']}/review", headers=headers())
     assert reviewed.status_code == 200 and reviewed.json()["reviewed"] is True
     assert item["id"] in [candidate["id"] for candidate in select_split(load_dataset(), "dev")]
+    # 截断题要按分片实际的 token 数挑证据，不能用 AI 生成。
+    refused = client.post("/eval/dataset/generate", headers=headers(), json={"count": 1, "type": "截断"})
+    assert refused.status_code == 422 and "截断" in refused.json()["detail"]
 
 
 # AI 同义改写允许模型把单条证据返回为字符串，并自动落盘为共享题对的两条独立题目。

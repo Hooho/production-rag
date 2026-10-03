@@ -617,7 +617,7 @@ export type EvalComparisonRow = { key: string; label: string; direction: "higher
 // settings_diff：两次评测用的系统参数不同的项（设置页改过），分数变化可能来自参数而不是代码。
 export type EvalComparison = { base: EvalRunBrief; target: EvalRunBrief; metrics: EvalComparisonRow[]; settings_diff?: { key: string; base: unknown; target: unknown }[] };
 export type EvalSuite = { key: string; label: string; variants: string[] };
-export type EvalDataset = { items: EvalItem[]; types: string[]; corpus: string[]; reviewed_count?: number; pending_count?: number };
+export type EvalDataset = { items: EvalItem[]; types: string[]; generated_types?: string[]; corpus: string[]; reviewed_count?: number; pending_count?: number };
 
 export function getEvalDataset() {
   return request<EvalDataset>("/eval/dataset");

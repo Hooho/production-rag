@@ -60,6 +60,7 @@ const DATASET_TYPE_DESCRIPTIONS: Record<string, string> = {
   关键词: "这类题使用较短的关键词式问题，主要检验关键词检索和混合召回。",
   多轮追问: "这类题依赖上一轮问题继续追问，主要检验历史上下文和问题改写。",
   无法回答: "这类题在语料中没有答案，主要检验系统能否正确拒答而不是编造内容。",
+  截断: "这类题的证据只在分片超长、被向量模型截掉的后半段里，主要检验截断会不会让向量检索找不到内容。可以和「仅向量」消融结果对照看。",
 };
 // 题目卡片补充每道题的评测目标，避免用户只能看到类型名称却不知道这道题具体在测什么。
 const DATASET_TYPE_CARD_DETAILS: Record<string, string> = {
@@ -68,6 +69,7 @@ const DATASET_TYPE_CARD_DETAILS: Record<string, string> = {
   关键词: "问题依赖人名、专有名词、指标或概念等关键词，检验关键词是否帮助召回正确证据。",
   多轮追问: "当前问题依赖上一轮上下文，检验系统能否理解省略信息并继续检索。",
   无法回答: "语料中没有足够答案，预期行为是拒答且不返回误导性来源。",
+  截断: "证据所在分片超过向量模型的长度上限，证据正好在没参与向量计算的那一段；向量找不到时只能靠关键词检索兜底。",
 };
 
 // 根据已完成和总检索次数计算进度百分比。
@@ -1481,7 +1483,7 @@ function DatasetBrowser({ dataset, onToast, onSaved }: { dataset: EvalDataset | 
             <p className="ev-form-note">基于当前语料起草题目、证据和标准答案；会产生少量大模型费用，生成后必须人工审核。</p>
             <div className="ev-form-grid">
               <label className="ev-form-field">生成数量<input type="number" min={1} max={10} value={aiCount} onChange={(event) => setAiCount(Number(event.target.value))} /></label>
-              <label className="ev-form-field">题型<select value={aiType} onChange={(event) => setAiType(event.target.value)}><option value="">混合题型</option>{dataset.types.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+              <label className="ev-form-field">题型<select value={aiType} onChange={(event) => setAiType(event.target.value)}><option value="">混合题型</option>{(dataset.generated_types ?? dataset.types).map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
               <label className="ev-form-field">题目范围<select value={aiSplit} onChange={(event) => setAiSplit(event.target.value)}><option value="dev">开发集</option><option value="holdout">留出集</option></select></label>
             </div>
             <button className="primary-button ev-form-submit" type="submit" disabled={saving}>{saving ? "生成中…" : "AI 生成并加入"}</button>

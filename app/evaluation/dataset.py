@@ -9,8 +9,12 @@ from langchain_core.prompts import ChatPromptTemplate
 
 # 评测数据、语料和结果都放在仓库的 eval 目录，随代码一起版本管理，任何人拉下代码都能复现同一组分数。
 EVAL_DIR = Path(os.getenv("EVAL_DIR", "eval"))
-# 题目类型固定为五种，前端按这个顺序分组展示。
-QUESTION_TYPES = ["事实", "同义改写", "关键词", "多轮追问", "无法回答"]
+# 题目类型固定为六种，前端按这个顺序分组展示。
+# 截断：证据只在某个分片超出向量模型长度上限、被截掉的后半段里，检验截断对向量检索的影响
+# （bge-small-zh 只读前 512 个 token，800 字的中文分片加上标题路径常常超限）。
+QUESTION_TYPES = ["事实", "同义改写", "关键词", "多轮追问", "无法回答", "截断"]
+# 截断题要按分片实际的 token 数挑证据，大模型看不到分片和分词结果，不能让它生成。
+GENERATED_TYPES = [item for item in QUESTION_TYPES if item != "截断"]
 # 同义改写保存为两个独立题目，但用同一个题对编号把它们关联起来。
 REWRITE_ROLES = {"original", "paraphrase"}
 # 评测集拆成开发集和留出集：平时调参只看 dev，holdout 只在确定参数后做最终验证，
@@ -181,7 +185,7 @@ def generate_items(models, existing, count, split, question_type=None):
         evidence = normalize_generated_evidence(raw.get("evidence"))
         reference_answer = raw.get("reference_answer")
         history = raw.get("history") or []
-        if item_type not in QUESTION_TYPES or not isinstance(answerable, bool):
+        if item_type not in GENERATED_TYPES or not isinstance(answerable, bool):
             raise ValueError("模型返回了未知题型或无效可回答标记")
         if not isinstance(question, str) or not question.strip():
             raise ValueError("模型返回了空问题")
