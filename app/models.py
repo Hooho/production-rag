@@ -32,6 +32,10 @@ CHUNK_CONTEXT_PROMPT_VERSION = 2
 THINK_PATTERN = re.compile(r"<think>.*?(</think>|$)\s*", re.S)
 
 
+# 引用检查不通过时替换给用户的回答。
+CITATION_REJECTED = "模型没有返回可校验的引用，请直接查看来源或换一种问法。"
+
+
 def strip_think(text):
     return THINK_PATTERN.sub("", text) if "<think>" in text else text
 
@@ -512,10 +516,18 @@ class Models:
     # 检查模型引用只指向本轮真实检索来源。
     @staticmethod
     def validate_citations(answer, sources):
-        allowed = set()
-        for source in sources:
-            allowed.add(source["id"])
-        citations = set(re.findall(r"\[(S\d+)\]", answer))
-        if not citations or not citations.issubset(allowed):
-            return "模型没有返回可校验的引用，请直接查看来源或换一种问法。"
+        if not Models.check_citations(answer, sources)["passed"]:
+            return CITATION_REJECTED
         return answer
+
+    # 引用检查的明细：没有标注任何引用（no_citation）或引用了本轮不存在的来源编号（unknown_source）都不通过。
+    # 单独返回明细，是为了在回答被拦截时记下具体原因，排查时能分清是"忘了标"还是"标错了"。
+    @staticmethod
+    def check_citations(answer, sources):
+        allowed = []
+        for source in sources:
+            allowed.append(source["id"])
+        cited = sorted(set(re.findall(r"\[(S\d+)\]", answer or "")), key=lambda value: int(value[1:]))
+        unknown = [value for value in cited if value not in allowed]
+        reason = "no_citation" if not cited else "unknown_source" if unknown else None
+        return {"passed": reason is None, "reason": reason, "source_ids": allowed, "cited": cited, "unknown": unknown}

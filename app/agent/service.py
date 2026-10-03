@@ -6,6 +6,7 @@ from langchain_core.tools import StructuredTool
 from langgraph.graph import END, START, StateGraph
 
 from ..memory.service import Memory
+from ..models import CITATION_REJECTED
 from ..router.router import Router
 from ..security import BLOCKED_ANSWER, OUTPUT_CHECKS, check_answer, detect_injection, injection_rule_catalog
 from ..tools.data_query import DataQueryTool
@@ -463,8 +464,13 @@ class Agent:
             coverage=state.get("coverage"))
         # 没有来源时回答是固定的拒答文本，本来就没有引用；原来也做引用校验，会把拒答替换成
         # "模型没有返回可校验的引用"，用户看到的像是出错而不是"知识库没有资料"。
+        citation = None
         if state["models"].mode == "openai" and state["sources"]:
-            answer = state["models"].validate_citations(answer, state["sources"])
+            citation = state["models"].check_citations(answer, state["sources"])
+            if not citation["passed"]:
+                # 拦截前保存模型原话，知识巡检据此判断是忘了标引用还是编造了来源编号；原来直接丢弃，事后无从排查。
+                citation["raw_answer"] = answer[:4000]
+                answer = CITATION_REJECTED
             self.record_ai_memory(state, "LangChain 回答 Agent", {
                 "memory_summary": memory["summary"], "history_turns": memory["turns"],
             })
@@ -481,6 +487,8 @@ class Agent:
             "memory_trigger_tokens": self.response_agent.memory.trigger_tokens,
             "current_question": state["question"],
         }
+        if citation is not None:
+            result["citation_check"] = citation
         sent = state["ai_memories"][sent_before:]
         if sent:
             result["ai_memory_sent"] = list(sent)

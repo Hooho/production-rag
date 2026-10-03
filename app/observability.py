@@ -76,6 +76,11 @@ def summarize_run(result):
         summary["generation"] = {"model": model,
             "prompt_version": response.get("prompt_version"),
             "token_usage": response.get("token_usage")}
+        # 引用检查结果（不含模型原话，原话在 response 的步骤里）：统计有多少回答因为引用问题被拦截。
+        citation = response.get("citation_check")
+        if citation:
+            summary["citation"] = {"passed": citation.get("passed"), "reason": citation.get("reason"),
+                "source_count": len(citation.get("source_ids") or []), "unknown": citation.get("unknown") or []}
     return summary
 
 
