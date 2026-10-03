@@ -1,4 +1,4 @@
-/* 证据所在分片：正文整段显示，证据高亮（黄底），没参与向量计算的部分字色调浅。 */
+/* 证据所在分片：正文整段同一个颜色，只高亮证据（黄底）；有没有被截断看上面的标签。 */
 .evc-root {
    display: flex;
    flex-direction: column;
@@ -92,14 +92,6 @@
    color: #1d3550;
 }
 
-/* 没参与向量计算的部分只把字调浅，不加删除线，原文照样好读。 */
-.evc-cut {
-   color: #8aa0b6;
-}
-
-.evc-match.evc-cut {
-   color: #1d3550;
-}
 
 .evc-details {
    margin-top: 4px;

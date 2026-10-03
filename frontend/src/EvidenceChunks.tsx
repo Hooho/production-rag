@@ -3,7 +3,7 @@ import { locateEvalEvidence, type EvalEvidenceChunk, type EvalEvidenceLookup } f
 import "./EvidenceChunks.css";
 
 // 证据原文所在的分片：展开时到评测语料当前的分片里现查（题目不存分片 id，分片规则变了也不会指错），
-// 整段显示分片正文，证据那句高亮；本地向量模型能给出截断位置时，没参与向量计算的部分字色调浅。
+// 整段显示分片正文，证据那句高亮；本地向量模型能给出截断位置时，在标签里标明分片超了多少、证据在保留的部分还是被截掉的部分。
 export function EvidenceChunks({ texts }: { texts: string[] }) {
   const [data, setData] = useState<EvalEvidenceLookup | null>(null);
   const [error, setError] = useState("");
@@ -42,7 +42,6 @@ function ChunkView({ chunk }: { chunk: EvalEvidenceChunk }) {
     </div>
     {chunk.prefix && <details className="evc-prefix"><summary>算向量时正文前面还加了一段</summary><div>{chunk.prefix}</div></details>}
     <div className="evc-content">{pieces(chunk.content, start, end, cut).map((piece, index) => <span key={index} className={`${piece.match ? "evc-match" : ""} ${piece.cut ? "evc-cut" : ""}`}>{piece.text}</span>)}</div>
-    {cut !== null && <p className="evc-note">浅色的字没参与向量计算，只能靠关键词检索找到。</p>}
   </div>;
 }
 
