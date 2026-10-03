@@ -3,16 +3,26 @@ import json
 import os
 import re
 import subprocess
+import threading
 
+from sqlalchemy import select
+
+from ..mysql.store import eval_runs, settings as settings_table
+from ..runtime_config import bound_engine
 from .dataset import EVAL_DIR, QUESTION_TYPES
 from .generation import answer_question, cited_ids, judge_answer, summarize_generation
 from .retrieval import EVAL_OWNER, run_retrieval
 from ..tools.search import DocumentSearchTool
 
 
-# 每次评测保存为一个 JSON 文件，文件名是"日期时间_提交号"，一眼能看出是哪天、哪个版本的代码跑出来的。
-# 放在仓库目录而不是数据库里，是为了能和代码一起提交：以后回看某次改动时，可以同时看到当时的分数。
+# 每次评测一条记录，编号是"日期时间_提交号"，一眼能看出是哪天、哪个版本的代码跑出来的。
+# 以前每次评测存成 eval/results 下的一个 JSON 文件，想随代码一起提交；实际很少提交，文件又大（带诊断的一次两百多万字节），
+# 题目也已经搬进了数据库，所以结果也存数据库（eval_runs 表）。旧文件在首次启动时导入一次（import_result_files）。
 RESULTS_DIR = EVAL_DIR / "results"
+IMPORT_KEY = "eval_results_imported"
+# 评测在后台线程里边跑边保存进度，页面同时在轮询读取；读写评测记录时排个队，免得同一个连接上的事务互相打架
+# （SQLite 测试库只有一个共享连接，MySQL 上也只是多等几毫秒）。
+_lock = threading.RLock()
 RUN_ID_PATTERN = re.compile(r"^\d{8}-\d{6}_[0-9A-Za-z-]+$")
 # 对比时每个指标的方向：higher 表示越大越好，lower 表示越小越好。
 # 没有方向就无法判断"变好还是变差"，例如误杀率上升是变差，召回率上升是变好。
@@ -54,7 +64,9 @@ def new_run_id(commit):
     moment = datetime.now()
     while True:
         run_id = moment.strftime("%Y%m%d-%H%M%S") + "_" + safe_commit
-        if not (RESULTS_DIR / f"{run_id}.json").exists():
+        with _lock, target_engine().connect() as connection:
+            taken = connection.execute(select(eval_runs.c.id).where(eval_runs.c.id == run_id)).first()
+        if not taken:
             return run_id
         moment += timedelta(seconds=1)
 
@@ -64,37 +76,65 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 
-# 编号只允许固定格式，防止接口参数里带 ../ 读到结果目录以外的文件。
-def run_path(run_id):
+# 编号只允许固定格式，接口参数里的编号先校验再查询。
+def check_run_id(run_id):
     if not RUN_ID_PATTERN.match(run_id):
         raise ValueError("评测编号格式不正确")
-    return RESULTS_DIR / f"{run_id}.json"
+    return run_id
 
 
-# 先写临时文件再改名：评测进行中会反复保存进度，直接覆盖时如果同时有人读取，可能读到写了一半的 JSON。
-def save_run(run):
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    path = run_path(run["id"])
-    temporary = path.with_suffix(".json.tmp")
-    temporary.write_text(json.dumps(run, ensure_ascii=False, indent=1), encoding="utf-8")
-    temporary.replace(path)
+def target_engine(engine=None):
+    return engine or bound_engine()
+
+
+# 保存（新建或覆盖）一次评测：列表要用的概要单独存一列，读列表时不用把逐题明细一起读出来。
+# 评测进行中会反复保存进度，每次整条覆盖，读到的总是完整的一版。
+def save_run(run, engine=None):
+    check_run_id(run["id"])
+    values = {"kind": run.get("kind") or "", "status": run.get("status") or "", "created": run.get("created") or now(),
+        "brief": json.loads(json.dumps(run_brief(run), default=str)), "data": json.loads(json.dumps(run, default=str)),
+        "updated": now()}
+    with _lock, target_engine(engine).begin() as connection:
+        updated = connection.execute(eval_runs.update().where(eval_runs.c.id == run["id"]).values(**values)).rowcount
+        if not updated:
+            connection.execute(eval_runs.insert().values(id=run["id"], **values))
 
 
 # 读取一次评测的完整结果。
-def load_run(run_id):
-    path = run_path(run_id)
-    if not path.exists():
-        return None
-    return json.loads(path.read_text(encoding="utf-8"))
+def load_run(run_id, engine=None):
+    check_run_id(run_id)
+    with _lock, target_engine(engine).connect() as connection:
+        data = connection.execute(select(eval_runs.c.data).where(eval_runs.c.id == run_id)).scalar()
+    return dict(data) if data is not None else None
 
 
-# 删除一条已经落盘的评测记录；只操作由 run_id 校验得到的单个结果文件，不影响其他评测记录。
-def delete_run(run_id):
-    path = run_path(run_id)
-    if not path.is_file():
-        return False
-    path.unlink()
-    return True
+# 删除一条评测记录。
+def delete_run(run_id, engine=None):
+    check_run_id(run_id)
+    with _lock, target_engine(engine).begin() as connection:
+        return bool(connection.execute(eval_runs.delete().where(eval_runs.c.id == run_id)).rowcount)
+
+
+# 首次启动时把 eval/results 下的旧结果文件导入数据库（已有同编号的跳过），只做一次；文件原样保留，可以自己删。
+def import_result_files(engine):
+    with engine.connect() as connection:
+        if connection.execute(select(settings_table.c.key).where(settings_table.c.key == IMPORT_KEY)).first():
+            return 0
+        existing = set(connection.execute(select(eval_runs.c.id)).scalars().all())
+    imported = 0
+    for path in sorted(RESULTS_DIR.glob("*.json")) if RESULTS_DIR.exists() else []:
+        try:
+            run = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(run, dict) or not RUN_ID_PATTERN.match(str(run.get("id", ""))) or run["id"] in existing:
+            continue
+        save_run(run, engine)
+        imported += 1
+    with engine.begin() as connection:
+        connection.execute(settings_table.insert().values(key=IMPORT_KEY, value={"at": now(), "count": imported},
+            updated=now()))
+    return imported
 
 
 # 历史指标说明只需要这些汇总数字；提前随列表返回，前端展开指标时不必再请求完整逐题结果。
@@ -168,18 +208,11 @@ def summarize_history_metrics(run):
     }
 
 
-# 列出历次评测，只返回列表需要的字段；逐题明细很大，列表里不带。
-def list_runs():
-    if not RESULTS_DIR.exists():
-        return []
-    runs = []
-    for path in sorted(RESULTS_DIR.glob("*.json"), reverse=True):
-        try:
-            run = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        runs.append(run_brief(run))
-    return runs
+# 列出历次评测（新的在前），只返回列表需要的概要；逐题明细很大，列表里不带。
+def list_runs(engine=None):
+    with _lock, target_engine(engine).connect() as connection:
+        rows = connection.execute(select(eval_runs.c.brief).order_by(eval_runs.c.id.desc())).scalars().all()
+    return [dict(row) for row in rows]
 
 
 # 一次评测的概要：编号、时间、提交号、配置、主要指标和进度。

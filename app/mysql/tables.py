@@ -419,3 +419,15 @@ eval_suite_items = Table("eval_suite_items", metadata,
     Column("created", String(32), nullable=False),
     Column("updated", String(32), nullable=False),
 )
+
+# 评测记录（调参评测和专项评测）：编号是"日期时间_提交号"；brief 是列表要用的概要（配置、总览指标、进度），
+# data 是完整结果（含逐题明细，可能有几兆）。以前存成 eval/results 下的 JSON 文件，首次启动时导入。
+eval_runs = Table("eval_runs", metadata,
+    Column("id", String(64), primary_key=True),
+    Column("kind", String(16), nullable=False),
+    Column("status", String(16), nullable=False),
+    Column("created", String(40), nullable=False),
+    Column("brief", JSON, nullable=False),
+    Column("data", JSON, nullable=False),
+    Column("updated", String(40), nullable=False),
+)

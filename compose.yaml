@@ -66,7 +66,7 @@ services:
     restart: unless-stopped
     volumes:
       - uploads_data:/app/uploads
-      # 评测集、语料和结果直接挂载仓库目录：改了题目不用重新构建镜像，评测结果也直接写回仓库，可以随代码提交。
+      # 评测语料和初始题目（eval/seed）直接挂载仓库目录，改了不用重新构建镜像；题目和评测结果存在数据库里。
       - ./eval:/app/eval
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=20)"]

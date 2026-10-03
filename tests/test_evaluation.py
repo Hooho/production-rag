@@ -302,7 +302,7 @@ def test_eval_api(setup, eval_dir, monkeypatch):
         if run["status"] != "running":
             break
         time.sleep(0.05)
-    assert run["status"] == "completed"
+    assert run["status"] == "completed", run.get("error")
     assert len(run["questions"]) == 4
     listing = client.get("/eval/runs", headers=headers()).json()
     assert listing["runs"][0]["id"] == run_id and "questions" not in listing["runs"][0]

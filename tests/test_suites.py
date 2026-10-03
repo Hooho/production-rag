@@ -116,3 +116,25 @@ def test_special_search_mode(setup, eval_dir, monkeypatch):
     assert updated.status_code == 200 and updated.json()["search_mode"] == "keyword"
     assert client.put(f"/eval/suites/{created['id']}", headers=headers(), json={"name": "向量专项",
         "method": "retrieval", "search_mode": "nope"}).status_code == 422
+
+
+# 旧的评测结果文件在首次启动时导入数据库：只导入一次，格式不对的文件跳过，已有同编号的不覆盖。
+def test_import_result_files(setup, tmp_path, monkeypatch):
+    import json
+    from app.evaluation import results as results_module
+    from app.mysql.store import settings as settings_table
+    client, store = setup
+    monkeypatch.setattr(results_module, "RESULTS_DIR", tmp_path)
+    old = {"id": "20260101-120000_abc", "kind": "retrieval", "status": "completed", "created": "2026-01-01T12:00:00",
+        "config": {"split": "dev", "suites": []}, "summary": {"recall_pool": 1.0}, "questions": []}
+    (tmp_path / "20260101-120000_abc.json").write_text(json.dumps(old), encoding="utf-8")
+    (tmp_path / "broken.json").write_text("{", encoding="utf-8")
+    with store.engine.begin() as connection:
+        connection.execute(settings_table.delete().where(settings_table.c.key == results_module.IMPORT_KEY))
+    assert results_module.import_result_files(store.engine) == 1
+    assert results_module.import_result_files(store.engine) == 0
+    listing = client.get("/eval/runs", headers=headers()).json()["runs"]
+    assert [run["id"] for run in listing] == ["20260101-120000_abc"]
+    assert client.get("/eval/runs/20260101-120000_abc", headers=headers()).json()["summary"] == {"recall_pool": 1.0}
+    assert client.delete("/eval/runs/20260101-120000_abc", headers=headers()).status_code == 200
+    assert client.get("/eval/runs/20260101-120000_abc", headers=headers()).status_code == 404

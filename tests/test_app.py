@@ -141,6 +141,11 @@ def setup(monkeypatch):
     create_user(store.engine, "alice", "alice-password")
     create_user(store.engine, "bob", "bob-password")
     create_user(store.engine, "admin", "admin-password", is_admin=True)
+    # 仓库里 eval/results 的旧结果文件很大，测试不需要导入，标记为已经导入过（导入本身在 test_suites 里单独测）。
+    from app.evaluation.results import IMPORT_KEY
+    from app.mysql.store import settings as settings_table
+    with store.engine.begin() as connection:
+        connection.execute(settings_table.insert().values(key=IMPORT_KEY, value={}, updated="test"))
     with TestClient(create_app(store, models, JWT_SECRET)) as client:
         yield client, store
     store.engine.dispose()
