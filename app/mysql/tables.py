@@ -343,9 +343,9 @@ inspection_issue_events = Table("inspection_issue_events", metadata,
     Column("created", String(32), nullable=False),
 )
 
-# 线上回归集：管理员自建、自定义名字的评测集，题目多数从知识巡检的问题加入。
-# 和 eval/dataset.jsonl 的基准集不同：基准集跑在隔离的评测语料上、随代码做版本管理；
-# 回归集的题目是真实用户的提问，按提问人的权限在线上知识库里跑，内容随知识库变化，所以存数据库、不进代码仓库。
+# 巡检复测集：管理员自建、自定义名字的评测集，题目多数从知识巡检的问题加入。
+# 和调参评测集、专项评测集不同：那两种跑在隔离的评测语料上；
+# 巡检复测集的题目是真实用户的提问，按提问人的权限在线上知识库里跑，内容随知识库变化，所以存数据库、不进代码仓库。
 eval_sets = Table("eval_sets", metadata,
     Column("id", String(36), primary_key=True),
     Column("name", String(100), nullable=False, unique=True),
@@ -354,7 +354,7 @@ eval_sets = Table("eval_sets", metadata,
     Column("created", String(32), nullable=False),
     Column("updated", String(32), nullable=False),
 )
-# 回归集的题目。expect：answer 应该回答，refuse 应该拒答。
+# 巡检复测集的题目。expect：answer 应该回答，refuse 应该拒答。
 # documents 是期望命中的文档 [{doc_key, title}]，用 doc_key 而不是分片：文档更新版本后分片会变，doc_key 不变。
 # issue_id 记录题目来自哪个巡检问题，同一个问题在同一个评测集里只加一次。
 eval_set_items = Table("eval_set_items", metadata,
@@ -370,7 +370,7 @@ eval_set_items = Table("eval_set_items", metadata,
     Column("created_by", String(32), nullable=False),
     Column("created", String(32), nullable=False),
 )
-# 回归集的每次运行。kind：retrieval 只检索，generation 完整问一遍再判断；results 是逐题结果。
+# 巡检复测集的每次运行。kind：retrieval 只检索，generation 完整问一遍再判断；results 是逐题结果。
 eval_set_runs = Table("eval_set_runs", metadata,
     Column("id", String(36), primary_key=True),
     Column("set_id", String(36), nullable=False, index=True),
@@ -382,4 +382,38 @@ eval_set_runs = Table("eval_set_runs", metadata,
     Column("error", String(500)),
     Column("started", String(32), nullable=False),
     Column("finished", String(32)),
+)
+
+# 调参评测集：开发集 / 留出集的题目，在隔离的评测语料上衡量检索和回答质量，用来调参数。
+# 以前放在 eval/dataset.jsonl 里随代码提交；现在存数据库，在页面上增删改、审核都不用改文件，
+# 首次启动时从 eval/seed/dataset.jsonl 导入（见 app/evaluation/dataset.py 的 seed_eval_data）。
+# 题目字段（问题、题型、证据、标准答案、追问历史、同义改写题对……）整体放在 data 里，id 是 q01、u01 这样的编号。
+eval_items = Table("eval_items", metadata,
+    Column("id", String(16), primary_key=True),
+    Column("position", Integer, nullable=False),
+    Column("data", JSON, nullable=False),
+    Column("created", String(32), nullable=False),
+    Column("updated", String(32), nullable=False),
+)
+# 专项评测集：管理员自建，每个专项针对一个方向（例如分片超长被截断、多轮对话记忆），题目只属于这个专项，
+# 不计入调参分数。method 是评测方式：retrieval 只检索，answer 完整回答再评审，dialogue 按顺序问完一段对话。
+eval_suites = Table("eval_suites", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("name", String(64), nullable=False, unique=True),
+    Column("description", String(500)),
+    Column("method", String(16), nullable=False),
+    Column("created_by", String(32), nullable=False),
+    Column("created", String(32), nullable=False),
+    Column("updated", String(32), nullable=False),
+)
+# 专项的题目，字段随评测方式不同放在 data 里：
+#   retrieval：question、evidence；answer：再加 reference_answer；dialogue：turns、question、reference_answer。
+eval_suite_items = Table("eval_suite_items", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("suite_id", String(36), nullable=False, index=True),
+    Column("position", Integer, nullable=False),
+    Column("data", JSON, nullable=False),
+    Column("created_by", String(32), nullable=False),
+    Column("created", String(32), nullable=False),
+    Column("updated", String(32), nullable=False),
 )

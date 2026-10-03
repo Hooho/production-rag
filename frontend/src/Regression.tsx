@@ -3,8 +3,8 @@ import { listGroups, listUsers, type AuthUser, addEvalSetItems, createEvalSet, d
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./Regression.css";
 
-// 线上回归集：题目是真实用户问过的问题（多数从知识巡检加入），按提问人的权限在线上知识库里跑，
-// 回答"之前出过问题的这些提问，现在还好吗"。和"评测集"页签的基准集分开，那边跑在固定的评测语料上。
+// 巡检复测集：题目是真实用户问过的问题（多数从知识巡检加入），按提问人的权限在线上知识库里跑，
+// 回答"之前出过问题的这些提问，现在还好吗"。和「调参评测集」「专项评测集」分开，那两种跑在固定的评测语料上。
 type ShowToast = (kind: "success" | "error", message: string) => void;
 type Props = { setId: string | null; onNavigate: (path: string) => void; onToast: ShowToast };
 
@@ -62,9 +62,9 @@ function SetList({ onOpen, onToast }: { onOpen: (id: string) => void; onToast: S
 
   return <div className="rg-root">
     <div className="rg-intro">
-      <p>回归集里是真实用户问过的问题，按提问人的权限在线上知识库里检查：之前出过问题的提问，现在还好吗。每次补资料、调检索、改提示词之后跑一遍，看有没有改好，有没有改坏别的。</p>
-      <p>题目一般在知识巡检的问题详情里点「加入评测集」添加，也可以在评测集里手动添加。</p>
-      {!creating && <button type="button" className="primary-button" onClick={() => setCreating(true)}>新建回归集</button>}
+      <p>巡检复测集里是真实用户问过的问题，按提问人的权限在线上知识库里检查：之前出过问题的提问，现在还好吗。每次补资料、调检索、改提示词之后跑一遍，看有没有改好，有没有改坏别的。</p>
+      <p>题目一般在知识巡检的问题详情里点「加入巡检复测集」添加，也可以在评测集里手动添加。</p>
+      {!creating && <button type="button" className="primary-button" onClick={() => setCreating(true)}>新建巡检复测集</button>}
     </div>
     {creating && <div className="rg-form">
       <label className="rg-field"><span>名字</span><input value={name} maxLength={100} onChange={(event) => setName(event.target.value)} placeholder="例如：售后问题回归" autoFocus /></label>
@@ -74,8 +74,8 @@ function SetList({ onOpen, onToast }: { onOpen: (id: string) => void; onToast: S
         <button type="button" className="primary-button" onClick={() => void create()} disabled={busy || !name.trim()}>创建</button>
       </div>
     </div>}
-    {sets === null ? <LoadingSkeleton label="正在加载回归集"><SkeletonBlock className="skeleton-line" /><SkeletonBlock className="skeleton-line-short" /></LoadingSkeleton>
-      : sets.length === 0 ? <div className="rg-empty">还没有回归集。</div>
+    {sets === null ? <LoadingSkeleton label="正在加载巡检复测集"><SkeletonBlock className="skeleton-line" /><SkeletonBlock className="skeleton-line-short" /></LoadingSkeleton>
+      : sets.length === 0 ? <div className="rg-empty">还没有巡检复测集。</div>
       : <ul className="rg-sets">
         {sets.map((item) => <li key={item.id}>
           <button type="button" className="rg-set" onClick={() => onOpen(item.id)}>
@@ -169,7 +169,7 @@ function SetDetail({ setId, onBack, onToast }: { setId: string; onBack: () => vo
   async function remove() {
     try {
       await deleteEvalSet(setId);
-      onToast("success", "已删除回归集");
+      onToast("success", "已删除巡检复测集");
       onBack();
     } catch (reason) {
       onToast("error", (reason as Error).message);
@@ -185,9 +185,9 @@ function SetDetail({ setId, onBack, onToast }: { setId: string; onBack: () => vo
     }
   }
 
-  if (!data) return <div className="rg-root"><LoadingSkeleton label="正在加载回归集"><SkeletonBlock className="skeleton-line" /><SkeletonBlock className="skeleton-line-short" /></LoadingSkeleton></div>;
+  if (!data) return <div className="rg-root"><LoadingSkeleton label="正在加载巡检复测集"><SkeletonBlock className="skeleton-line" /><SkeletonBlock className="skeleton-line-short" /></LoadingSkeleton></div>;
   return <div className="rg-root">
-    <button type="button" className="rg-back" onClick={onBack}>← 全部回归集</button>
+    <button type="button" className="rg-back" onClick={onBack}>← 全部巡检复测集</button>
     {renaming ? <div className="rg-form">
       <label className="rg-field"><span>名字</span><input value={name} maxLength={100} onChange={(event) => setName(event.target.value)} /></label>
       <label className="rg-field"><span>说明</span><input value={description} maxLength={500} onChange={(event) => setDescription(event.target.value)} placeholder="可选" /></label>
@@ -231,7 +231,7 @@ function SetDetail({ setId, onBack, onToast }: { setId: string; onBack: () => vo
         {!adding && <button type="button" className="secondary-button" onClick={() => { setEditing(null); setAdding(true); }}>添加题目</button>}
       </div>
       {adding && <ItemForm setId={setId} onToast={onToast} onDone={(changed) => { setAdding(false); if (changed) void load(); }} />}
-      {data.items.length === 0 && !adding && <p className="rg-muted">还没有题目。在知识巡检的问题详情里点「加入评测集」，或点「添加题目」手动添加。</p>}
+      {data.items.length === 0 && !adding && <p className="rg-muted">还没有题目。在知识巡检的问题详情里点「加入巡检复测集」，或点「添加题目」手动添加。</p>}
       <ul className="rg-items">
         {data.items.map((item) => editing === item.id ? <li key={item.id}><ItemForm setId={setId} initial={item} onToast={onToast} onDone={(changed) => { setEditing(null); if (changed) void load(); }} /></li> : <li key={item.id} className="rg-item">
           <div className="rg-item-main">

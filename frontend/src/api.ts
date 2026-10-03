@@ -586,10 +586,11 @@ export type EvalHistoryMetrics = {
   false_reject_questions: number;
   false_accept_questions: number;
 };
-export type EvalConfig = { split: string; suites: string[]; dataset_size?: number; rrf_k?: number; pool_size?: number; return_limit?: number; min_score?: number | null; reranked?: boolean; fusion?: string; methods?: string[]; model_mode?: string; embedding_mode?: string; embedding_model?: string; rerank_model?: string; rerank_mode?: string; query_source?: string[] };
+export type EvalConfig = { split: string | null; suites: string[]; special?: { suites: { id: string; name: string }[]; compare_memory?: boolean }; dataset_size?: number; rrf_k?: number; pool_size?: number; return_limit?: number; min_score?: number | null; reranked?: boolean; fusion?: string; methods?: string[]; model_mode?: string; embedding_mode?: string; embedding_model?: string; rerank_model?: string; rerank_mode?: string; query_source?: string[] };
 export type EvalRunBrief = {
   id: string;
-  kind: "retrieval" | "generation" | "memory";
+  // memory 是以前单独的多轮对话评测（现在并入专项评测集），旧记录仍然能打开。
+  kind: "retrieval" | "generation" | "memory" | "special";
   status: "running" | "completed" | "failed" | "interrupted";
   created: string;
   finished: string | null;
@@ -611,13 +612,15 @@ export type EvalRun = EvalRunBrief & {
   variants?: EvalVariant[];
   questions?: EvalQuestion[];
   paraphrase?: EvalParaphraseAnalysis | null;
+  // 专项评测：每个专项一块结果。
+  special?: EvalSpecialSection[];
   previous_id: string | null;
 };
 export type EvalComparisonRow = { key: string; label: string; direction: "higher" | "lower"; base: number | null; target: number | null; delta: number | null; change: "better" | "worse" | "same" | "unknown" };
 // settings_diff：两次评测用的系统参数不同的项（设置页改过），分数变化可能来自参数而不是代码。
 export type EvalComparison = { base: EvalRunBrief; target: EvalRunBrief; metrics: EvalComparisonRow[]; settings_diff?: { key: string; base: unknown; target: unknown }[] };
 export type EvalSuite = { key: string; label: string; variants: string[] };
-export type EvalDataset = { items: EvalItem[]; types: string[]; generated_types?: string[]; corpus: string[]; reviewed_count?: number; pending_count?: number };
+export type EvalDataset = { items: EvalItem[]; types: string[]; corpus: string[]; reviewed_count?: number; pending_count?: number };
 
 export function getEvalDataset() {
   return request<EvalDataset>("/eval/dataset");
@@ -683,13 +686,94 @@ export function compareEvalRuns(base: string, target: string) {
   return request<EvalComparison>(`/eval/compare?base=${encodeURIComponent(base)}&target=${encodeURIComponent(target)}`);
 }
 
-// 在界面上发起一次检索或生成评测；生成评测由服务端校验真实模型配置并调用大模型。
-export function startEvalRun(kind: "retrieval" | "generation" | "memory", split: string, suites: string[]) {
+// 在界面上发起一次评测：调参评测按 split 选开发集或留出集；专项评测按 suite_ids 选专项。
+export function startEvalRun(kind: "retrieval" | "generation", split: string, suites: string[]) {
   return request<{ id: string; status: string }>("/eval/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ kind, split, suites }),
   });
+}
+
+export function startSpecialRun(suiteIds: string[], compareMemory = false) {
+  return request<{ id: string; status: string }>("/eval/runs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "special", suite_ids: suiteIds, compare_memory: compareMemory }),
+  });
+}
+
+// ---- 专项评测集 ----
+// 评测方式：retrieval 只检索，answer 完整回答再评审，dialogue 按顺序问完一段对话。
+export type EvalSuiteMethod = "retrieval" | "answer" | "dialogue";
+export type EvalSuiteRunEntry = { id: string; status: "running" | "completed" | "failed" | "interrupted"; created: string; finished: string | null; summary: { name: string; method: EvalSuiteMethod; count: number; passed: number } | null };
+export type EvalSuiteBrief = { id: string; name: string; description: string; method: EvalSuiteMethod; method_label: string; created_by: string; created: string; updated: string; item_count: number; latest: EvalSuiteRunEntry | null };
+export type EvalSuiteItem = { id: string; question: string; evidence?: string[]; reference_answer?: string; turns?: string[]; created_by: string; created: string; updated: string };
+export type EvalSuiteFull = EvalSuiteBrief & { items: EvalSuiteItem[]; runs: EvalSuiteRunEntry[] };
+export type EvalSuiteItemInput = { question: string; evidence?: string[]; reference_answer?: string | null; turns?: string[] };
+// 一道专项题的结果。检索 / 回答：每条证据在向量、关键词检索里排第几、最后有没有返回；多轮对话：最后一问的回答和评审。
+export type EvalSpecialQuestion = {
+  id: string;
+  question: string;
+  passed: boolean;
+  previous_passed?: boolean | null;
+  reference_answer?: string | null;
+  evidence?: { text: string; dense_rank: number | null; keyword_rank: number | null; rerank_rank: number | null; status: string | null }[];
+  found?: boolean;
+  lost_stage?: "recall" | "rerank" | "threshold" | null;
+  returned?: number;
+  answer?: string;
+  judgement?: Partial<EvalJudgement>;
+  turns?: string[];
+  summarized?: boolean;
+  input_tokens?: number | null;
+};
+export type EvalSpecialSection = {
+  suite_id: string;
+  name: string;
+  description: string;
+  method: EvalSuiteMethod;
+  method_label: string;
+  count: number;
+  passed: number;
+  evidence_total?: number;
+  dense_found?: number;
+  keyword_found?: number;
+  questions: EvalSpecialQuestion[];
+  variants?: { name: string; label: string; passed: number; correctness: number | null; summarized_rate: number | null; input_tokens_avg: number | null }[];
+  previous?: { id: string; created: string; passed: number; count: number };
+};
+
+export function listEvalSuites() {
+  return request<{ items: EvalSuiteBrief[]; methods: Record<EvalSuiteMethod, string> }>("/eval/suites");
+}
+
+export function getEvalSuite(suiteId: string) {
+  return request<EvalSuiteFull>(`/eval/suites/${encodeURIComponent(suiteId)}`);
+}
+
+export function createEvalSuite(payload: { name: string; description?: string; method: EvalSuiteMethod }) {
+  return request<EvalSuiteFull>("/eval/suites", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+}
+
+export function updateEvalSuite(suiteId: string, payload: { name: string; description?: string; method: EvalSuiteMethod }) {
+  return request<EvalSuiteFull>(`/eval/suites/${encodeURIComponent(suiteId)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+}
+
+export function deleteEvalSuite(suiteId: string) {
+  return request<{ id: string; deleted: boolean }>(`/eval/suites/${encodeURIComponent(suiteId)}`, { method: "DELETE" });
+}
+
+export function addEvalSuiteItem(suiteId: string, payload: EvalSuiteItemInput) {
+  return request<EvalSuiteFull>(`/eval/suites/${encodeURIComponent(suiteId)}/items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+}
+
+export function updateEvalSuiteItem(suiteId: string, itemId: string, payload: EvalSuiteItemInput) {
+  return request<EvalSuiteFull>(`/eval/suites/${encodeURIComponent(suiteId)}/items/${encodeURIComponent(itemId)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+}
+
+export function deleteEvalSuiteItem(suiteId: string, itemId: string) {
+  return request<EvalSuiteFull>(`/eval/suites/${encodeURIComponent(suiteId)}/items/${encodeURIComponent(itemId)}`, { method: "DELETE" });
 }
 
 // 知识巡检（只有管理员可见）：从问答日志合并出来的问题。

@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import json
 import os
 import re
@@ -5,16 +6,19 @@ import unicodedata
 from pathlib import Path
 
 from langchain_core.prompts import ChatPromptTemplate
+from sqlalchemy import func, select
+
+from ..mysql.store import eval_items, eval_suite_items, eval_suites, settings as settings_table
+from ..runtime_config import bound_engine
 
 
-# 评测数据、语料和结果都放在仓库的 eval 目录，随代码一起版本管理，任何人拉下代码都能复现同一组分数。
+# 评测语料和结果放在仓库的 eval 目录；调参评测集和专项评测集的题目存数据库（eval_items、eval_suites），
+# 首次启动时从 eval/seed 导入。
 EVAL_DIR = Path(os.getenv("EVAL_DIR", "eval"))
-# 题目类型固定为六种，前端按这个顺序分组展示。
-# 截断：证据只在某个分片超出向量模型长度上限、被截掉的后半段里，检验截断对向量检索的影响
-# （bge-small-zh 只读前 512 个 token，800 字的中文分片加上标题路径常常超限）。
-QUESTION_TYPES = ["事实", "同义改写", "关键词", "多轮追问", "无法回答", "截断"]
-# 截断题要按分片实际的 token 数挑证据，大模型看不到分片和分词结果，不能让它生成。
-GENERATED_TYPES = [item for item in QUESTION_TYPES if item != "截断"]
+# 调参评测集的题目类型固定为五种，前端按这个顺序分组展示。针对某个方向的检查（例如分片截断）放在专项评测集里。
+QUESTION_TYPES = ["事实", "同义改写", "关键词", "多轮追问", "无法回答"]
+# 导入过初始题目后在 settings 表记一笔，之后把题目删光也不会再导入一次。
+SEED_KEY = "eval_seeded"
 # 同义改写保存为两个独立题目，但用同一个题对编号把它们关联起来。
 REWRITE_ROLES = {"original", "paraphrase"}
 # 评测集拆成开发集和留出集：平时调参只看 dev，holdout 只在确定参数后做最终验证，
@@ -29,16 +33,69 @@ def normalize(text):
     return re.sub(r"\s+", "", folded)
 
 
-# 读取 JSONL 评测集，每行一道题；空行跳过，便于人工编辑。
-def load_dataset(path=None):
-    path = Path(path) if path else EVAL_DIR / "dataset.jsonl"
+def now_text():
+    return datetime.now(timezone.utc).isoformat()
+
+
+# 读取 JSONL 文件，每行一道题；空行跳过。只用于 eval/seed 里的初始题目。
+def read_jsonl(path):
     items = []
-    with path.open(encoding="utf-8") as file:
+    with Path(path).open(encoding="utf-8") as file:
         for line in file:
-            if not line.strip():
-                continue
-            items.append(json.loads(line))
+            if line.strip():
+                items.append(json.loads(line))
     return items
+
+
+# 初始题目：调参评测集 eval/seed/dataset.jsonl，专项评测集 eval/seed/suites.json。
+def seed_items():
+    path = EVAL_DIR / "seed" / "dataset.jsonl"
+    return read_jsonl(path) if path.exists() else []
+
+
+def seed_suites():
+    path = EVAL_DIR / "seed" / "suites.json"
+    return json.loads(path.read_text(encoding="utf-8"))["suites"] if path.exists() else []
+
+
+# 首次启动时把初始题目导入数据库：只在从没导入过、而且表是空的时候做，已有的题目不会被覆盖。
+def seed_eval_data(engine):
+    with engine.begin() as connection:
+        if connection.execute(select(settings_table.c.key).where(settings_table.c.key == SEED_KEY)).first():
+            return False
+        now = now_text()
+        if not connection.execute(select(func.count()).select_from(eval_items)).scalar():
+            for position, item in enumerate(seed_items()):
+                connection.execute(eval_items.insert().values(id=item["id"], position=position, data=item,
+                    created=now, updated=now))
+        if not connection.execute(select(func.count()).select_from(eval_suites)).scalar():
+            from uuid import uuid4
+            for suite in seed_suites():
+                suite_id = str(uuid4())
+                connection.execute(eval_suites.insert().values(id=suite_id, name=suite["name"],
+                    description=suite.get("description"), method=suite["method"], created_by="system",
+                    created=now, updated=now))
+                for position, data in enumerate(suite["items"]):
+                    connection.execute(eval_suite_items.insert().values(id=str(uuid4()), suite_id=suite_id,
+                        position=position, data=data, created_by="system", created=now, updated=now))
+        connection.execute(settings_table.insert().values(key=SEED_KEY, value={"at": now}, updated=now))
+    return True
+
+
+# 读取调参评测集的全部题目，按加入顺序排列。engine 不传时用系统参数绑定的同一个库。
+def load_dataset(engine=None):
+    target = engine or bound_engine()
+    with target.connect() as connection:
+        rows = connection.execute(select(eval_items.c.data).order_by(eval_items.c.position)).scalars().all()
+    return [dict(row) for row in rows]
+
+
+# 整体替换调参评测集（测试和初始化用）。
+def replace_dataset(items, engine=None):
+    target = engine or bound_engine()
+    with target.begin() as connection:
+        connection.execute(eval_items.delete())
+    append_items(items, target)
 
 
 # 按 split 选择题目；all 表示全部题目。
@@ -54,29 +111,17 @@ def select_split(items, split):
     return selected
 
 
-# 原子覆盖评测集文件，审核状态变化不能只改内存，否则服务重启后题目会重新变成待审核。
-def save_dataset(items, path=None):
-    target = Path(path) if path else EVAL_DIR / "dataset.jsonl"
-    temporary = target.with_suffix(target.suffix + ".tmp")
-    with temporary.open("w", encoding="utf-8") as file:
-        for item in items:
-            file.write(json.dumps(item, ensure_ascii=False) + "\n")
-    temporary.replace(target)
-
-
-# 将指定题目标记为已审核，返回更新后的题目；题干、证据和答案保持原样。
-def mark_reviewed(items, item_id):
-    selected = []
-    for item in items:
-        updated = dict(item)
-        if updated.get("id") == item_id:
-            updated["reviewed"] = True
-        selected.append(updated)
-    for item in selected:
-        if item.get("id") == item_id:
-            save_dataset(selected)
-            return item
-    return None
+# 将指定题目标记为已审核，返回更新后的题目；题干、证据和答案保持原样。题目不存在时返回 None。
+def mark_reviewed(item_id, engine=None):
+    target = engine or bound_engine()
+    with target.begin() as connection:
+        data = connection.execute(select(eval_items.c.data).where(eval_items.c.id == item_id)).scalar()
+        if data is None:
+            return None
+        item = {**data, "reviewed": True}
+        connection.execute(eval_items.update().where(eval_items.c.id == item_id).values(data=item,
+            updated=now_text()))
+    return item
 
 
 # 语料目录下的每个 Markdown 文件是一份文档，文件名（去掉扩展名）作为文档标题。
@@ -125,12 +170,17 @@ def next_pair_id(items):
     return candidate
 
 
-# 追加 JSONL 题目；单独封装写入动作，避免 API 路由把序列化细节和校验流程混在一起。
-def append_items(items, path=None):
-    target = Path(path) if path else EVAL_DIR / "dataset.jsonl"
-    with target.open("a", encoding="utf-8") as file:
+# 追加题目，排在现有题目之后。
+def append_items(items, engine=None):
+    target = engine or bound_engine()
+    now = now_text()
+    with target.begin() as connection:
+        position = connection.execute(select(func.max(eval_items.c.position))).scalar()
+        position = -1 if position is None else position
         for item in items:
-            file.write(json.dumps(item, ensure_ascii=False) + "\n")
+            position += 1
+            connection.execute(eval_items.insert().values(id=item["id"], position=position, data=item,
+                created=now, updated=now))
 
 
 # 统一模型返回的证据格式；模型有时会把单条证据返回为字符串，或用 text/quote 包一层。
@@ -185,7 +235,7 @@ def generate_items(models, existing, count, split, question_type=None):
         evidence = normalize_generated_evidence(raw.get("evidence"))
         reference_answer = raw.get("reference_answer")
         history = raw.get("history") or []
-        if item_type not in GENERATED_TYPES or not isinstance(answerable, bool):
+        if item_type not in QUESTION_TYPES or not isinstance(answerable, bool):
             raise ValueError("模型返回了未知题型或无效可回答标记")
         if not isinstance(question, str) or not question.strip():
             raise ValueError("模型返回了空问题")

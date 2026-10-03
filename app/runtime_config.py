@@ -95,6 +95,11 @@ def bind(engine):
     clear_cache()
 
 
+# 当前绑定的数据库连接；评测题目等也存在同一个库里，没传连接的调用用它。
+def bound_engine():
+    return _engine
+
+
 def clear_cache():
     with _lock:
         _cache.update(at=0.0, saved=None)

@@ -2,19 +2,14 @@
 # 单题评测里多轮追问是用补全后的完整问题去问的，测不到记忆；这里把一段对话按顺序真的问一遍，
 # 最后一问要用到开头几轮的内容（例如「回到我最开始问的那个称号」），看压缩之后还记不记得。
 # 和线上一样：意图识别只看最近 3 轮问答和滚动摘要，所以开头的内容只能靠摘要带过来。
-# 每组参数各跑一遍全部对话，回答模型用进程内记忆，不写 runs 表和 PostgreSQL。需要真实大模型。
+# 回答模型用进程内记忆，不写 runs 表和 PostgreSQL。需要真实大模型。
+# 题目放在专项评测集里（评测方式选「多轮对话」），由 app/evaluation/suites.py 调用这里按顺序问完。
 from datetime import datetime, timezone
-import json
 
 from ..agent.response import ResponseAgent
 from ..agent.service import Agent
-from ..runtime_config import snapshot as runtime_snapshot
-from .dataset import EVAL_DIR
-from .generation import judge_answer
-from .retrieval import EVAL_OWNER, import_corpus
+from .retrieval import EVAL_OWNER
 
-
-DIALOGUE_FILE = "dialogues.jsonl"
 # 线上每轮从 MySQL 取最近 6 轮问答作为历史（app/memory/service.py）。
 HISTORY_LIMIT = 6
 
@@ -30,17 +25,6 @@ def memory_variants(settings):
         if value != keep:
             variants.append({"name": f"keep_{value}", "label": f"保留最近 {value} 条", "trigger": trigger, "keep": value})
     return variants
-
-
-def load_dialogues(path=None):
-    target = path or EVAL_DIR / DIALOGUE_FILE
-    if not target.exists():
-        return []
-    dialogues = []
-    for line in target.read_text(encoding="utf-8").splitlines():
-        if line.strip():
-            dialogues.append(json.loads(line))
-    return dialogues
 
 
 def now():
@@ -75,40 +59,3 @@ def run_dialogue(store, models, run_id, variant, dialogue):
 def average(values):
     values = [value for value in values if value is not None]
     return round(sum(values) / len(values), 4) if values else None
-
-
-# 执行多轮对话评测，结果和其他评测一样写进 run（eval/results 下的 JSON）。
-def run_memory(store, models, run, on_progress=None):
-    if models.mode != "openai":
-        raise ValueError("多轮对话评测需要真实大模型：请设置 MODEL_MODE=openai 和 LLM_API_KEY")
-    dialogues = [dialogue for dialogue in load_dialogues() if dialogue.get("reviewed", True)]
-    if not dialogues:
-        raise ValueError("eval/dialogues.jsonl 里没有已审核的多轮对话题")
-    import_corpus(store, models)
-    settings = runtime_snapshot()
-    variants = memory_variants(settings)
-    total = len(variants) * len(dialogues)
-    done = 0
-    results = []
-    for variant in variants:
-        rows = []
-        for dialogue in dialogues:
-            outcome = run_dialogue(store, models, run["id"], variant, dialogue)
-            judgement = judge_answer(models, {"question": dialogue["question"], "history": dialogue["turns"],
-                "answerable": True, "reference_answer": dialogue["reference_answer"]}, outcome["answer"], outcome["sources"])
-            rows.append({"id": dialogue["id"], "question": dialogue["question"], "turns": len(dialogue["turns"]) + 1,
-                "answer": outcome["answer"][:4000], "route": outcome["route"], "summarized": outcome["summarized"],
-                "input_tokens": outcome["input_tokens"], "judgement": judgement})
-            done += 1
-            if on_progress:
-                on_progress(done, total)
-        results.append({**variant, "summary": {
-            "correctness": average([row["judgement"].get("correctness") for row in rows]),
-            "faithfulness": average([row["judgement"].get("faithfulness") for row in rows]),
-            "summarized_rate": average([1.0 if row["summarized"] else 0.0 for row in rows]),
-            "input_tokens_avg": average([row["input_tokens"] for row in rows])}, "dialogues": rows})
-    run["config"].update({"settings": settings, "dataset_size": len(dialogues), "model_mode": models.mode,
-        "llm_model": models.llm_model})
-    run["memory"] = results
-    run["summary"] = dict(results[0]["summary"])
-    return run

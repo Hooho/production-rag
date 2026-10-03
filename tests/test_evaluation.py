@@ -6,8 +6,8 @@ import pytest
 from app.evaluation import dataset as dataset_module
 from app.evaluation import results as results_module
 from app.evaluation import retrieval as retrieval_module
-from app.evaluation.dataset import (QUESTION_TYPES, corpus_files, load_dataset, normalize, select_split,
-    validate_dataset)
+from app.evaluation.dataset import (QUESTION_TYPES, corpus_files, load_dataset, normalize, replace_dataset,
+    seed_items, select_split, validate_dataset)
 from app.evaluation.generation import judge_answer, summarize_generation
 from app.evaluation.results import compare_runs, execute_run, previous_run, start_run
 from app.evaluation.retrieval import import_corpus, score_question, summarize_paraphrase_pairs, threshold_sweep
@@ -30,11 +30,10 @@ def corpus_text():
     return "\n".join(parts)
 
 
-# 评测集字段完整、证据都能在语料里找到，无法回答题约占两成，并且六种题型都有。
-# 上限从 50 放宽到 60：加了 9 道「截断」题，证据在分片超长被截断的部分。
+# 初始调参评测集（eval/seed/dataset.jsonl）字段完整、证据都能在语料里找到，无法回答题约占两成，并且五种题型都有。
 def test_dataset_is_valid():
-    items = load_dataset()
-    assert 30 <= len(items) <= 60
+    items = seed_items()
+    assert 30 <= len(items) <= 50
     assert validate_dataset(items, corpus_text()) == []
     unanswerable = 0
     types = set()
@@ -57,7 +56,7 @@ def test_every_evidence_fits_in_one_chunk():
     for path in corpus_files():
         for record in chunk_document_records(path.read_text(encoding="utf-8")):
             chunks.append(normalize(record["embedding_text"]))
-    for item in load_dataset():
+    for item in seed_items():
         for evidence in item["evidence"]:
             target = normalize(evidence)
             found = False
@@ -79,7 +78,7 @@ def test_normalize_ignores_width_and_whitespace():
 
 # 用临时目录代替仓库的 eval 目录：两份小语料、四道题（一道无法回答），结果也写到临时目录。
 @pytest.fixture
-def eval_dir(tmp_path, monkeypatch):
+def eval_dir(setup, tmp_path, monkeypatch):
     corpus = tmp_path / "corpus"
     corpus.mkdir()
     (corpus / "售后.md").write_text("# 退货\n\n耳机签收后七天内可以无理由退货。\n\n# 保修\n\n耳机保修期为一年，人为损坏不在保修范围。",
@@ -95,9 +94,7 @@ def eval_dir(tmp_path, monkeypatch):
         {"id": "u1", "question": "明天东京天气怎么样？", "type": "无法回答", "answerable": False,
             "evidence": [], "reference_answer": "拒答", "split": "dev", "reviewed": True},
     ]
-    with (tmp_path / "dataset.jsonl").open("w", encoding="utf-8") as file:
-        for row in rows:
-            file.write(json.dumps(row, ensure_ascii=False) + "\n")
+    replace_dataset(rows, setup[1].engine)
     monkeypatch.setattr(dataset_module, "EVAL_DIR", tmp_path)
     monkeypatch.setattr(retrieval_module, "EVAL_DIR", tmp_path)
     monkeypatch.setattr(results_module, "RESULTS_DIR", tmp_path / "results")
@@ -181,9 +178,6 @@ def test_eval_dataset_ai_generation(setup, eval_dir):
     reviewed = client.post(f"/eval/dataset/items/{item['id']}/review", headers=headers())
     assert reviewed.status_code == 200 and reviewed.json()["reviewed"] is True
     assert item["id"] in [candidate["id"] for candidate in select_split(load_dataset(), "dev")]
-    # 截断题要按分片实际的 token 数挑证据，不能用 AI 生成。
-    refused = client.post("/eval/dataset/generate", headers=headers(), json={"count": 1, "type": "截断"})
-    assert refused.status_code == 422 and "截断" in refused.json()["detail"]
 
 
 # AI 同义改写允许模型把单条证据返回为字符串，并自动落盘为共享题对的两条独立题目。

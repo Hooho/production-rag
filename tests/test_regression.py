@@ -25,7 +25,7 @@ def run_count(store):
         return connection.execute(select(func.count()).select_from(runs)).scalar()
 
 
-# 回归集只允许管理员访问；名字不能重复；从巡检问题加入时预填问法、提问人、期望结果和期望文档。
+# 巡检复测集只允许管理员访问；名字不能重复；从巡检问题加入时预填问法、提问人、期望结果和期望文档。
 def test_regression_set_from_inspection_issue(setup, monkeypatch):
     client, store = setup
     document_id = upload(client)

@@ -92,19 +92,22 @@ def test_memory_settings_rebuild(setup):
     assert (agent.memory.trigger_tokens, agent.memory.keep_messages) == (4000, 8)
 
 
-# 多轮对话评测：参数组合每组只改一个因素；演示模式下按顺序问完一段对话，不写 runs 表；接口要求真实大模型。
+# 多轮对话（现在是一个专项评测集）：参数组合每组只改一个因素；演示模式下按顺序问完一段对话，不写 runs 表；
+# 发起评测要求真实大模型。
 def test_memory_eval_dialogue(setup):
     from sqlalchemy import func, select
-    from app.evaluation.memory import load_dialogues, memory_variants, run_dialogue
+    from app.evaluation.memory import memory_variants, run_dialogue
     from app.mysql.store import runs
     client, store = setup
     variants = memory_variants({"memory_trigger_tokens": 2400, "memory_keep_messages": 6})
     assert [(variant["trigger"], variant["keep"]) for variant in variants] == [(2400, 6), (1200, 6), (4800, 6), (2400, 2), (2400, 10)]
-    assert len(load_dialogues()) >= 3
     dialogue = {"id": "t1", "turns": ["退货期限是多久"], "question": "那运费呢"}
     outcome = run_dialogue(store, client.app.state.models, "test", variants[0], dialogue)
     assert outcome["route"] == "knowledge" and outcome["summarized"] is False
     with store.engine.connect() as connection:
         assert connection.execute(select(func.count()).select_from(runs)).scalar() == 0
-    response = client.post("/eval/runs", headers=admin(), json={"kind": "memory"})
+    suites = client.get("/eval/suites", headers=admin()).json()["items"]
+    dialogue_suite = next(suite for suite in suites if suite["method"] == "dialogue")
+    assert dialogue_suite["item_count"] >= 3
+    response = client.post("/eval/runs", headers=admin(), json={"kind": "special", "suite_ids": [dialogue_suite["id"]]})
     assert response.status_code == 422 and "真实大模型" in response.json()["detail"]

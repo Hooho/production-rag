@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 NEW_TABLES = {"users", "user_groups", "user_group_members", "refresh_tokens", "document_permissions", "document_shares",
     "products", "customers", "inventory", "shipments", "after_sales", "promotions", "reviews",
     "data_permissions", "data_audit", "inspection_runs", "inspection_issues", "inspection_issue_events",
-    "eval_sets", "eval_set_items", "eval_set_runs"}
+    "eval_sets", "eval_set_items", "eval_set_runs", "eval_items", "eval_suites", "eval_suite_items"}
 
 
 # 指向临时 SQLite 库的 Alembic 配置。

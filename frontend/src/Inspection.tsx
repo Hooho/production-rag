@@ -508,7 +508,7 @@ function IssueDetail({ issueId, signals, onChanged, onToast }: { issueId: string
       <textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={2000} rows={2} placeholder="处理备注：补了哪份文档、改了什么配置（可选）" />
       <div className="inspection-action-buttons">
         <button type="button" className="secondary-button" disabled={busy || note === (issue.note ?? "")} onClick={() => void save()}>保存备注</button>
-        {issue.kind !== "parse_quality" && <button type="button" className="secondary-button" disabled={busy} onClick={() => setPicking(picking === "eval" ? null : "eval")} title="把这个问题的提问加入回归集，以后改动后用它检查还能不能答对">加入评测集</button>}
+        {issue.kind !== "parse_quality" && <button type="button" className="secondary-button" disabled={busy} onClick={() => setPicking(picking === "eval" ? null : "eval")} title="把这个问题的提问加入巡检复测集，以后改动后用它检查还能不能答对">加入巡检复测集</button>}
         {issue.status !== "open" && <button type="button" className="secondary-button" disabled={busy} onClick={() => void save("open")}>重新打开</button>}
         {issue.status !== "ignored" && <button type="button" className="secondary-button" disabled={busy} onClick={() => { setCloseReason(issue.suggested_close_reason); setPicking(picking === "ignored" ? null : "ignored"); }}>无需处理</button>}
         {issue.status !== "handled" && issue.status !== "resolved" && <button type="button" className="primary-button" disabled={busy} onClick={() => { setFixType(issue.suggested_fix_type); setPicking(picking === "handled" ? null : "handled"); }}>标记已处理</button>}
@@ -634,24 +634,24 @@ function EvalSetPicker({ issueId, onToast, onDone }: { issueId: string; onToast:
   }
 
   return <div className="inspection-close inspection-eval">
-    <div className="inspection-close-title">加入评测集</div>
+    <div className="inspection-close-title">加入巡检复测集</div>
     <p className="inspection-hint">{data.hint}</p>
     <div className="inspection-eval-row">
-      <span className="inspection-eval-label">评测集</span>
+      <span className="inspection-eval-label">复测集</span>
       <select value={setId} onChange={(event) => setSetId(event.target.value)}>
         {sets.map((item) => <option key={item.id} value={item.id}>{item.name}（{item.item_count} 题）</option>)}
-        <option value="new">新建评测集…</option>
+        <option value="new">新建复测集…</option>
       </select>
-      {setId === "new" && <input value={name} maxLength={100} onChange={(event) => setName(event.target.value)} placeholder="评测集名字" />}
+      {setId === "new" && <input value={name} maxLength={100} onChange={(event) => setName(event.target.value)} placeholder="复测集名字" />}
     </div>
     <div className="inspection-eval-row is-top">
       <span className="inspection-eval-label">问题</span>
       <div className="inspection-eval-checks">
         {data.candidates.length === 0 && <span className="inspection-hint">这个问题没有可以加入的提问记录。</span>}
-        {data.candidates.length > 0 && data.candidates.every((_, index) => inSet(index)) && <span className="inspection-eval-done">这些问题都已经在「{targetName}」里了，可以换一个评测集，或者到回归集页签里编辑题目。</span>}
+        {data.candidates.length > 0 && data.candidates.every((_, index) => inSet(index)) && <span className="inspection-eval-done">这些问题都已经在「{targetName}」里了，可以换一个复测集，或者到「巡检复测集」页签里编辑题目。</span>}
         {data.candidates.map((item, index) => <label key={index} className={`inspection-eval-check ${inSet(index) ? "is-disabled" : ""}`}>
           <input type="checkbox" disabled={inSet(index)} checked={chosen.includes(index) && !inSet(index)} onChange={() => setChosen(chosen.includes(index) ? chosen.filter((value) => value !== index) : [...chosen, index])} />
-          <span>{item.question}<em>提问人 {item.asker}{item.question !== item.original && ` · 原话：${item.original}`}{inSet(index) && " · 已在这个评测集里"}</em></span>
+          <span>{item.question}<em>提问人 {item.asker}{item.question !== item.original && ` · 原话：${item.original}`}{inSet(index) && " · 已在这个复测集里"}</em></span>
         </label>)}
       </div>
     </div>

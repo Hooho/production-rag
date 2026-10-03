@@ -27,11 +27,10 @@ from ..business.service import (DataError, can_pick, create_batch, create_record
     permission_matrix, ref_options, require, save_permission, update_record, user_permissions)
 from ..auth import (authenticate, check_groups, create_user, decode_access_token, hash_password, issue_tokens,
     load_user, revoke_refresh_token, revoke_user_tokens, rotate_refresh_token, seed_users, set_user_groups)
-from ..evaluation.dataset import GENERATED_TYPES, QUESTION_TYPES, append_items, corpus_files, corpus_text, generate_items, load_dataset, mark_reviewed, next_item_id, next_pair_id, select_split, validate_dataset
+from ..evaluation.dataset import QUESTION_TYPES, append_items, corpus_files, corpus_text, generate_items, load_dataset, mark_reviewed, next_item_id, next_pair_id, seed_eval_data, select_split, validate_dataset
 from ..evaluation.results import compare_runs, delete_run, execute_run, list_runs, load_run, previous_run, start_run
 from ..evaluation.retrieval import SUITES, VARIANTS
-from ..evaluation import regression
-from ..evaluation.memory import load_dialogues
+from ..evaluation import regression, suites as special_suites
 from .. import runtime_config
 from ..inspection.diagnosis import CATEGORIES as DIAGNOSIS_CATEGORIES
 from ..inspection.schedule import load_schedule, save_schedule, schedule_view
@@ -63,9 +62,13 @@ class ChatInput(BaseModel):
 # 界面发起评测的参数：评测类型、题目范围和检索实验组（消融、参数对比）。
 class EvalRunInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: str = Field("retrieval", pattern="^(retrieval|generation|memory)$")
+    # retrieval / generation 是调参评测（按 split 选开发集或留出集）；special 是专项评测（按 suite_ids 选专项）。
+    kind: str = Field("retrieval", pattern="^(retrieval|generation|special)$")
     split: str = Field("dev", pattern="^(dev|holdout|all)$")
     suites: list[str] = Field(default_factory=list, max_length=len(SUITES))
+    suite_ids: list[str] = Field(default_factory=list, max_length=50)
+    # 多轮对话专项是否把记忆参数换成几组各跑一遍（默认只用当前设置）。
+    compare_memory: bool = False
 
 
 # 手动录入一道评测题；编号、来源和审核状态由服务端统一生成，避免客户端伪造元数据。
@@ -105,14 +108,31 @@ class RuntimeSettingsInput(BaseModel):
     changes: dict[str, bool | int | float | str | None] = Field(max_length=50)
 
 
-# 线上回归集：新建或修改评测集。
+# 巡检复测集：新建或修改评测集。
+# 专项评测集：名称、说明、评测方式（retrieval / answer / dialogue）。
+class EvalSuiteInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(..., max_length=64)
+    description: str | None = Field(None, max_length=500)
+    method: str = Field(..., pattern="^(retrieval|answer|dialogue)$")
+
+
+# 专项的一道题，字段随评测方式不同：检索要问题和证据，回答再加参考答案，多轮对话是前面几轮提问 + 最后一问 + 参考答案。
+class EvalSuiteItemInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    question: str = Field(..., max_length=500)
+    evidence: list[str] = Field(default_factory=list, max_length=10)
+    reference_answer: str | None = Field(None, max_length=2000)
+    turns: list[str] = Field(default_factory=list, max_length=20)
+
+
 class EvalSetInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str | None = Field(None, max_length=100)
     description: str | None = Field(None, max_length=500)
 
 
-# 回归集的一道题：提问人、期望结果（answer / refuse）、期望命中的文档 doc_key；issue_id 表示来自哪个巡检问题。
+# 巡检复测集的一道题：提问人、期望结果（answer / refuse）、期望命中的文档 doc_key；issue_id 表示来自哪个巡检问题。
 class EvalSetItemInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     question: str = Field(min_length=1, max_length=2000)
@@ -368,6 +388,8 @@ def create_app(store=None, models=None, jwt_secret=None):
         # 测试传入的存储不经过 Storage.__init__，这里再绑定一次系统参数的数据库。
         runtime_config.bind(app.state.store.engine)
         seed_users(app.state.store.engine)
+        # 评测题目存数据库：第一次启动时从 eval/seed 导入初始的调参题和专项。
+        seed_eval_data(app.state.store.engine)
         # 设置页保存过模型配置时优先使用它，必须在创建 Agent 之前应用，回答 Agent 才会绑定到这个模型。
         saved_llm = app.state.store.load_llm_settings()
         if saved_llm:
@@ -381,7 +403,7 @@ def create_app(store=None, models=None, jwt_secret=None):
         app.state.eval_running = None
         # 页面发起的巡检在后台线程执行；保存线程便于测试等待它完成。
         app.state.inspection_thread = None
-        # 回归集的运行同样在后台线程执行；重启前没跑完的记录标记为中断。
+        # 巡检复测集的运行同样在后台线程执行；重启前没跑完的记录标记为中断。
         app.state.regression_threads = {}
         try:
             regression.interrupt_running(app.state.store)
@@ -1237,7 +1259,7 @@ def create_app(store=None, models=None, jwt_secret=None):
             corpus.append(path.stem)
         items = load_dataset()
         reviewed_count = len(select_split(items, "all"))
-        return {"items": items, "types": QUESTION_TYPES, "generated_types": GENERATED_TYPES, "corpus": corpus,
+        return {"items": items, "types": QUESTION_TYPES, "corpus": corpus,
             "reviewed_count": reviewed_count, "pending_count": len(items) - reviewed_count}
 
     # 手动新增评测题：先验证题型、证据和语料一致性，再追加到项目评测集。
@@ -1295,10 +1317,9 @@ def create_app(store=None, models=None, jwt_secret=None):
     @app.post("/eval/dataset/items/{item_id}/review", dependencies=[Depends(require_admin)])
     def review_eval_dataset_item(item_id: str, owner=Depends(identity)):
         with app.state.eval_dataset_lock:
-            items = load_dataset()
-            if not any(item.get("id") == item_id for item in items):
-                raise HTTPException(404, "评测题目不存在")
-            item = mark_reviewed(items, item_id)
+            item = mark_reviewed(item_id)
+        if item is None:
+            raise HTTPException(404, "评测题目不存在")
         return item
 
     # AI 起草评测题：只允许真实大模型，生成后立即做同样的证据校验并标记为待人工审核。
@@ -1308,8 +1329,6 @@ def create_app(store=None, models=None, jwt_secret=None):
             raise HTTPException(422, "AI 生成题目需要真实大模型：请设置 MODEL_MODE=openai 和 LLM_API_KEY")
         if body.type and body.type not in QUESTION_TYPES:
             raise HTTPException(422, f"未知题型：{body.type}")
-        if body.type and body.type not in GENERATED_TYPES:
-            raise HTTPException(422, "截断题要按分片实际的 token 数挑证据，不能用 AI 生成，请手动添加")
         with app.state.eval_dataset_lock:
             existing = load_dataset()
             try:
@@ -1350,7 +1369,12 @@ def create_app(store=None, models=None, jwt_secret=None):
             raise HTTPException(404, "评测不存在")
         if run["status"] == "running" and run["id"] != app.state.eval_running:
             run["status"] = "interrupted"
-        base = previous_run(run, list_runs())
+        runs = list_runs()
+        if run.get("kind") == "special":
+            special_suites.attach_previous(run, runs)
+            run["previous_id"] = None
+            return run
+        base = previous_run(run, runs)
         run["previous_id"] = base["id"] if base else None
         return run
 
@@ -1385,20 +1409,32 @@ def create_app(store=None, models=None, jwt_secret=None):
         for suite in body.suites:
             if suite not in SUITES:
                 raise HTTPException(422, f"未知实验组：{suite}")
-        if body.kind in ("generation", "memory") and app.state.models.mode != "openai":
-            raise HTTPException(422, "生成评测和多轮对话评测需要真实大模型：请设置 MODEL_MODE=openai 和 LLM_API_KEY")
-        if body.kind in ("generation", "memory") and body.suites:
-            raise HTTPException(422, "生成评测和多轮对话评测只运行基线，消融实验和参数对比请切换为检索评测")
-        # 启动前检查审核后的题目，避免所有题目都在待审核时创建一个必然失败的空评测。
-        if body.kind == "memory":
-            if not [dialogue for dialogue in load_dialogues() if dialogue.get("reviewed", True)]:
-                raise HTTPException(422, "eval/dialogues.jsonl 里没有已审核的多轮对话题")
-        elif not select_split(load_dataset(), body.split):
-            raise HTTPException(422, "当前题目范围没有已审核题目，请先审核评测题")
+        special = None
+        if body.kind == "special":
+            # 专项评测：每个专项按自己的评测方式跑；回答和多轮对话要生成和评审，需要真实大模型。
+            try:
+                loaded = special_suites.load_for_run(app.state.store.engine, body.suite_ids)
+            except ValueError as error:
+                raise HTTPException(422, str(error))
+            needs_llm = [suite["name"] for suite in loaded if suite["method"] in special_suites.LLM_METHODS]
+            if needs_llm and app.state.models.mode != "openai":
+                raise HTTPException(422, f"「{'」「'.join(needs_llm)}」需要真实大模型：请设置 MODEL_MODE=openai 和 LLM_API_KEY")
+            special = {"suites": [{"id": suite["id"], "name": suite["name"]} for suite in loaded],
+                "compare_memory": body.compare_memory}
+            needs_responder = any(suite["method"] == "answer" for suite in loaded)
+        else:
+            needs_responder = body.kind == "generation"
+            if body.kind == "generation" and app.state.models.mode != "openai":
+                raise HTTPException(422, "生成评测需要真实大模型：请设置 MODEL_MODE=openai 和 LLM_API_KEY")
+            if body.kind == "generation" and body.suites:
+                raise HTTPException(422, "生成评测只运行基线，消融实验和参数对比请切换为检索评测")
+            # 启动前检查审核后的题目，避免所有题目都在待审核时创建一个必然失败的空评测。
+            if not select_split(load_dataset(), body.split):
+                raise HTTPException(422, "当前题目范围没有已审核题目，请先审核评测题")
         if not app.state.eval_lock.acquire(blocking=False):
             raise HTTPException(409, "已有评测正在运行，请等待完成")
         try:
-            run = start_run(body.kind, body.split, body.suites)
+            run = start_run(body.kind, None if special else body.split, body.suites, special)
         except Exception:
             app.state.eval_lock.release()
             raise
@@ -1407,10 +1443,10 @@ def create_app(store=None, models=None, jwt_secret=None):
         def work():
             responder = None
             try:
-                if body.kind == "generation":
+                if needs_responder:
                     # 生成评测只验证回答质量，不应把评测题写进线上会话的持久化记忆，回答 Agent 用进程内记忆。
                     responder = ResponseAgent(app.state.models, use_postgres=False)
-                execute_run(app.state.store, app.state.models, load_dataset(), run,
+                execute_run(app.state.store, app.state.models, [] if special else load_dataset(), run,
                     generate=body.kind == "generation", responder=responder)
             except Exception:
                 logger.exception("eval_run_failed run_id=%s", run["id"])
@@ -1423,7 +1459,68 @@ def create_app(store=None, models=None, jwt_secret=None):
         Thread(target=work, daemon=True).start()
         return {"id": run["id"], "status": "running"}
 
-    # 线上回归集：题目是真实用户的提问，按提问人的权限在线上知识库里跑，只允许管理员调用。
+    # 专项评测集：管理员自建，每个专项针对一个方向，题目在评测语料上跑，不计入调参分数。
+    def suite_or_404(result):
+        if result is None:
+            raise HTTPException(404, "专项不存在")
+        return result
+
+    @app.get("/eval/suites", dependencies=[Depends(require_admin)])
+    def eval_suites_list():
+        return special_suites.list_suites(app.state.store.engine)
+
+    @app.post("/eval/suites", status_code=201)
+    def eval_suite_create(body: EvalSuiteInput, admin=Depends(require_admin)):
+        try:
+            return special_suites.create_suite(app.state.store.engine, body.name, body.description, body.method,
+                admin["username"])
+        except ValueError as error:
+            raise HTTPException(422, str(error))
+
+    @app.get("/eval/suites/{suite_id}", dependencies=[Depends(require_admin)])
+    def eval_suite_get(suite_id: str):
+        return suite_or_404(special_suites.get_suite(app.state.store.engine, suite_id))
+
+    @app.put("/eval/suites/{suite_id}", dependencies=[Depends(require_admin)])
+    def eval_suite_update(suite_id: str, body: EvalSuiteInput):
+        try:
+            return suite_or_404(special_suites.update_suite(app.state.store.engine, suite_id, body.name,
+                body.description, body.method))
+        except ValueError as error:
+            raise HTTPException(422, str(error))
+
+    @app.delete("/eval/suites/{suite_id}", dependencies=[Depends(require_admin)])
+    def eval_suite_delete(suite_id: str):
+        if not special_suites.delete_suite(app.state.store.engine, suite_id):
+            raise HTTPException(404, "专项不存在")
+        return {"id": suite_id, "deleted": True}
+
+    @app.post("/eval/suites/{suite_id}/items", status_code=201)
+    def eval_suite_item_add(suite_id: str, body: EvalSuiteItemInput, admin=Depends(require_admin)):
+        try:
+            return suite_or_404(special_suites.add_item(app.state.store.engine, suite_id, body.model_dump(),
+                admin["username"]))
+        except ValueError as error:
+            raise HTTPException(422, str(error))
+
+    @app.put("/eval/suites/{suite_id}/items/{item_id}", dependencies=[Depends(require_admin)])
+    def eval_suite_item_update(suite_id: str, item_id: str, body: EvalSuiteItemInput):
+        try:
+            result = special_suites.update_item(app.state.store.engine, suite_id, item_id, body.model_dump())
+        except ValueError as error:
+            raise HTTPException(422, str(error))
+        if result is None:
+            raise HTTPException(404, "题目不存在")
+        return result
+
+    @app.delete("/eval/suites/{suite_id}/items/{item_id}", dependencies=[Depends(require_admin)])
+    def eval_suite_item_delete(suite_id: str, item_id: str):
+        result = special_suites.delete_item(app.state.store.engine, suite_id, item_id)
+        if result is None:
+            raise HTTPException(404, "题目不存在")
+        return result
+
+    # 巡检复测集（代码里仍叫 regression / eval_sets）：题目是真实用户的提问，按提问人的权限在线上知识库里跑，只允许管理员调用。
     @app.get("/eval/sets", dependencies=[Depends(require_admin)])
     def eval_sets_list():
         return regression.list_sets(app.state.store)
@@ -1487,7 +1584,7 @@ def create_app(store=None, models=None, jwt_secret=None):
         if not regression.delete_item(app.state.store, set_id, item_id):
             raise HTTPException(404, "题目不存在")
 
-    # 运行回归集：后台线程逐题执行，前端轮询评测集详情里的运行状态。
+    # 运行巡检复测集：后台线程逐题执行，前端轮询评测集详情里的运行状态。
     @app.post("/eval/sets/{set_id}/runs", status_code=202)
     def eval_set_run(set_id: str, body: EvalSetRunInput, admin=Depends(require_admin)):
         try:
@@ -1598,7 +1695,7 @@ def create_app(store=None, models=None, jwt_secret=None):
             raise HTTPException(404, "记录不存在")
         return entry
 
-    # 把巡检问题加入回归集前的预填内容：几种问法、提问人、期望结果和期望命中的文档。
+    # 把巡检问题加入巡检复测集前的预填内容：几种问法、提问人、期望结果和期望命中的文档。
     @app.get("/inspection/issues/{issue_id}/eval-candidates", dependencies=[Depends(require_admin)])
     def inspection_issue_eval_candidates(issue_id: str):
         result = regression.issue_candidates(app.state.store, issue_id)

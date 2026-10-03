@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import os
 import re
@@ -48,9 +48,15 @@ def git_commit():
 
 
 # 生成一次评测的编号；提交号里只保留字母数字和连字符，保证能安全地作为文件名。
+# 编号精确到秒，同一秒里发起两次（测试里很常见）会撞号、后一次覆盖前一次；撞号时往后顺延一秒，保持按时间排序。
 def new_run_id(commit):
     safe_commit = re.sub(r"[^0-9A-Za-z-]", "", commit) or "unknown"
-    return datetime.now().strftime("%Y%m%d-%H%M%S") + "_" + safe_commit
+    moment = datetime.now()
+    while True:
+        run_id = moment.strftime("%Y%m%d-%H%M%S") + "_" + safe_commit
+        if not (RESULTS_DIR / f"{run_id}.json").exists():
+            return run_id
+        moment += timedelta(seconds=1)
 
 
 # 当前 UTC 时间，统一用 ISO 格式保存。
@@ -239,13 +245,36 @@ def compare_runs(base, target):
 
 
 # 新建一次评测记录并立即保存为 running，前端马上就能在列表里看到它和进度。
-def start_run(kind, split, suites):
+def start_run(kind, split, suites, special=None):
     commit = git_commit()
+    config = {"split": split, "suites": list(suites)}
+    # 专项评测：要跑的专项（编号和名称）以及多轮对话是否对比记忆参数。
+    if special is not None:
+        config["special"] = special
     run = {"id": new_run_id(commit), "kind": kind, "status": "running", "created": now(), "finished": None,
-        "commit": commit, "config": {"split": split, "suites": list(suites)}, "summary": None,
+        "commit": commit, "config": config, "summary": None,
         "progress": {"done": 0, "total": 0}, "error": None}
     save_run(run)
     return run
+
+
+# 生成评测和线上一样先做检索充分性判断（可能补充检索或拒答），再生成回答；
+# 检索指标仍按第一次检索计算，判断结论和最终来源数单独记在 sufficiency 里，便于看它挡掉了哪些题。
+# 返回给 run_retrieval 的逐题回调，专项评测集的「回答」方式也用它。
+def answer_hook(store, models, responder, run_id):
+    def on_item(item, row, retrieval):
+        check = DocumentSearchTool().check_sufficiency(store, models, EVAL_OWNER, row["queries"],
+            row["rerank_query"], retrieval)
+        coverage = {"verdict": check["verdict"], "missing": check["missing"]} if check["checked"] else None
+        sources = check["sources"]
+        answer = answer_question(models, responder, run_id, item, row["rerank_query"], sources, coverage)
+        row["answer"] = answer
+        row["cited"] = cited_ids(answer)
+        row["sufficiency"] = {"checked": check["checked"], "verdict": check["verdict"],
+            "missing": check["missing"], "retried": check["retried"], "retry_query": check["retry_query"], "retry_used": check.get("retry_used", False),
+            "refused": check["refused"], "source_count": len(sources)}
+        row["judgement"] = judge_answer(models, item, answer, sources)
+    return on_item
 
 
 # 执行一次评测并把结果写回同一个文件。generate=True 时在检索之后继续生成回答并请大模型评审。
@@ -261,28 +290,13 @@ def execute_run(store, models, items, run, generate=False, responder=None):
             last_saved[0] = current
             save_run(run)
 
-    # 生成评测和线上一样先做检索充分性判断（可能补充检索或拒答），再生成回答；
-    # 检索指标仍按第一次检索计算，判断结论和最终来源数单独记在 sufficiency 里，便于看它挡掉了哪些题。
-    def on_item(item, row, retrieval):
-        if not generate:
-            return
-        check = DocumentSearchTool().check_sufficiency(store, models, EVAL_OWNER, row["queries"],
-            row["rerank_query"], retrieval)
-        coverage = {"verdict": check["verdict"], "missing": check["missing"]} if check["checked"] else None
-        sources = check["sources"]
-        answer = answer_question(models, responder, run["id"], item, row["rerank_query"], sources, coverage)
-        row["answer"] = answer
-        row["cited"] = cited_ids(answer)
-        row["sufficiency"] = {"checked": check["checked"], "verdict": check["verdict"],
-            "missing": check["missing"], "retried": check["retried"], "retry_query": check["retry_query"], "retry_used": check.get("retry_used", False),
-            "refused": check["refused"], "source_count": len(sources)}
-        row["judgement"] = judge_answer(models, item, answer, sources)
+    on_item = answer_hook(store, models, responder, run["id"]) if generate else None
 
     try:
-        # 多轮对话评测不按题检索打分，单独执行（见 app/evaluation/memory.py）。
-        if run["kind"] == "memory":
-            from .memory import run_memory
-            run_memory(store, models, run, on_progress)
+        # 专项评测：每个专项按自己的评测方式跑，结果分开（见 app/evaluation/suites.py）。
+        if run["kind"] == "special":
+            from .suites import run_special
+            run_special(store, models, run, on_progress, responder)
             run["status"] = "completed"
             return run
         split = run["config"]["split"]
