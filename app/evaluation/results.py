@@ -242,7 +242,7 @@ def start_run(kind, split, suites):
 
 # 执行一次评测并把结果写回同一个文件。generate=True 时在检索之后继续生成回答并请大模型评审。
 # 任何异常都记录到结果里再抛出，避免界面上永远显示"运行中"。
-def execute_run(store, models, items, run, generate=False, memory=None):
+def execute_run(store, models, items, run, generate=False, responder=None):
     last_saved = [0.0]
 
     # 进度最多每秒写一次文件，逐题写入会让慢速磁盘上的评测明显变慢。
@@ -262,7 +262,7 @@ def execute_run(store, models, items, run, generate=False, memory=None):
             row["rerank_query"], retrieval)
         coverage = {"verdict": check["verdict"], "missing": check["missing"]} if check["checked"] else None
         sources = check["sources"]
-        answer = answer_question(models, memory, run["id"], item, row["rerank_query"], sources, coverage)
+        answer = answer_question(models, responder, run["id"], item, row["rerank_query"], sources, coverage)
         row["answer"] = answer
         row["cited"] = cited_ids(answer)
         row["sufficiency"] = {"checked": check["checked"], "verdict": check["verdict"],

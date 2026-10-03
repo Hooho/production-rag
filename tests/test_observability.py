@@ -1,7 +1,7 @@
 from langchain_core.messages import AIMessage
 from sqlalchemy import select
 
-from app.memory.framework import PROMPT_VERSION, FrameworkMemory
+from app.agent.response import PROMPT_VERSION, ResponseAgent
 from app.models import Models
 from app.mysql.store import feedback, run_errors, runs
 from app.observability import run_columns, summarize_run
@@ -147,8 +147,8 @@ def test_feedback_validation_and_owner_boundary(setup):
 # LangChain 的 usage_metadata 转成统一字段；模型没返回用量时为 None。
 def test_token_usage_is_normalized():
     message = AIMessage(content="答", usage_metadata={"input_tokens": 120, "output_tokens": 30, "total_tokens": 150})
-    assert FrameworkMemory.token_usage(message) == {"input": 120, "output": 30, "total": 150}
-    assert FrameworkMemory.token_usage(AIMessage(content="答")) is None
+    assert ResponseAgent.token_usage(message) == {"input": 120, "output": 30, "total": 150}
+    assert ResponseAgent.token_usage(AIMessage(content="答")) is None
 
 
 # 结果缺少阶段记录时摘要仍能生成，不抛异常。

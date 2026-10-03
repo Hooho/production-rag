@@ -13,7 +13,7 @@ from sqlalchemy.pool import StaticPool
 from app.main import create_app
 from app.models import Models
 from app.agent.service import Agent
-from app.memory.framework import FrameworkMemory
+from app.agent.response import ResponseAgent
 from app.security import BLOCKED_ANSWER, REDACTED
 from app.auth import create_access_token, create_user
 from app.memory.service import Memory
@@ -551,7 +551,7 @@ def test_model_query_analysis_is_strict(monkeypatch):
     assert result["queries"] == ["退货期限", "退货时间"]
 
 
-def test_framework_memory_uses_checkpointer_and_summarization(monkeypatch):
+def test_response_agent_uses_checkpointer_and_summarization(monkeypatch):
     monkeypatch.setenv("MODEL_MODE", "demo")
     monkeypatch.setenv("MEMORY_TRIGGER_TOKENS", "1")
     monkeypatch.setenv("MEMORY_KEEP_MESSAGES", "2")
@@ -560,31 +560,31 @@ def test_framework_memory_uses_checkpointer_and_summarization(monkeypatch):
     models.chat_model = FakeListChatModel(responses=[
         "第一轮回答 [S1]", "用户持续询问退货政策。", "第二轮回答 [S1]",
     ])
-    memory = FrameworkMemory(models)
+    responder = ResponseAgent(models)
     sources = [{"id": "S1", "title": "售后政策", "text": "退货期限为七天。"}]
-    first_answer, _ = memory.answer("alice", "session-1", "退货期限？", sources)
-    second_answer, second_memory = memory.answer("alice", "session-1", "需要什么材料？", sources)
+    first_answer, _ = responder.answer("alice", "session-1", "退货期限？", sources)
+    second_answer, second_memory = responder.answer("alice", "session-1", "需要什么材料？", sources)
     assert first_answer == "第一轮回答 [S1]"
     assert second_answer == "第二轮回答 [S1]"
     assert second_memory["summary_updated"] is True
     assert second_memory["summary"] == "用户持续询问退货政策。"
-    assert memory.inspect("alice", "session-1")["message_count"] >= 3
-    memory.close()
+    assert responder.memory.inspect("alice", "session-1")["message_count"] >= 3
+    responder.close()
 
 
-def test_framework_memory_streams_answer_tokens(monkeypatch):
+def test_response_agent_streams_answer_tokens(monkeypatch):
     monkeypatch.setenv("MODEL_MODE", "demo")
     monkeypatch.delenv("LANGGRAPH_DATABASE_URL", raising=False)
     models = Models()
     models.chat_model = FakeListChatModel(responses=["退货期限是七天 [S1]"])
-    memory = FrameworkMemory(models)
+    responder = ResponseAgent(models)
     sources = [{"id": "S1", "title": "售后政策", "text": "退货期限为七天。"}]
     tokens = []
-    answer, _ = memory.answer("alice", "session-1", "退货期限？", sources, on_token=tokens.append)
+    answer, _ = responder.answer("alice", "session-1", "退货期限？", sources, on_token=tokens.append)
     assert answer == "退货期限是七天 [S1]"
     assert len(tokens) > 1
     assert "".join(tokens) == answer
-    memory.close()
+    responder.close()
 
 
 def test_rule_classifier_runs_before_local_and_llm(monkeypatch):
@@ -1578,13 +1578,13 @@ def test_partial_coverage_reaches_answer_prompt(monkeypatch):
 
     models = Models()
     models.chat_model = RecordingModel(responses=["营收 100 亿 [S1]，利润资料中没有。", "营收 100 亿 [S1]。"])
-    memory = FrameworkMemory(models)
+    responder = ResponseAgent(models)
     sources = [{"id": "S1", "title": "财报", "text": "营收 100 亿。"}]
-    memory.answer("alice", "s1", "营收和利润？", sources, coverage={"verdict": "partial", "missing": "利润数据"})
+    responder.answer("alice", "s1", "营收和利润？", sources, coverage={"verdict": "partial", "missing": "利润数据"})
     assert "缺少：利润数据" in prompts[-1]
-    memory.answer("alice", "s2", "营收？", sources, coverage={"verdict": "sufficient", "missing": ""})
+    responder.answer("alice", "s2", "营收？", sources, coverage={"verdict": "sufficient", "missing": ""})
     assert "缺少" not in prompts[-1]
-    memory.close()
+    responder.close()
 
 
 # 问答链路中判断资料不足时清空来源并拒答，拒答文本不再被引用校验替换；处理阶段里能看到判断结论。

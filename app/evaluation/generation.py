@@ -4,7 +4,7 @@ import re
 from langchain_core.prompts import ChatPromptTemplate
 
 
-# 回答阶段的两句固定拒答文本：来源为空时由 FrameworkMemory 直接返回，引用校验失败时由 Models 替换。
+# 回答阶段的两句固定拒答文本：来源为空时由回答 Agent（ResponseAgent）直接返回，引用校验失败时由 Models 替换。
 # 这两种情况不需要评审模型判断，确定就是拒答。
 FIXED_REFUSALS = ("知识库中没有足够资料", "模型没有返回可校验的引用")
 
@@ -25,9 +25,9 @@ JUDGE_SYSTEM = (
 # 每道题使用独立的会话线程，避免上一题的对话记忆影响下一题；多轮追问题用补全后的完整问题提问，
 # 因为评测时没有真实的上一轮对话可供回答模型理解"它""那么"指的是什么。
 # coverage 是检索充分性判断的结论，和线上一样传给回答模型。
-def answer_question(models, memory, run_id, item, standalone_query, sources, coverage=None):
+def answer_question(models, responder, run_id, item, standalone_query, sources, coverage=None):
     session_id = f"{run_id}:{item['id']}"
-    answer, _ = memory.answer("eval", session_id, standalone_query, sources, coverage=coverage)
+    answer, _ = responder.answer("eval", session_id, standalone_query, sources, coverage=coverage)
     # 与线上一致：没有来源时是固定拒答文本，不做引用校验。
     if models.mode == "openai" and sources:
         answer = models.validate_citations(answer, sources)

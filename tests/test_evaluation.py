@@ -368,7 +368,7 @@ def test_generation_run_end_to_end(setup, eval_dir, monkeypatch):
     # 该测试验证生成链路和评审调用次数，不验证生产阈值；显式使用较低阈值保证两道可回答题都进入评审。
     monkeypatch.setenv("RERANK_MIN_SCORE", "0.3")
 
-    class FakeMemory:
+    class FakeResponder:
         def answer(self, owner, session_id, question, sources, coverage=None):
             assert owner == "eval"
             if not sources:
@@ -379,7 +379,7 @@ def test_generation_run_end_to_end(setup, eval_dir, monkeypatch):
     monkeypatch.setattr(models, "chat_completion", lambda messages, max_tokens: replies.append(1) or json.dumps(
         {"refused": False, "faithfulness": 1, "correctness": 1, "citation": 1}))
     run = start_run("generation", "dev", [])
-    run = execute_run(store, models, dataset_module.load_dataset(), run, generate=True, memory=FakeMemory())
+    run = execute_run(store, models, dataset_module.load_dataset(), run, generate=True, responder=FakeResponder())
     assert run["kind"] == "generation" and run["status"] == "completed"
     answered = run["questions"][0]
     assert answered["answer"].startswith("根据资料") and answered["cited"] == ["S1"]

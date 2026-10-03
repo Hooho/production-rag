@@ -5,13 +5,13 @@ from typing import Any, TypedDict
 from langchain_core.tools import StructuredTool
 from langgraph.graph import END, START, StateGraph
 
-from ..memory.framework import PROMPT_MARKERS, PROMPT_VERSION, FrameworkMemory
 from ..memory.service import Memory
 from ..router.router import Router
 from ..security import BLOCKED_ANSWER, OUTPUT_CHECKS, check_answer, detect_injection, injection_rule_catalog
 from ..tools.data_query import DataQueryTool
 from ..tools.orders import OrderTool
 from ..tools.search import DocumentSearchTool
+from .response import PROMPT_MARKERS, PROMPT_VERSION, ResponseAgent
 
 
 class AgentState(TypedDict, total=False):
@@ -45,7 +45,8 @@ class Agent:
     def __init__(self, models=None):
         self.router = Router()
         self.memory = Memory()
-        self.framework_memory = FrameworkMemory(models) if models is not None else None
+        # 回答 Agent 负责生成最终回答；它持有的 FrameworkMemory 只管会话记忆（Checkpointer 和摘要中间件）。
+        self.response_agent = ResponseAgent(models) if models is not None else None
         self.order_tool = OrderTool()
         self.data_tool = DataQueryTool()
         self.search_tool = DocumentSearchTool()
@@ -220,7 +221,7 @@ class Agent:
 
     # 从 MySQL 读取审计历史，并从 LangGraph Checkpointer 读取模型会话状态。
     def read_memory(self, state):
-        framework = self.framework_memory.inspect(state["owner"], state["session_id"])
+        framework = self.response_agent.memory.inspect(state["owner"], state["session_id"])
         history_memory = []
         for item in state["previous"]:
             response = item.get("response") or {}
@@ -228,11 +229,11 @@ class Agent:
                 "question": item.get("question", ""), "answer": response.get("answer", "")})
         result = {"mysql_history_count": len(history_memory), "mysql_history": history_memory,
             "rolling_summary": framework["summary"] or "尚未生成",
-            "checkpoint_backend": self.framework_memory.backend,
+            "checkpoint_backend": self.response_agent.memory.backend,
             "checkpoint_messages": framework["message_count"],
             # 滚动摘要的生成规则：超过多少 Token 压缩、保留几条原文、用哪个模型压缩，前端写在滚动摘要下面。
-            "memory_trigger_tokens": self.framework_memory.trigger_tokens,
-            "memory_keep_messages": self.framework_memory.keep_messages,
+            "memory_trigger_tokens": self.response_agent.memory.trigger_tokens,
+            "memory_keep_messages": self.response_agent.memory.keep_messages,
             "summary_model": state["models"].llm_model,
             **self.no_model_info("MySQL + PostgreSQL Checkpoint + Redis 读取", "读取历史记忆供后续阶段使用")}
         # Redis 短期状态目前只有最近订单号，只和订单追问有关；没有订单时不显示。
@@ -439,13 +440,13 @@ class Agent:
         # 说明直接写出组装了哪三部分、交给谁；以前"按预算组合……"看不出这一步的产出是发给大模型的上下文。
         self.add_step(state, "context", "agent", "组装模型上下文",
             "把【滚动摘要】【最近问答】【检索来源】组装成上下文发给大模型", {
-                "memory_token_budget": self.framework_memory.trigger_tokens,
+                "memory_token_budget": self.response_agent.memory.trigger_tokens,
                 "estimated_memory_tokens": context["estimated_tokens"],
                 "recent_turns": len(context["turns"]),
                 # 最近问答原文（问题 + 答案）的总字数，和摘要字数、来源字数一起看出上下文各块有多大。
                 "recent_characters": sum(len(turn.get("question", "")) + len(turn.get("answer", "")) for turn in context["turns"]),
                 "summary_characters": len(context["summary"]),
-                "keep_messages": self.framework_memory.keep_messages,
+                "keep_messages": self.response_agent.memory.keep_messages,
                 "source_count": len(state["sources"]),
                 "source_characters": source_characters,
                 "memory_managed_by": "SummarizationMiddleware",
@@ -457,7 +458,7 @@ class Agent:
     def generate_response(self, state):
         started = time.monotonic()
         sent_before = len(state["ai_memories"])
-        answer, memory = self.framework_memory.answer(state["owner"], state["session_id"],
+        answer, memory = self.response_agent.answer(state["owner"], state["session_id"],
             state["question"], state["sources"], on_token=state.get("on_token"),
             coverage=state.get("coverage"))
         # 没有来源时回答是固定的拒答文本，本来就没有引用；原来也做引用校验，会把拒答替换成
@@ -477,7 +478,7 @@ class Agent:
             "checkpoint_messages_before": memory["previous_message_count"],
             "checkpoint_messages_sent": memory["message_count"],
             # 前端据此写明"对话历史超过多少 Token 会压缩"和"本轮问题"，让收到的上下文按时间顺序看得懂。
-            "memory_trigger_tokens": self.framework_memory.trigger_tokens,
+            "memory_trigger_tokens": self.response_agent.memory.trigger_tokens,
             "current_question": state["question"],
         }
         sent = state["ai_memories"][sent_before:]
@@ -490,8 +491,8 @@ class Agent:
 
     # 释放 LangGraph PostgreSQL Checkpointer 的连接池。
     def close(self):
-        if self.framework_memory is not None:
-            self.framework_memory.close()
+        if self.response_agent is not None:
+            self.response_agent.close()
 
     # 汇总 LangGraph 本轮运行结果。
     def complete_run(self, state):

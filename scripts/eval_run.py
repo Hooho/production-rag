@@ -1,10 +1,9 @@
 import argparse
-import os
 
 from app.evaluation.dataset import load_dataset
 from app.evaluation.results import compare_runs, execute_run, list_runs, previous_run, start_run
 from app.evaluation.retrieval import VARIANTS, refresh_rewrites
-from app.memory.framework import FrameworkMemory
+from app.agent.response import ResponseAgent
 from app.models import Models
 from app.storage import Storage
 
@@ -42,17 +41,18 @@ def main():
         refresh_rewrites(models, items)
         print("已更新 eval/rewrites.json")
     store = Storage(models)
-    memory = None
+    responder = None
     try:
         if args.generation:
             # 评测的对话线程不写入生产用的 PostgreSQL Checkpointer：每道题一个临时线程，
-            # 写进去只会堆积无用数据，所以这里改用进程内存保存，脚本结束即释放。
-            os.environ.pop("LANGGRAPH_DATABASE_URL", None)
-            memory = FrameworkMemory(models)
+            # 写进去只会堆积无用数据，所以回答 Agent 改用进程内记忆，脚本结束即释放。
+            responder = ResponseAgent(models, use_postgres=False)
         run = start_run("generation" if args.generation else "retrieval", args.split, args.suite)
         print(f"开始评测 {run['id']}")
-        run = execute_run(store, models, items, run, generate=args.generation, memory=memory)
+        run = execute_run(store, models, items, run, generate=args.generation, responder=responder)
     finally:
+        if responder is not None:
+            responder.close()
         store.close()
     print(f"完成：eval/results/{run['id']}.json")
     base = previous_run(run, list_runs())

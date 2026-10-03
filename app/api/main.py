@@ -30,7 +30,7 @@ from ..auth import (authenticate, check_groups, create_user, decode_access_token
 from ..evaluation.dataset import QUESTION_TYPES, append_items, corpus_files, corpus_text, generate_items, load_dataset, mark_reviewed, next_item_id, next_pair_id, select_split, validate_dataset
 from ..evaluation.results import compare_runs, delete_run, execute_run, list_runs, load_run, previous_run, start_run
 from ..evaluation.retrieval import SUITES, VARIANTS
-from ..memory.framework import FrameworkMemory
+from ..agent.response import ResponseAgent
 from ..models import Models
 from ..memory.service import Memory
 from ..mysql.store import (data_permissions, document_heads, document_shares, document_steps, documents, feedback,
@@ -356,7 +356,7 @@ def create_app(store=None, models=None, jwt_secret=None):
     @app.get("/health/ready")
     def ready():
         app.state.store.ready()
-        app.state.agent.framework_memory.ready()
+        app.state.agent.response_agent.memory.ready()
         return {"status": "ready", "model_mode": app.state.models.mode}
 
     # 设置页回显当前生效的聊天模型配置，密钥只返回脱敏值。
@@ -388,7 +388,8 @@ def create_app(store=None, models=None, jwt_secret=None):
             "api_key": resolve_llm_key(body)}
         app.state.store.save_llm_settings(value)
         app.state.models.apply_llm(value)
-        app.state.agent.framework_memory.rebuild()
+        # 回答 Agent 和摘要中间件都绑定了聊天模型，切换模型时一起重建，会话记忆保留。
+        app.state.agent.response_agent.rebuild()
         logger.info("llm_settings_saved owner=%s provider=%s model=%s", owner, body.provider, body.model)
         return llm_settings_view()
 
@@ -1320,18 +1321,18 @@ def create_app(store=None, models=None, jwt_secret=None):
         app.state.eval_running = run["id"]
 
         def work():
-            generation_memory = None
+            responder = None
             try:
                 if body.kind == "generation":
-                    # 生成评测只验证回答质量，不应把评测题写进线上会话的持久化记忆。
-                    generation_memory = FrameworkMemory(app.state.models, use_postgres=False)
+                    # 生成评测只验证回答质量，不应把评测题写进线上会话的持久化记忆，回答 Agent 用进程内记忆。
+                    responder = ResponseAgent(app.state.models, use_postgres=False)
                 execute_run(app.state.store, app.state.models, load_dataset(), run,
-                    generate=body.kind == "generation", memory=generation_memory)
+                    generate=body.kind == "generation", responder=responder)
             except Exception:
                 logger.exception("eval_run_failed run_id=%s", run["id"])
             finally:
-                if generation_memory is not None:
-                    generation_memory.close()
+                if responder is not None:
+                    responder.close()
                 app.state.eval_running = None
                 app.state.eval_lock.release()
 

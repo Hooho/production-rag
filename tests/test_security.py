@@ -1,6 +1,6 @@
 import pytest
 
-from app.memory.framework import ANSWER_RULES, PROMPT_MARKERS, format_source
+from app.agent.response import ANSWER_RULES, PROMPT_MARKERS, format_source
 from app.security import LEAKED_ANSWER, LINK_REMOVED, REDACTED, check_answer, detect_injection, sanitize_source
 from app.storage import filter_literal
 
