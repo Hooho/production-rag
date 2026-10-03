@@ -36,6 +36,8 @@ def main():
         print(f"重新打开：{summary.get('reopened', 0)}，自动解决：{summary.get('auto_resolved', 0)}")
         print(f"拒答分类：重跑了 {summary.get('diagnosed', 0)} 个知识缺口，验证通过 {summary.get('verified', 0)} 个，"
               f"验证未通过重新打开 {summary.get('verification_failed', 0)} 个")
+        print(f"系统问题重新提问验证：{summary.get('system_rechecked', 0)} 个，恢复后自动解决 {summary.get('system_resolved', 0)} 个，"
+              f"仍未恢复 {summary.get('system_failed', 0)} 个")
         print(f"权限保密复查：权限已放开自动解决 {summary.get('recheck_resolved', 0)} 个，"
               f"资料已不在重新打开 {summary.get('recheck_reopened', 0)} 个")
         print(f"当前待处理：{summary.get('total_open', 0)}")

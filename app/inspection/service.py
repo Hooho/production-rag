@@ -224,6 +224,10 @@ class Inspector:
         # 拒答分类要调用检索，检索会自己开数据库连接，不能放在上面的事务里：先提交收集结果，再单独诊断。
         if self.diagnose:
             self.diagnose_gaps()
+            # 系统问题用原问题重问一遍做验证，每次最多几条（设置页可改，0 表示不自动验证）。
+            limit = runtime_snapshot()["system_recheck_limit"]
+            if limit:
+                verify_system_issues(self.store, self.models, self.now, self.stats, limit=limit)
         with self.store.engine.connect() as connection:
             for status, count in connection.execute(select(inspection_issues.c.status, func.count()).group_by(
                     inspection_issues.c.status)).all():
@@ -590,16 +594,93 @@ def diagnose_gap_issues(store, models, now, stats, issue_ids=None, trigger="insp
     return [issue_id for issue_id, _, _ in updates]
 
 
-# 管理员在问题详情里点"重新检索"：只诊断这一个知识缺口，规则和巡检时相同，返回更新后的问题。
+# 系统问题的自动验证：用最近一条关联记录的原问题，以原提问人的身份完整重问一遍（见 app/agent/replay.py）。
+#   处理失败类：这次没有报错就算恢复；
+#   引用被拦截类：回答没有再被拦截才算恢复；
+#   恢复了：待处理的自动标为已解决，已处理的就是验证通过；
+#   没恢复：已处理的重新打开并说明，待处理的保持不变，结果记在 detail.recheck。
+# 巡检时按出现次数从多到少取前 limit 个待处理、已处理的问题；管理员手动验证时传入 issue_ids。
+# 和拒答分类一样分三步：先读出问题和问法，再逐个重问（不占着事务），最后只在状态没变时写回。
+def verify_system_issues(store, models, now, stats, issue_ids=None, limit=None, trigger="inspection", by=None):
+    with store.engine.connect() as connection:
+        query = select(inspection_issues.c.id, inspection_issues.c.status, inspection_issues.c.detail).where(
+            inspection_issues.c.kind == "system_error")
+        if issue_ids is None:
+            query = query.where(inspection_issues.c.status.in_(["open", "handled"])).order_by(
+                inspection_issues.c.occurrences.desc(), inspection_issues.c.last_seen.desc()).limit(limit or 5)
+        else:
+            query = query.where(inspection_issues.c.id.in_(issue_ids))
+        issues = connection.execute(query).mappings().all()
+        plans = []
+        for issue in issues:
+            event = connection.execute(select(inspection_issue_events).where(
+                inspection_issue_events.c.issue_id == issue["id"]).order_by(
+                    inspection_issue_events.c.created.desc()).limit(1)).mappings().first()
+            if event is None:
+                continue
+            if event["source"] == "run":
+                row = connection.execute(select(runs.c.question, runs.c.trace).where(runs.c.id == event["source_id"])).mappings().first()
+                question = (((row["trace"] or {}).get("rewrite") or {}).get("standalone_query") or row["question"]) if row else None
+            else:
+                question = connection.execute(select(run_errors.c.question).where(run_errors.c.id == event["source_id"])).scalar()
+            if question:
+                plans.append((issue, question, event["owner"]))
+    updates = []
+    for issue, question, owner in plans:
+        detail = dict(issue["detail"] or {})
+        citation = bool((detail.get("signals") or {}).get("citation_failure"))
+        recheck = {"at": now, "trigger": trigger, "by": by, "question": question, "owner": owner}
+        try:
+            result = replay_question(store, models, owner, question)
+            rejected = CITATION_FAILURE in (result["answer"] or "") or (result.get("citation") or {}).get("passed") is False
+            passed = not rejected if citation else True
+            recheck.update({"answer": (result["answer"] or "")[:1000], "route": result["route"]})
+            if passed:
+                recheck["message"] = "重新提问后正常回答了" + ("，引用校验通过" if citation else "，没有再报错")
+            else:
+                recheck["message"] = "重新提问后回答仍然因为引用问题被拦截"
+        except Exception as error:
+            passed = False
+            recheck.update({"error": f"{type(error).__name__}: {error}"[:500], "message": "重新提问时仍然出错"})
+        recheck["passed"] = passed
+        detail["recheck"] = recheck
+        values = {"detail": detail, "updated": now}
+        stats["system_rechecked"] += 1
+        if passed and issue["status"] in ("open", "handled"):
+            verified = issue["status"] == "handled"
+            detail["resolution"] = ("验证通过：" if verified else "已恢复：") + f"用原问题「{question}」以 {owner} 的身份重新提问，" + \
+                recheck["message"].replace("重新提问后", "") + "，自动标为已解决。"
+            detail.pop("verification", None)
+            values.update(status="resolved", status_by="system", status_updated=now)
+            stats["system_resolved"] += 1
+        elif not passed and issue["status"] == "handled":
+            detail["verification"] = {"passed": False, "at": now,
+                "message": f"标记已处理后用原问题重新提问，{recheck['message'].replace('重新提问后', '')}，已重新打开。"}
+            values.update(status="open", status_by="system", status_updated=now)
+            stats["system_failed"] += 1
+        elif not passed:
+            stats["system_failed"] += 1
+        updates.append((issue["id"], issue["status"], values))
+    with store.engine.begin() as connection:
+        for issue_id, status, values in updates:
+            connection.execute(inspection_issues.update().where(inspection_issues.c.id == issue_id,
+                inspection_issues.c.status == status).values(**values))
+    return [issue_id for issue_id, _, _ in updates]
+
+
+# 管理员在问题详情里点"重新检索"（知识缺口）或"重新提问验证"（系统问题）：只处理这一个问题，规则和巡检时相同。
 def verify_issue(store, models, issue_id, username):
     with store.engine.connect() as connection:
         kind = connection.execute(select(inspection_issues.c.kind).where(inspection_issues.c.id == issue_id)).scalar()
     if kind is None:
         return None
-    if kind != "knowledge_gap":
-        raise ValueError("目前只有知识缺口支持重新检索")
     stats = Counter()
-    diagnose_gap_issues(store, models, now_text(), stats, issue_ids=[issue_id], trigger="manual", by=username)
+    if kind == "knowledge_gap":
+        diagnose_gap_issues(store, models, now_text(), stats, issue_ids=[issue_id], trigger="manual", by=username)
+    elif kind == "system_error":
+        verify_system_issues(store, models, now_text(), stats, issue_ids=[issue_id], trigger="manual", by=username)
+    else:
+        raise ValueError("可疑内容在文档更新后自动关闭，不需要手动验证")
     issue = get_issue(store, issue_id)
     issue["verify_result"] = dict(stats)
     return issue

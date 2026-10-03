@@ -70,6 +70,8 @@ SPECS = [
         "default": 0.5, "min": 0.1, "max": 0.9},
     {"key": "out_of_scope_score", "group": "inspection", "type": "float", "env": "INSPECTION_OUT_OF_SCOPE_SCORE",
         "default": 0.05, "min": 0.0, "max": 0.3},
+    {"key": "system_recheck_limit", "group": "inspection", "type": "int", "env": "INSPECTION_SYSTEM_RECHECK_LIMIT",
+        "default": 5, "min": 0, "max": 20},
     {"key": "business_tz", "group": "general", "type": "choice", "env": "BUSINESS_TZ", "default": "Asia/Shanghai",
         "choices": TIMEZONES},
     {"key": "embedding_timeout", "group": "general", "type": "int", "env": "EMBEDDING_TIMEOUT_SECONDS", "default": 120,

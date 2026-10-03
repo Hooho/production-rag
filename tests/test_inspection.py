@@ -541,3 +541,33 @@ def test_filter_by_diagnosis(setup, monkeypatch):
     filtered = client.get("/inspection/issues?diagnosis=permission", headers=headers("admin")).json()
     assert [item["title"] for item in filtered["items"]] == ["退货期限是多久"]
     assert client.get("/inspection/issues?diagnosis=nope", headers=headers("admin")).status_code == 422
+
+
+# 系统问题的自动验证：巡检时用原问题重新提问。仍然出错时，已处理的重新打开；恢复后自动标为已解决。
+# 管理员也可以在详情里手动验证；设置页把条数设为 0 时巡检不再自动验证。
+def test_system_error_recheck(setup, monkeypatch):
+    client, store = setup
+    original = DocumentSearchTool.execute
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("milvus timeout")
+    monkeypatch.setattr(DocumentSearchTool, "execute", broken)
+    assert client.post("/chat", headers=headers(), json=question(session(client), "退货政策")).status_code == 503
+    summary = inspect(client, store)
+    error = issues(store, "system_error")[0]
+    assert summary["system_rechecked"] == 1 and summary["system_failed"] == 1
+    assert error["status"] == "open" and error["detail"]["recheck"]["passed"] is False
+    assert "milvus timeout" in error["detail"]["recheck"]["error"]
+    url = f"/inspection/issues/{error['id']}"
+    assert client.patch(url, headers=headers("admin"), json={"status": "handled", "fix_type": "fix_system"}).status_code == 200
+    inspect(client, store)
+    reopened = issues(store, "system_error")[0]
+    assert reopened["status"] == "open" and "仍然出错" in reopened["detail"]["verification"]["message"]
+    # 关掉自动验证后巡检不再重问。
+    assert client.put("/settings/runtime", headers=headers("admin"), json={"changes": {"system_recheck_limit": 0}}).status_code == 200
+    assert "system_rechecked" not in inspect(client, store)
+    # 修好以后手动验证：恢复了，自动标为已解决。
+    monkeypatch.setattr(DocumentSearchTool, "execute", original)
+    verified = client.post(f"{url}/verify", headers=headers("admin")).json()
+    assert verified["status"] == "resolved" and verified["verify_result"]["system_resolved"] == 1
+    assert verified["detail"]["resolution"].startswith("已恢复") and verified["detail"]["recheck"]["by"] == "admin"

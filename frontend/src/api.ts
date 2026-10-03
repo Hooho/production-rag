@@ -716,9 +716,12 @@ export type InspectionIssueDetail = {
   // 标记已处理后验证没通过时的说明。
   verification?: { passed: boolean; at: string; message: string };
   reopened?: { at: string; previous_status: InspectionStatus; new_occurrences: number };
+  // 系统问题最近一次重新提问验证的结果。
+  recheck?: InspectionRecheck;
   // 关联记录上"重新提问"的最近一次结果，键是 "run:编号" 或 "error:编号"。
   replays?: Record<string, InspectionReplay>;
 };
+export type InspectionRecheck = { at: string; trigger: "inspection" | "manual"; by: string | null; question: string; owner: string; passed: boolean; message: string; answer?: string; route?: string; error?: string };
 // 以提问人的身份把问题完整再问一遍的结果；出错时只有 error。
 export type InspectionReplay = {
   at: string;

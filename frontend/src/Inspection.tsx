@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { addEvalSetItems, createEvalSet, getInspectionEvalCandidates, listEvalSets, replayInspectionEvent, verifyInspectionIssue, getInspectionIssue, getInspectionSchedule, listInspectionIssues, saveInspectionSchedule, startInspection, updateInspectionIssue, type EvalCandidates, type EvalSetBrief, type EvalSetExpect, type InspectionCloseReason, type InspectionFixType, type InspectionReplay, type InspectionGapSummary, type InspectionDiagnosis, type InspectionDiagnosisCategory, type InspectionDiagnosisChunk, type InspectionEvent, type InspectionSchedule, type InspectionScheduleView, type InspectionIssue, type InspectionIssueFull, type InspectionIssuePage, type InspectionKind, type InspectionStatus } from "./api";
+import { addEvalSetItems, createEvalSet, getInspectionEvalCandidates, listEvalSets, replayInspectionEvent, verifyInspectionIssue, getInspectionIssue, getInspectionSchedule, listInspectionIssues, saveInspectionSchedule, startInspection, updateInspectionIssue, type EvalCandidates, type EvalSetBrief, type EvalSetExpect, type InspectionCloseReason, type InspectionFixType, type InspectionRecheck, type InspectionReplay, type InspectionGapSummary, type InspectionDiagnosis, type InspectionDiagnosisCategory, type InspectionDiagnosisChunk, type InspectionEvent, type InspectionSchedule, type InspectionScheduleView, type InspectionIssue, type InspectionIssueFull, type InspectionIssuePage, type InspectionKind, type InspectionStatus } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./Inspection.css";
 
@@ -53,7 +53,7 @@ function explain(issue: InspectionIssue): { what: string; todo: string[] } {
   if (detail.signals?.citation_failure) {
     return {
       what: "系统检索到了资料并交给模型（编号为 S1、S2…），要求模型在回答里用编号标明每句话的依据。下面这些回答要么没有引用任何一段资料，要么引用了根本不存在的编号（虚构来源）。为了防止编造，系统拦下了回答，用户只看到一句提示，没有拿到答案。",
-      todo: ["看每条关联记录的具体原因和模型原话：没有引用，多半是模型没遵守格式；引用了不存在的编号，说明模型在编造来源。", "偶尔出现可以标记无需处理（偶发问题）；反复出现时，检查回答模型的提示词，或者在设置页换一个更听指令的模型。"],
+      todo: ["看每条关联记录的具体原因和模型原话：没有引用，多半是模型没遵守格式；引用了不存在的编号，说明模型在编造来源。", "偶尔出现可以标记无需处理（偶发问题）；反复出现时，检查回答模型的提示词，或者在设置页换一个更听指令的模型。", "巡检时会自动用原问题重新提问，回答不再被拦截就自动关闭；也可以点下面的「重新提问验证」。"],
     };
   }
   const error = detail.error ?? "";
@@ -63,7 +63,7 @@ function explain(issue: InspectionIssue): { what: string; todo: string[] } {
     : /auth|401|api key|密钥/i.test(error)
       ? ["这类错误通常是模型密钥无效或过期：在设置页检查模型配置。", "确认恢复后点「标记已处理」。"]
       : ["根据下面的错误信息排查，必要时查看 api 容器日志：docker-compose logs api。", "修复后点「标记已处理」。"];
-  return { what: `用户提问后，系统在「${step}」完成之后的下一步出错，用户只收到了错误提示，没有拿到回答。`, todo };
+  return { what: `用户提问后，系统在「${step}」完成之后的下一步出错，用户只收到了错误提示，没有拿到回答。`, todo: [...todo, "巡检时会自动用原问题重新提问验证，恢复了就自动关闭；修好后也可以马上点下面的「重新提问验证」。"] };
 }
 
 // 显示成本地时间的"月-日 时:分"；年份不同时带上年份。
@@ -419,6 +419,12 @@ function IssueDetail({ issueId, signals, onChanged, onToast }: { issueId: string
       const value = await verifyInspectionIssue(issue.id);
       setIssue(value);
       const result = value.verify_result ?? {};
+      if (issue.kind === "system_error") {
+        if (result.system_resolved) onToast("success", "已恢复：重新提问正常回答了，已自动标为已解决");
+        else onToast("error", value.detail.recheck?.message ? `${value.detail.recheck.message}，问题保持打开` : "重新提问后仍未恢复");
+        onChanged(value);
+        return;
+      }
       if (result.verified || result.auto_resolved) onToast("success", "验证通过：问题现在都能处理了，已自动标为已解决");
       else if (result.verification_failed) onToast("error", "验证未通过：仍有问题没解决，已重新打开");
       else if (result.recheck_resolved) onToast("success", "权限已放开：提问人现在能检索到资料，已自动标为已解决");
@@ -462,6 +468,7 @@ function IssueDetail({ issueId, signals, onChanged, onToast }: { issueId: string
     {issue.status === "open" && detail.reopened && <div className="inspection-notice is-red">{issue.fix_type_label && !detail.verification && `上次处理：${issue.fix_type_label}。`}标记为{detail.reopened.previous_status === "handled" ? "已处理" : "已解决"}之后又出现了 {detail.reopened.new_occurrences} 次，已重新打开（{formatTime(detail.reopened.at)}）。</div>}
 
     {issue.kind === "knowledge_gap" && <DiagnosisDetail diagnosis={detail.diagnosis} verifying={verifying} onVerify={() => void verify()} />}
+    {issue.kind === "system_error" && <SystemRecheck recheck={detail.recheck} verifying={verifying} onVerify={() => void verify()} />}
     {issue.kind === "knowledge_gap" && (detail.missing?.length || detail.comments?.length) ? <div className="inspection-facts">
       {detail.missing?.length ? <Fact label="缺失内容"><ul>{detail.missing.map((item) => <li key={item.text}>{item.text}{item.count > 1 && <span className="inspection-count">×{item.count}</span>}</li>)}</ul></Fact> : null}
       {detail.comments?.length ? <Fact label="用户补充">{<ul>{detail.comments.map((text) => <li key={text}>{text}</li>)}</ul>}</Fact> : null}
@@ -812,6 +819,35 @@ function diagnosisSentence(item: InspectionDiagnosis["questions"][number], limit
     default:
       return item.reason ?? "无法判断。";
   }
+}
+
+// 系统问题的验证结果：巡检时（或管理员手动）用最近一条记录的原问题、以原提问人身份重新提问，看还会不会出错或被拦截。
+function SystemRecheck({ recheck, verifying, onVerify }: { recheck?: InspectionRecheck; verifying: boolean; onVerify: () => void }) {
+  const button = <button type="button" className="secondary-button inspection-verify-button" onClick={onVerify} disabled={verifying} title="用最近一条记录的原问题，以原提问人的身份完整重问一遍">{verifying ? "提问中…" : "重新提问验证"}</button>;
+  if (!recheck) {
+    return <div className="inspection-diagnosis">
+      <div className="inspection-diagnosis-head">
+        <span className="inspection-explain-title">验证结果</span>
+        <span className="inspection-diagnosis-time">还没有验证过。巡检时会自动用原问题重新提问，也可以现在手动验证一次。</span>
+        {button}
+      </div>
+    </div>;
+  }
+  const who = recheck.trigger === "manual" ? `${recheck.by ?? "管理员"} 手动验证` : "巡检时系统自动验证";
+  return <div className="inspection-diagnosis">
+    <div className="inspection-diagnosis-head">
+      <span className="inspection-explain-title">验证结果</span>
+      <span className="inspection-diagnosis-time">{who}（{formatTime(recheck.at)}）：以 {recheck.owner} 的身份重新提问</span>
+      {button}
+    </div>
+    <div className="inspection-diagnosis-line">
+      <span className={`status-tag is-${recheck.passed ? "green" : "red"}`}>{recheck.passed ? "已恢复" : "未恢复"}</span>
+      <span className="inspection-diagnosis-question">{recheck.question}</span>
+    </div>
+    <p className="inspection-diagnosis-sentence">{recheck.message}。</p>
+    {recheck.error && <div className="inspection-event-line"><code>{recheck.error}</code></div>}
+    {recheck.answer && <AnswerText label="这次的回答：" text={recheck.answer} />}
+  </div>;
 }
 
 function DiagnosisDetail({ diagnosis, verifying, onVerify }: { diagnosis?: InspectionDiagnosis; verifying: boolean; onVerify: () => void }) {
