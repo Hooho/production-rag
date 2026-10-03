@@ -683,6 +683,124 @@ export function startEvalRun(kind: "retrieval" | "generation", split: string, su
   });
 }
 
+// 知识巡检（只有管理员可见）：从问答日志合并出来的问题。
+export type InspectionKind = "knowledge_gap" | "suspect_content" | "system_error";
+export type InspectionStatus = "open" | "handled" | "resolved" | "ignored";
+export type InspectionIssueDetail = {
+  signals?: Record<string, number>;
+  questions?: string[];
+  missing?: { text: string; count: number }[];
+  comments?: string[];
+  chunk_key?: string;
+  document_title?: string;
+  preview?: string;
+  doc_key?: string;
+  cited?: number;
+  negative_rate?: number;
+  last_step?: string;
+  last_step_label?: string;
+  error?: string;
+  status_code?: number;
+  resolution?: string;
+  reopened?: { at: string; previous_status: InspectionStatus; new_occurrences: number };
+};
+export type InspectionIssue = {
+  id: string;
+  kind: InspectionKind;
+  kind_label: string;
+  status: InspectionStatus;
+  status_label: string;
+  title: string;
+  occurrences: number;
+  users: number;
+  detail: InspectionIssueDetail;
+  note: string | null;
+  status_by: string | null;
+  status_updated: string | null;
+  first_seen: string;
+  last_seen: string;
+  created: string;
+  updated: string;
+};
+export type InspectionEvent = {
+  source: "run" | "error";
+  source_id: string;
+  owner: string;
+  signals: string[];
+  created: string;
+  question?: string;
+  answer?: string;
+  top_score?: number | null;
+  // 最终交给模型的资料段数。
+  returned?: number | null;
+  // 引用检查明细；回答被拦截时带模型原话。记录这项信息之前的问答为空。
+  citation?: { passed: boolean; reason: "no_citation" | "unknown_source" | null; source_ids: string[]; cited: string[]; unknown: string[]; raw_answer?: string } | null;
+  // 调用摘要：调用的模型及用途、重排模型、提示词版本、Token 用量、总耗时。
+  call?: { models: { name: string; steps: string[] }[]; rerank_model?: string | null; prompt_version?: string | null; token_usage?: { input?: number | null; output?: number | null; total?: number | null } | null; duration_ms?: number | null };
+  // 交给模型的资料原文，按 S1、S2… 排列。
+  sources?: { id: string; title: string; heading?: string | null; page_start?: number | null; version?: number | null; score?: number | null; text: string; truncated: boolean }[];
+  missing?: string[];
+  feedback?: { rating: number; reason: FeedbackReason | null; comment: string | null } | null;
+  error?: string;
+  last_step?: string | null;
+  status_code?: number;
+};
+export type InspectionIssueFull = InspectionIssue & { events: InspectionEvent[] };
+export type InspectionRun = {
+  id: string;
+  status: "running" | "completed" | "failed";
+  trigger: "cli" | "api";
+  triggered_by: string | null;
+  since: string;
+  summary: Record<string, number>;
+  error: string | null;
+  started: string;
+  finished: string | null;
+};
+export type InspectionIssuePage = {
+  items: InspectionIssue[];
+  total: number;
+  page: number;
+  page_size: number;
+  status_counts: Partial<Record<InspectionStatus, number>>;
+  kind_counts: Partial<Record<InspectionKind, number>>;
+  last_run: InspectionRun | null;
+  running: boolean;
+  kinds: Record<InspectionKind, string>;
+  statuses: Record<InspectionStatus, string>;
+  signals: Record<string, string>;
+};
+
+export function listInspectionIssues(params: { status?: InspectionStatus | null; kind?: InspectionKind | null; page?: number }) {
+  const query = new URLSearchParams();
+  if (params.status) query.set("status", params.status);
+  if (params.kind) query.set("kind", params.kind);
+  query.set("page", String(params.page ?? 1));
+  return request<InspectionIssuePage>(`/inspection/issues?${query.toString()}`);
+}
+
+export function getInspectionIssue(issueId: string) {
+  return request<InspectionIssueFull>(`/inspection/issues/${encodeURIComponent(issueId)}`);
+}
+
+// 手动标记状态（待处理 / 已处理 / 已忽略）或修改备注；已解决只由巡检自动设置。
+export function updateInspectionIssue(issueId: string, payload: { status?: "open" | "handled" | "ignored"; note?: string }) {
+  return request<InspectionIssueFull>(`/inspection/issues/${encodeURIComponent(issueId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+// 立即巡检，在服务端后台执行；完成后问题列表的 running 变为 false。
+export function startInspection(days?: number) {
+  return request<{ id: string; status: string }>("/inspection/runs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(days ? { days } : {}),
+  });
+}
+
 // 设置页：当前生效的聊天模型配置，密钥只返回脱敏值。
 export type LLMSettings = {
   model_mode: string;

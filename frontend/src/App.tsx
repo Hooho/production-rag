@@ -1,6 +1,7 @@
 import DataManagement from "./DataManagement";
 import Evaluation, { type EvaluationSection } from "./Evaluation";
 import AnswerFeedback from "./Feedback";
+import Inspection from "./Inspection";
 import Settings from "./Settings";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import { durationTitle, formatDuration, isDurationField } from "./format";
@@ -9,11 +10,12 @@ import { LOGOUT_EVENT, listDataTypes, createSession, deleteDocument, retryDocume
 
 // 评测页面放在 /eval，与知识问答、知识库并列；历史记录和评测集分别使用独立子路由。
 // 数据管理页放在 /data：录入和维护商品、订单等业务数据，也是聊天里数据查询工具的数据来源。
-type Route = { page: "chat" } | { page: "knowledge"; documentId?: string } | { page: "data" } | { page: "eval"; section: EvaluationSection } | { page: "settings" };
+// 知识巡检页放在 /inspection，只对管理员显示。
+type Route = { page: "chat" } | { page: "knowledge"; documentId?: string } | { page: "data" } | { page: "eval"; section: EvaluationSection } | { page: "inspection" } | { page: "settings" };
 type ToastKind = "success" | "error";
 type ToastMessage = { id: number; kind: ToastKind; message: string };
 type ShowToast = (kind: ToastKind, message: string) => void;
-type NavIconName = "spark" | "library" | "table" | "target" | "sliders";
+type NavIconName = "spark" | "library" | "table" | "target" | "pulse" | "sliders";
 
 // 原来侧栏使用 Unicode 字符图标，不同字体下的字重、基线和边框风格不一致；统一成内联 SVG 后，图标在收起和展开状态都保持同一套线性视觉。
 function NavIcon({ name }: { name: NavIconName }) {
@@ -22,6 +24,7 @@ function NavIcon({ name }: { name: NavIconName }) {
     library: <><path d="M4 4.5h10.5A1.5 1.5 0 0 1 16 6v10H5.5A1.5 1.5 0 0 1 4 14.5v-10Z" /><path d="M7 4.5v10A1.5 1.5 0 0 0 8.5 16H16" /><path d="M8 8h5M8 11h5" /></>,
     table: <><rect x="3" y="3" width="14" height="14" rx="1.5" /><path d="M3 7h14M3 11h14M3 15h14M8 7v10M13 7v10" /></>,
     target: <><circle cx="10" cy="10" r="7" /><circle cx="10" cy="10" r="3" /><path d="M10 1.5v2M10 16.5v2M1.5 10h2M16.5 10h2" /></>,
+    pulse: <><path d="M2 10h3.5l2-5 3 10 2-6 1.5 1H18" /></>,
     sliders: <><path d="M3 5h14M3 10h14M3 15h14" /><circle cx="7" cy="5" r="1.7" fill="currentColor" stroke="none" /><circle cx="13" cy="10" r="1.7" fill="currentColor" stroke="none" /><circle cx="9" cy="15" r="1.7" fill="currentColor" stroke="none" /></>,
   };
   return <svg className="nav-svg" viewBox="0 0 20 20" aria-hidden="true" focusable="false">{shapes[name]}</svg>;
@@ -38,6 +41,7 @@ function readRoute(pathname = window.location.pathname): Route {
   if (path === "/data") return { page: "data" };
   if (path === "/eval" || path === "/eval/runs") return { page: "eval", section: "history" };
   if (path === "/eval/dataset") return { page: "eval", section: "dataset" };
+  if (path === "/inspection") return { page: "inspection" };
   if (path === "/settings") return { page: "settings" };
   if (path.startsWith("/knowledge/")) {
     return { page: "knowledge", documentId: decodeURIComponent(path.slice("/knowledge/".length)) };
@@ -81,7 +85,7 @@ function App() {
   // 直接打开没有权限的页面地址时回到知识问答，不显示一个只会报 403 的页面。
   useEffect(() => {
     if (!user) return;
-    if ((route.page === "eval" && !user.is_admin) || (route.page === "data" && dataAllowed === false)) navigate("/chat");
+    if (((route.page === "eval" || route.page === "inspection") && !user.is_admin) || (route.page === "data" && dataAllowed === false)) navigate("/chat");
   }, [route.page, user, dataAllowed]);
   const toastIdRef = useRef(0);
 
@@ -236,12 +240,13 @@ function App() {
           <button className={route.page === "knowledge" ? "nav-item active" : "nav-item"} onClick={() => navigate("/knowledge")} title="知识库"><span className="nav-icon"><NavIcon name="library" /></span><span className="nav-label">知识库</span></button>
           {dataAllowed && <button className={route.page === "data" ? "nav-item active" : "nav-item"} onClick={() => navigate("/data")} title="数据管理"><span className="nav-icon"><NavIcon name="table" /></span><span className="nav-label">数据管理</span></button>}
           {user.is_admin && <button className={route.page === "eval" ? "nav-item active" : "nav-item"} onClick={() => navigate("/eval/runs")} title="评测"><span className="nav-icon"><NavIcon name="target" /></span><span className="nav-label">评测</span></button>}
+          {user.is_admin && <button className={route.page === "inspection" ? "nav-item active" : "nav-item"} onClick={() => navigate("/inspection")} title="知识巡检"><span className="nav-icon"><NavIcon name="pulse" /></span><span className="nav-label">知识巡检</span></button>}
           <button className={route.page === "settings" ? "nav-item active" : "nav-item"} onClick={() => navigate("/settings")} title="设置"><span className="nav-icon"><NavIcon name="sliders" /></span><span className="nav-label">设置</span></button>
           <div className="sidebar-bottom"><div className="status-dot" /><span className="sidebar-status-label">{user.username}{user.is_admin ? "（管理员）" : ""}</span><button className="logout-button" type="button" onClick={() => void handleLogout()}>退出登录</button></div>
         </aside>
         <main className={`main-panel ${route.page === "chat" ? "main-panel-chat" : ""}`}>
           {error && <div className="error-banner">{error}</div>}
-          {route.page === "settings" ? <Settings user={user} onToast={showToast} /> : route.page === "data" && dataAllowed ? <DataManagement onToast={showToast} /> : route.page === "eval" && user.is_admin ? <Evaluation section={route.section} onNavigate={navigate} onToast={showToast} Diagnostics={RetrievalDiagnostics} /> : route.page === "chat" ? sessionLoading ? <ChatLoading /> : <Chat sessionId={sessionId} initialMessages={savedMessages} historyRuns={historyRuns} onNewChat={() => void startNewChat()} onOpenHistory={openHistory} onMessageSaved={recordHistory} onFeedbackSaved={recordFeedback} /> : <Knowledge user={user} documentId={route.page === "knowledge" ? route.documentId ?? null : null} onToast={showToast} onNavigate={(documentId) => navigate(documentId ? `/knowledge/${encodeURIComponent(documentId)}` : "/knowledge")} />}
+          {route.page === "settings" ? <Settings user={user} onToast={showToast} /> : route.page === "data" && dataAllowed ? <DataManagement onToast={showToast} /> : route.page === "eval" && user.is_admin ? <Evaluation section={route.section} onNavigate={navigate} onToast={showToast} Diagnostics={RetrievalDiagnostics} /> : route.page === "inspection" && user.is_admin ? <Inspection onToast={showToast} /> : route.page === "chat" ? sessionLoading ? <ChatLoading /> : <Chat sessionId={sessionId} initialMessages={savedMessages} historyRuns={historyRuns} onNewChat={() => void startNewChat()} onOpenHistory={openHistory} onMessageSaved={recordHistory} onFeedbackSaved={recordFeedback} /> : <Knowledge user={user} documentId={route.page === "knowledge" ? route.documentId ?? null : null} onToast={showToast} onNavigate={(documentId) => navigate(documentId ? `/knowledge/${encodeURIComponent(documentId)}` : "/knowledge")} />}
         </main>
       </div>
     </>

@@ -287,6 +287,59 @@ document_shares = Table("document_shares", metadata,
     Column("group_id", String(32), primary_key=True, index=True),
 )
 
+# 知识巡检：定期从问答日志里收集问题（拒答、资料不足、差评、处理失败），合并成待处理清单，只有管理员可见。
+# 每次巡检一行，记录时间窗口、执行状态和各类问题数量。
+inspection_runs = Table("inspection_runs", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("status", String(16), nullable=False),
+    # cli 表示命令行（定时任务）发起，api 表示管理员在页面上发起。
+    Column("trigger", String(16), nullable=False),
+    Column("triggered_by", String(32)),
+    # 本次扫描的问答起始时间，早于它的问答不再处理。
+    Column("since", String(32), nullable=False),
+    Column("summary", JSON),
+    Column("error", String(500)),
+    Column("started", String(32), nullable=False),
+    Column("finished", String(32)),
+)
+# 合并后的问题。同一个问题由 fingerprint 识别：再次巡检时更新原记录、追加关联问答，不重复创建。
+# kind：knowledge_gap 知识缺口（答不上来），suspect_content 可疑内容（被引用却常收到差评），system_error 系统问题。
+# status：open 待处理；handled 管理员已处理、等待验证；resolved 已解决；ignored 已忽略。
+# handled、resolved 之后又出现新的同类问答会自动重新打开；ignored 不会。
+inspection_issues = Table("inspection_issues", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("fingerprint", String(64), nullable=False, unique=True),
+    Column("kind", String(32), nullable=False, index=True),
+    Column("status", String(16), nullable=False, index=True),
+    Column("title", String(200), nullable=False),
+    # 关联问答的条数和涉及的用户数，列表按它们排序：先处理最多人遇到的问题。
+    Column("occurrences", Integer, nullable=False),
+    Column("users", Integer, nullable=False),
+    # 各类信号的计数和类型相关的展示信息（缺失内容、分片原文、错误信息等）。
+    Column("detail", JSON),
+    # 知识缺口的聚类中心，新问题与它比较相似度后决定归入哪个缺口；不返回给前端。
+    Column("vector", JSON),
+    Column("note", Text),
+    Column("status_by", String(32)),
+    Column("status_updated", String(32)),
+    Column("first_seen", String(32), nullable=False),
+    Column("last_seen", String(32), nullable=False),
+    Column("created", String(32), nullable=False),
+    Column("updated", String(32), nullable=False),
+)
+# 问题与原始记录的关联：source 为 run（runs.id）或 error（run_errors.id）。
+# 同一条问答只会挂到同一个问题一次，重复巡检不会重复计数。
+inspection_issue_events = Table("inspection_issue_events", metadata,
+    Column("issue_id", String(36), primary_key=True),
+    Column("source", String(16), primary_key=True),
+    Column("source_id", String(36), primary_key=True, index=True),
+    Column("owner", String(32), nullable=False),
+    # 这条问答命中的信号，如 refused、insufficient、negative_feedback。
+    Column("signals", JSON, nullable=False),
+    # 问答发生的时间，不是写入时间。
+    Column("created", String(32), nullable=False),
+)
+
 # 数据库连接地址。API、Worker 和 Alembic 迁移都用它，保证连的是同一个库。
 def database_url():
     return URL.create("mysql+pymysql", username=os.getenv("MYSQL_USER", "rag"),

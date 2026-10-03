@@ -30,6 +30,9 @@ from ..auth import (authenticate, check_groups, create_user, decode_access_token
 from ..evaluation.dataset import QUESTION_TYPES, append_items, corpus_files, corpus_text, generate_items, load_dataset, mark_reviewed, next_item_id, next_pair_id, select_split, validate_dataset
 from ..evaluation.results import compare_runs, delete_run, execute_run, list_runs, load_run, previous_run, start_run
 from ..evaluation.retrieval import SUITES, VARIANTS
+from ..inspection.service import (KINDS as INSPECTION_KINDS, LOCK_KEY as INSPECTION_LOCK, MANUAL_STATUSES,
+    STATUSES as INSPECTION_STATUSES, InspectionBusy, get_issue, list_issues, list_runs as list_inspection_runs,
+    run_inspection, update_issue)
 from ..agent.response import ResponseAgent
 from ..models import Models
 from ..memory.service import Memory
@@ -92,6 +95,18 @@ class EvalDatasetGenerateInput(BaseModel):
 
 
 # 用户对一次回答的反馈；request_id 即 runs.id。点赞不需要原因，点踩的原因从固定选项中选。
+# 管理员修改巡检问题：status 只能是 open / handled / ignored，note 为空字符串表示清空备注。
+class InspectionIssueInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    status: str | None = None
+    note: str | None = Field(None, max_length=2000)
+
+
+class InspectionRunInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    days: int | None = Field(None, ge=1, le=365)
+
+
 class FeedbackInput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     request_id: UUID
@@ -308,6 +323,8 @@ def create_app(store=None, models=None, jwt_secret=None):
         # 题目写入和 AI 起草必须串行，避免两个请求同时读取旧编号后生成重复 ID。
         app.state.eval_dataset_lock = Lock()
         app.state.eval_running = None
+        # 页面发起的巡检在后台线程执行；保存线程便于测试等待它完成。
+        app.state.inspection_thread = None
         try:
             yield
         finally:
@@ -1338,6 +1355,61 @@ def create_app(store=None, models=None, jwt_secret=None):
 
         Thread(target=work, daemon=True).start()
         return {"id": run["id"], "status": "running"}
+
+    # 知识巡检：问题里有其他用户的提问和反馈，所有接口只允许管理员调用。
+    @app.get("/inspection/issues", dependencies=[Depends(require_admin)])
+    def inspection_issues_list(status: str | None = Query(None), kind: str | None = Query(None),
+                               page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
+        if status is not None and status not in INSPECTION_STATUSES:
+            raise HTTPException(422, f"未知状态：{status}")
+        if kind is not None and kind not in INSPECTION_KINDS:
+            raise HTTPException(422, f"未知问题类型：{kind}")
+        result = list_issues(app.state.store, status, kind, page, page_size)
+        result["running"] = bool(app.state.store.cache.get(INSPECTION_LOCK))
+        return result
+
+    @app.get("/inspection/issues/{issue_id}", dependencies=[Depends(require_admin)])
+    def inspection_issue_detail(issue_id: str):
+        issue = get_issue(app.state.store, issue_id)
+        if issue is None:
+            raise HTTPException(404, "问题不存在")
+        return issue
+
+    @app.patch("/inspection/issues/{issue_id}")
+    def inspection_issue_update(issue_id: str, body: InspectionIssueInput, admin=Depends(require_admin)):
+        if body.status is not None and body.status not in MANUAL_STATUSES:
+            raise HTTPException(422, "只能标记为待处理、已处理或已忽略")
+        issue = update_issue(app.state.store, issue_id, body.status, body.note, admin["username"])
+        if issue is None:
+            raise HTTPException(404, "问题不存在")
+        return issue
+
+    @app.get("/inspection/runs", dependencies=[Depends(require_admin)])
+    def inspection_runs_list():
+        return {"runs": list_inspection_runs(app.state.store),
+            "running": bool(app.state.store.cache.get(INSPECTION_LOCK))}
+
+    # 立即巡检：在后台线程执行，前端轮询问题列表的 running 字段等待完成。
+    @app.post("/inspection/runs", status_code=202)
+    def inspection_run_start(body: InspectionRunInput | None = None, admin=Depends(require_admin)):
+        if app.state.store.cache.get(INSPECTION_LOCK):
+            raise HTTPException(409, "已有巡检正在运行，请稍后再试")
+        run_id = str(uuid4())
+        days = body.days if body else None
+
+        def work():
+            try:
+                run_inspection(app.state.store, app.state.models, trigger="api", triggered_by=admin["username"],
+                    days=days, run_id=run_id)
+            except InspectionBusy:
+                logger.warning("inspection_busy run_id=%s", run_id)
+            except Exception:
+                logger.exception("inspection_run_failed run_id=%s", run_id)
+
+        thread = Thread(target=work, daemon=True)
+        app.state.inspection_thread = thread
+        thread.start()
+        return {"id": run_id, "status": "running"}
 
     return app
 
