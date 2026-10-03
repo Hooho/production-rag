@@ -30,10 +30,11 @@ from ..auth import (authenticate, check_groups, create_user, decode_access_token
 from ..evaluation.dataset import QUESTION_TYPES, append_items, corpus_files, corpus_text, generate_items, load_dataset, mark_reviewed, next_item_id, next_pair_id, select_split, validate_dataset
 from ..evaluation.results import compare_runs, delete_run, execute_run, list_runs, load_run, previous_run, start_run
 from ..evaluation.retrieval import SUITES, VARIANTS
+from ..evaluation import regression
 from ..inspection.schedule import load_schedule, save_schedule, schedule_view
 from ..inspection.service import (CLOSE_REASONS, KINDS as INSPECTION_KINDS, LOCK_KEY as INSPECTION_LOCK, MANUAL_STATUSES,
     STATUSES as INSPECTION_STATUSES, InspectionBusy, get_issue, list_issues, list_runs as list_inspection_runs,
-    run_inspection, update_issue, verify_issue)
+    replay_event, run_inspection, update_issue, verify_issue)
 from ..agent.response import ResponseAgent
 from ..models import Models
 from ..memory.service import Memory
@@ -93,6 +94,35 @@ class EvalDatasetGenerateInput(BaseModel):
     count: int = Field(1, ge=1, le=10)
     split: str = Field("dev", pattern="^(dev|holdout)$")
     type: str | None = Field(None, max_length=20)
+
+
+# 线上回归集：新建或修改评测集。
+class EvalSetInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = Field(None, max_length=100)
+    description: str | None = Field(None, max_length=500)
+
+
+# 回归集的一道题：提问人、期望结果（answer / refuse）、期望命中的文档 doc_key；issue_id 表示来自哪个巡检问题。
+class EvalSetItemInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    question: str = Field(min_length=1, max_length=2000)
+    asker: str = Field(min_length=1, max_length=32)
+    expect: Literal["answer", "refuse"]
+    documents: list[str] = Field(default_factory=list, max_length=10)
+    reference_answer: str | None = Field(None, max_length=4000)
+    note: str | None = Field(None, max_length=500)
+    issue_id: str | None = Field(None, max_length=36)
+
+
+class EvalSetItemsInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[EvalSetItemInput] = Field(min_length=1, max_length=20)
+
+
+class EvalSetRunInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["retrieval", "generation"]
 
 
 # 用户对一次回答的反馈；request_id 即 runs.id。点赞不需要原因，点踩的原因从固定选项中选。
@@ -340,6 +370,12 @@ def create_app(store=None, models=None, jwt_secret=None):
         app.state.eval_running = None
         # 页面发起的巡检在后台线程执行；保存线程便于测试等待它完成。
         app.state.inspection_thread = None
+        # 回归集的运行同样在后台线程执行；重启前没跑完的记录标记为中断。
+        app.state.regression_threads = {}
+        try:
+            regression.interrupt_running(app.state.store)
+        except Exception:
+            logger.exception("regression_interrupt_failed")
         try:
             yield
         finally:
@@ -1371,6 +1407,91 @@ def create_app(store=None, models=None, jwt_secret=None):
         Thread(target=work, daemon=True).start()
         return {"id": run["id"], "status": "running"}
 
+    # 线上回归集：题目是真实用户的提问，按提问人的权限在线上知识库里跑，只允许管理员调用。
+    @app.get("/eval/sets", dependencies=[Depends(require_admin)])
+    def eval_sets_list():
+        return regression.list_sets(app.state.store)
+
+    @app.post("/eval/sets", status_code=201)
+    def eval_set_create(body: EvalSetInput, admin=Depends(require_admin)):
+        try:
+            return regression.create_set(app.state.store, body.name, body.description, admin["username"])
+        except ValueError as error:
+            raise HTTPException(422, str(error))
+
+    @app.get("/eval/sets/{set_id}", dependencies=[Depends(require_admin)])
+    def eval_set_get(set_id: str):
+        result = regression.get_set(app.state.store, set_id)
+        if result is None:
+            raise HTTPException(404, "评测集不存在")
+        return result
+
+    @app.patch("/eval/sets/{set_id}", dependencies=[Depends(require_admin)])
+    def eval_set_update(set_id: str, body: EvalSetInput):
+        try:
+            result = regression.update_set(app.state.store, set_id, body.name, body.description)
+        except ValueError as error:
+            raise HTTPException(422, str(error))
+        if result is None:
+            raise HTTPException(404, "评测集不存在")
+        return result
+
+    @app.delete("/eval/sets/{set_id}", status_code=204, dependencies=[Depends(require_admin)])
+    def eval_set_delete(set_id: str):
+        if not regression.delete_set(app.state.store, set_id):
+            raise HTTPException(404, "评测集不存在")
+
+    @app.post("/eval/sets/{set_id}/items", status_code=201)
+    def eval_set_items_add(set_id: str, body: EvalSetItemsInput, admin=Depends(require_admin)):
+        try:
+            added = regression.add_items(app.state.store, set_id, [item.model_dump() for item in body.items], admin["username"])
+        except ValueError as error:
+            raise HTTPException(422, str(error))
+        if added is None:
+            raise HTTPException(404, "评测集不存在")
+        return {"items": added}
+
+    @app.put("/eval/sets/{set_id}/items/{item_id}", dependencies=[Depends(require_admin)])
+    def eval_set_item_update(set_id: str, item_id: str, body: EvalSetItemInput):
+        try:
+            item = regression.update_item(app.state.store, set_id, item_id, body.model_dump())
+        except ValueError as error:
+            raise HTTPException(422, str(error))
+        if item is None:
+            raise HTTPException(404, "题目不存在")
+        return item
+
+    # 编辑题目时选择期望命中的文档。
+    @app.get("/eval/documents", dependencies=[Depends(require_admin)])
+    def eval_document_options():
+        return {"documents": regression.document_options(app.state.store)}
+
+    @app.delete("/eval/sets/{set_id}/items/{item_id}", status_code=204, dependencies=[Depends(require_admin)])
+    def eval_set_item_delete(set_id: str, item_id: str):
+        if not regression.delete_item(app.state.store, set_id, item_id):
+            raise HTTPException(404, "题目不存在")
+
+    # 运行回归集：后台线程逐题执行，前端轮询评测集详情里的运行状态。
+    @app.post("/eval/sets/{set_id}/runs", status_code=202)
+    def eval_set_run(set_id: str, body: EvalSetRunInput, admin=Depends(require_admin)):
+        try:
+            run_id = regression.start_run(app.state.store, set_id, body.kind, admin["username"])
+        except ValueError as error:
+            raise HTTPException(409 if "正在运行" in str(error) else 422, str(error))
+        if run_id is None:
+            raise HTTPException(404, "评测集不存在")
+        thread = Thread(target=regression.execute_run, args=(app.state.store, app.state.models, run_id), daemon=True)
+        app.state.regression_threads[run_id] = thread
+        thread.start()
+        return {"id": run_id, "status": "running"}
+
+    @app.get("/eval/sets/{set_id}/runs/{run_id}", dependencies=[Depends(require_admin)])
+    def eval_set_run_get(set_id: str, run_id: str):
+        result = regression.get_run(app.state.store, set_id, run_id)
+        if result is None:
+            raise HTTPException(404, "运行记录不存在")
+        return result
+
     # 知识巡检：问题里有其他用户的提问和反馈，所有接口只允许管理员调用。
     @app.get("/inspection/issues", dependencies=[Depends(require_admin)])
     def inspection_issues_list(status: str | None = Query(None), kind: str | None = Query(None),
@@ -1419,7 +1540,7 @@ def create_app(store=None, models=None, jwt_secret=None):
             raise HTTPException(422, str(error))
         return schedule_view(app.state.store)
 
-    # 立即重新验证一个知识缺口：按提问人现在的权限重跑检索，规则和巡检时相同（能检索到就关闭，已处理但仍检索不到就重新打开）。
+    # 立即重新检索一个知识缺口：按提问人现在的权限重跑检索，规则和巡检时相同（能检索到就关闭，已处理但仍检索不到就重新打开）。
     # 只检索不生成回答，几秒内完成，所以同步返回结果。
     @app.post("/inspection/issues/{issue_id}/verify")
     def inspection_issue_verify(issue_id: str, admin=Depends(require_admin)):
@@ -1430,6 +1551,25 @@ def create_app(store=None, models=None, jwt_secret=None):
         if issue is None:
             raise HTTPException(404, "问题不存在")
         return issue
+
+    # 关联记录上的"重新提问"：以提问人的身份把这条问题完整再问一遍，同步返回新回答（要调用大模型，可能十几秒）。
+    @app.post("/inspection/issues/{issue_id}/events/{source}/{source_id}/replay")
+    def inspection_event_replay(issue_id: str, source: Literal["run", "error"], source_id: str, admin=Depends(require_admin)):
+        try:
+            entry = replay_event(app.state.store, app.state.models, issue_id, source, source_id, admin["username"])
+        except ValueError as error:
+            raise HTTPException(422, str(error))
+        if entry is None:
+            raise HTTPException(404, "记录不存在")
+        return entry
+
+    # 把巡检问题加入回归集前的预填内容：几种问法、提问人、期望结果和期望命中的文档。
+    @app.get("/inspection/issues/{issue_id}/eval-candidates", dependencies=[Depends(require_admin)])
+    def inspection_issue_eval_candidates(issue_id: str):
+        result = regression.issue_candidates(app.state.store, issue_id)
+        if result is None:
+            raise HTTPException(404, "问题不存在")
+        return result
 
     @app.get("/inspection/runs", dependencies=[Depends(require_admin)])
     def inspection_runs_list():

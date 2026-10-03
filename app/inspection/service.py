@@ -13,8 +13,9 @@ import os
 import re
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 
+from ..agent.replay import replay_question
 from .diagnosis import CATEGORIES as DIAGNOSIS_LABELS, QUESTION_LIMIT, diagnose_question, full_scope, overall_category, thresholds
 from ..mysql.store import (chunks, document_chunks, document_heads, feedback, inspection_issue_events, inspection_issues,
     inspection_runs, run_errors, runs)
@@ -40,10 +41,13 @@ FIX_TYPES = {
     "update_content": "改了资料",
     "grant_permission": "调了权限",
     "tune_retrieval": "调了检索",
+    "tune_routing": "调了分流",
     "update_prompt": "改了提示词",
     "fix_system": "修了系统配置",
     "other": "其他",
 }
+# 这个原因的"无需处理"会在巡检时复查，见 diagnose_gap_issues。
+RECHECK_REASON = "by_design_permission"
 # 这些原因说明"系统拒答是对的"，统计时算作合理拒答。
 REASONABLE_REFUSALS = {"out_of_scope", "by_design_permission", "not_covered"}
 # 管理员可以手动设置的状态。resolved 只由巡检自动设置（例如可疑分片已不在当前版本中），
@@ -479,14 +483,20 @@ class Inspector:
 # 拒答分类和自动验证：对知识缺口按提问人现在的权限重跑检索，写入诊断结论。
 #   全部问题现在都能检索到资料：自动标为已解决（"已处理"的问题就是验证通过）；
 #   标记"已处理"但仍有问题检索不到：验证不通过，重新打开并说明还差多少。
-# 巡检时只处理待处理、已处理的缺口；管理员在页面上点"重新验证"时传入 issue_ids，任何状态都会更新诊断，
-# 但只有待处理、已处理的会改状态。
+# 标记"无需处理 · 权限限制，按设计保密"的缺口也会复查：权限和文档会变，保密的理由可能已经不成立。
+#   提问人现在能检索到资料：权限已经放开，自动标为已解决；
+#   全库里也找不到当初那份资料了（文档被删或改了）：变成内容缺口，重新打开；
+#   仍然是没有权限：保持无需处理，只更新诊断时间。
+# 其他原因的"无需处理"（超出范围、不打算覆盖等）是人的决定，不会自己变化，不复查。
+# 巡检时只处理待处理、已处理和需要复查的缺口；管理员在页面上点"重新检索"时传入 issue_ids，任何状态都会更新诊断，
+# 但只有上面这几种会改状态。
 # 分三步：先读出要诊断的问题和关联问答，再逐个重跑检索（检索会自己开连接，不能占着事务），最后一次性写回。
 def diagnose_gap_issues(store, models, now, stats, issue_ids=None, trigger="inspection", by=None):
     with store.engine.connect() as connection:
         query = select(inspection_issues).where(inspection_issues.c.kind == "knowledge_gap")
         if issue_ids is None:
-            query = query.where(inspection_issues.c.status.in_(["open", "handled"]))
+            query = query.where(or_(inspection_issues.c.status.in_(["open", "handled"]), and_(
+                inspection_issues.c.status == "ignored", inspection_issues.c.close_reason == RECHECK_REASON)))
         else:
             query = query.where(inspection_issues.c.id.in_(issue_ids))
         issues = connection.execute(query).mappings().all()
@@ -524,28 +534,48 @@ def diagnose_gap_issues(store, models, now, stats, issue_ids=None, trigger="insp
         detail = dict(issue["detail"] or {})
         detail["diagnosis"] = {"category": category, "label": DIAGNOSIS_LABELS[category], "checked_at": now,
             "counts": dict(counts), "questions": checked,
-            # 谁触发的验证：巡检（含定时）自动验证，或管理员手动点"重新验证"。
+            # 谁触发的验证：巡检（含定时）自动验证，或管理员手动点"重新检索"。
             "trigger": trigger, "checked_by": by,
             # 判断用的门槛，页面据此把分数解释成"差多少才算相关"。
             "thresholds": thresholds()}
         values = {"detail": detail, "updated": now}
         stats["diagnosed"] += 1
-        if issue["status"] in ("open", "handled") and category == "answerable":
+        recheck = issue["status"] == "ignored" and issue["close_reason"] == RECHECK_REASON
+        if recheck:
+            if category == "answerable":
+                detail["resolution"] = (f"权限已调整：标记为权限保密后复查，这 {len(checked)} 个问题按提问人现在的权限"
+                    "都能检索到资料，自动标为已解决。")
+                detail.pop("verification", None)
+                values.update(status="resolved", status_by="system", status_updated=now, close_reason=None)
+                stats["recheck_resolved"] += 1
+            elif category != "permission":
+                detail["verification"] = {"passed": False, "at": now, "message": (
+                    f"标记为权限保密后复查：整个知识库里已经找不到当初那份资料（{DIAGNOSIS_LABELS[category]}），"
+                    "保密的理由不成立，已重新打开。")}
+                values.update(status="open", status_by="system", status_updated=now, close_reason=None)
+                stats["recheck_reopened"] += 1
+        elif issue["status"] in ("open", "handled") and category == "answerable":
             titles = []
             for item in checked:
                 for document in item["documents"]:
                     if document["title"] not in titles:
                         titles.append(document["title"])
             verified = issue["status"] == "handled"
-            detail["resolution"] = ("验证通过：" if verified else "现在能答：") + f"这 {len(checked)} 个问题按提问人的权限都能检索到相关资料" + (
-                "（" + "、".join(f"《{title}》" for title in titles[:3]) + "）" if titles else "") + "，自动标为已解决。"
+            rerouted = sum(1 for item in checked if item.get("rerouted"))
+            if rerouted == len(checked):
+                found = f"这 {len(checked)} 个问题现在都会分到数据查询，不再去知识库检索"
+            else:
+                found = f"这 {len(checked)} 个问题按提问人的权限都能检索到相关资料" + (
+                    "（" + "、".join(f"《{title}》" for title in titles[:3]) + "）" if titles else "") + (
+                    f"，其中 {rerouted} 个现在会分到数据查询" if rerouted else "")
+            detail["resolution"] = ("验证通过：" if verified else "现在能答：") + found + "，自动标为已解决。"
             detail.pop("verification", None)
             values.update(status="resolved", status_by="system", status_updated=now)
             stats["verified" if verified else "auto_resolved"] += 1
         elif issue["status"] == "handled":
             unanswered = len(checked) - counts["answerable"]
             detail["verification"] = {"passed": False, "at": now, "message": (
-                f"标记已处理后重新检索验证，{len(checked)} 个问题里还有 {unanswered} 个检索不到资料"
+                f"标记已处理后重新验证，{len(checked)} 个问题里还有 {unanswered} 个没解决"
                 f"（{DIAGNOSIS_LABELS[category]}），已重新打开。")}
             values.update(status="open", status_by="system", status_updated=now)
             stats["verification_failed"] += 1
@@ -558,19 +588,54 @@ def diagnose_gap_issues(store, models, now, stats, issue_ids=None, trigger="insp
     return [issue_id for issue_id, _, _ in updates]
 
 
-# 管理员在问题详情里点"重新验证"：只诊断这一个知识缺口，规则和巡检时相同，返回更新后的问题。
+# 管理员在问题详情里点"重新检索"：只诊断这一个知识缺口，规则和巡检时相同，返回更新后的问题。
 def verify_issue(store, models, issue_id, username):
     with store.engine.connect() as connection:
         kind = connection.execute(select(inspection_issues.c.kind).where(inspection_issues.c.id == issue_id)).scalar()
     if kind is None:
         return None
     if kind != "knowledge_gap":
-        raise ValueError("目前只有知识缺口支持重新验证")
+        raise ValueError("目前只有知识缺口支持重新检索")
     stats = Counter()
     diagnose_gap_issues(store, models, now_text(), stats, issue_ids=[issue_id], trigger="manual", by=username)
     issue = get_issue(store, issue_id)
     issue["verify_result"] = dict(stats)
     return issue
+
+
+# 关联记录上的"重新提问"：以这条记录的提问人身份，把问题完整再问一遍（见 app/agent/replay.py），
+# 结果存进问题详情的 replays，按记录分开，只保留最近一次；不改问题状态，也不会被巡检收成新的问答。
+# 多轮追问用改写后的完整问题，否则"那它呢"单独问没有意义。
+def replay_event(store, models, issue_id, source, source_id, username):
+    with store.engine.connect() as connection:
+        event = connection.execute(select(inspection_issue_events).where(inspection_issue_events.c.issue_id == issue_id,
+            inspection_issue_events.c.source == source, inspection_issue_events.c.source_id == source_id)).mappings().first()
+        if event is None:
+            return None
+        if source == "run":
+            row = connection.execute(select(runs.c.question, runs.c.trace).where(runs.c.id == source_id)).mappings().first()
+            question = (((row["trace"] or {}).get("rewrite") or {}).get("standalone_query") or row["question"]) if row else None
+        else:
+            question = connection.execute(select(run_errors.c.question).where(run_errors.c.id == source_id)).scalar()
+    if not question:
+        raise ValueError("找不到这条记录的原始问题")
+    entry = {"at": now_text(), "by": username, "question": question, "owner": event["owner"]}
+    try:
+        result = replay_question(store, models, event["owner"], question)
+        entry.update({"answer": result["answer"][:4000], "route": result["route"], "refused": result["refused"],
+            "top_score": result["top_score"], "citation": result["citation"], "duration_ms": result["duration_ms"],
+            "sources": [{"id": item["id"], "title": item["title"], "score": item["score"]} for item in result["sources"]]})
+    except Exception as error:
+        logger.exception("inspection_replay_failed issue_id=%s source_id=%s", issue_id, source_id)
+        entry["error"] = f"{type(error).__name__}: {error}"[:500]
+    with store.engine.begin() as connection:
+        detail = connection.execute(select(inspection_issues.c.detail).where(inspection_issues.c.id == issue_id)).scalar()
+        detail = dict(detail or {})
+        replays = dict(detail.get("replays") or {})
+        replays[f"{source}:{source_id}"] = entry
+        detail["replays"] = replays
+        connection.execute(inspection_issues.update().where(inspection_issues.c.id == issue_id).values(detail=detail))
+    return entry
 
 
 # 执行一次巡检并记录到 inspection_runs。同一时间只允许一次巡检（命令行和页面共用 Redis 锁）。
@@ -626,6 +691,8 @@ def suggest_fix_type(row):
             return "grant_permission"
         if category == "retrieval":
             return "tune_retrieval"
+        if category == "routing":
+            return "tune_routing"
         return "add_content"
     if row["kind"] == "suspect_content":
         return "update_content"
@@ -643,6 +710,8 @@ def suggest_close_reason(row):
             return "by_design_permission"
         if category in ("content", "retrieval"):
             return "not_covered"
+        if category == "routing":
+            return "other"
         return "out_of_scope"
     if row["kind"] == "suspect_content":
         return "invalid_feedback"

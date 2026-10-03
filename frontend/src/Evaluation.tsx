@@ -1,10 +1,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ComponentType, type FormEvent, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { addEvalDatasetItem, addEvalDatasetPair, compareEvalRuns, deleteEvalRun, generateEvalDatasetItems, getEvalDataset, getEvalRun, listEvalRuns, reviewEvalDatasetItem, startEvalRun, type EvalComparison, type EvalComparisonRow, type EvalDataset, type EvalHistoryMetrics, type EvalItem, type EvalParaphraseAnalysis, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalSufficiency, type EvalSuite, type EvalSummary, type EvalSweepPoint, type RetrievalDiagnosticsData } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
+import Regression from "./Regression";
 // 耗时格式化移到公共文件，知识库、问答、设置页共用同一套规则。
 import { durationTitle, formatDuration as formatMs, formatDurationDelta } from "./format";
 
-export type EvaluationSection = "history" | "dataset";
+export type EvaluationSection = "history" | "dataset" | "regression";
 type TopTab = EvaluationSection;
 type DetailTab = "overview" | "questions" | "sweep" | "variants";
 type EvalKind = "retrieval" | "generation";
@@ -15,6 +16,8 @@ type ShowToast = (kind: "success" | "error", message: string) => void;
 type Props = {
   Diagnostics: ComponentType<{ data: RetrievalDiagnosticsData }>;
   section: EvaluationSection;
+  // 回归集页签里打开的评测集，来自地址 /eval/regression/<编号>。
+  setId?: string;
   onNavigate: (path: string) => void;
   onToast: ShowToast;
 };
@@ -22,6 +25,7 @@ type Props = {
 const TOP_TAB_LABELS: Record<TopTab, string> = {
   history: "历史评测记录",
   dataset: "评测集",
+  regression: "回归集",
 };
 const DETAIL_TAB_LABELS: Record<DetailTab, string> = {
   overview: "总览",
@@ -342,7 +346,7 @@ function metricCardDetails(metricKey: string, run: EvalRun, value: number | null
   return ["本次评测暂无逐题数据。"];
 }
 
-function Evaluation({ onToast, Diagnostics, section, onNavigate }: Props) {
+function Evaluation({ onToast, Diagnostics, section, setId, onNavigate }: Props) {
   const [detailTab, setDetailTab] = useState<DetailTab>("overview");
   const [runs, setRuns] = useState<EvalRunBrief[]>([]);
   const [running, setRunning] = useState<string | null>(null);
@@ -483,7 +487,7 @@ function Evaluation({ onToast, Diagnostics, section, onNavigate }: Props) {
       <div><h2>评测</h2><p>用固定的评测集衡量检索和回答质量：每次改动后跑一遍，看指标是变好还是变差。</p></div>
     </div>
     <div className="document-detail-tabs ev-tabs ev-top-tabs" role="tablist">
-      {(Object.keys(TOP_TAB_LABELS) as TopTab[]).map((key) => <button key={key} role="tab" aria-selected={section === key} className={section === key ? "active" : ""} onClick={() => onNavigate(key === "history" ? "/eval/runs" : "/eval/dataset")}>{TOP_TAB_LABELS[key]}<span>{key === "history" ? runs.length : dataset?.reviewed_count ?? dataset?.items.filter((item) => item.reviewed === true).length ?? ""}</span></button>)}
+      {(Object.keys(TOP_TAB_LABELS) as TopTab[]).map((key) => <button key={key} role="tab" aria-selected={section === key} className={section === key ? "active" : ""} onClick={() => onNavigate(key === "history" ? "/eval/runs" : key === "dataset" ? "/eval/dataset" : "/eval/regression")}>{TOP_TAB_LABELS[key]}{key !== "regression" && <span>{key === "history" ? runs.length : dataset?.reviewed_count ?? dataset?.items.filter((item) => item.reviewed === true).length ?? ""}</span>}</button>)}
     </div>
     {section === "history" && <>
       {/* 操作区只属于历史记录，评测集 Tab 保持为题目管理入口。 */}
@@ -531,7 +535,7 @@ function Evaluation({ onToast, Diagnostics, section, onNavigate }: Props) {
       </div>
     </>}
     {error && <div className="error-banner">{error}</div>}
-    {section === "dataset" ? datasetLoading ? <DatasetSkeleton /> : <DatasetBrowser dataset={dataset} onToast={onToast} onSaved={async () => { setDataset(await getEvalDataset()); }} /> : runsLoading ? <RunHistorySkeleton /> : selectedId ? <RunDetailView
+    {section === "regression" ? <Regression setId={setId ?? null} onNavigate={onNavigate} onToast={onToast} /> : section === "dataset" ? datasetLoading ? <DatasetSkeleton /> : <DatasetBrowser dataset={dataset} onToast={onToast} onSaved={async () => { setDataset(await getEvalDataset()); }} /> : runsLoading ? <RunHistorySkeleton /> : selectedId ? <RunDetailView
       onBack={() => setSelectedId(null)}
       run={run}
       running={running}

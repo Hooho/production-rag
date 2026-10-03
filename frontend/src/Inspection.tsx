@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { verifyInspectionIssue, getInspectionIssue, getInspectionSchedule, listInspectionIssues, saveInspectionSchedule, startInspection, updateInspectionIssue, type InspectionCloseReason, type InspectionFixType, type InspectionGapSummary, type InspectionDiagnosis, type InspectionDiagnosisChunk, type InspectionEvent, type InspectionSchedule, type InspectionScheduleView, type InspectionIssue, type InspectionIssueFull, type InspectionIssuePage, type InspectionKind, type InspectionStatus } from "./api";
+import { addEvalSetItems, createEvalSet, getInspectionEvalCandidates, listEvalSets, replayInspectionEvent, verifyInspectionIssue, getInspectionIssue, getInspectionSchedule, listInspectionIssues, saveInspectionSchedule, startInspection, updateInspectionIssue, type EvalCandidates, type EvalSetBrief, type EvalSetExpect, type InspectionCloseReason, type InspectionFixType, type InspectionReplay, type InspectionGapSummary, type InspectionDiagnosis, type InspectionDiagnosisChunk, type InspectionEvent, type InspectionSchedule, type InspectionScheduleView, type InspectionIssue, type InspectionIssueFull, type InspectionIssuePage, type InspectionKind, type InspectionStatus } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./Inspection.css";
 
@@ -26,6 +26,8 @@ function explain(issue: InspectionIssue): { what: string; todo: string[] } {
     switch (detail.diagnosis?.category) {
       case "permission":
         return { what: base + "重新检索发现：知识库里其实有相关资料，但提问人没有权限看到。", todo: ["看下面「诊断结果」里列出的文档和它们当前的可见范围，判断是该共享给提问人所在的部门，还是本来就应该保密。", "需要共享就到知识库里修改这份文档的可见范围；本来就该保密的，点「无需处理」。", verify] };
+      case "routing":
+        return { what: base + "这些问题提到了订单、库存这类业务数据，像是在查数据库，却被意图识别分到了知识库检索，知识库里当然找不到。问题出在分流，不是缺文档。", todo: ["看下面「诊断结果」里每个问题提到了哪种数据、被分到了哪里，确认用户确实是在查数据。", "调整意图识别：在数据查询的识别规则里补上这类说法（app/tools/data_query.py 的 QUERY_WORDS），或者调整本地小模型、意图识别的提示词。", "改好后点「标记已处理」，修复方式选「调了分流」。下次巡检会用现在的规则重新判断，分到数据查询就自动关闭；也可以点「重新检索」马上验证。", "如果确认这个问题其实是在问制度和流程、该由知识库回答，按内容缺口处理：补充文档。"] };
       case "retrieval":
         return { what: base + "重新检索发现：提问人能看到的资料里有比较接近的内容，但相关度没达到阈值；或者用户明确反馈过「资料里有却说找不到」。问题多半出在检索，而不是缺文档。", todo: ["对照「诊断结果」里的得分和问题原文，确认资料是否确实存在。", "资料存在的话，考虑调整文档的标题和分块、补充同义说法，或者评估检索阈值 RERANK_MIN_SCORE 是否偏高。", verify] };
       case "content":
@@ -298,6 +300,7 @@ const FIX_TYPE_OPTIONS: { key: InspectionFixType; label: string; hint: string }[
   { key: "update_content", label: "改了资料", hint: "修正了文档里错误或过期的内容" },
   { key: "grant_permission", label: "调了权限", hint: "把文档共享给了提问人所在的部门" },
   { key: "tune_retrieval", label: "调了检索", hint: "改了分片、阈值、同义词等检索设置" },
+  { key: "tune_routing", label: "调了分流", hint: "调整了意图识别的规则、小模型或提示词" },
   { key: "update_prompt", label: "改了提示词", hint: "调整了回答模型的提示词或换了模型" },
   { key: "fix_system", label: "修了系统配置", hint: "网络、代理、密钥、服务地址等" },
   { key: "other", label: "其他", hint: "需要在上面的备注里说明" },
@@ -393,7 +396,7 @@ function IssueDetail({ issueId, signals, onChanged, onToast }: { issueId: string
     };
   }, [issueId]);
 
-  // 重新验证：按提问人现在的权限重跑检索，结果直接写回问题，状态可能随之改变。
+  // 重新检索：按提问人现在的权限重跑检索，结果直接写回问题，状态可能随之改变。
   const [verifying, setVerifying] = useState(false);
   async function verify() {
     if (!issue) return;
@@ -402,9 +405,11 @@ function IssueDetail({ issueId, signals, onChanged, onToast }: { issueId: string
       const value = await verifyInspectionIssue(issue.id);
       setIssue(value);
       const result = value.verify_result ?? {};
-      if (result.verified || result.auto_resolved) onToast("success", "验证通过：问题现在都能检索到资料，已自动标为已解决");
-      else if (result.verification_failed) onToast("error", "验证未通过：仍有问题检索不到资料，已重新打开");
-      else onToast("success", `已重新验证，诊断结论：${value.detail.diagnosis?.label ?? "无法判断"}`);
+      if (result.verified || result.auto_resolved) onToast("success", "验证通过：问题现在都能处理了，已自动标为已解决");
+      else if (result.verification_failed) onToast("error", "验证未通过：仍有问题没解决，已重新打开");
+      else if (result.recheck_resolved) onToast("success", "权限已放开：提问人现在能检索到资料，已自动标为已解决");
+      else if (result.recheck_reopened) onToast("error", "当初那份资料已经找不到了，保密的理由不成立，已重新打开");
+      else onToast("success", `已重新检索，诊断结论：${value.detail.diagnosis?.label ?? "无法判断"}`);
       onChanged(value);
     } catch (reason) {
       onToast("error", (reason as Error).message);
@@ -414,7 +419,7 @@ function IssueDetail({ issueId, signals, onChanged, onToast }: { issueId: string
   }
 
   // 标记"无需处理"前先选原因、标记"已处理"前先选修复方式，默认选中系统推测的一项。
-  const [picking, setPicking] = useState<"ignored" | "handled" | null>(null);
+  const [picking, setPicking] = useState<"ignored" | "handled" | "eval" | null>(null);
   const [closeReason, setCloseReason] = useState<InspectionCloseReason>("other");
   const [fixType, setFixType] = useState<InspectionFixType>("other");
 
@@ -443,11 +448,10 @@ function IssueDetail({ issueId, signals, onChanged, onToast }: { issueId: string
     {issue.status === "open" && detail.reopened && <div className="inspection-notice is-red">{issue.fix_type_label && !detail.verification && `上次处理：${issue.fix_type_label}。`}标记为{detail.reopened.previous_status === "handled" ? "已处理" : "已解决"}之后又出现了 {detail.reopened.new_occurrences} 次，已重新打开（{formatTime(detail.reopened.at)}）。</div>}
 
     {issue.kind === "knowledge_gap" && <DiagnosisDetail diagnosis={detail.diagnosis} verifying={verifying} onVerify={() => void verify()} />}
-    {issue.kind === "knowledge_gap" && <div className="inspection-facts">
-      <Fact label="示例问题">{detail.questions?.length ? <ul>{detail.questions.map((text) => <li key={text}>{text}</li>)}</ul> : "—"}</Fact>
+    {issue.kind === "knowledge_gap" && (detail.missing?.length || detail.comments?.length) ? <div className="inspection-facts">
       {detail.missing?.length ? <Fact label="缺失内容"><ul>{detail.missing.map((item) => <li key={item.text}>{item.text}{item.count > 1 && <span className="inspection-count">×{item.count}</span>}</li>)}</ul></Fact> : null}
       {detail.comments?.length ? <Fact label="用户补充">{<ul>{detail.comments.map((text) => <li key={text}>{text}</li>)}</ul>}</Fact> : null}
-    </div>}
+    </div> : null}
 
     {issue.kind === "suspect_content" && <div className="inspection-facts">
       <Fact label="所在文档">{detail.document_title ? `《${detail.document_title}》` : "已不在当前版本中"}</Fact>
@@ -461,42 +465,182 @@ function IssueDetail({ issueId, signals, onChanged, onToast }: { issueId: string
       {!detail.signals?.citation_failure && <Fact label="错误信息"><code>{detail.error ?? "—"}</code></Fact>}
     </div>}
 
-    <div className="inspection-meta">首次出现 {formatTime(issue.first_seen)} · 最近 {formatTime(issue.last_seen)}{issue.status_by && <> · {issue.status_by === "system" ? "巡检" : issue.status_by} 于 {formatTime(issue.status_updated)} 标记为{issue.status_label}{(issue.close_reason_label || (issue.status !== "open" && issue.fix_type_label)) && `（${issue.close_reason_label || issue.fix_type_label}）`}</>}</div>
 
     <div className="inspection-actions">
       <textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={2000} rows={2} placeholder="处理备注：补了哪份文档、改了什么配置（可选）" />
       <div className="inspection-action-buttons">
         <button type="button" className="secondary-button" disabled={busy || note === (issue.note ?? "")} onClick={() => void save()}>保存备注</button>
+        <button type="button" className="secondary-button" disabled={busy} onClick={() => setPicking(picking === "eval" ? null : "eval")} title="把这个问题的提问加入回归集，以后改动后用它检查还能不能答对">加入评测集</button>
         {issue.status !== "open" && <button type="button" className="secondary-button" disabled={busy} onClick={() => void save("open")}>重新打开</button>}
         {issue.status !== "ignored" && <button type="button" className="secondary-button" disabled={busy} onClick={() => { setCloseReason(issue.suggested_close_reason); setPicking(picking === "ignored" ? null : "ignored"); }}>无需处理</button>}
         {issue.status !== "handled" && issue.status !== "resolved" && <button type="button" className="primary-button" disabled={busy} onClick={() => { setFixType(issue.suggested_fix_type); setPicking(picking === "handled" ? null : "handled"); }}>标记已处理</button>}
       </div>
       {picking === "ignored" && <ChoicePicker title="为什么无需处理？" name="inspection-close-reason" options={CLOSE_REASON_OPTIONS} value={closeReason} suggested={issue.suggested_close_reason} onChange={setCloseReason} busy={busy} noteEmpty={!note.trim()} confirmLabel="确认无需处理" onCancel={() => setPicking(null)} onConfirm={() => void save("ignored", { close_reason: closeReason })} />}
+      {picking === "eval" && <EvalSetPicker issueId={issue.id} onToast={onToast} onDone={() => setPicking(null)} />}
       {picking === "handled" && <ChoicePicker title="做了什么修复？" name="inspection-fix-type" options={FIX_TYPE_OPTIONS} value={fixType} suggested={issue.suggested_fix_type} onChange={setFixType} busy={busy} noteEmpty={!note.trim()} confirmLabel="确认已处理" onCancel={() => setPicking(null)} onConfirm={() => void save("handled", { fix_type: fixType })} />}
       <p className="inspection-hint">标记已处理后，如果又出现同类问答，下次巡检会自动重新打开；标记无需处理的问题不会再提醒。</p>
     </div>
 
     <h3 className="inspection-section-title">关联记录（{issue.occurrences}）</h3>
     <ul className="inspection-events">
-      {issue.events.map((event) => <li key={`${event.source}:${event.source_id}`} className="inspection-event">
-        <div className="inspection-event-head">
-          <span>{formatTime(event.created)}</span>
-          <span>{event.owner}</span>
-          {event.signals.map((signal) => <span key={signal} className="inspection-signal">{signals[signal] ?? signal}</span>)}
-          {event.returned !== undefined && event.returned !== null && <span className="inspection-score">检索返回 {event.returned} 段资料</span>}
-          {event.top_score !== undefined && event.top_score !== null && <span className="inspection-score" title="检索到的资料里，和问题最相关的那一段的得分，满分 1，越高说明资料越对题">最相关资料得分 {event.top_score.toFixed(2)}（满分 1）</span>}
-        </div>
-        {event.question && <div className="inspection-event-question"><span className="inspection-event-label">问题：</span>{event.question}</div>}
-        {event.answer && <AnswerText label="用户看到的回答：" text={event.answer} />}
-        {event.signals.includes("citation_failure") && <CitationDetail event={event} />}
-        <SourceList event={event} />
-        <CallSummary event={event} />
-        {event.missing && event.missing.length > 0 && <div className="inspection-event-line">缺失：{event.missing.join("；")}</div>}
-        {event.feedback && event.feedback.rating === -1 && <div className="inspection-event-line">差评{event.feedback.reason ? `：${FEEDBACK_REASONS[event.feedback.reason] ?? event.feedback.reason}` : ""}{event.feedback.comment && <>（{event.feedback.comment}）</>}</div>}
-        {event.error && <div className="inspection-event-line"><code>{event.error}</code></div>}
-      </li>)}
+      {issue.events.map((event) => <EventItem key={`${event.source}:${event.source_id}`} issueId={issue.id} event={event} signals={signals} replay={detail.replays?.[`${event.source}:${event.source_id}`]} onReplayed={(key, value) => setIssue((current) => current && { ...current, detail: { ...current.detail, replays: { ...current.detail.replays, [key]: value } } })} onToast={onToast} />)}
     </ul>
     {issue.occurrences > issue.events.length && <p className="inspection-hint">只显示最近 {issue.events.length} 条。</p>}
+  </div>;
+}
+
+// 一条关联记录。右上角"重新提问"以提问人的身份完整再问一遍，结果显示在这条记录下面，和原来的回答对照。
+function EventItem({ issueId, event, signals, replay, onReplayed, onToast }: { issueId: string; event: InspectionEvent; signals: Record<string, string>; replay?: InspectionReplay; onReplayed: (key: string, value: InspectionReplay) => void; onToast: ShowToast }) {
+  const [replaying, setReplaying] = useState(false);
+  async function runReplay() {
+    setReplaying(true);
+    try {
+      const value = await replayInspectionEvent(issueId, event.source, event.source_id);
+      onReplayed(`${event.source}:${event.source_id}`, value);
+      if (value.error) onToast("error", "重新提问时出错了，错误信息见这条记录下方");
+    } catch (reason) {
+      onToast("error", (reason as Error).message);
+    } finally {
+      setReplaying(false);
+    }
+  }
+  return <li className="inspection-event">
+    <div className="inspection-event-head">
+      <span>{formatTime(event.created)}</span>
+      <span>{event.owner}</span>
+      {event.signals.map((signal) => <span key={signal} className="inspection-signal">{signals[signal] ?? signal}</span>)}
+      {event.returned !== undefined && event.returned !== null && <span className="inspection-score">检索返回 {event.returned} 段资料</span>}
+      {event.top_score !== undefined && event.top_score !== null && <span className="inspection-score" title="检索到的资料里，和问题最相关的那一段的得分，满分 1，越高说明资料越对题">最相关资料得分 {event.top_score.toFixed(2)}（满分 1）</span>}
+      <button type="button" className="secondary-button inspection-replay-button" disabled={replaying} onClick={() => void runReplay()} title={`以 ${event.owner} 的身份，把这个问题完整再问一遍，看现在会怎么回答`}>{replaying ? "提问中…" : "重新提问"}</button>
+    </div>
+    {event.question && <div className="inspection-event-question"><span className="inspection-event-label">问题：</span>{event.question}</div>}
+    {event.answer && <AnswerText label="用户看到的回答：" text={event.answer} />}
+    {event.signals.includes("citation_failure") && <CitationDetail event={event} />}
+    <SourceList event={event} />
+    <CallSummary event={event} />
+    {event.missing && event.missing.length > 0 && <div className="inspection-event-line">缺失：{event.missing.join("；")}</div>}
+    {event.feedback && event.feedback.rating === -1 && <div className="inspection-event-line">差评{event.feedback.reason ? `：${FEEDBACK_REASONS[event.feedback.reason] ?? event.feedback.reason}` : ""}{event.feedback.comment && <>（{event.feedback.comment}）</>}</div>}
+    {event.error && <div className="inspection-event-line"><code>{event.error}</code></div>}
+    {replay && <ReplayResult replay={replay} event={event} />}
+  </li>;
+}
+
+// 重新提问的结果：现在是回答了、拒答了还是出错，回答原文（可折叠）和用到的资料。
+function ReplayResult({ replay, event }: { replay: InspectionReplay; event: InspectionEvent }) {
+  const outcome = replay.error ? { label: "出错", tone: "red" } : replay.refused ? { label: "拒答", tone: "orange" }
+    : replay.route && replay.route !== "knowledge" ? { label: "走了其他工具", tone: "orange" } : { label: "回答了", tone: "green" };
+  const sources = replay.sources ?? [];
+  return <div className="inspection-replay">
+    <div className="inspection-replay-head">
+      <span className="inspection-explain-title">重新提问</span>
+      <span className={`status-tag is-${outcome.tone}`}>{outcome.label}</span>
+      <span className="inspection-diagnosis-time">{replay.by}（{formatTime(replay.at)}）：以 {replay.owner} 的身份完整再问一遍</span>
+    </div>
+    {event.question && replay.question !== event.question && <div className="inspection-event-line">多轮追问，用补全后的问题提问：{replay.question}</div>}
+    {replay.error ? <div className="inspection-event-line"><code>{replay.error}</code></div> : <>
+      {replay.answer && <AnswerText label="现在的回答：" text={replay.answer} />}
+      {replay.citation && !replay.citation.passed && <div className="inspection-event-line">引用校验没通过，回答被拦截了。</div>}
+      {sources.length > 0 && <div className="inspection-event-line">用到的资料：{sources.map((source) => `《${source.title}》${typeof source.score === "number" ? ` ${source.score.toFixed(2)} 分` : ""}`).join("、")}</div>}
+    </>}
+  </div>;
+}
+
+// 加入评测集：选评测集（或新建）、勾选要加入的问法，期望结果和期望命中的文档按问题状态预填。
+function EvalSetPicker({ issueId, onToast, onDone }: { issueId: string; onToast: ShowToast; onDone: () => void }) {
+  const [data, setData] = useState<EvalCandidates | null>(null);
+  const [sets, setSets] = useState<EvalSetBrief[]>([]);
+  const [setId, setSetId] = useState<string>("new");
+  const [name, setName] = useState("巡检回归");
+  const [chosen, setChosen] = useState<number[]>([]);
+  const [expect, setExpect] = useState<EvalSetExpect>("answer");
+  const [documents, setDocuments] = useState<string[]>([]);
+  const [reference, setReference] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([getInspectionEvalCandidates(issueId), listEvalSets()]).then(([candidates, list]) => {
+      if (cancelled) return;
+      setData(candidates);
+      setSets(list.items);
+      if (list.items.length) setSetId(list.items[0].id);
+      setExpect(candidates.expect);
+      setDocuments(candidates.documents.map((item) => item.doc_key));
+      setChosen(candidates.candidates.length ? [0] : []);
+    }).catch((reason: Error) => onToast("error", reason.message));
+    return () => {
+      cancelled = true;
+    };
+  }, [issueId]);
+
+  if (!data) return <div className="inspection-close"><LoadingSkeleton label="正在加载"><SkeletonBlock className="skeleton-line" /></LoadingSkeleton></div>;
+  const targetName = setId === "new" ? name.trim() : sets.find((item) => item.id === setId)?.name ?? "";
+  const inSet = (index: number) => data.candidates[index].in_sets.includes(targetName);
+  const selected = chosen.filter((index) => !inSet(index));
+
+  async function submit() {
+    setBusy(true);
+    try {
+      const target = setId === "new" ? await createEvalSet(name.trim()) : { id: setId, name: targetName };
+      await addEvalSetItems(target.id, selected.map((index) => ({ question: data!.candidates[index].question, asker: data!.candidates[index].asker,
+        expect, documents: expect === "answer" ? documents : [], reference_answer: reference.trim() || null, issue_id: issueId })));
+      onToast("success", `已把 ${selected.length} 个问题加入「${target.name}」`);
+      onDone();
+    } catch (reason) {
+      onToast("error", (reason as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <div className="inspection-close inspection-eval">
+    <div className="inspection-close-title">加入评测集</div>
+    <p className="inspection-hint">{data.hint}</p>
+    <div className="inspection-eval-row">
+      <span className="inspection-eval-label">评测集</span>
+      <select value={setId} onChange={(event) => setSetId(event.target.value)}>
+        {sets.map((item) => <option key={item.id} value={item.id}>{item.name}（{item.item_count} 题）</option>)}
+        <option value="new">新建评测集…</option>
+      </select>
+      {setId === "new" && <input value={name} maxLength={100} onChange={(event) => setName(event.target.value)} placeholder="评测集名字" />}
+    </div>
+    <div className="inspection-eval-row is-top">
+      <span className="inspection-eval-label">问题</span>
+      <div className="inspection-eval-checks">
+        {data.candidates.length === 0 && <span className="inspection-hint">这个问题没有可以加入的提问记录。</span>}
+        {data.candidates.length > 0 && data.candidates.every((_, index) => inSet(index)) && <span className="inspection-eval-done">这些问题都已经在「{targetName}」里了，可以换一个评测集，或者到回归集页签里编辑题目。</span>}
+        {data.candidates.map((item, index) => <label key={index} className={`inspection-eval-check ${inSet(index) ? "is-disabled" : ""}`}>
+          <input type="checkbox" disabled={inSet(index)} checked={chosen.includes(index) && !inSet(index)} onChange={() => setChosen(chosen.includes(index) ? chosen.filter((value) => value !== index) : [...chosen, index])} />
+          <span>{item.question}<em>提问人 {item.asker}{item.question !== item.original && ` · 原话：${item.original}`}{inSet(index) && " · 已在这个评测集里"}</em></span>
+        </label>)}
+      </div>
+    </div>
+    <div className="inspection-eval-row">
+      <span className="inspection-eval-label">期望结果</span>
+      <div className="inspection-eval-checks is-inline" role="radiogroup">
+        {(["answer", "refuse"] as EvalSetExpect[]).map((key) => <label key={key} className="inspection-eval-check">
+          <input type="radio" name={`eval-expect-${issueId}`} checked={expect === key} onChange={() => setExpect(key)} />
+          <span>{key === "answer" ? "应该回答" : "应该拒答"}{key === data.expect && <em className="is-recommended">推荐</em>}</span>
+        </label>)}
+      </div>
+    </div>
+    {expect === "answer" && data.documents.length > 0 && <div className="inspection-eval-row is-top">
+      <span className="inspection-eval-label">期望命中</span>
+      <div className="inspection-eval-checks">
+        {data.documents.map((item) => <label key={item.doc_key} className="inspection-eval-check">
+          <input type="checkbox" checked={documents.includes(item.doc_key)} onChange={() => setDocuments(documents.includes(item.doc_key) ? documents.filter((value) => value !== item.doc_key) : [...documents, item.doc_key])} />
+          <span>《{item.title}》</span>
+        </label>)}
+      </div>
+    </div>}
+    {expect === "answer" && <div className="inspection-eval-row is-top">
+      <span className="inspection-eval-label">参考答案</span>
+      <textarea value={reference} maxLength={4000} rows={2} onChange={(event) => setReference(event.target.value)} placeholder="可选：正确的说法。生成评测时由评审模型核对回答和它是否一致。" />
+    </div>}
+    <div className="inspection-action-buttons">
+      <button type="button" className="secondary-button" onClick={onDone} disabled={busy}>取消</button>
+      <button type="button" className="primary-button" onClick={() => void submit()} disabled={busy || selected.length === 0 || !targetName}>{busy ? "加入中…" : `加入 ${selected.length} 个问题`}</button>
+    </div>
   </div>;
 }
 
@@ -620,7 +764,10 @@ function diagnosisSentence(item: InspectionDiagnosis["questions"][number], limit
   const pass = `要达到 ${limits.min_score.toFixed(2)} 才算相关，满分 1`;
   const who = item.owner;
   switch (item.category) {
+    case "routing":
+      return `问题提到了「${item.routing?.data_types.join("、")}」，像是在查业务数据，但现在仍会被分到${item.routing?.route_label ?? "知识库检索"}，不会去查数据库。`;
     case "answerable":
+      if (item.rerouted) return `问题提到了「${item.routing?.data_types.join("、")}」，按现在的分流规则会分到数据查询，不再去知识库检索。`;
       return `现在按 ${who} 的权限重新检索，能找到相关资料（最相关的一段得分 ${score(item.user_top)}，${pass}），这个问题已经能答。`;
     case "permission":
       return `${who} 能看到的资料里找不到相关内容（最高只有 ${score(item.user_top)}），但整个知识库里有得分 ${score(item.full_top)} 的资料，在下面这份文档里，${who} 没有权限看到（${pass}）。`;
@@ -636,22 +783,22 @@ function diagnosisSentence(item: InspectionDiagnosis["questions"][number], limit
 }
 
 function DiagnosisDetail({ diagnosis, verifying, onVerify }: { diagnosis?: InspectionDiagnosis; verifying: boolean; onVerify: () => void }) {
-  const button = <button type="button" className="secondary-button inspection-verify-button" onClick={onVerify} disabled={verifying} title="按提问人现在的权限，用这些问题重新检索一遍">{verifying ? "验证中…" : "重新验证"}</button>;
+  const button = <button type="button" className="secondary-button inspection-verify-button" onClick={onVerify} disabled={verifying} title="按提问人现在的权限，用这些问题重新检索一遍">{verifying ? "检索中…" : "重新检索"}</button>;
   if (!diagnosis) {
     return <div className="inspection-diagnosis">
       <div className="inspection-diagnosis-head">
         <span className="inspection-explain-title">诊断结果</span>
-        <span className="inspection-diagnosis-time">还没有验证过。巡检时会自动验证，也可以现在手动验证一次。</span>
+        <span className="inspection-diagnosis-time">还没有检索过。巡检时会自动检索，也可以现在手动检索一次。</span>
         {button}
       </div>
     </div>;
   }
   const limits = diagnosis.thresholds ?? { min_score: 0.85, near_miss: 0.425, out_of_scope: 0.05 };
-  const who = diagnosis.trigger === "manual" ? `${diagnosis.checked_by ?? "管理员"} 手动验证` : "巡检时系统自动验证";
+  const who = diagnosis.trigger === "manual" ? `${diagnosis.checked_by ?? "管理员"} 手动检索` : "巡检时系统自动检索";
   return <div className="inspection-diagnosis">
     <div className="inspection-diagnosis-head">
       <span className="inspection-explain-title">诊断结果</span>
-      <span className="inspection-diagnosis-time">{who}（{formatTime(diagnosis.checked_at)}）：以提问人的权限重新检索</span>
+      <span className="inspection-diagnosis-time">{who}（{formatTime(diagnosis.checked_at)}）：以提问人的权限检索</span>
       {button}
     </div>
     <ul>
@@ -665,7 +812,7 @@ function DiagnosisDetail({ diagnosis, verifying, onVerify }: { diagnosis?: Inspe
         {item.documents.length > 0 && <ul className="inspection-diagnosis-docs">
           {item.documents.map((document) => <li key={document.doc_key}>《{document.title}》 · 上传者 {document.owner} · 当前{document.visibility_label ?? document.visibility}{document.groups.length > 0 && `（${document.groups.join("、")}）`}</li>)}
         </ul>}
-        <DiagnosisChunks chunks={item.chunks} owner={item.owner} minScore={limits.min_score} />
+        {!item.routing && <DiagnosisChunks chunks={item.chunks} owner={item.owner} minScore={limits.min_score} />}
       </li>)}
     </ul>
   </div>;
@@ -673,8 +820,8 @@ function DiagnosisDetail({ diagnosis, verifying, onVerify }: { diagnosis?: Inspe
 
 // 重新检索时得分最高的那段资料，默认折叠：得分、是否达到相关门槛、提问人能不能看到，原文显示 3 行可展开。
 function DiagnosisChunks({ chunks, owner, minScore }: { chunks?: InspectionDiagnosisChunk[]; owner: string; minScore: number }) {
-  // 没有 chunks 字段：这次诊断是在保存资料之前做的，不是没检索到资料，要提示重新验证，不能说"没找到"。
-  if (chunks === undefined) return <div className="inspection-event-line">这次诊断没有保存检索到的资料（在加入这项功能之前做的），点右上角「重新验证」后就能看到。</div>;
+  // 没有 chunks 字段：这次诊断是在保存资料之前做的，不是没检索到资料，要提示重新检索，不能说"没找到"。
+  if (chunks === undefined) return <div className="inspection-event-line">这次诊断没有保存检索到的资料（在加入这项功能之前做的），点右上角「重新检索」后就能看到。</div>;
   if (chunks.length === 0) return <div className="inspection-event-line">重新检索时没有召回任何候选资料：知识库里没有能和这个问题匹配上的内容，得分按 0 计算。</div>;
   const chunk = chunks[0];
   return <details className="inspection-sources">

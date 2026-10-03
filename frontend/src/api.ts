@@ -707,8 +707,25 @@ export type InspectionIssueDetail = {
   // 标记已处理后验证没通过时的说明。
   verification?: { passed: boolean; at: string; message: string };
   reopened?: { at: string; previous_status: InspectionStatus; new_occurrences: number };
+  // 关联记录上"重新提问"的最近一次结果，键是 "run:编号" 或 "error:编号"。
+  replays?: Record<string, InspectionReplay>;
 };
-export type InspectionDiagnosisCategory = "answerable" | "permission" | "retrieval" | "content" | "out_of_scope" | "unknown";
+// 以提问人的身份把问题完整再问一遍的结果；出错时只有 error。
+export type InspectionReplay = {
+  at: string;
+  by: string;
+  question: string;
+  owner: string;
+  answer?: string;
+  route?: string;
+  refused?: boolean;
+  top_score?: number | null;
+  citation?: { passed: boolean; reason: string | null } | null;
+  duration_ms?: number | null;
+  sources?: { id: string; title: string; score?: number | null }[];
+  error?: string;
+};
+export type InspectionDiagnosisCategory = "answerable" | "permission" | "routing" | "retrieval" | "content" | "out_of_scope" | "unknown";
 export type InspectionDiagnosisDocument = { title: string; doc_key: string; owner: string; visibility: string; visibility_label?: string | null; groups: string[]; score?: number | null };
 // 重新检索时得分最高的几段资料：scope=mine 是按提问人权限检索到的，all 是全库检索到、提问人看不到的。
 export type InspectionDiagnosisChunk = { chunk_id: string; scope: "mine" | "all"; title: string; version?: number | null; page_start?: number | null; heading?: string | null; score: number; passed: boolean; visible: boolean; text: string; truncated: boolean };
@@ -718,12 +735,14 @@ export type InspectionDiagnosis = {
   checked_at: string;
   counts: Partial<Record<InspectionDiagnosisCategory, number>>;
   thresholds?: { min_score: number; near_miss: number; out_of_scope: number };
-  // inspection：巡检时自动验证；manual：管理员点了"重新验证"。
+  // inspection：巡检时自动验证；manual：管理员点了"重新检索"。
   trigger?: "inspection" | "manual";
   checked_by?: string | null;
-  questions: { question: string; owner: string; category: InspectionDiagnosisCategory; label: string; reason?: string; user_top: number | null; full_top: number | null; documents: InspectionDiagnosisDocument[]; chunks?: InspectionDiagnosisChunk[] }[];
+  questions: { question: string; owner: string; category: InspectionDiagnosisCategory; label: string; reason?: string; user_top: number | null; full_top: number | null; documents: InspectionDiagnosisDocument[]; chunks?: InspectionDiagnosisChunk[];
+    // 问题提到了业务数据时，用当前的意图识别和分流规则判断会分到哪里；rerouted 表示现在会分到数据查询。
+    routing?: { route: string; route_label: string; classifier?: string | null; reason?: string | null; data_types: string[] }; rerouted?: boolean }[];
 };
-export type InspectionFixType = "add_content" | "update_content" | "grant_permission" | "tune_retrieval" | "update_prompt" | "fix_system" | "other";
+export type InspectionFixType = "add_content" | "update_content" | "grant_permission" | "tune_retrieval" | "tune_routing" | "update_prompt" | "fix_system" | "other";
 export type InspectionCloseReason = "out_of_scope" | "by_design_permission" | "not_covered" | "invalid_feedback" | "transient" | "other";
 // 页面顶部统计：最近 N 天没答上来的问答，按所属问题的处理结果分组。
 export type InspectionGapSummary = { days: number; total: number; reasonable: number; reasonable_by_reason: Partial<Record<InspectionCloseReason, number>>; other_ignored: number; resolved: number; pending: number };
@@ -844,9 +863,89 @@ export function saveInspectionSchedule(payload: Pick<InspectionSchedule, "enable
   });
 }
 
-// 立即重新验证一个知识缺口，同步返回更新后的问题。
+// 立即重新检索一个知识缺口，同步返回更新后的问题。
 export function verifyInspectionIssue(issueId: string) {
   return request<InspectionIssueFull>(`/inspection/issues/${encodeURIComponent(issueId)}/verify`, { method: "POST" });
+}
+
+// 关联记录上的"重新提问"：以提问人的身份完整再问一遍，要调用大模型，可能需要十几秒。
+export function replayInspectionEvent(issueId: string, source: "run" | "error", sourceId: string) {
+  return request<InspectionReplay>(`/inspection/issues/${encodeURIComponent(issueId)}/events/${source}/${encodeURIComponent(sourceId)}/replay`, { method: "POST" });
+}
+
+// ---- 线上回归集 ----
+// 管理员自建的评测集，题目多数从知识巡检加入，按提问人的权限在线上知识库里跑。
+export type EvalSetExpect = "answer" | "refuse";
+export type EvalSetKind = "retrieval" | "generation";
+export type EvalSetRunSummary = { total?: number; done?: number; passed?: number; failed?: number; pass_rate?: number | null; by_expect?: Partial<Record<EvalSetExpect, { total: number; passed: number }>>; previous?: { id: string; started: string } | null; changes?: Partial<Record<"fixed" | "regressed" | "new", number>> };
+export type EvalSetLatest = { id: string; status: string; summary: EvalSetRunSummary; started: string; finished: string | null };
+export type EvalSetBrief = { id: string; name: string; description: string | null; created_by: string; created: string; updated: string; item_count: number; latest: Partial<Record<EvalSetKind, EvalSetLatest>> };
+export type EvalSetDocument = { doc_key: string; title: string; score?: number | null };
+export type EvalSetItem = { id: string; set_id: string; question: string; asker: string; expect: EvalSetExpect; expect_label: string; documents: EvalSetDocument[]; reference_answer: string | null; note: string | null; issue_id: string | null; created_by: string; created: string };
+export type EvalSetRun = { id: string; set_id: string; kind: EvalSetKind; kind_label: string; status: "running" | "completed" | "failed" | "interrupted"; triggered_by: string | null; summary: EvalSetRunSummary; error: string | null; started: string; finished: string | null };
+export type EvalSetResult = { item_id: string; question: string; asker: string; expect: EvalSetExpect; passed: boolean; reason: string; top_score?: number | null; documents?: EvalSetDocument[]; route?: string; refused?: boolean; answer?: string; judge?: { correctness?: number; correctness_reason?: string } | null; change?: "fixed" | "regressed" | "new"; error?: boolean };
+export type EvalSetRunFull = EvalSetRun & { results: EvalSetResult[] };
+export type EvalSetFull = EvalSetBrief & { items: EvalSetItem[]; runs: EvalSetRun[] };
+export type EvalSetItemInput = { question: string; asker: string; expect: EvalSetExpect; documents?: string[]; reference_answer?: string | null; note?: string | null; issue_id?: string | null };
+export type EvalCandidates = { issue_id: string; kind: InspectionKind; candidates: { question: string; original: string; asker: string; in_sets: string[] }[]; expect: EvalSetExpect; documents: EvalSetDocument[]; hint: string };
+
+// 删除接口返回 204 没有内容，不能按 JSON 解析。
+async function requestEmpty(path: string, options: RequestInit = {}) {
+  const response = await authorizedFetch(path, options);
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({ detail: response.statusText }));
+    throw new Error(body.detail || `请求失败：${response.status}`);
+  }
+}
+
+export function listEvalSets() {
+  return request<{ items: EvalSetBrief[] }>("/eval/sets");
+}
+
+export function createEvalSet(name: string, description?: string) {
+  return request<EvalSetFull>("/eval/sets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, description }) });
+}
+
+export function getEvalSet(setId: string) {
+  return request<EvalSetFull>(`/eval/sets/${encodeURIComponent(setId)}`);
+}
+
+export function updateEvalSet(setId: string, payload: { name?: string; description?: string }) {
+  return request<EvalSetFull>(`/eval/sets/${encodeURIComponent(setId)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+}
+
+export function deleteEvalSet(setId: string) {
+  return requestEmpty(`/eval/sets/${encodeURIComponent(setId)}`, { method: "DELETE" });
+}
+
+export function addEvalSetItems(setId: string, items: EvalSetItemInput[]) {
+  return request<{ items: EvalSetItem[] }>(`/eval/sets/${encodeURIComponent(setId)}/items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items }) });
+}
+
+export function updateEvalSetItem(setId: string, itemId: string, item: EvalSetItemInput) {
+  return request<EvalSetItem>(`/eval/sets/${encodeURIComponent(setId)}/items/${encodeURIComponent(itemId)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(item) });
+}
+
+// 编辑题目时可选的期望文档（所有文档的当前版本）。
+export function listEvalDocuments() {
+  return request<{ documents: { doc_key: string; title: string; owner: string }[] }>("/eval/documents");
+}
+
+export function deleteEvalSetItem(setId: string, itemId: string) {
+  return requestEmpty(`/eval/sets/${encodeURIComponent(setId)}/items/${encodeURIComponent(itemId)}`, { method: "DELETE" });
+}
+
+export function startEvalSetRun(setId: string, kind: EvalSetKind) {
+  return request<{ id: string; status: string }>(`/eval/sets/${encodeURIComponent(setId)}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind }) });
+}
+
+export function getEvalSetRun(setId: string, runId: string) {
+  return request<EvalSetRunFull>(`/eval/sets/${encodeURIComponent(setId)}/runs/${encodeURIComponent(runId)}`);
+}
+
+// 把巡检问题加入回归集前的预填内容。
+export function getInspectionEvalCandidates(issueId: string) {
+  return request<EvalCandidates>(`/inspection/issues/${encodeURIComponent(issueId)}/eval-candidates`);
 }
 
 // 立即巡检，在服务端后台执行；完成后问题列表的 running 变为 false。

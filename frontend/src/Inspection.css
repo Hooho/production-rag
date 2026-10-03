@@ -304,6 +304,10 @@
    color: #b42318;
 }
 
+.inspection-category.is-routing {
+   color: #7c3aed;
+}
+
 .inspection-category.is-retrieval {
    color: #2563eb;
 }
@@ -872,4 +876,153 @@
 
 .inspection-close-warning {
    color: #b45309;
+}
+
+/* 关联记录右上角的"重新提问"。 */
+.inspection-replay-button {
+   margin-left: auto;
+   padding: 2px 10px;
+   font-size: 12px;
+}
+
+/* 重新提问的结果，用左边线和原来的回答区分开。 */
+.inspection-replay {
+   margin-top: 10px;
+   border-left: 3px solid #93b4f5;
+   background: #f7faff;
+   padding: 8px 12px;
+}
+
+.inspection-replay-head {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: 8px;
+   margin-bottom: 4px;
+}
+
+/* 加入评测集：每行左边是名称，右边是选项。 */
+.inspection-eval-row {
+   display: grid;
+   grid-template-columns: 72px 1fr;
+   align-items: center;
+   gap: 10px;
+   margin-bottom: 10px;
+}
+
+.inspection-eval-row.is-top {
+   align-items: start;
+}
+
+.inspection-eval-row select,
+.inspection-eval-row input[type="text"],
+.inspection-eval-row input:not([type]),
+.inspection-eval-row textarea {
+   width: 100%;
+   max-width: 420px;
+   margin: 0;
+   font-family: inherit;
+   font-size: 13px;
+   letter-spacing: normal;
+}
+
+.inspection-eval-row:has(input:not([type])) {
+   grid-template-columns: 72px minmax(160px, 260px) 1fr;
+}
+
+.inspection-eval-label {
+   color: #5e7a95;
+   font-size: 13px;
+}
+
+.inspection-eval-checks {
+   display: flex;
+   flex-direction: column;
+   gap: 6px;
+}
+
+.inspection-eval-checks.is-inline {
+   flex-direction: row;
+   gap: 16px;
+}
+
+/* 全局 label 是上下排列的小号等宽字，这里改回正常排版。 */
+.inspection-eval-check {
+   display: flex;
+   align-items: flex-start;
+   gap: 8px;
+   margin: 0;
+   color: #1d3550;
+   font-family: inherit;
+   font-size: 13px;
+   letter-spacing: normal;
+   text-transform: none;
+   cursor: pointer;
+}
+
+.inspection-eval-check input {
+   width: auto;
+   margin: 3px 0 0;
+   padding: 0;
+}
+
+.inspection-eval-check em {
+   display: block;
+   color: #6c88a3;
+   font-size: 12px;
+   font-style: normal;
+}
+
+.inspection-eval-check em.is-recommended {
+   display: inline;
+   margin-left: 6px;
+   border-radius: 3px;
+   background: #eaf1ff;
+   color: #2563eb;
+   padding: 0 5px;
+   font-size: 11px;
+}
+
+.inspection-eval-check.is-disabled {
+   color: #9fb3c6;
+   cursor: default;
+}
+
+/* 下拉框和输入框与备注框保持同一套样式：浅色边框、圆角、白底；下拉框去掉系统默认外观，换成同色的箭头。 */
+.inspection-eval-row select,
+.inspection-eval-row input:not([type]),
+.inspection-eval-row textarea {
+   box-sizing: border-box;
+   border: 1px solid #cedfec;
+   border-radius: 6px;
+   background-color: #fff;
+   color: #1d3550;
+   padding: 6px 10px;
+   outline: 0;
+}
+
+.inspection-eval-row select,
+.inspection-eval-row input:not([type]) {
+   height: 34px;
+}
+
+.inspection-eval-row select {
+   appearance: none;
+   padding-right: 32px;
+   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%236c88a3' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+   background-position: right 10px center;
+   background-repeat: no-repeat;
+   cursor: pointer;
+}
+
+.inspection-eval-row select:focus,
+.inspection-eval-row input:not([type]):focus,
+.inspection-eval-row textarea:focus {
+   border-color: #2563eb;
+}
+
+.inspection-eval-done {
+   color: #6c88a3;
+   font-size: 13px;
+   line-height: 1.6;
 }

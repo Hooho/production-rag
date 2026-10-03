@@ -11,7 +11,7 @@ import { LOGOUT_EVENT, listDataTypes, createSession, deleteDocument, retryDocume
 // 评测页面放在 /eval，与知识问答、知识库并列；历史记录和评测集分别使用独立子路由。
 // 数据管理页放在 /data：录入和维护商品、订单等业务数据，也是聊天里数据查询工具的数据来源。
 // 知识巡检页放在 /inspection，只对管理员显示。
-type Route = { page: "chat" } | { page: "knowledge"; documentId?: string } | { page: "data" } | { page: "eval"; section: EvaluationSection } | { page: "inspection" } | { page: "settings" };
+type Route = { page: "chat" } | { page: "knowledge"; documentId?: string } | { page: "data" } | { page: "eval"; section: EvaluationSection; setId?: string } | { page: "inspection" } | { page: "settings" };
 type ToastKind = "success" | "error";
 type ToastMessage = { id: number; kind: ToastKind; message: string };
 type ShowToast = (kind: ToastKind, message: string) => void;
@@ -41,6 +41,8 @@ function readRoute(pathname = window.location.pathname): Route {
   if (path === "/data") return { page: "data" };
   if (path === "/eval" || path === "/eval/runs") return { page: "eval", section: "history" };
   if (path === "/eval/dataset") return { page: "eval", section: "dataset" };
+  if (path === "/eval/regression") return { page: "eval", section: "regression" };
+  if (path.startsWith("/eval/regression/")) return { page: "eval", section: "regression", setId: decodeURIComponent(path.slice("/eval/regression/".length)) };
   if (path === "/inspection") return { page: "inspection" };
   if (path === "/settings") return { page: "settings" };
   if (path.startsWith("/knowledge/")) {
@@ -246,7 +248,7 @@ function App() {
         </aside>
         <main className={`main-panel ${route.page === "chat" ? "main-panel-chat" : ""}`}>
           {error && <div className="error-banner">{error}</div>}
-          {route.page === "settings" ? <Settings user={user} onToast={showToast} /> : route.page === "data" && dataAllowed ? <DataManagement onToast={showToast} /> : route.page === "eval" && user.is_admin ? <Evaluation section={route.section} onNavigate={navigate} onToast={showToast} Diagnostics={RetrievalDiagnostics} /> : route.page === "inspection" && user.is_admin ? <Inspection onToast={showToast} /> : route.page === "chat" ? sessionLoading ? <ChatLoading /> : <Chat sessionId={sessionId} initialMessages={savedMessages} historyRuns={historyRuns} onNewChat={() => void startNewChat()} onOpenHistory={openHistory} onMessageSaved={recordHistory} onFeedbackSaved={recordFeedback} /> : <Knowledge user={user} documentId={route.page === "knowledge" ? route.documentId ?? null : null} onToast={showToast} onNavigate={(documentId) => navigate(documentId ? `/knowledge/${encodeURIComponent(documentId)}` : "/knowledge")} />}
+          {route.page === "settings" ? <Settings user={user} onToast={showToast} /> : route.page === "data" && dataAllowed ? <DataManagement onToast={showToast} /> : route.page === "eval" && user.is_admin ? <Evaluation section={route.section} setId={route.setId} onNavigate={navigate} onToast={showToast} Diagnostics={RetrievalDiagnostics} /> : route.page === "inspection" && user.is_admin ? <Inspection onToast={showToast} /> : route.page === "chat" ? sessionLoading ? <ChatLoading /> : <Chat sessionId={sessionId} initialMessages={savedMessages} historyRuns={historyRuns} onNewChat={() => void startNewChat()} onOpenHistory={openHistory} onMessageSaved={recordHistory} onFeedbackSaved={recordFeedback} /> : <Knowledge user={user} documentId={route.page === "knowledge" ? route.documentId ?? null : null} onToast={showToast} onNavigate={(documentId) => navigate(documentId ? `/knowledge/${encodeURIComponent(documentId)}` : "/knowledge")} />}
         </main>
       </div>
     </>

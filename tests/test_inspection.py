@@ -349,7 +349,7 @@ def test_permission_gap_and_verification(setup, monkeypatch):
     summary = inspect(client, store)
     assert summary["verification_failed"] == 1
     reopened = issues(store, "knowledge_gap")[0]
-    assert reopened["status"] == "open" and "还有 1 个检索不到" in reopened["detail"]["verification"]["message"]
+    assert reopened["status"] == "open" and "还有 1 个没解决" in reopened["detail"]["verification"]["message"]
     # 改成公开后验证通过。
     assert client.put(f"/documents/{document_id}/permission", headers=headers(),
         json={"visibility": "public", "groups": []}).status_code == 200
@@ -398,7 +398,7 @@ def test_diagnosis_without_rerank_and_overall_category(setup, monkeypatch):
     assert overall_category(["content", "content", "permission"]) == "content"
 
 
-# 详情页的"重新验证"：只诊断这一个缺口，记录是谁手动验证的；诊断结果带上重新检索到的资料和提问人能否看到。
+# 详情页的"重新检索"：只诊断这一个缺口，记录是谁手动验证的；诊断结果带上重新检索到的资料和提问人能否看到。
 def test_manual_verify(setup, monkeypatch):
     client, store = setup
     document_id = upload(client)
@@ -498,3 +498,30 @@ def test_fix_type(setup, monkeypatch):
     # 改成无需处理时清空修复方式。
     ignored = client.patch(url, headers=headers("admin"), json={"status": "ignored", "close_reason": "out_of_scope"}).json()
     assert ignored["fix_type"] is None and ignored["fix_type_label"] is None
+
+
+# 分错了路：问题提到了业务数据（库存），却被分到知识库检索，诊断为"分错了路"而不是内容缺口；
+# 补上分流规则后重新检索，现在会分到数据查询，自动关闭。
+def test_misrouted_data_question(setup, monkeypatch):
+    client, store = setup
+    upload(client)
+    monkeypatch.setattr(Models, "rerank", keyword_rerank(0.95))
+    ask(client, "库存够不够")
+    inspect(client, store)
+    gap = issues(store, "knowledge_gap")[0]
+    diagnosis = gap["detail"]["diagnosis"]
+    assert diagnosis["category"] == "routing" and diagnosis["label"] == "分错了路"
+    routing = diagnosis["questions"][0]["routing"]
+    assert routing["data_types"] == ["库存"] and routing["route"] == "knowledge" and routing["route_label"] == "知识库检索"
+    issue = client.get(f"/inspection/issues/{gap['id']}", headers=headers("admin")).json()
+    assert issue["suggested_fix_type"] == "tune_routing"
+    # 问制度的问题即使提到了数据关键词，也不算分错了路。
+    from app.inspection.diagnosis import data_types_in
+    assert data_types_in("库存管理制度是什么") == [] and data_types_in("库存够不够") == ["inventory"]
+    # 补上分流规则后，重新检索判断为现在会分到数据查询，自动关闭。
+    import app.tools.data_query as data_query
+    monkeypatch.setattr(data_query, "QUERY_WORDS", data_query.QUERY_WORDS + ["够不够"])
+    verified = client.post(f"/inspection/issues/{gap['id']}/verify", headers=headers("admin")).json()
+    assert verified["status"] == "resolved"
+    assert verified["detail"]["diagnosis"]["questions"][0]["rerouted"] is True
+    assert "现在都会分到数据查询" in verified["detail"]["resolution"]

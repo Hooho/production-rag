@@ -36,6 +36,8 @@ def main():
         print(f"重新打开：{summary.get('reopened', 0)}，自动解决：{summary.get('auto_resolved', 0)}")
         print(f"拒答分类：重跑了 {summary.get('diagnosed', 0)} 个知识缺口，验证通过 {summary.get('verified', 0)} 个，"
               f"验证未通过重新打开 {summary.get('verification_failed', 0)} 个")
+        print(f"权限保密复查：权限已放开自动解决 {summary.get('recheck_resolved', 0)} 个，"
+              f"资料已不在重新打开 {summary.get('recheck_reopened', 0)} 个")
         print(f"当前待处理：{summary.get('total_open', 0)}")
         for issue in list_issues(store, status="open", page_size=10)["items"]:
             print(f"  [{issue['kind_label']}] {issue['title']}（{issue['occurrences']} 次，{issue['users']} 人）")

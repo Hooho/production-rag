@@ -3,13 +3,19 @@
 #   permission    权限缺口：提问人看不到，但全库里有相关资料；
 #   retrieval     检索缺口：提问人范围里有接近阈值的资料，或用户反馈"资料里有却说找不到"，需要调检索；
 #   content       内容缺口：全库都找不到足够相关的资料，需要补文档；
-#   out_of_scope  疑似超出范围：全库里连沾边的资料都没有，多半是闲聊或与业务无关的问题。
+#   out_of_scope  疑似超出范围：全库里连沾边的资料都没有，多半是闲聊或与业务无关的问题；
+#   routing       分错了路：问题提到了订单、库存这类业务数据，像是在查数据库，却被意图识别分到了知识库检索，
+#                 当然找不到资料。要调的是意图识别和分流，不是补文档。
 # "能不能检索到"沿用线上问答同一个重排阈值；它只说明找到了相关资料，不保证一定能答对。
+# 分错了路的问题用当前的意图识别和分流规则再判断一次（不检索、不生成回答）：现在能分到数据查询，就算已经修好。
 import os
 
 from sqlalchemy import select
 
+from ..data.schema import DATA_TYPES
 from ..mysql.store import chunks, document_heads
+from ..router.router import Router
+from ..tools.data_query import KNOWLEDGE_WORDS, TYPE_PRIORITY, mentions
 from ..tools.search import DEFAULT_RERANK_MIN_SCORE, DocumentSearchTool
 
 
@@ -19,10 +25,12 @@ CATEGORIES = {
     "retrieval": "检索缺口",
     "content": "内容缺口",
     "out_of_scope": "疑似超出范围",
+    "routing": "分错了路",
     "unknown": "无法判断",
 }
+ROUTE_LABELS = {"knowledge": "知识库检索", "data": "数据查询", "order": "订单查询", "greeting": "问候"}
 # 同一个缺口里各问题结论不同时，按这个顺序取主结论：越靠前越需要管理员处理。
-PRIORITY = ["permission", "retrieval", "content", "out_of_scope", "unknown"]
+PRIORITY = ["permission", "routing", "retrieval", "content", "out_of_scope", "unknown"]
 VISIBILITY_LABELS = {"private": "仅上传者可见", "shared": "共享给部门", "public": "所有人可见"}
 # 每个缺口最多重跑几个问题：取最近的几个不重复的问题，控制巡检耗时。
 QUESTION_LIMIT = 5
@@ -120,6 +128,27 @@ def top_chunks(store, result, scope_name, visible_versions, limit=CHUNK_LIMIT):
     return items
 
 
+# 问题里提到了哪些业务数据（用数据查询识别数据类型的同一套关键词）。
+# 带"政策、规定、流程"这类词的是在问制度，不算：例如"售后服务的规定"应该查知识库。
+def data_types_in(question):
+    for word in KNOWLEDGE_WORDS:
+        if word in question:
+            return []
+    found = []
+    for data_type in TYPE_PRIORITY:
+        if mentions(question, data_type):
+            found.append(data_type)
+    return found
+
+
+# 用当前的意图识别和分流规则判断这个问题会被分到哪里；规则或本地小模型能识别时不调用大模型。
+def current_route(models, question):
+    analysis = models.analyze_query(question, [], None)
+    decision = Router().inspect(question, None, analysis)
+    return {"route": decision["route"], "route_label": ROUTE_LABELS.get(decision["route"], decision["route"]),
+        "classifier": analysis.get("classifier"), "reason": decision.get("reason")}
+
+
 # 判断一个问题现在属于哪一类。feedback_missed：用户反馈过"资料里有却说找不到"。
 def diagnose_question(store, models, owner, queries, rerank_query, scope, feedback_missed=False):
     tool = DocumentSearchTool()
@@ -144,7 +173,19 @@ def diagnose_question(store, models, owner, queries, rerank_query, scope, feedba
     result = {"user_top": user_top, "full_top": full_top, "documents": [], "chunks": found}
     if everything["sources"]:
         result.update(category="permission", documents=matched_documents(store, everything["sources"], scope))
-    elif feedback_missed or user_top >= limits["near_miss"]:
+        return result
+    # 知识库里找不到，又提到了业务数据：看现在会被分到哪里。分到数据查询说明分流已经修好，算现在能处理。
+    data_types = data_types_in(rerank_query)
+    if data_types:
+        routing = current_route(models, rerank_query)
+        routing["data_types"] = [DATA_TYPES[data_type]["label"] for data_type in data_types]
+        result["routing"] = routing
+        if routing["route"] == "data":
+            result.update(category="answerable", rerouted=True)
+        else:
+            result["category"] = "routing"
+        return result
+    if feedback_missed or user_top >= limits["near_miss"]:
         result["category"] = "retrieval"
     elif (full_top or 0) < limits["out_of_scope"]:
         result["category"] = "out_of_scope"
