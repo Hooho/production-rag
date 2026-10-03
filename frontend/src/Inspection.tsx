@@ -50,6 +50,12 @@ function explain(issue: InspectionIssue): { what: string; todo: string[] } {
       todo: ["对照用户的补充说明核对原文。有问题就在知识库里上传新版本，文档更新后这个问题会自动变成「已解决」。", "核对后内容没有问题（比如用户理解错了），点「无需处理」。"],
     };
   }
+  if (issue.kind === "parse_quality") {
+    return {
+      what: "巡检时检查了这份文档当前版本提取出来的文字，发现解析有问题。解析出错的内容检索不到或者被错误地检索到，用户只会看到「找不到」或答非所问。",
+      todo: ["展开下面每一项看原文例子，对照原文件确认。", "常见做法：扫描件先做文字识别（OCR）再上传；PDF 乱码或汉字被拆开时，换成 Word 或从原始文件重新导出；页眉页脚可以在导出前去掉。", "处理好后在知识库里上传新版本，然后点「标记已处理」。下次巡检新版本正常就自动关闭，仍有问题会重新打开；也可以点「重新检查」马上看结果。", "文档本身就是这样（例如本来就是一页一页的短条目），点「无需处理」。"],
+    };
+  }
   if (detail.signals?.citation_failure) {
     return {
       what: "系统检索到了资料并交给模型（编号为 S1、S2…），要求模型在回答里用编号标明每句话的依据。下面这些回答要么没有引用任何一段资料，要么引用了根本不存在的编号（虚构来源）。为了防止编造，系统拦下了回答，用户只看到一句提示，没有拿到答案。",
@@ -312,6 +318,7 @@ const CLOSE_REASON_OPTIONS: { key: InspectionCloseReason; label: string; hint: s
 const FIX_TYPE_OPTIONS: { key: InspectionFixType; label: string; hint: string }[] = [
   { key: "add_content", label: "补了资料", hint: "上传了新文档，覆盖这类问题" },
   { key: "update_content", label: "改了资料", hint: "修正了文档里错误或过期的内容" },
+  { key: "fix_parsing", label: "改了解析", hint: "换了文件格式、开了文字识别或调了解析方式后重新上传" },
   { key: "grant_permission", label: "调了权限", hint: "把文档共享给了提问人所在的部门" },
   { key: "tune_retrieval", label: "调了检索", hint: "改了分片、阈值、同义词等检索设置" },
   { key: "tune_routing", label: "调了分流", hint: "调整了意图识别的规则、小模型或提示词" },
@@ -383,10 +390,13 @@ function IssueRow({ issue, signals, open, onToggle, onChanged, onToast }: { issu
         <div className="inspection-item-title">{issue.title}</div>
         <SignalChips counts={issue.detail.signals} labels={signals} />
       </div>
-      <div className="inspection-item-stats">
+      {issue.kind === "parse_quality" ? <div className="inspection-item-stats">
+        <span>第 <strong>{issue.detail.version ?? "?"}</strong> 版 · <strong>{issue.detail.chunks ?? 0}</strong> 段</span>
+        <em>检查于 {formatTime(issue.detail.checked ?? issue.updated)}</em>
+      </div> : <div className="inspection-item-stats">
         <span><strong>{issue.occurrences}</strong> 次 · <strong>{issue.users}</strong> 人</span>
         <em>最近 {formatTime(issue.last_seen)}</em>
-      </div>
+      </div>}
     </button>
     {open && <IssueDetail issueId={issue.id} signals={signals} onChanged={onChanged} onToast={onToast} />}
   </li>;
@@ -419,6 +429,12 @@ function IssueDetail({ issueId, signals, onChanged, onToast }: { issueId: string
       const value = await verifyInspectionIssue(issue.id);
       setIssue(value);
       const result = value.verify_result ?? {};
+      if (issue.kind === "parse_quality") {
+        if (value.status === "resolved") onToast("success", "检查通过：当前版本解析正常，已自动标为已解决");
+        else onToast("error", value.detail.problems?.length ? `仍有问题：${value.detail.problems.map((item) => item.label).join("、")}` : "已重新检查");
+        onChanged(value);
+        return;
+      }
       if (issue.kind === "system_error") {
         if (result.system_resolved) onToast("success", "已恢复：重新提问正常回答了，已自动标为已解决");
         else onToast("error", value.detail.recheck?.message ? `${value.detail.recheck.message}，问题保持打开` : "重新提问后仍未恢复");
@@ -469,6 +485,7 @@ function IssueDetail({ issueId, signals, onChanged, onToast }: { issueId: string
 
     {issue.kind === "knowledge_gap" && <DiagnosisDetail diagnosis={detail.diagnosis} verifying={verifying} onVerify={() => void verify()} />}
     {issue.kind === "system_error" && <SystemRecheck recheck={detail.recheck} verifying={verifying} onVerify={() => void verify()} />}
+    {issue.kind === "parse_quality" && <ParseQuality detail={detail} verifying={verifying} onVerify={() => void verify()} />}
     {issue.kind === "knowledge_gap" && (detail.missing?.length || detail.comments?.length) ? <div className="inspection-facts">
       {detail.missing?.length ? <Fact label="缺失内容"><ul>{detail.missing.map((item) => <li key={item.text}>{item.text}{item.count > 1 && <span className="inspection-count">×{item.count}</span>}</li>)}</ul></Fact> : null}
       {detail.comments?.length ? <Fact label="用户补充">{<ul>{detail.comments.map((text) => <li key={text}>{text}</li>)}</ul>}</Fact> : null}
@@ -491,7 +508,7 @@ function IssueDetail({ issueId, signals, onChanged, onToast }: { issueId: string
       <textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={2000} rows={2} placeholder="处理备注：补了哪份文档、改了什么配置（可选）" />
       <div className="inspection-action-buttons">
         <button type="button" className="secondary-button" disabled={busy || note === (issue.note ?? "")} onClick={() => void save()}>保存备注</button>
-        <button type="button" className="secondary-button" disabled={busy} onClick={() => setPicking(picking === "eval" ? null : "eval")} title="把这个问题的提问加入回归集，以后改动后用它检查还能不能答对">加入评测集</button>
+        {issue.kind !== "parse_quality" && <button type="button" className="secondary-button" disabled={busy} onClick={() => setPicking(picking === "eval" ? null : "eval")} title="把这个问题的提问加入回归集，以后改动后用它检查还能不能答对">加入评测集</button>}
         {issue.status !== "open" && <button type="button" className="secondary-button" disabled={busy} onClick={() => void save("open")}>重新打开</button>}
         {issue.status !== "ignored" && <button type="button" className="secondary-button" disabled={busy} onClick={() => { setCloseReason(issue.suggested_close_reason); setPicking(picking === "ignored" ? null : "ignored"); }}>无需处理</button>}
         {issue.status !== "handled" && issue.status !== "resolved" && <button type="button" className="primary-button" disabled={busy} onClick={() => { setFixType(issue.suggested_fix_type); setPicking(picking === "handled" ? null : "handled"); }}>标记已处理</button>}
@@ -499,14 +516,16 @@ function IssueDetail({ issueId, signals, onChanged, onToast }: { issueId: string
       {picking === "ignored" && <ChoicePicker title="为什么无需处理？" name="inspection-close-reason" options={CLOSE_REASON_OPTIONS} value={closeReason} suggested={issue.suggested_close_reason} onChange={setCloseReason} busy={busy} noteEmpty={!note.trim()} confirmLabel="确认无需处理" onCancel={() => setPicking(null)} onConfirm={() => void save("ignored", { close_reason: closeReason })} />}
       {picking === "eval" && <EvalSetPicker issueId={issue.id} onToast={onToast} onDone={() => setPicking(null)} />}
       {picking === "handled" && <ChoicePicker title="做了什么修复？" name="inspection-fix-type" options={FIX_TYPE_OPTIONS} value={fixType} suggested={issue.suggested_fix_type} onChange={setFixType} busy={busy} noteEmpty={!note.trim()} confirmLabel="确认已处理" onCancel={() => setPicking(null)} onConfirm={() => void save("handled", { fix_type: fixType })} />}
-      <p className="inspection-hint">标记已处理后，如果又出现同类问答，下次巡检会自动重新打开；标记无需处理的问题不会再提醒。</p>
+      <p className="inspection-hint">{issue.kind === "parse_quality" ? "标记已处理后，上传的新版本仍有问题会自动重新打开；标记无需处理的不会再提醒。" : "标记已处理后，如果又出现同类问答，下次巡检会自动重新打开；标记无需处理的问题不会再提醒。"}</p>
     </div>
 
+    {issue.kind !== "parse_quality" && <>
     <h3 className="inspection-section-title">关联记录（{issue.occurrences}）</h3>
     <ul className="inspection-events">
       {issue.events.map((event) => <EventItem key={`${event.source}:${event.source_id}`} issueId={issue.id} event={event} signals={signals} replay={detail.replays?.[`${event.source}:${event.source_id}`]} onReplayed={(key, value) => setIssue((current) => current && { ...current, detail: { ...current.detail, replays: { ...current.detail.replays, [key]: value } } })} onToast={onToast} />)}
     </ul>
     {issue.occurrences > issue.events.length && <p className="inspection-hint">只显示最近 {issue.events.length} 条。</p>}
+    </>}
   </div>;
 }
 
@@ -905,6 +924,27 @@ function DiagnosisChunks({ chunks, owner, minScore }: { chunks?: InspectionDiagn
       </li>
     </ol>
   </details>;
+}
+
+// 解析质量：文档信息、每项问题（默认收起原文例子）和「重新检查」按钮。
+function ParseQuality({ detail, verifying, onVerify }: { detail: InspectionIssueFull["detail"]; verifying: boolean; onVerify: () => void }) {
+  const problems = detail.problems ?? [];
+  return <div className="inspection-diagnosis">
+    <div className="inspection-diagnosis-head">
+      <span className="inspection-explain-title">检查结果</span>
+      <span className="inspection-diagnosis-time">{detail.checked ? `${formatTime(detail.checked)} · ${detail.checked_by ? `${detail.checked_by} 手动检查` : "巡检时自动检查"}` : ""}</span>
+      <button type="button" className="secondary-button inspection-verify-button" disabled={verifying} onClick={onVerify} title="重新检查这份文档的当前版本">{verifying ? "检查中…" : "重新检查"}</button>
+    </div>
+    <p className="inspection-parse-doc">《{detail.document_title}》{detail.filename && <span>{detail.filename}</span>}<span>第 {detail.version} 版 · {detail.chunks} 段 · {detail.chars} 字</span></p>
+    {problems.length === 0 ? <p className="inspection-hint">当前版本没有发现解析问题。</p> : <ul className="inspection-parse-list">
+      {problems.map((problem) => <li key={problem.code}>
+        <details>
+          <summary><span className={`inspection-parse-tag is-${problem.code}`}>{problem.label}</span>{problem.message}</summary>
+          <ul className="inspection-parse-examples">{problem.examples.map((text, index) => <li key={index}><code>{text}</code></li>)}</ul>
+        </details>
+      </li>)}
+    </ul>}
+  </div>;
 }
 
 function Explanation({ issue }: { issue: InspectionIssue }) {

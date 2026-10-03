@@ -693,7 +693,7 @@ export function startEvalRun(kind: "retrieval" | "generation" | "memory", split:
 }
 
 // 知识巡检（只有管理员可见）：从问答日志合并出来的问题。
-export type InspectionKind = "knowledge_gap" | "suspect_content" | "system_error";
+export type InspectionKind = "knowledge_gap" | "suspect_content" | "system_error" | "parse_quality";
 export type InspectionStatus = "open" | "handled" | "resolved" | "ignored";
 export type InspectionIssueDetail = {
   signals?: Record<string, number>;
@@ -720,7 +720,16 @@ export type InspectionIssueDetail = {
   recheck?: InspectionRecheck;
   // 关联记录上"重新提问"的最近一次结果，键是 "run:编号" 或 "error:编号"。
   replays?: Record<string, InspectionReplay>;
+  // 解析质量：检查的是哪份文档的哪个版本、分片数和字数、发现的问题。
+  filename?: string;
+  version?: number;
+  chunks?: number;
+  chars?: number;
+  checked?: string;
+  checked_by?: string;
+  problems?: InspectionParseProblem[];
 };
+export type InspectionParseProblem = { code: "empty" | "garbled" | "spaced" | "repeated" | "fragments"; label: string; value: number; message: string; examples: string[] };
 export type InspectionRecheck = { at: string; trigger: "inspection" | "manual"; by: string | null; question: string; owner: string; passed: boolean; message: string; answer?: string; route?: string; error?: string };
 // 以提问人的身份把问题完整再问一遍的结果；出错时只有 error。
 export type InspectionReplay = {
@@ -754,7 +763,7 @@ export type InspectionDiagnosis = {
     // 问题提到了业务数据时，用当前的意图识别和分流规则判断会分到哪里；rerouted 表示现在会分到数据查询。
     routing?: { route: string; route_label: string; classifier?: string | null; reason?: string | null; data_types: string[] }; rerouted?: boolean }[];
 };
-export type InspectionFixType = "add_content" | "update_content" | "grant_permission" | "tune_retrieval" | "tune_routing" | "update_prompt" | "fix_system" | "other";
+export type InspectionFixType = "add_content" | "update_content" | "fix_parsing" | "grant_permission" | "tune_retrieval" | "tune_routing" | "update_prompt" | "fix_system" | "other";
 export type InspectionCloseReason = "out_of_scope" | "by_design_permission" | "not_covered" | "invalid_feedback" | "transient" | "other";
 // 页面顶部统计：最近 N 天没答上来的问答，按所属问题的处理结果分组。
 export type InspectionGapSummary = { days: number; total: number; reasonable: number; reasonable_by_reason: Partial<Record<InspectionCloseReason, number>>; other_ignored: number; resolved: number; pending: number };

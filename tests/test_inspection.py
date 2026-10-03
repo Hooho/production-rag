@@ -571,3 +571,47 @@ def test_system_error_recheck(setup, monkeypatch):
     verified = client.post(f"{url}/verify", headers=headers("admin")).json()
     assert verified["status"] == "resolved" and verified["verify_result"]["system_resolved"] == 1
     assert verified["detail"]["resolution"].startswith("已恢复") and verified["detail"]["recheck"]["by"] == "admin"
+
+
+# 解析质量：纯规则检查每份文档当前版本的分片文字。
+def test_check_document_rules():
+    from app.inspection.scans import check_document
+    normal = ["退货政策：自签收之日起 7 天内可以无理由退货，商品需保持完好，运费由买家承担。" * 2] * 5
+    assert check_document(normal) == []
+    assert [item["code"] for item in check_document(["  "])] == ["empty"]
+    garbled = ["退货政策��：自签收之日起�� 7 天内可以��无理由退货。" * 2]
+    assert [item["code"] for item in check_document(garbled)] == ["garbled"]
+    spaced = ["退 货 政 策 说 明。售 后 服 务 流 程。换 货 申 请 规 则。其余正文内容正常，用来凑够长度。"]
+    assert [item["code"] for item in check_document(spaced)] == ["spaced"]
+    footer = ["某某公司内部资料 严禁外传\n" + text for text in normal]
+    found = check_document(footer)
+    assert [item["code"] for item in found] == ["repeated"] and found[0]["examples"][0] == "某某公司内部资料 严禁外传"
+    pieces = ["第一章", "第二章", "第三章"] + normal[:2]
+    assert [item["code"] for item in check_document(pieces)] == ["fragments"]
+
+
+# 巡检时发现有乱码的文档；标记已处理后上传的新版本仍有问题就重新打开，新版本正常后自动解决；手动「重新检查」只查这一份。
+def test_parse_quality_issue_lifecycle(setup):
+    from test_app import import_text
+    client, store = setup
+    import_text(client, "正常文档", "退货政策：自签收之日起 7 天内可以无理由退货，商品需保持完好。")
+    bad = import_text(client, "乱码文档", "退货��政策��：签收��后 7 天��内可以退货。")
+    summary = inspect(client, store)
+    assert summary["parse_checked"] == 2 and summary["created_parse_quality"] == 1
+    issue = issues(store, "parse_quality")[0]
+    assert issue["title"] == "《乱码文档》有乱码" and issue["detail"]["problems"][0]["code"] == "garbled"
+    url = f"/inspection/issues/{issue['id']}"
+    assert client.get(url, headers=headers("admin")).json()["suggested_fix_type"] == "fix_parsing"
+    assert client.patch(url, headers=headers("admin"), json={"status": "handled", "fix_type": "fix_parsing"}).status_code == 200
+    # 没有新版本时保持已处理。
+    inspect(client, store)
+    assert issues(store, "parse_quality")[0]["status"] == "handled"
+    second = import_text(client, "乱码文档", "退货��政策��：签收��后 15 天��内可以退货。",
+        replace=bad["document_id"])
+    inspect(client, store)
+    reopened = issues(store, "parse_quality")[0]
+    assert reopened["status"] == "open" and "第 2 版" in reopened["detail"]["verification"]["message"]
+    import_text(client, "乱码文档", "退货政策：签收后 15 天内可以退货，运费由买家承担。", replace=second["document_id"])
+    verified = client.post(f"{url}/verify", headers=headers("admin")).json()
+    assert verified["status"] == "resolved" and verified["detail"]["resolution"] == "第 3 版解析正常"
+    assert verified["verify_result"]["parse_checked"] == 1 and "verification" not in verified["detail"]

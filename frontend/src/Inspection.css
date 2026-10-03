@@ -1026,3 +1026,65 @@
    font-size: 13px;
    line-height: 1.6;
 }
+
+/* 解析质量：类型标签用青色；每项问题前是浅底方角小标签，原文例子默认收起。 */
+.inspection-kind.is-parse_quality {
+   background: #0f766e;
+}
+
+.inspection-parse-doc {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: baseline;
+   gap: 10px;
+   margin: 0 0 6px;
+   color: #1d3550;
+   font-size: 13px;
+}
+
+.inspection-parse-doc span {
+   color: #7d95ac;
+   font-size: 12px;
+}
+
+.inspection-parse-list {
+   list-style: none;
+   margin: 0;
+   padding: 0;
+}
+
+.inspection-parse-list > li {
+   border-top: 1px solid #f0f5fa;
+   padding: 6px 0;
+   font-size: 13px;
+}
+
+.inspection-parse-list summary {
+   color: #334e68;
+   cursor: pointer;
+}
+
+.inspection-parse-tag {
+   display: inline-block;
+   margin-right: 8px;
+   border-radius: 3px;
+   background: #e6f4f1;
+   padding: 0 6px;
+   color: #0f766e;
+   font-size: 12px;
+}
+
+.inspection-parse-examples {
+   display: flex;
+   flex-direction: column;
+   gap: 4px;
+   margin: 6px 0 0;
+   padding-left: 18px;
+   color: #5e7a95;
+   font-size: 12px;
+}
+
+.inspection-parse-examples code {
+   white-space: pre-wrap;
+   word-break: break-all;
+}

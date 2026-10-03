@@ -40,9 +40,11 @@ def main():
               f"仍未恢复 {summary.get('system_failed', 0)} 个")
         print(f"权限保密复查：权限已放开自动解决 {summary.get('recheck_resolved', 0)} 个，"
               f"资料已不在重新打开 {summary.get('recheck_reopened', 0)} 个")
+        print(f"解析质量：检查了 {summary.get('parse_checked', 0)} 份文档，有问题 {summary.get('parse_bad', 0)} 份，"
+              f"新版本正常自动解决 {summary.get('parse_resolved', 0)} 个，新版本仍有问题重新打开 {summary.get('parse_reopened', 0)} 个")
         print(f"当前待处理：{summary.get('total_open', 0)}")
         for issue in list_issues(store, status="open", page_size=10)["items"]:
-            print(f"  [{issue['kind_label']}] {issue['title']}（{issue['occurrences']} 次，{issue['users']} 人）")
+            print(f"  [{issue['kind_label']}] {issue['title']}" + ("" if issue["kind"] == "parse_quality" else f"（{issue['occurrences']} 次，{issue['users']} 人）"))
         if created or summary.get("reopened"):
             sys.exit(1)
     finally:

@@ -17,6 +17,7 @@ from sqlalchemy import and_, func, or_, select
 
 from ..agent.replay import replay_question
 from ..runtime_config import snapshot as runtime_snapshot
+from .scans import scan_parse_quality
 from .diagnosis import CATEGORIES as DIAGNOSIS_LABELS, QUESTION_LIMIT, diagnose_question, full_scope, overall_category, thresholds
 from ..mysql.store import (chunks, document_chunks, document_heads, feedback, inspection_issue_events, inspection_issues,
     inspection_runs, run_errors, runs)
@@ -24,7 +25,7 @@ from ..mysql.store import (chunks, document_chunks, document_heads, feedback, in
 
 logger = logging.getLogger("production-rag-inspection")
 
-KINDS = {"knowledge_gap": "知识缺口", "suspect_content": "可疑内容", "system_error": "系统问题"}
+KINDS = {"knowledge_gap": "知识缺口", "suspect_content": "可疑内容", "system_error": "系统问题", "parse_quality": "解析质量"}
 STATUSES = {"open": "待处理", "handled": "已处理", "resolved": "已解决", "ignored": "无需处理"}
 # 标记"无需处理"时必须选的原因。原来只有"忽略"，看不出是拒答本来就对，还是懒得管；
 # 记下原因后，列表可以按原因筛选，统计也能区分"合理拒答"和"真正需要处理的问题"。
@@ -40,6 +41,7 @@ CLOSE_REASONS = {
 FIX_TYPES = {
     "add_content": "补了资料",
     "update_content": "改了资料",
+    "fix_parsing": "改了解析",
     "grant_permission": "调了权限",
     "tune_retrieval": "调了检索",
     "tune_routing": "调了分流",
@@ -221,6 +223,8 @@ class Inspector:
             for issue_id in self.touched:
                 self.refresh_issue(connection, issue_id)
             self.resolve_updated_content(connection)
+            # 主动扫描：检查每份文档当前版本的解析质量，纯规则，不调用模型。
+            scan_parse_quality(self, connection)
         # 拒答分类要调用检索，检索会自己开数据库连接，不能放在上面的事务里：先提交收集结果，再单独诊断。
         if self.diagnose:
             self.diagnose_gaps()
@@ -679,6 +683,13 @@ def verify_issue(store, models, issue_id, username):
         diagnose_gap_issues(store, models, now_text(), stats, issue_ids=[issue_id], trigger="manual", by=username)
     elif kind == "system_error":
         verify_system_issues(store, models, now_text(), stats, issue_ids=[issue_id], trigger="manual", by=username)
+    elif kind == "parse_quality":
+        inspector = Inspector(store, models, now_text())
+        with store.engine.begin() as connection:
+            doc_key = (connection.execute(select(inspection_issues.c.detail).where(
+                inspection_issues.c.id == issue_id)).scalar() or {}).get("doc_key")
+            scan_parse_quality(inspector, connection, doc_keys={doc_key}, by=username)
+        stats.update(inspector.stats)
     else:
         raise ValueError("可疑内容在文档更新后自动关闭，不需要手动验证")
     issue = get_issue(store, issue_id)
@@ -779,6 +790,8 @@ def suggest_fix_type(row):
         return "add_content"
     if row["kind"] == "suspect_content":
         return "update_content"
+    if row["kind"] == "parse_quality":
+        return "fix_parsing"
     if (detail.get("signals") or {}).get("citation_failure"):
         return "update_prompt"
     return "fix_system"
