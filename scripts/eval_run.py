@@ -22,6 +22,7 @@ def format_value(value):
 #   python -m scripts.eval_run --suite ablation      加上消融实验：仅向量 / 仅 BM25 / 混合不重排
 #   python -m scripts.eval_run --suite params        加上参数对比：候选池 12/30、多查询取最好名次
 #   python -m scripts.eval_run --generation          同时做生成评测（需要 MODEL_MODE=openai，会产生少量费用）
+#   python -m scripts.eval_run --memory              多轮对话评测：对比对话记忆参数（需要 MODEL_MODE=openai，会产生费用）
 #   python -m scripts.eval_run --split holdout       只在留出集上做最终验证
 #   python -m scripts.eval_run --refresh-rewrites    重新用大模型生成并缓存查询改写
 # 结果保存到 eval/results/日期时间_提交号.json，并自动与上一次同类评测对比。
@@ -31,11 +32,12 @@ def main():
     parser.add_argument("--suite", action="append", choices=sorted({variant["suite"] for variant in VARIANTS.values()}),
         default=[])
     parser.add_argument("--generation", action="store_true")
+    parser.add_argument("--memory", action="store_true")
     parser.add_argument("--refresh-rewrites", action="store_true")
     args = parser.parse_args()
     models = Models()
-    if args.generation and models.mode != "openai":
-        raise SystemExit("生成评测需要真实大模型：请设置 MODEL_MODE=openai 和 LLM_API_KEY")
+    if (args.generation or args.memory) and models.mode != "openai":
+        raise SystemExit("生成评测和多轮对话评测需要真实大模型：请设置 MODEL_MODE=openai 和 LLM_API_KEY")
     items = load_dataset()
     if args.refresh_rewrites:
         refresh_rewrites(models, items)
@@ -47,7 +49,8 @@ def main():
             # 评测的对话线程不写入生产用的 PostgreSQL Checkpointer：每道题一个临时线程，
             # 写进去只会堆积无用数据，所以回答 Agent 改用进程内记忆，脚本结束即释放。
             responder = ResponseAgent(models, use_postgres=False)
-        run = start_run("generation" if args.generation else "retrieval", args.split, args.suite)
+        kind = "memory" if args.memory else "generation" if args.generation else "retrieval"
+        run = start_run(kind, args.split, args.suite)
         print(f"开始评测 {run['id']}")
         run = execute_run(store, models, items, run, generate=args.generation, responder=responder)
     finally:
@@ -55,6 +58,12 @@ def main():
             responder.close()
         store.close()
     print(f"完成：eval/results/{run['id']}.json")
+    if run["kind"] == "memory":
+        for variant in run["memory"]:
+            summary = variant["summary"]
+            print(f"{variant['label']}：正确性 {format_value(summary['correctness'])}，"
+                f"触发压缩 {format_value(summary['summarized_rate'])}，最后一问平均输入 {format_value(summary['input_tokens_avg'])} Token")
+        return
     base = previous_run(run, list_runs())
     if base is None:
         for key, value in run["summary"].items():

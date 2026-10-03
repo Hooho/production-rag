@@ -9,17 +9,11 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from openai import OpenAIError
 
+from .runtime_config import value as runtime_value
 from .tools.data_query import looks_like_data_query
 
 
-# 本地交叉编码器首次请求可能需要加载模型，原来的 5 秒超时会把冷启动误判成“未启用重排”；允许通过环境变量调整。
-RERANK_TIMEOUT_SECONDS = float(os.getenv("RERANK_TIMEOUT_SECONDS", "60"))
-# Embedding 以前沿用通用的 20 秒超时。开启 Contextual Retrieval 后每个分片前面多了上下文说明，
-# 一批 64 段长文本在 CPU 上的本地模型里可能超过 20 秒，整份文档在"生成向量"阶段超时失败；
-# 重试会从解析重新开始，前面十几分钟的上下文生成也要重做。放宽到 120 秒，并允许通过环境变量调整。
-EMBEDDING_TIMEOUT_SECONDS = float(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "120"))
-# 生成上下文说明的输出上限，要留出推理模型思考过程的额度。
-CHUNK_CONTEXT_MAX_TOKENS = int(os.getenv("CHUNK_CONTEXT_MAX_TOKENS", "1024"))
+# 向量 / 重排请求超时、分片说明的输出上限都可以在设置页修改，每次调用时读取，默认值的来由见 app/runtime_config.py。
 # 分片上下文提示词的版本号，参与上下文缓存的键。
 # v2：推理模型的思考过程曾经被当成说明写进分片和缓存，版本加一让这些缓存全部失效。
 CHUNK_CONTEXT_PROMPT_VERSION = 2
@@ -55,9 +49,9 @@ class Models:
         self.embedding_mode = os.getenv("EMBEDDING_MODE", "demo")
         if self.embedding_mode not in {"demo", "openai", "local"}:
             raise ValueError("EMBEDDING_MODE 必须为 demo、openai 或 local")
-        self.intent_mode = os.getenv("INTENT_MODE", "off")
-        if self.intent_mode not in {"off", "local"}:
-            raise ValueError("INTENT_MODE 必须为 off 或 local")
+        # 本地意图识别、Contextual Retrieval 的开关在设置页修改，每次用到时读取；测试可以直接给实例赋值覆盖。
+        self._intent_mode = None
+        self._contextual = None
         self.intent_url = os.getenv("INTENT_URL", "http://intent:8091/v1")
         default_dimension = 512 if self.embedding_mode == "local" else 256
         self.dimension = int(os.getenv("EMBEDDING_DIM", str(default_dimension)))
@@ -84,10 +78,30 @@ class Models:
             self.chat_model = self.build_chat_model(self.llm_base_url, self.llm_api_key, self.llm_model)
         else:
             self.chat_model = None
-        # Contextual Retrieval 需要真实聊天模型为每个分片写上下文说明，演示模式没有模型，始终关闭。
-        self.contextual = self.mode == "openai" and os.getenv("CONTEXTUAL_RETRIEVAL", "on") != "off"
         if self.embedding_mode == "openai" and not os.getenv("EMBEDDING_API_KEY"):
             raise ValueError("缺少 EMBEDDING_API_KEY")
+
+    # local：规则认不出的问题先交给本地小模型分类；off：直接交给大模型。
+    @property
+    def intent_mode(self):
+        if self._intent_mode is not None:
+            return self._intent_mode
+        return "local" if runtime_value("intent_local") else "off"
+
+    @intent_mode.setter
+    def intent_mode(self, value):
+        self._intent_mode = value
+
+    # Contextual Retrieval 需要真实聊天模型为每个分片写上下文说明，演示模式没有模型，始终关闭。
+    @property
+    def contextual(self):
+        if self._contextual is not None:
+            return self._contextual
+        return self.mode == "openai" and runtime_value("contextual_retrieval")
+
+    @contextual.setter
+    def contextual(self, value):
+        self._contextual = value
 
     # 按给定地址、密钥和模型名创建 OpenAI 兼容的聊天模型；DeepSeek、MiniMax、通义千问、Kimi、智谱、Ollama 都走这个接口。
     @staticmethod
@@ -158,13 +172,13 @@ class Models:
     def remote_embedding(self, texts):
         return self.call("EMBEDDING", "embeddings", {
             "model": self.embedding_model, "input": texts,
-        }, timeout=EMBEDDING_TIMEOUT_SECONDS)
+        }, timeout=runtime_value("embedding_timeout"))
 
     # 调用本地 Embedding 接口的一批文本。
     def local_embedding(self, texts):
         return self.call_url(os.getenv("EMBEDDING_URL", "http://embedding:8090/v1"), "embeddings", {
             "model": self.embedding_model, "input": texts,
-        }, timeout=EMBEDDING_TIMEOUT_SECONDS)
+        }, timeout=runtime_value("embedding_timeout"))
 
     # 统计每段文字在本地向量模型下的真实 token 数，返回 (token 数列表, 模型最大输入长度)。
     # 以前分片只记字符数，token_count 恒为空，超过模型上限被截断的分片完全看不出来。
@@ -190,12 +204,13 @@ class Models:
 
     # 调用本地交叉编码器重排候选；服务未启用时返回空结果并保留融合排序。
     def rerank(self, query, documents):
-        if os.getenv("RERANK_MODE", "local") == "off" or self.embedding_mode != "local":
+        if not runtime_value("rerank_enabled") or self.embedding_mode != "local":
             return None
+        timeout = runtime_value("rerank_timeout")
         try:
             data = self.call_url(os.getenv("RERANK_URL", "http://embedding:8090/v1"), "rerank", {
                 "query": query, "documents": documents,
-            }, timeout=RERANK_TIMEOUT_SECONDS)
+            }, timeout=timeout)
             scores = [0.0] * len(documents)
             for item in data["data"]:
                 # fastembed 的 TextCrossEncoder 返回原始 logit（约 -10 到 10），不是 0~1 的概率。
@@ -206,7 +221,7 @@ class Models:
                 scores[int(item["index"])] = 1 / (1 + math.exp(-logit))
             return scores
         except httpx.TimeoutException as error:
-            raise RerankError(f"重排服务超时（超过 {RERANK_TIMEOUT_SECONDS:g} 秒）") from error
+            raise RerankError(f"重排服务超时（超过 {timeout:g} 秒）") from error
         except httpx.HTTPStatusError as error:
             raise RerankError(f"重排服务返回错误 {error.response.status_code}") from error
         except httpx.HTTPError as error:
@@ -479,7 +494,7 @@ class Models:
         # 而当时还没去掉未闭合的 <think>，于是半截英文思考过程被当成说明写进了分片。
         # 现在给足思考的额度；去掉思考过程后没有内容就当作生成失败，不写入分片和缓存，之后可以重试。
         content = self.chat_completion(prompt.format_messages(document=document, chunk=chunk),
-            CHUNK_CONTEXT_MAX_TOKENS)
+            runtime_value("chunk_context_max_tokens"))
         context = " ".join(content.split())[:300]
         if not context or "<think" in context:
             raise ValueError("模型没有输出上下文说明（可能只输出了思考过程）")

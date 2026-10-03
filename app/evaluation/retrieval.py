@@ -9,7 +9,8 @@ from sqlalchemy import select
 
 from ..models import Models
 from ..mysql.store import chunks, document_chunks, document_heads
-from ..tools.search import RERANK_CANDIDATES, RETURN_LIMIT, RRF_K, DocumentSearchTool
+from ..runtime_config import snapshot as runtime_snapshot
+from ..tools.search import DocumentSearchTool
 from .dataset import EVAL_DIR, QUESTION_TYPES, corpus_files, normalize, select_split
 
 
@@ -427,10 +428,44 @@ def threshold_sweep(rows, return_limit):
     return points
 
 
+# 离线扫描「交给模型的段数」：在当前阈值下，段数取 1 到候选池大小时，证据召回和平均实际交给模型几段。
+# 和阈值扫描一样用候选池里每条的重排概率重算，不用重新检索。段数只能截掉排在后面的资料，
+# 证据都排在前面时召回不受影响，这时它的作用只剩控制输入长度。
+def return_limit_sweep(rows, threshold, pool_size):
+    points = []
+    for limit in range(1, pool_size + 1):
+        recalls = []
+        complete = 0
+        multi = []
+        returned = []
+        capped = 0
+        for row in rows:
+            kept = filter_pool(row["pool"], threshold, limit)
+            returned.append(len(kept))
+            passing = sum(1 for item in row["pool"] if item["p"] is None or item["p"] >= threshold)
+            if passing > limit:
+                capped += 1
+            if not row["answerable"] or not row["evidence_count"]:
+                continue
+            found = set()
+            for item in kept:
+                for index in item["ev"]:
+                    found.add(index)
+            recall = len(found) / row["evidence_count"]
+            recalls.append(recall)
+            complete += recall == 1
+            if row["evidence_count"] > 1:
+                multi.append(recall)
+        points.append({"return_limit": limit, "recall_final": mean(recalls), "complete": complete,
+            "answerable": len(recalls), "multi_evidence_recall": mean(multi) if multi else None,
+            "multi_evidence": len(multi), "avg_returned": mean(returned), "capped": capped, "total": len(rows)})
+    return points
+
+
 # 对一组题执行一次检索并打分；options 是传给 DocumentSearchTool 的变体参数。
 def evaluate_items(store, models, items, chunk_texts, rewrites, options, keep_diagnostics, on_item=None):
     tool = DocumentSearchTool()
-    pool_size = options.get("pool_size", RERANK_CANDIDATES)
+    pool_size = options.get("pool_size") or runtime_snapshot()["rerank_candidates"]
     rows = []
     for item in items:
         queries, rerank_query, query_source = plan_queries(item, rewrites)
@@ -494,13 +529,16 @@ def run_retrieval(store, models, items, split, suites=(), on_progress=None, on_i
         variants.append({"name": name, "label": variant["label"], "suite": variant["suite"],
             "options": variant["options"], "summary": summarize(variant_rows), "funnel": funnel(variant_rows),
             "by_type": summarize_by_type(variant_rows)})
-    config = {"split": split, "dataset_size": len(selected), "suites": list(suites), "rrf_k": RRF_K,
-        "pool_size": RERANK_CANDIDATES, "return_limit": RETURN_LIMIT, "min_score": min_score,
+    # 记下这次评测实际用的全部系统参数（设置页可改），对比两次评测时能看出参数是否相同。
+    settings = runtime_snapshot()
+    config = {"split": split, "dataset_size": len(selected), "suites": list(suites), "rrf_k": settings["rrf_k"],
+        "pool_size": settings["rerank_candidates"], "return_limit": settings["return_limit"], "min_score": min_score,
         "reranked": reranked, "fusion": "sum", "methods": ["dense", "keyword"],
         "model_mode": models.mode, "embedding_mode": models.embedding_mode,
         "embedding_model": models.embedding_model, "rerank_model": models.rerank_model,
-        "rerank_mode": os.getenv("RERANK_MODE", "local"), "query_source": sorted(query_sources),
-        "corpus": corpus}
+        "rerank_mode": "local" if settings["rerank_enabled"] else "off", "query_source": sorted(query_sources),
+        "corpus": corpus, "settings": settings}
     return {"config": config, "summary": summarize(rows), "by_type": summarize_by_type(rows),
-        "funnel": funnel(rows), "sweep": threshold_sweep(rows, RETURN_LIMIT) if reranked else [],
+        "funnel": funnel(rows), "sweep": threshold_sweep(rows, settings["return_limit"]) if reranked else [],
+        "limit_sweep": return_limit_sweep(rows, min_score, settings["rerank_candidates"]) if reranked else [],
         "variants": variants, "paraphrase": summarize_paraphrase_pairs(rows), "questions": rows}

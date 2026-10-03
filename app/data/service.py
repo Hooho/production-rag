@@ -1,5 +1,4 @@
 from datetime import date, datetime, timezone
-import os
 import re
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -8,12 +7,13 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 
 from ..mysql.store import data_audit, data_permissions
+from ..runtime_config import value as runtime_value
 from .schema import ACTIONS, DATA_TYPES, SYSTEM_FIELDS, find_field
 
 
 # "今天""这周"要按业务所在时区换算。服务器（容器）通常是 UTC，直接用 date.today()
 # 在北京时间早上 8 点前会把"今天"算成前一天，所以单独配置业务时区。
-BUSINESS_TZ = ZoneInfo(os.getenv("BUSINESS_TZ", "Asia/Shanghai"))
+# 时区在设置页修改（见 app/runtime_config.py），每次计算"今天"时读取。
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 PAGE_SIZE_LIMIT = 100
 
@@ -34,7 +34,7 @@ def now_text():
 
 # 业务时区的今天。
 def today():
-    return datetime.now(BUSINESS_TZ).date()
+    return datetime.now(ZoneInfo(runtime_value("business_tz"))).date()
 
 
 # 返回用户对每种数据的权限：{数据类型: {"read", "create", ...}}。

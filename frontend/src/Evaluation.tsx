@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ComponentType, type FormEvent, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
-import { addEvalDatasetItem, addEvalDatasetPair, compareEvalRuns, deleteEvalRun, generateEvalDatasetItems, getEvalDataset, getEvalRun, listEvalRuns, reviewEvalDatasetItem, startEvalRun, type EvalComparison, type EvalComparisonRow, type EvalDataset, type EvalHistoryMetrics, type EvalItem, type EvalParaphraseAnalysis, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalSufficiency, type EvalSuite, type EvalSummary, type EvalSweepPoint, type RetrievalDiagnosticsData } from "./api";
+import { addEvalDatasetItem, addEvalDatasetPair, compareEvalRuns, deleteEvalRun, generateEvalDatasetItems, getEvalDataset, getEvalRun, listEvalRuns, reviewEvalDatasetItem, startEvalRun, type EvalComparison, type EvalComparisonRow, type EvalDataset, type EvalHistoryMetrics, type EvalItem, type EvalParaphraseAnalysis, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalSufficiency, type EvalSuite, type EvalSummary, type EvalLimitPoint, type EvalSweepPoint, type RetrievalDiagnosticsData } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import Regression from "./Regression";
 // 耗时格式化移到公共文件，知识库、问答、设置页共用同一套规则。
@@ -8,7 +8,8 @@ import { durationTitle, formatDuration as formatMs, formatDurationDelta } from "
 export type EvaluationSection = "history" | "dataset" | "regression";
 type TopTab = EvaluationSection;
 type DetailTab = "overview" | "questions" | "sweep" | "variants";
-type EvalKind = "retrieval" | "generation";
+type EvalKind = "retrieval" | "generation" | "memory";
+const KIND_LABELS: Record<EvalKind, string> = { retrieval: "检索", generation: "生成", memory: "多轮对话" };
 
 // 评测页面单独成一个文件：App.tsx 已有一千多行且还在频繁修改，评测页面有六个子视图，放在一起会让两边的改动互相冲突。
 // 检索诊断面板由 App 以参数传入，直接复用问答页面同一个组件，避免两份实现各自演化。
@@ -30,7 +31,7 @@ const TOP_TAB_LABELS: Record<TopTab, string> = {
 const DETAIL_TAB_LABELS: Record<DetailTab, string> = {
   overview: "总览",
   questions: "逐题明细",
-  sweep: "阈值扫描",
+  sweep: "阈值与段数",
   variants: "消融与参数",
 };
 const SPLIT_LABELS: Record<string, string> = { dev: "开发集", holdout: "留出集", all: "全部题目" };
@@ -425,13 +426,13 @@ function Evaluation({ onToast, Diagnostics, section, setId, onNavigate }: Props)
     setLaunching(true);
     setError("");
     try {
-      const suites = launchKind === "generation" ? [] : launchSuites;
+      const suites = launchKind !== "retrieval" ? [] : launchSuites;
       const started = await startEvalRun(launchKind, launchSplit, suites);
       setSelectedId(started.id);
       setDetailTab("overview");
       await refreshRuns();
       // 评测进度继续留在页面内；Toast 只确认启动结果，避免把持续状态变成短暂提示。
-      onToast("success", `${launchKind === "generation" ? "生成" : "检索"}评测已启动。`);
+      onToast("success", `${KIND_LABELS[launchKind]}评测已启动。`);
     } catch (reason) {
       onToast("error", (reason as Error).message);
     } finally {
@@ -458,7 +459,7 @@ function Evaluation({ onToast, Diagnostics, section, setId, onNavigate }: Props)
   // 生成评测只跑基线；切换到生成时清空已选的检索实验，避免把无效组合提交给后端。
   function changeLaunchKind(kind: EvalKind) {
     setLaunchKind(kind);
-    if (kind === "generation") setLaunchSuites([]);
+    if (kind !== "retrieval") setLaunchSuites([]);
   }
 
   function toggleSuite(key: string) {
@@ -492,7 +493,7 @@ function Evaluation({ onToast, Diagnostics, section, setId, onNavigate }: Props)
     {section === "history" && <>
       {/* 操作区只属于历史记录，评测集 Tab 保持为题目管理入口。 */}
       <div className="ev-launch">
-        <div className="ev-launch-title">操作：发起{launchKind === "generation" ? "生成" : "检索"}评测<small>{launchKind === "generation" ? "调用回答和评审大模型，会产生少量费用" : "不调用大模型，约几十秒"}</small></div>
+        <div className="ev-launch-title">操作：发起{KIND_LABELS[launchKind]}评测<small>{launchKind === "memory" ? "按顺序问完多段对话，每组记忆参数各一遍，调用大模型次数较多" : launchKind === "generation" ? "调用回答和评审大模型，会产生少量费用" : "不调用大模型，约几十秒"}</small></div>
         <div className="ev-launch-options">
           <div className="ev-launch-option">
             <fieldset className="ev-radio-field">
@@ -500,11 +501,12 @@ function Evaluation({ onToast, Diagnostics, section, setId, onNavigate }: Props)
               <div className="ev-radio-options" role="radiogroup" aria-label="评测类型">
                 <label className={`ev-radio-option ${launchKind === "retrieval" ? "is-selected" : ""}`}><input type="radio" name="eval-kind" value="retrieval" checked={launchKind === "retrieval"} onChange={() => changeLaunchKind("retrieval")} />检索评测</label>
                 <label className={`ev-radio-option ${launchKind === "generation" ? "is-selected" : ""}`}><input type="radio" name="eval-kind" value="generation" checked={launchKind === "generation"} onChange={() => changeLaunchKind("generation")} />生成评测</label>
+                <label className={`ev-radio-option ${launchKind === "memory" ? "is-selected" : ""}`}><input type="radio" name="eval-kind" value="memory" checked={launchKind === "memory"} onChange={() => changeLaunchKind("memory")} />多轮对话评测</label>
               </div>
             </fieldset>
-            <span className="ev-option-description"><span className="ev-description-label"><span className="ev-info-icon" aria-hidden="true">i</span>说明</span>：{launchKind === "generation" ? "调用回答模型生成答案，再调用评审模型检查忠实度、正确性、拒答和引用。" : "只验证召回、重排和阈值过滤，不调用大模型，适合修改检索参数后反复运行。"}</span>
+            <span className="ev-option-description"><span className="ev-description-label"><span className="ev-info-icon" aria-hidden="true">i</span>说明</span>：{launchKind === "memory" ? "用 eval/dialogues.jsonl 里的多段对话，按顺序真的问一遍，最后一问要用到开头的内容；对比当前的对话记忆参数和调大、调小后的结果，给设置页的「对话记忆」两项提供依据。" : launchKind === "generation" ? "调用回答模型生成答案，再调用评审模型检查忠实度、正确性、拒答和引用。" : "只验证召回、重排和阈值过滤，不调用大模型，适合修改检索参数后反复运行。"}</span>
           </div>
-          <div className="ev-launch-option">
+          {launchKind !== "memory" && <div className="ev-launch-option">
             <fieldset className="ev-radio-field">
               <legend>题目范围</legend>
               <div className="ev-radio-options" role="radiogroup" aria-label="题目范围">
@@ -514,15 +516,15 @@ function Evaluation({ onToast, Diagnostics, section, setId, onNavigate }: Props)
               </div>
             </fieldset>
             <span className="ev-option-description"><span className="ev-description-label"><span className="ev-info-icon" aria-hidden="true">i</span>说明</span>：{launchSplit === "dev" ? `${splitCounts.dev || "—"} 题。每次修改检索参数后使用，可以反复试错；调参只看这一组，不动最终验证题。` : launchSplit === "holdout" ? `${splitCounts.holdout || "—"} 题。调参完成后再运行，只验证没有参与调参的题目，确认参数没有变差。` : `${splitCounts.dev + splitCounts.holdout || "—"} 题。合并已审核的开发集和留出集查看总体表现，不用于决定参数。`}</span>
-          </div>
+          </div>}
           {/* 生成评测只跑基线，先在界面层禁用检索实验组选项，避免用户提交无效组合。 */}
           {suites.map((suite) => {
-            const suiteDescription = launchKind === "generation"
-              ? "生成评测只运行基线；切换为检索评测后才能运行这组实验。"
+            const suiteDescription = launchKind !== "retrieval"
+              ? "只有检索评测能运行这组实验。"
               : (SUITE_DESCRIPTIONS[suite.key] ?? "对比这一实验组和基线的指标差异。") + " 本次会各跑一次：" + suite.variants.join("、") + "。";
-            const suiteClass = launchKind === "generation" ? "ev-check is-disabled" : "ev-check";
+            const suiteClass = launchKind !== "retrieval" ? "ev-check is-disabled" : "ev-check";
             return <div className="ev-launch-option" key={suite.key}>
-              <label className={suiteClass} title={launchKind === "generation" ? "生成评测只运行基线" : suite.variants.join("、")}><input type="checkbox" disabled={launchKind === "generation"} checked={launchSuites.includes(suite.key)} onChange={() => toggleSuite(suite.key)} />{suite.label}<small>{suite.variants.length} 组</small></label>
+              <label className={suiteClass} title={launchKind !== "retrieval" ? "只有检索评测能运行这组实验" : suite.variants.join("、")}><input type="checkbox" disabled={launchKind !== "retrieval"} checked={launchSuites.includes(suite.key)} onChange={() => toggleSuite(suite.key)} />{suite.label}<small>{suite.variants.length} 组</small></label>
               <span className="ev-option-description"><span className="ev-description-label"><span className="ev-info-icon" aria-hidden="true">i</span>说明</span>：{suiteDescription}</span>
             </div>;
           })}
@@ -594,6 +596,7 @@ function RunDetailView({ onBack, run, running, detailTab, setDetailTab, detailCo
   return <div className="ev-detail-view">
     <div className="ev-detail-toolbar"><button className="ev-back-button" onClick={onBack}>← 返回历次记录</button></div>
     {/* 详情页只展示当前评测配置；切换记录回到历史表格，避免下拉框和详情页职责重叠。 */}
+    {run?.kind === "memory" ? <div className="ev-body">{run.status !== "completed" ? <RunStatus run={run} live={run.id === running} /> : <MemoryResults run={run} />}</div> : <>
     {run && <RunConfig run={run} />}
     <div className="document-detail-tabs ev-tabs ev-detail-tabs" role="tablist">
       {(Object.keys(DETAIL_TAB_LABELS) as DetailTab[]).map((key) => <button key={key} role="tab" aria-selected={detailTab === key} className={detailTab === key ? "active" : ""} onClick={() => setDetailTab(key)}>{DETAIL_TAB_LABELS[key]}{detailCounts[key] !== "" && <span>{detailCounts[key]}</span>}</button>)}
@@ -606,6 +609,33 @@ function RunDetailView({ onBack, run, running, detailTab, setDetailTab, detailCo
               detailTab === "sweep" ? <SweepPanel run={run} /> :
                 <VariantPanel run={run} />}
     </div>
+    </>}
+  </div>;
+}
+
+// 多轮对话评测结果：每组对话记忆参数一行，看最后一问答对了多少、有没有触发压缩、输入多长；展开看每段对话。
+function MemoryResults({ run }: { run: EvalRun }) {
+  const variants = run.memory ?? [];
+  return <div className="ev-memory">
+    <p className="ev-muted-note">每段对话按顺序问完，最后一问要用到开头几轮的内容。和线上一样，意图识别只看最近 3 轮问答和滚动摘要，开头的内容只能靠摘要带过来。正确性由评审大模型打分（1 = 要点一致，0.5 = 部分正确，0 = 错误）。共 {run.config.dataset_size ?? "—"} 段对话。</p>
+    <div className="diag-table-wrap"><table className="diag-table ev-table">
+      <thead><tr><th>参数</th><th className="num">最后一问正确性</th><th className="num">忠实度</th><th className="num">触发了压缩</th><th className="num">最后一问平均输入</th></tr></thead>
+      <tbody>{variants.map((variant, index) => <tr key={variant.name} className={index === 0 ? "is-current" : ""}>
+        <td>{variant.label}</td>
+        <td className="num">{formatScore(variant.summary.correctness, 2)}</td>
+        <td className="num">{formatScore(variant.summary.faithfulness, 2)}</td>
+        <td className="num">{formatPercent(variant.summary.summarized_rate)}</td>
+        <td className="num">{variant.summary.input_tokens_avg !== null ? `${Math.round(variant.summary.input_tokens_avg)} Token` : "—"}</td>
+      </tr>)}</tbody>
+    </table></div>
+    {variants.map((variant) => <details key={variant.name} className="ev-table-view">
+      <summary>{variant.label}：逐段对话</summary>
+      <ul className="ev-memory-dialogues">{variant.dialogues.map((dialogue) => <li key={dialogue.id}>
+        <div><strong>{dialogue.question}</strong><span className="ev-muted-note">（第 {dialogue.turns} 轮 · {dialogue.summarized ? "触发了压缩" : "没有压缩"} · 正确性 {formatScore(dialogue.judgement.correctness ?? null, 1)}）</span></div>
+        <div className="ev-memory-answer">{dialogue.answer}</div>
+        {dialogue.judgement.correctness_reason && <div className="ev-muted-note">评审：{dialogue.judgement.correctness_reason}</div>}
+      </li>)}</ul>
+    </details>)}
   </div>;
 }
 
@@ -652,6 +682,7 @@ function Overview({ run, comparison }: { run: EvalRun; comparison: EvalCompariso
   const hasGeneration = run.kind === "generation";
   return <div className="ev-overview">
     {/* 顶部总览只展示本次评测结果，移除重复的历史对比提示；历史对比仍用于耗时变化和历史页。 */}
+    {comparison?.settings_diff && comparison.settings_diff.length > 0 && <div className="ev-settings-diff">和上一次评测相比，系统参数改过 {comparison.settings_diff.length} 项：{comparison.settings_diff.map((item) => `${item.key} ${String(item.base)} → ${String(item.target)}`).join("；")}。分数变化可能来自参数，而不是代码。</div>}
     <div className="ev-section-title">检索指标<small>{summary.answerable_count ?? 0} 道能回答 · {summary.unanswerable_count ?? 0} 道无法回答</small></div>
     <div className="ev-cards">{retrievalKeys.map((key) => <MetricCard key={key} metricKey={key} run={run} value={summary[key]} />)}</div>
     {hasGeneration && <><div className="ev-section-title">生成指标<small>大模型评审，温度 0；评审理由见逐题明细</small></div>
@@ -1032,6 +1063,30 @@ function SweepPanel({ run }: { run: EvalRun }) {
       <thead><tr><th className="num">阈值</th><th className="num">误杀率</th><th className="num">漏放率</th><th className="num">过滤后 Recall</th></tr></thead>
       <tbody>{sweep.map((point) => <tr key={point.threshold} className={current !== null && Math.abs(point.threshold - current) < 1e-6 ? "is-current" : ""}><td className="num">{point.threshold.toFixed(2)}</td><td className="num">{formatPercent(point.false_reject_rate)}</td><td className="num">{formatPercent(point.false_accept_rate)}</td><td className="num">{formatPercent(point.recall_final)}</td></tr>)}</tbody>
     </table></div></details>
+    <LimitSweep points={run.limit_sweep ?? []} current={run.config.return_limit ?? null} />
+  </div>;
+}
+
+// 「交给模型的段数」扫描：在当前阈值下，段数取不同值时证据召回和平均实际交给模型几段。
+// 召回在某个段数之后不再上升，说明再多给也找不到更多证据，只会让输入更长。
+function LimitSweep({ points, current }: { points: EvalLimitPoint[]; current: number | null }) {
+  if (points.length === 0) return null;
+  const top = Math.max(...points.map((point) => point.recall_final ?? 0));
+  const enough = points.find((point) => (point.recall_final ?? 0) >= top);
+  return <div className="ev-limit-sweep">
+    <div className="ev-section-title">交给模型的段数<small>在当前阈值下离线重算，不需要重新检索</small></div>
+    <p className="ev-muted-note">{enough && <>段数达到 <strong>{enough.return_limit}</strong> 时召回已经是最高的 {formatPercent(top)}，再多给也找不到更多证据，只会让输入更长。</>}现在设置的是 {current ?? "—"} 段。多证据题如果很少，或证据都在同一个分片里，这张表区分不出段数的好坏。</p>
+    <div className="diag-table-wrap"><table className="diag-table ev-table">
+      <thead><tr><th className="num">段数</th><th className="num">证据召回</th><th className="num">证据全部命中</th><th className="num">多证据题召回</th><th className="num">平均实际交给模型</th><th className="num">被段数截断的题</th></tr></thead>
+      <tbody>{points.map((point) => <tr key={point.return_limit} className={point.return_limit === current ? "is-current" : ""}>
+        <td className="num">{point.return_limit}</td>
+        <td className="num">{formatPercent(point.recall_final)}</td>
+        <td className="num">{point.complete} / {point.answerable}</td>
+        <td className="num">{point.multi_evidence ? `${formatPercent(point.multi_evidence_recall)}（${point.multi_evidence} 题）` : "—"}</td>
+        <td className="num">{point.avg_returned?.toFixed(2) ?? "—"} 段</td>
+        <td className="num">{point.capped} / {point.total}</td>
+      </tr>)}</tbody>
+    </table></div>
   </div>;
 }
 
@@ -1184,7 +1239,7 @@ function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: 
   // 删除前明确展示时间和状态，避免把误点“删除”当成可逆操作。
   async function remove(item: EvalRunBrief) {
     if (item.status === "running") return;
-    if (!window.confirm(`确定删除 ${formatTime(item.created)} 的${item.kind === "generation" ? "生成" : "检索"}评测记录吗？删除后不可恢复。`)) return;
+    if (!window.confirm(`确定删除 ${formatTime(item.created)} 的${KIND_LABELS[item.kind]}评测记录吗？删除后不可恢复。`)) return;
     setDeletingId(item.id);
     try {
       await onDelete(item.id);
@@ -1228,7 +1283,7 @@ function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: 
         return <Fragment key={item.id}>
           <tr className={`ev-history-main-row ${picked.includes(item.id) ? "is-current" : ""}`} tabIndex={0} aria-expanded={metricsExpanded} aria-controls={`history-metrics-${item.id}`} title="点击展开或收起指标" onClick={() => toggleMetrics(item.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleMetrics(item.id); } }}>
             <td><input type="checkbox" aria-label={`选择 ${item.id}`} checked={picked.includes(item.id)} disabled={item.status !== "completed"} onClick={(event) => event.stopPropagation()} onChange={() => toggle(item.id)} /></td>
-            <td className="ev-history-time">{formatTime(item.created)}</td><td><span className="ev-history-kind">{item.kind === "generation" ? "生成" : "检索"}</span></td><td>{SPLIT_LABELS[item.config.split] ?? item.config.split}</td><td className="num ev-history-number">{item.config.dataset_size ?? "—"}</td>
+            <td className="ev-history-time">{formatTime(item.created)}</td><td><span className="ev-history-kind">{KIND_LABELS[item.kind]}</span></td><td>{SPLIT_LABELS[item.config.split] ?? item.config.split}</td><td className="num ev-history-number">{item.config.dataset_size ?? "—"}</td>
             <td className="ev-config-cell">候选池 {item.config.pool_size ?? "—"} · 阈值 {item.config.reranked === false ? "未启用" : formatScore(item.config.min_score ?? null, 2)}{item.config.suites.length ? ` · 含${item.config.suites.map((suite) => (suite === "ablation" ? "消融" : "参数")).join("、")}` : ""}<span className="ev-history-expand-hint">{metricsExpanded ? "▼ 指标" : "▶ 指标"}</span></td>
             <td className="num ev-history-latency" title={durationTitle(item.summary?.latency_avg_ms)}>{formatMs(item.summary?.latency_avg_ms)}</td>
             <td><span className={`status-tag is-${STATUS_TONES[item.status] ?? "gray"}`}>{STATUS_LABELS[item.status] ?? item.status}{item.status === "running" ? ` ${progressPercent(item)}%` : ""}</span></td>

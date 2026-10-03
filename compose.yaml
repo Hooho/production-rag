@@ -39,7 +39,6 @@ services:
       EMBEDDING_URL: http://embedding:8090/v1
       RERANK_MODE: ${RERANK_MODE:-local}
       RERANK_URL: http://embedding:8090/v1
-      RERANK_MIN_SCORE: ${RERANK_MIN_SCORE:-0.3}
       INTENT_MODE: ${INTENT_MODE:-local}
       INTENT_URL: http://intent:8091/v1
       HTTP_PROXY: ${HTTP_PROXY:-}

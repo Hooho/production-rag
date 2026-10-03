@@ -1255,7 +1255,9 @@ def long_section_document():
 
 # 命中子块后交给模型的是同一小节相邻分片拼成的父块；相邻命中合并到同一个父块，不跨小节扩展。
 def test_sources_expand_to_parent_section(setup):
-    from app.tools.search import PARENT_MAX_CHARS, DocumentSearchTool
+    from app.runtime_config import BY_KEY
+    from app.tools.search import DocumentSearchTool
+    PARENT_MAX_CHARS = BY_KEY["parent_max_chars"]["default"]
     client, store = setup
     import_text(client, "投资笔记", long_section_document())
     rows = sorted(store.vectors.rows.values(), key=lambda row: row["position"])

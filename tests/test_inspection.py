@@ -263,7 +263,7 @@ def test_old_title_prefix_is_removed(setup, monkeypatch):
 def test_schedule_next_run(monkeypatch):
     from datetime import datetime, timezone
     from app.inspection import schedule as schedule_module
-    monkeypatch.setattr(schedule_module, "BUSINESS_TZ", "Asia/Shanghai")
+    monkeypatch.setenv("BUSINESS_TZ", "Asia/Shanghai")
     daily = {"enabled": True, "mode": "daily", "time": "08:00", "interval_hours": 24, "days": 30,
         "updated": "2026-10-02T23:00:00+00:00"}
     # 北京时间 07:00 保存，当天 08:00（UTC 00:00）执行。

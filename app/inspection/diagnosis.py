@@ -8,7 +8,6 @@
 #                 当然找不到资料。要调的是意图识别和分流，不是补文档。
 # "能不能检索到"沿用线上问答同一个重排阈值；它只说明找到了相关资料，不保证一定能答对。
 # 分错了路的问题用当前的意图识别和分流规则再判断一次（不检索、不生成回答）：现在能分到数据查询，就算已经修好。
-import os
 
 from sqlalchemy import select
 
@@ -16,7 +15,8 @@ from ..data.schema import DATA_TYPES
 from ..mysql.store import chunks, document_heads
 from ..router.router import Router
 from ..tools.data_query import KNOWLEDGE_WORDS, TYPE_PRIORITY, mentions
-from ..tools.search import DEFAULT_RERANK_MIN_SCORE, DocumentSearchTool
+from ..runtime_config import snapshot as runtime_snapshot
+from ..tools.search import DocumentSearchTool
 
 
 CATEGORIES = {
@@ -42,13 +42,14 @@ CHUNK_CHARACTERS = 6000
 
 
 def thresholds():
-    min_score = float(os.getenv("RERANK_MIN_SCORE", str(DEFAULT_RERANK_MIN_SCORE)))
+    config = runtime_snapshot()
+    min_score = config["rerank_min_score"]
     return {
         "min_score": min_score,
         # 提问人范围内最高分达到阈值的这个比例，算"差一点就找到"，归入检索缺口。
-        "near_miss": min_score * float(os.getenv("INSPECTION_NEAR_MISS_RATIO", "0.5")),
+        "near_miss": round(min_score * config["near_miss_ratio"], 4),
         # 全库最高分低于它，算"连沾边的资料都没有"。
-        "out_of_scope": float(os.getenv("INSPECTION_OUT_OF_SCOPE_SCORE", "0.05")),
+        "out_of_scope": config["out_of_scope_score"],
     }
 
 

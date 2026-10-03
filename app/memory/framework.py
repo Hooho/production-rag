@@ -7,6 +7,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg_pool import ConnectionPool
 
 from ..models import strip_think
+from ..runtime_config import value as runtime_value
 
 
 # 推理模型压缩记忆时会把 <think> 思考过程一起写进摘要。摘要每一轮都会发给模型，
@@ -26,8 +27,9 @@ class FrameworkMemory:
     # 生成评测使用独立的进程内记忆，避免每道评测题把临时回答写入正式 PostgreSQL Checkpointer。
     def __init__(self, models, use_postgres=True):
         self.models = models
-        self.trigger_tokens = int(os.getenv("MEMORY_TRIGGER_TOKENS", "2400"))
-        self.keep_messages = int(os.getenv("MEMORY_KEEP_MESSAGES", "6"))
+        # 压缩阈值和保留条数在设置页修改（见 app/runtime_config.py）；改了以后回答 Agent 在下一次提问前重建中间件。
+        self.trigger_tokens = runtime_value("memory_trigger_tokens")
+        self.keep_messages = runtime_value("memory_keep_messages")
         self.pool = None
         database_url = os.getenv("LANGGRAPH_DATABASE_URL", "") if use_postgres else ""
         if database_url:

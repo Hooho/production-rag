@@ -16,6 +16,7 @@ from uuid import uuid4
 from sqlalchemy import and_, func, or_, select
 
 from ..agent.replay import replay_question
+from ..runtime_config import snapshot as runtime_snapshot
 from .diagnosis import CATEGORIES as DIAGNOSIS_LABELS, QUESTION_LIMIT, diagnose_question, full_scope, overall_category, thresholds
 from ..mysql.store import (chunks, document_chunks, document_heads, feedback, inspection_issue_events, inspection_issues,
     inspection_runs, run_errors, runs)
@@ -98,14 +99,15 @@ def now_text():
 
 # 阈值都可以用环境变量调整，默认值偏保守：宁可漏报，也不让清单被噪声淹没。
 def settings():
+    config = runtime_snapshot()
     return {
         # 扫描最近多少天的问答。
         "days": int(os.getenv("INSPECTION_DAYS", "30")),
-        # 新问题与某个缺口的相似度达到这个值才并入该缺口，否则新建缺口。
-        "gap_similarity": float(os.getenv("INSPECTION_GAP_SIMILARITY", "0.75")),
+        # 新问题与某个缺口的相似度达到这个值才并入该缺口，否则新建缺口（设置页可改，见 app/runtime_config.py）。
+        "gap_similarity": config["gap_similarity"],
         # 分片至少收到几次差评、差评占引用次数的比例至少多少，才算可疑内容。
-        "content_min_negative": int(os.getenv("INSPECTION_CONTENT_MIN_NEGATIVE", "2")),
-        "content_min_rate": float(os.getenv("INSPECTION_CONTENT_MIN_RATE", "0.3")),
+        "content_min_negative": config["content_min_negative"],
+        "content_min_rate": config["content_min_rate"],
     }
 
 

@@ -6964,3 +6964,34 @@ input:focus {
    color: #7890a8;
    font-size: 9px;
 }
+
+/* 评测：段数扫描放在阈值扫描下面；两次评测参数不同时的提醒。 */
+.ev-limit-sweep {
+   margin-top: 24px;
+}
+
+.ev-settings-diff {
+   margin-bottom: 12px;
+   border-left: 3px solid #f5b46b;
+   background: #fff8ef;
+   padding: 8px 12px;
+   color: #92400e;
+   font-size: 13px;
+}
+
+.ev-memory-dialogues {
+   display: flex;
+   flex-direction: column;
+   gap: 12px;
+   margin: 8px 0 0;
+   padding: 0;
+   list-style: none;
+}
+
+.ev-memory-answer {
+   margin-top: 4px;
+   color: #334e68;
+   font-size: 13px;
+   line-height: 1.7;
+   white-space: pre-wrap;
+}

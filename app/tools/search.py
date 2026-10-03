@@ -5,29 +5,21 @@ import time
 
 from ..security import sanitize_source
 from ..models import RerankError
+from ..runtime_config import BY_KEY, snapshot as runtime_snapshot
 
 
 logger = logging.getLogger("production-rag-search")
 
 
-# RRF 平滑常数，取论文和 Milvus、Elasticsearch 的常用默认值；越大越弱化头部名次的优势。
-RRF_K = 60
-# 开发集对比显示候选池 12 与 20 的可回答题 Recall 都是 1.0，但 12 的平均耗时约 9.2 秒（20 约 13.6 秒），
-# 且无法回答题漏放率从 0.625 降到 0.5，因此缩小候选池，保留召回质量并减少重排开销。
-RERANK_CANDIDATES = 12
-# 最终交给回答模型的来源数。
-RETURN_LIMIT = 6
-# 开发集阈值扫描显示 0.85 仍保持可回答题 Recall 1.0，并将无法回答题漏放率从 0.625 降到 0.25，故采用该默认下限。
-DEFAULT_RERANK_MIN_SCORE = 0.85
+# 检索参数（RRF 平滑常数、候选池、交给模型的段数、相关度阈值、父子分块）都可以在设置页修改，
+# 读取和默认值的来由见 app/runtime_config.py。下面两个只影响诊断页面的显示，不放进设置页。
+# 原默认值留在这里，供还在引用它们的地方使用（例如诊断阈值的兜底）。
+DEFAULT_RERANK_MIN_SCORE = BY_KEY["rerank_min_score"]["default"]
+RERANK_CANDIDATES = BY_KEY["rerank_candidates"]["default"]
 # 诊断信息里正文预览的字数；完整正文已在来源中返回，这里只用于辨认候选。
 PREVIEW_CHARACTERS = 80
 # 诊断里权限范围最多列出的文档数。
 SCOPE_DOCUMENT_LIMIT = 50
-# 父子分块：检索和重排仍用 800 字的分片（子块），交给回答模型前把命中分片扩展为同一小节里相邻分片拼成的父块。
-# 子块小，向量和重排判断集中、准确；但一个观点常常跨两三个分片，只给命中的那一块，回答模型看不到前因后果。
-# 父块上限约三个分片的长度，最多向前后各看 3 个分片。
-PARENT_MAX_CHARS = 2400
-PARENT_RADIUS = 3
 
 
 class DocumentSearchTool:
@@ -43,7 +35,11 @@ class DocumentSearchTool:
     # rerank=False 跳过重排，min_score 覆盖环境变量里的阈值。
     # 以前这些都是写死的常量，想比较"候选池 12 还是 20 更好"只能改代码重启，无法在同一份评测集上并排对比。
     def execute(self, store, models, owner, queries, rerank_query, methods=("dense", "keyword"),
-                pool_size=RERANK_CANDIDATES, fusion="sum", rerank=True, min_score=None, parent=True, scope=None):
+                pool_size=None, fusion="sum", rerank=True, min_score=None, parent=True, scope=None):
+        # 一次检索只读一次参数，整条检索用同一份；实际用到的值写进诊断配置，事后能查到这次用的是哪组参数。
+        config = runtime_snapshot()
+        if pool_size is None:
+            pool_size = config["rerank_candidates"]
         candidates = {}
         lists = []
         dense_hits = 0
@@ -60,11 +56,11 @@ class DocumentSearchTool:
             if "dense" in methods:
                 dense = store.search(owner, query, models, limit=12, **scoped)
                 dense_hits += len(dense)
-                lists.append(self.add_candidates(candidates, dense, "dense", query))
+                lists.append(self.add_candidates(candidates, dense, "dense", query, config["rrf_k"]))
             if "keyword" in methods:
                 keyword = store.search_keyword(owner, query, limit=30, **scoped)
                 keyword_hits += len(keyword)
-                lists.append(self.add_candidates(candidates, keyword, "keyword", query))
+                lists.append(self.add_candidates(candidates, keyword, "keyword", query, config["rrf_k"]))
         recall_ms = round((time.monotonic() - recall_started) * 1000)
         ranked = []
         for candidate in candidates.values():
@@ -115,7 +111,7 @@ class DocumentSearchTool:
             # 余弦相似度在不同问题和模型之间波动大，无关文本也常有 0.3 以上的分数。
             min_score = threshold
             if min_score is None:
-                min_score = float(os.getenv("RERANK_MIN_SCORE", str(DEFAULT_RERANK_MIN_SCORE)))
+                min_score = config["rerank_min_score"]
             ranked = []
             for item in pool:
                 if item["final_score"] >= min_score:
@@ -129,11 +125,11 @@ class DocumentSearchTool:
         # 已被某个父块包含的分片 {分片 id: 来源编号}。两个命中分片在同一小节里相邻时，
         # 后一个直接归入前一个父块，不再重复给模型同一段文字；诊断里它的来源编号指向那个父块。
         covered = {}
-        use_parent = parent and os.getenv("PARENT_CONTEXT", "on") != "off"
+        use_parent = parent and config["parent_context"]
         parent_characters = 0
         injection_redacted = 0
         for index, item in enumerate(ranked, start=1):
-            if index > RETURN_LIMIT:
+            if index > config["return_limit"]:
                 item["status"] = "beyond_limit"
                 continue
             item["status"] = "returned"
@@ -144,7 +140,7 @@ class DocumentSearchTool:
             text = item["text"]
             chunk_ids = [item["id"]]
             if use_parent:
-                expanded = self.parent_context(store, item, covered)
+                expanded = self.parent_context(store, item, covered, config["parent_radius"], config["parent_max_chars"])
                 if expanded:
                     text, chunk_ids = expanded
             for chunk_id in chunk_ids:
@@ -172,7 +168,7 @@ class DocumentSearchTool:
             "recall_ms": recall_ms, "rerank_ms": rerank_ms, "injection_redacted": injection_redacted,
             "rerank_error": rerank_error}
         reranked = rerank_count > 0
-        diagnostics = self.build_diagnostics(candidates, lists, stats, reranked, pool_size, fusion, methods)
+        diagnostics = self.build_diagnostics(candidates, lists, stats, reranked, pool_size, fusion, methods, config)
         if scope:
             diagnostics["scope"] = self.scope_summary(scope["documents"])
         return {"sources": sources, "stats": stats, "diagnostics": diagnostics}
@@ -190,10 +186,10 @@ class DocumentSearchTool:
         return {"total": len(documents_in_scope), **counts, "groups": groups,
             "documents": documents_in_scope[:SCOPE_DOCUMENT_LIMIT]}
 
-    # 余弦分数和 BM25 分数量纲不同，不直接相加；每张排名表只贡献 1 / (RRF_K + 名次)。
+    # 余弦分数和 BM25 分数量纲不同，不直接相加；每张排名表只贡献 1 / (rrf_k + 名次)。
     # 同时返回这张排名表本身，诊断信息据此展示每一路召回的原始名次和分数。
     @staticmethod
-    def add_candidates(candidates, rows, method, query):
+    def add_candidates(candidates, rows, method, query, rrf_k):
         hits = []
         for rank, row in enumerate(rows, start=1):
             key = row.get("id") or f"{row['title']}:{row['text']}"
@@ -202,7 +198,7 @@ class DocumentSearchTool:
                 "version": row.get("version"), "page_start": row.get("page_start"),
                 "heading": row.get("heading"), "chunk_key": row.get("chunk_key"),
                 "document_id": row.get("document_id"), "position": row.get("position")})
-            contribution = 1 / (RRF_K + rank)
+            contribution = 1 / (rrf_k + rank)
             item["rrf_score"] += contribution
             if method not in item["retrieval_methods"]:
                 item["retrieval_methods"].append(method)
@@ -219,13 +215,13 @@ class DocumentSearchTool:
     # 最终仍是 insufficient 就清空来源，由回答阶段确定性地拒答，不让模型拿无关资料硬凑答案。
     # 只补检索一次：多轮循环会让延迟成倍增加，而第二次还找不到时再换说法通常也找不到。
     # partial 不拒答，把缺少的内容交给回答阶段，让模型只回答资料支持的部分并说明缺什么。
-    # 演示模式没有聊天模型、或 SUFFICIENCY_CHECK=off、或来源已为空（重排阈值已过滤光）时不判断。
+    # 演示模式没有聊天模型、或设置页关闭了充分性判断、或来源已为空（重排阈值已过滤光）时不判断。
     VERDICT_RANK = {"insufficient": 0, "partial": 1, "sufficient": 2}
 
     def check_sufficiency(self, store, models, owner, queries, rerank_query, retrieval):
         result = {"checked": False, "verdict": None, "missing": "", "judgements": [], "retried": False,
             "retry_query": None, "retrieval": retrieval, "sources": retrieval["sources"], "refused": False}
-        if models.mode != "openai" or os.getenv("SUFFICIENCY_CHECK", "on") == "off" or not retrieval["sources"]:
+        if models.mode != "openai" or not runtime_snapshot()["sufficiency_check"] or not retrieval["sources"]:
             return result
         result["checked"] = True
         judgement = models.judge_sufficiency(rerank_query, retrieval["sources"])
@@ -253,10 +249,10 @@ class DocumentSearchTool:
     # 父块只在同一小节（标题路径相同）内扩展：跨小节拼接会把无关话题塞给模型。
     # 从命中分片开始交替向前、向后各加一个相邻分片，直到超出长度上限、离开小节或碰到已被其他父块包含的分片。
     @staticmethod
-    def parent_context(store, item, covered):
+    def parent_context(store, item, covered, radius, max_chars):
         if item.get("document_id") is None or item.get("position") is None:
             return None
-        rows = store.neighbor_chunks(item["document_id"], item["position"], PARENT_RADIUS)
+        rows = store.neighbor_chunks(item["document_id"], item["position"], radius)
         hit = None
         for index, row in enumerate(rows):
             if row["id"] == item["id"]:
@@ -281,7 +277,7 @@ class DocumentSearchTool:
                 if not joinable(index):
                     continue
                 length = len(rows[index]["content"] or rows[index]["text"] or "")
-                if total + length > PARENT_MAX_CHARS:
+                if total + length > max_chars:
                     continue
                 total += length
                 start = min(start, index)
@@ -328,8 +324,9 @@ class DocumentSearchTool:
 
     # 汇总每个候选从召回到最终去向的完整计算过程，排序与最终处理顺序一致。
     @staticmethod
-    def build_diagnostics(candidates, lists, stats, reranked, pool_size=RERANK_CANDIDATES, fusion="sum",
-                          methods=("dense", "keyword")):
+    def build_diagnostics(candidates, lists, stats, reranked, pool_size, fusion="sum",
+                          methods=("dense", "keyword"), settings=None):
+        settings = settings or runtime_snapshot()
         status_order = {"returned": 0, "beyond_limit": 1, "filtered_low_score": 2,
             "in_pool": 3, "not_in_pool": 4}
         items = []
@@ -353,8 +350,10 @@ class DocumentSearchTool:
                     if "rerank_probability" in item else None,
                 "rerank_rank": item.get("rerank_rank")})
         # 候选池、融合方式和召回方式写进诊断配置，评测对比不同参数时能看出每次实际用的是哪一组。
-        config = {"rrf_k": RRF_K, "rerank_candidates": pool_size, "fusion": fusion, "methods": list(methods),
-            "return_limit": RETURN_LIMIT, "reranked": reranked,
+        config = {"rrf_k": settings["rrf_k"], "rerank_candidates": pool_size, "fusion": fusion, "methods": list(methods),
+            "return_limit": settings["return_limit"], "reranked": reranked,
+            "parent_context": settings["parent_context"], "parent_max_chars": settings["parent_max_chars"],
+            "parent_radius": settings["parent_radius"],
             "min_score": stats["min_score"], "rerank_query": stats["rerank_query"],
             "rerank_model": stats["rerank_model"], "rerank_error": stats.get("rerank_error")}
         return {"config": config, "lists": lists, "candidates": rows}

@@ -1,0 +1,307 @@
+/* 设置页「系统参数」：每组一张卡片，每项左边是说明，右边是控件。 */
+.sys-root {
+   display: flex;
+   flex-direction: column;
+   gap: 16px;
+}
+
+.sys-lead {
+   margin: 0;
+   line-height: 1.7;
+}
+
+.sys-group {
+   border: 1px solid #e3edf5;
+   border-radius: 6px;
+   background: #fff;
+   padding: 16px 20px;
+}
+
+.sys-group h2 {
+   margin: 0 0 4px;
+}
+
+.sys-group-head .settings-hint {
+   margin: 0;
+}
+
+.sys-items {
+   display: flex;
+   flex-direction: column;
+}
+
+.sys-item {
+   display: grid;
+   grid-template-columns: minmax(0, 1fr) 240px;
+   gap: 24px;
+   border-top: 1px solid #eef3f8;
+   padding: 14px 0;
+}
+
+.sys-items .sys-item:first-child {
+   margin-top: 12px;
+}
+
+.sys-item.is-disabled .sys-item-main {
+   opacity: 0.55;
+}
+
+.sys-item-title {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: 8px;
+   color: #1d3550;
+   font-size: 14px;
+}
+
+/* 影响范围用方角描边标签，和右侧圆角的来源标签区分开。 */
+.sys-impact {
+   border: 1px solid currentColor;
+   border-radius: 2px;
+   padding: 0 6px;
+   font-size: 11px;
+   font-weight: 400;
+}
+
+.sys-impact.is-now {
+   color: #15803d;
+}
+
+.sys-impact.is-new {
+   color: #b45309;
+}
+
+.sys-impact.is-judge {
+   color: #7c3aed;
+}
+
+.sys-what {
+   margin: 6px 0;
+   color: #334e68;
+   font-size: 13px;
+   line-height: 1.7;
+}
+
+.sys-notes {
+   display: flex;
+   flex-direction: column;
+   gap: 3px;
+   margin: 0;
+   font-size: 12px;
+   line-height: 1.7;
+}
+
+.sys-notes div {
+   display: grid;
+   grid-template-columns: 92px minmax(0, 1fr);
+   gap: 8px;
+}
+
+.sys-notes dt {
+   color: #7d95ac;
+}
+
+.sys-notes dd {
+   margin: 0;
+   color: #5e7a95;
+}
+
+.sys-disabled-note {
+   margin: 6px 0 0;
+   color: #b45309;
+   font-size: 12px;
+}
+
+.sys-item-control {
+   display: flex;
+   flex-direction: column;
+   align-items: flex-start;
+   gap: 8px;
+}
+
+/* 当前值的来源：圆角胶囊。 */
+.sys-source {
+   border-radius: 999px;
+   padding: 1px 8px;
+   font-size: 11px;
+}
+
+.sys-source.is-settings {
+   background: #eaf1ff;
+   color: #1d4ed8;
+}
+
+.sys-source.is-env {
+   background: #fff4e5;
+   color: #b45309;
+}
+
+.sys-source.is-dirty {
+   background: #fdecec;
+   color: #b42318;
+}
+
+.sys-source.is-default {
+   background: #f1f3f6;
+   color: #64748b;
+}
+
+.sys-switch {
+   position: relative;
+   width: 44px;
+   height: 24px;
+   border: 0;
+   border-radius: 999px;
+   background: #cbd5e1;
+   padding: 0;
+   cursor: pointer;
+   transition: background 0.15s;
+}
+
+.sys-switch span {
+   position: absolute;
+   top: 3px;
+   left: 3px;
+   width: 18px;
+   height: 18px;
+   border-radius: 50%;
+   background: #fff;
+   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.2);
+   transition: left 0.15s;
+}
+
+.sys-switch.is-on {
+   background: #2563eb;
+}
+
+.sys-switch.is-on span {
+   left: 23px;
+}
+
+.sys-switch:disabled {
+   cursor: not-allowed;
+   opacity: 0.5;
+}
+
+.sys-item-control select,
+.sys-number input {
+   box-sizing: border-box;
+   height: 34px;
+   border: 1px solid #cedfec;
+   border-radius: 6px;
+   background-color: #fff;
+   color: #1d3550;
+   padding: 6px 10px;
+   outline: 0;
+   font-family: inherit;
+   font-size: 13px;
+}
+
+.sys-item-control select {
+   width: 100%;
+   appearance: none;
+   padding-right: 32px;
+   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%236c88a3' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+   background-position: right 10px center;
+   background-repeat: no-repeat;
+   cursor: pointer;
+}
+
+.sys-item-control select:focus,
+.sys-number input:focus {
+   border-color: #2563eb;
+}
+
+/* 全局 label 是上下排列的小号等宽字，这里改回横排。 */
+.sys-number {
+   display: flex;
+   align-items: center;
+   gap: 8px;
+   margin: 0;
+   color: #5e7a95;
+   font-family: inherit;
+   font-size: 13px;
+   letter-spacing: normal;
+}
+
+.sys-number input {
+   width: 120px;
+}
+
+.sys-range {
+   color: #7d95ac;
+   font-size: 12px;
+}
+
+.sys-range.is-error {
+   color: #b42318;
+}
+
+.sys-reset {
+   border: 0;
+   background: none;
+   padding: 0;
+   color: #2563eb;
+   font-size: 12px;
+   cursor: pointer;
+}
+
+.sys-advanced {
+   margin-top: 8px;
+}
+
+.sys-advanced summary {
+   color: #2563eb;
+   font-size: 13px;
+   cursor: pointer;
+}
+
+.sys-save {
+   display: flex;
+   flex-direction: column;
+   gap: 6px;
+   margin-top: 12px;
+   border-top: 1px solid #eef3f8;
+   padding-top: 12px;
+   color: #334e68;
+   font-size: 13px;
+}
+
+.sys-warning {
+   color: #b45309;
+}
+
+.sys-history {
+   display: flex;
+   flex-direction: column;
+   gap: 6px;
+   margin: 8px 0 0;
+   padding: 0;
+   list-style: none;
+   color: #334e68;
+   font-size: 13px;
+}
+
+.sys-history li {
+   display: grid;
+   grid-template-columns: 160px minmax(0, 1fr);
+   gap: 12px;
+}
+
+.sys-history-time {
+   color: #7d95ac;
+}
+
+@media (max-width: 760px) {
+   .sys-item {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 10px;
+   }
+
+   .sys-notes div,
+   .sys-history li {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 0;
+   }
+}

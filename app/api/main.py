@@ -31,6 +31,8 @@ from ..evaluation.dataset import QUESTION_TYPES, append_items, corpus_files, cor
 from ..evaluation.results import compare_runs, delete_run, execute_run, list_runs, load_run, previous_run, start_run
 from ..evaluation.retrieval import SUITES, VARIANTS
 from ..evaluation import regression
+from ..evaluation.memory import load_dialogues
+from .. import runtime_config
 from ..inspection.schedule import load_schedule, save_schedule, schedule_view
 from ..inspection.service import (CLOSE_REASONS, KINDS as INSPECTION_KINDS, LOCK_KEY as INSPECTION_LOCK, MANUAL_STATUSES,
     STATUSES as INSPECTION_STATUSES, InspectionBusy, get_issue, list_issues, list_runs as list_inspection_runs,
@@ -60,7 +62,7 @@ class ChatInput(BaseModel):
 # 界面发起评测的参数：评测类型、题目范围和检索实验组（消融、参数对比）。
 class EvalRunInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: str = Field("retrieval", pattern="^(retrieval|generation)$")
+    kind: str = Field("retrieval", pattern="^(retrieval|generation|memory)$")
     split: str = Field("dev", pattern="^(dev|holdout|all)$")
     suites: list[str] = Field(default_factory=list, max_length=len(SUITES))
 
@@ -94,6 +96,12 @@ class EvalDatasetGenerateInput(BaseModel):
     count: int = Field(1, ge=1, le=10)
     split: str = Field("dev", pattern="^(dev|holdout)$")
     type: str | None = Field(None, max_length=20)
+
+
+# 设置页「系统参数」的修改：{参数: 新值}，null 表示恢复默认。
+class RuntimeSettingsInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    changes: dict[str, bool | int | float | str | None] = Field(max_length=50)
 
 
 # 线上回归集：新建或修改评测集。
@@ -356,6 +364,8 @@ def create_app(store=None, models=None, jwt_secret=None):
             raise ValueError("JWT_SECRET 至少 32 字符")
         app.state.models = models or Models()
         app.state.store = store or Storage(app.state.models)
+        # 测试传入的存储不经过 Storage.__init__，这里再绑定一次系统参数的数据库。
+        runtime_config.bind(app.state.store.engine)
         seed_users(app.state.store.engine)
         # 设置页保存过模型配置时优先使用它，必须在创建 Agent 之前应用，回答 Agent 才会绑定到这个模型。
         saved_llm = app.state.store.load_llm_settings()
@@ -1372,12 +1382,15 @@ def create_app(store=None, models=None, jwt_secret=None):
         for suite in body.suites:
             if suite not in SUITES:
                 raise HTTPException(422, f"未知实验组：{suite}")
-        if body.kind == "generation" and app.state.models.mode != "openai":
-            raise HTTPException(422, "生成评测需要真实大模型：请设置 MODEL_MODE=openai 和 LLM_API_KEY")
-        if body.kind == "generation" and body.suites:
-            raise HTTPException(422, "生成评测只运行基线，消融实验和参数对比请切换为检索评测")
+        if body.kind in ("generation", "memory") and app.state.models.mode != "openai":
+            raise HTTPException(422, "生成评测和多轮对话评测需要真实大模型：请设置 MODEL_MODE=openai 和 LLM_API_KEY")
+        if body.kind in ("generation", "memory") and body.suites:
+            raise HTTPException(422, "生成评测和多轮对话评测只运行基线，消融实验和参数对比请切换为检索评测")
         # 启动前检查审核后的题目，避免所有题目都在待审核时创建一个必然失败的空评测。
-        if not select_split(load_dataset(), body.split):
+        if body.kind == "memory":
+            if not [dialogue for dialogue in load_dialogues() if dialogue.get("reviewed", True)]:
+                raise HTTPException(422, "eval/dialogues.jsonl 里没有已审核的多轮对话题")
+        elif not select_split(load_dataset(), body.split):
             raise HTTPException(422, "当前题目范围没有已审核题目，请先审核评测题")
         if not app.state.eval_lock.acquire(blocking=False):
             raise HTTPException(409, "已有评测正在运行，请等待完成")
@@ -1490,6 +1503,23 @@ def create_app(store=None, models=None, jwt_secret=None):
         result = regression.get_run(app.state.store, set_id, run_id)
         if result is None:
             raise HTTPException(404, "运行记录不存在")
+        return result
+
+    # 设置页「系统参数」：检索、回答流程、对话记忆、知识巡检和通用参数。
+    # 返回每一项的当前值、来源（设置页 / .env / 默认）、默认值和允许范围，以及最近的修改记录。
+    @app.get("/settings/runtime", dependencies=[Depends(require_admin)])
+    def runtime_settings_get():
+        return runtime_config.view(app.state.store.engine)
+
+    # 保存修改：changes 里值为 null 表示恢复默认（回到 .env 或代码默认值）。不合规整批不保存。
+    @app.put("/settings/runtime")
+    def runtime_settings_save(body: RuntimeSettingsInput, admin=Depends(require_admin)):
+        try:
+            changed = runtime_config.save(app.state.store.engine, body.changes, admin["username"])
+        except ValueError as error:
+            raise HTTPException(422, str(error))
+        result = runtime_config.view(app.state.store.engine)
+        result["changed"] = changed
         return result
 
     # 知识巡检：问题里有其他用户的提问和反馈，所有接口只允许管理员调用。

@@ -1,9 +1,11 @@
+from threading import Lock
 from typing import Any, TypedDict
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import ModelRequest, dynamic_prompt
 
 from ..memory.framework import FrameworkMemory
+from ..runtime_config import value as runtime_value
 from ..security import neutralize_tags
 
 
@@ -45,6 +47,9 @@ class ResponseAgent:
         self.models = models
         self.memory = FrameworkMemory(models, use_postgres=use_postgres)
         self.agent = self.build_agent()
+        self.settings_lock = Lock()
+        # 多轮对话评测要用指定的压缩参数做对比，置为 True 后不再跟随设置页。
+        self.fixed_memory = False
 
     def rebuild(self):
         """切换回答和摘要模型，保留已有会话记忆。"""
@@ -75,6 +80,25 @@ class ResponseAgent:
             middleware=[self.memory.middleware, source_prompt], checkpointer=self.memory.checkpointer,
             name="rag_response_agent")
 
+    # 设置页改了对话记忆的压缩阈值或保留条数时，重建摘要中间件和回答 Agent；已有的会话记忆（Checkpoint）不受影响。
+    def sync_memory_settings(self):
+        if self.fixed_memory:
+            return
+        trigger, keep = runtime_value("memory_trigger_tokens"), runtime_value("memory_keep_messages")
+        if (trigger, keep) == (self.memory.trigger_tokens, self.memory.keep_messages):
+            return
+        with self.settings_lock:
+            if (trigger, keep) == (self.memory.trigger_tokens, self.memory.keep_messages):
+                return
+            self.memory.trigger_tokens, self.memory.keep_messages = trigger, keep
+            self.rebuild()
+
+    # 固定压缩参数（多轮对话评测用）。
+    def use_memory_settings(self, trigger, keep):
+        self.fixed_memory = True
+        self.memory.trigger_tokens, self.memory.keep_messages = trigger, keep
+        self.rebuild()
+
     # 调用带摘要中间件的回答 Agent，并返回模型实际使用的框架记忆；传入 on_token 时逐段转发模型输出。
     def answer(self, owner, session_id, question, sources, on_token=None, coverage=None):
         if not sources:
@@ -90,6 +114,7 @@ class ResponseAgent:
             return answer, {"summary": "", "turns": [], "message_count": 0,
                 "estimated_tokens": 0, "summary_updated": False,
                 "previous_message_count": 0}
+        self.sync_memory_settings()
         config = {"configurable": {"thread_id": self.memory.thread_id(owner, session_id)}}
         before = self.memory.inspect(owner, session_id)
         # 原来用 invoke 等整段回答生成完才返回，前端首字要等几秒；

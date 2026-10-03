@@ -564,6 +564,11 @@ export type EvalParaphraseAnalysis = {
   pairs: EvalParaphrasePair[];
 };
 export type EvalSweepPoint = { threshold: number; false_reject_rate: number | null; false_accept_rate: number | null; recall_final: number | null };
+// 「交给模型的段数」扫描：段数取 1 到候选池大小时的证据召回、全部证据都命中的题数、平均实际交给模型几段、被段数截断的题数。
+export type EvalMemoryVariant = { name: string; label: string; trigger: number; keep: number;
+  summary: { correctness: number | null; faithfulness: number | null; summarized_rate: number | null; input_tokens_avg: number | null };
+  dialogues: { id: string; question: string; turns: number; answer: string; route: string; summarized: boolean; input_tokens: number | null; judgement: { correctness?: number; correctness_reason?: string } }[] };
+export type EvalLimitPoint = { return_limit: number; recall_final: number | null; complete: number; answerable: number; multi_evidence_recall: number | null; multi_evidence: number; avg_returned: number | null; capped: number; total: number };
 export type EvalVariant = { name: string; label: string; suite: string; options: Record<string, unknown>; summary: EvalSummary; funnel: EvalFunnel };
 export type EvalFunnel = { total: number; pool: number; top: number; final: number };
 export type EvalHistoryMetrics = {
@@ -584,7 +589,7 @@ export type EvalHistoryMetrics = {
 export type EvalConfig = { split: string; suites: string[]; dataset_size?: number; rrf_k?: number; pool_size?: number; return_limit?: number; min_score?: number | null; reranked?: boolean; fusion?: string; methods?: string[]; model_mode?: string; embedding_mode?: string; embedding_model?: string; rerank_model?: string; rerank_mode?: string; query_source?: string[] };
 export type EvalRunBrief = {
   id: string;
-  kind: "retrieval" | "generation";
+  kind: "retrieval" | "generation" | "memory";
   status: "running" | "completed" | "failed" | "interrupted";
   created: string;
   finished: string | null;
@@ -600,13 +605,17 @@ export type EvalRun = EvalRunBrief & {
   by_type?: Record<string, EvalSummary>;
   funnel?: EvalFunnel;
   sweep?: EvalSweepPoint[];
+  limit_sweep?: EvalLimitPoint[];
+  // 多轮对话评测：每组对话记忆参数的结果。
+  memory?: EvalMemoryVariant[];
   variants?: EvalVariant[];
   questions?: EvalQuestion[];
   paraphrase?: EvalParaphraseAnalysis | null;
   previous_id: string | null;
 };
 export type EvalComparisonRow = { key: string; label: string; direction: "higher" | "lower"; base: number | null; target: number | null; delta: number | null; change: "better" | "worse" | "same" | "unknown" };
-export type EvalComparison = { base: EvalRunBrief; target: EvalRunBrief; metrics: EvalComparisonRow[] };
+// settings_diff：两次评测用的系统参数不同的项（设置页改过），分数变化可能来自参数而不是代码。
+export type EvalComparison = { base: EvalRunBrief; target: EvalRunBrief; metrics: EvalComparisonRow[]; settings_diff?: { key: string; base: unknown; target: unknown }[] };
 export type EvalSuite = { key: string; label: string; variants: string[] };
 export type EvalDataset = { items: EvalItem[]; types: string[]; corpus: string[]; reviewed_count?: number; pending_count?: number };
 
@@ -675,7 +684,7 @@ export function compareEvalRuns(base: string, target: string) {
 }
 
 // 在界面上发起一次检索或生成评测；生成评测由服务端校验真实模型配置并调用大模型。
-export function startEvalRun(kind: "retrieval" | "generation", split: string, suites: string[]) {
+export function startEvalRun(kind: "retrieval" | "generation" | "memory", split: string, suites: string[]) {
   return request<{ id: string; status: string }>("/eval/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -989,6 +998,26 @@ export function testLLMSettings(payload: LLMSettingsInput) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+  });
+}
+
+// ---- 系统参数 ----
+// 设置页「系统参数」：每一项的当前值、来源（settings 设置页 / env .env / default 代码默认值）、默认值和允许范围。
+export type RuntimeSettingValue = boolean | number | string;
+export type RuntimeSettingItem = { key: string; group: string; type: "float" | "int" | "bool" | "choice"; default: RuntimeSettingValue; value: RuntimeSettingValue; source: "settings" | "env" | "default"; env: string | null; env_value: RuntimeSettingValue | null; advanced: boolean; min?: number; max?: number; choices?: string[] };
+export type RuntimeSettingChange = { key: string; before: RuntimeSettingValue; after: RuntimeSettingValue };
+export type RuntimeSettingsView = { items: RuntimeSettingItem[]; groups: Record<string, string>; history: { at: string; by: string; changes: RuntimeSettingChange[] }[]; cache_seconds: number; changed?: RuntimeSettingChange[] };
+
+export function getRuntimeSettings() {
+  return request<RuntimeSettingsView>("/settings/runtime");
+}
+
+// changes 里值为 null 表示恢复默认（回到 .env 或代码默认值）。
+export function saveRuntimeSettings(changes: Record<string, RuntimeSettingValue | null>) {
+  return request<RuntimeSettingsView>("/settings/runtime", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ changes }),
   });
 }
 

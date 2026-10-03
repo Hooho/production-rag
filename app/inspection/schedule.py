@@ -2,7 +2,6 @@
 # 设置存在 settings 表（key=inspection_schedule），API 和 worker 读同一份，改完不用重启。
 from datetime import datetime, timedelta, timezone
 import logging
-import os
 import re
 from threading import Thread
 import time
@@ -11,14 +10,14 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 
 from ..mysql.store import inspection_runs, settings
+from ..runtime_config import value as runtime_value
 from .service import InspectionBusy, run_inspection, settings as inspection_settings
 
 
 logger = logging.getLogger("production-rag-inspection")
 
 SETTING_KEY = "inspection_schedule"
-# 每天固定时间按业务时区计算，和数据管理用的是同一个时区配置。
-BUSINESS_TZ = os.getenv("BUSINESS_TZ", "Asia/Shanghai")
+# 每天固定时间按业务时区计算，和数据管理用的是同一个时区配置（设置页可改，见 app/runtime_config.py）。
 MODES = {"daily", "interval"}
 TIME_PATTERN = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 # worker 多久检查一次是否到点；到点后最多晚这么久执行。
@@ -88,7 +87,7 @@ def next_run(schedule, last_scheduled=None):
     anchor = max(anchors) if anchors else datetime.now(timezone.utc)
     if schedule.get("mode") == "interval":
         return anchor + timedelta(hours=int(schedule.get("interval_hours") or 24))
-    zone = ZoneInfo(BUSINESS_TZ)
+    zone = ZoneInfo(runtime_value("business_tz"))
     hour, minute = (int(part) for part in str(schedule.get("time") or "08:00").split(":"))
     local = anchor.astimezone(zone)
     slot = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
@@ -109,7 +108,7 @@ def schedule_view(store):
     last = last_scheduled_run(store)
     upcoming = next_run(schedule, last)
     return {"schedule": schedule, "next_run": upcoming.isoformat() if upcoming else None,
-        "last_scheduled_run": last, "timezone": BUSINESS_TZ}
+        "last_scheduled_run": last, "timezone": runtime_value("business_tz")}
 
 
 # worker 每轮调用：到点就在后台线程执行一次巡检，不阻塞文档导入队列。返回是否启动了巡检。

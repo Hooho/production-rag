@@ -227,7 +227,15 @@ def compare_runs(base, target):
                 change = "worse"
         rows.append({"key": key, "label": label, "direction": direction, "base": before, "target": after,
             "delta": delta, "change": change})
-    return {"base": run_brief(base), "target": run_brief(target), "metrics": rows}
+    # 两次评测用的系统参数不同时（设置页改过），列出不同的项，提醒分数变化可能来自参数而不是代码。
+    # 旧记录没有保存完整参数，只比较双方都有的项。
+    base_settings = (base.get("config") or {}).get("settings") or {}
+    target_settings = (target.get("config") or {}).get("settings") or {}
+    settings_diff = []
+    for key in sorted(set(base_settings) & set(target_settings)):
+        if base_settings[key] != target_settings[key]:
+            settings_diff.append({"key": key, "base": base_settings[key], "target": target_settings[key]})
+    return {"base": run_brief(base), "target": run_brief(target), "metrics": rows, "settings_diff": settings_diff}
 
 
 # 新建一次评测记录并立即保存为 running，前端马上就能在列表里看到它和进度。
@@ -271,6 +279,12 @@ def execute_run(store, models, items, run, generate=False, responder=None):
         row["judgement"] = judge_answer(models, item, answer, sources)
 
     try:
+        # 多轮对话评测不按题检索打分，单独执行（见 app/evaluation/memory.py）。
+        if run["kind"] == "memory":
+            from .memory import run_memory
+            run_memory(store, models, run, on_progress)
+            run["status"] = "completed"
+            return run
         split = run["config"]["split"]
         suites = run["config"]["suites"]
         result = run_retrieval(store, models, items, split, suites, on_progress, on_item)

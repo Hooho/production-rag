@@ -7,6 +7,7 @@ import math
 
 from sqlalchemy import and_, delete, func, or_, select, text
 
+from . import runtime_config
 from .milvus.store import MilvusStore
 from .mysql.store import (MySQLStore, chunks, document_chunks, document_heads, document_permissions, document_shares,
     document_steps, documents, metadata, orders, runs, sessions, settings, user_group_members, user_groups, users)
@@ -33,6 +34,8 @@ class Storage:
         self.redis = RedisStore()
         self.milvus = MilvusStore(models)
         self.engine = self.mysql.engine
+        # 设置页保存的系统参数从这个库读取（api、worker 和各个脚本都经过这里）。
+        runtime_config.bind(self.engine)
         self.cache = self.redis.client
         self.collection = self.milvus.collection
 
