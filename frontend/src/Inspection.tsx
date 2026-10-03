@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { getInspectionIssue, listInspectionIssues, startInspection, updateInspectionIssue, type InspectionEvent, type InspectionIssue, type InspectionIssueFull, type InspectionIssuePage, type InspectionKind, type InspectionStatus } from "./api";
+import { getInspectionIssue, getInspectionSchedule, listInspectionIssues, saveInspectionSchedule, startInspection, updateInspectionIssue, type InspectionEvent, type InspectionSchedule, type InspectionScheduleView, type InspectionIssue, type InspectionIssueFull, type InspectionIssuePage, type InspectionKind, type InspectionStatus } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./Inspection.css";
 
@@ -14,7 +14,7 @@ const STATUS_TABS: { key: InspectionStatus | null; label: string }[] = [
 ];
 const STATUS_TONES: Record<InspectionStatus, string> = { open: "orange", handled: "blue", resolved: "green", ignored: "gray" };
 const FEEDBACK_REASONS: Record<string, string> = { wrong: "答错了", incomplete: "没答全", missed: "资料里有却说找不到", citation: "引用不对", other: "其他" };
-const TRIGGERS: Record<string, string> = { cli: "命令行", api: "页面发起" };
+const TRIGGERS: Record<string, string> = { cli: "命令行", api: "手动", schedule: "定时" };
 
 // 每类问题用大白话说明"这是什么问题"和"建议怎么处理"，详情页顶部显示。
 // 原来详情页只列出系统内部的字段（错误信息、出错步骤、最高分），第一次看的人不知道问题意味着什么、下一步该做什么。
@@ -140,6 +140,8 @@ export default function Inspection({ onToast }: { onToast: ShowToast }) {
       </div>
     </header>
 
+    <ScheduleBar running={running} onToast={onToast} />
+
     <div className="document-detail-tabs inspection-tabs" role="tablist">
       {STATUS_TABS.map((tab) => {
         const count = tab.key ? data?.status_counts[tab.key] ?? 0 : null;
@@ -163,6 +165,103 @@ export default function Inspection({ onToast }: { onToast: ShowToast }) {
       <button type="button" className="secondary-button" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>下一页</button>
     </div>}
   </div>;
+}
+
+// 下次执行时间按巡检设置的时区显示，和"每天 08:00（时区）"对得上；浏览器在别的时区时不会显示成另一个钟点。
+function formatZoned(value: string, timeZone: string) {
+  const date = new Date(value);
+  try {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+      .formatToParts(date).map((part) => [part.type, part.value]));
+    return `${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
+  } catch {
+    return formatTime(value);
+  }
+}
+
+function describeSchedule(schedule: InspectionSchedule, timezone: string) {
+  const frequency = schedule.mode === "daily" ? `每天 ${schedule.time}（${timezone}）` : `每隔 ${schedule.interval_hours} 小时`;
+  return `${frequency} · 扫描最近 ${schedule.days} 天的问答`;
+}
+
+// 定时巡检：显示当前设置和下次执行时间，点"设置"展开表单。由 worker 按设置执行，保存后立即生效。
+function ScheduleBar({ running, onToast }: { running: boolean; onToast: ShowToast }) {
+  const [view, setView] = useState<InspectionScheduleView | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<InspectionSchedule | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function load() {
+    try {
+      setView(await getInspectionSchedule());
+    } catch (reason) {
+      onToast("error", (reason as Error).message);
+    }
+  }
+
+  // 巡检结束后刷新一次，"下次执行"会跟着更新。
+  useEffect(() => {
+    if (!running) void load();
+  }, [running]);
+
+  function startEdit() {
+    if (!view) return;
+    setDraft({ ...view.schedule });
+    setEditing(true);
+  }
+
+  async function save() {
+    if (!draft) return;
+    setSaving(true);
+    try {
+      const { enabled, mode, time, interval_hours, days } = draft;
+      setView(await saveInspectionSchedule({ enabled, mode, time, interval_hours: Number(interval_hours), days: Number(days) }));
+      setEditing(false);
+      onToast("success", enabled ? "定时巡检已保存" : "已关闭定时巡检");
+    } catch (reason) {
+      onToast("error", (reason as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!view) return null;
+  const schedule = view.schedule;
+  const update = (patch: Partial<InspectionSchedule>) => setDraft((current) => current ? { ...current, ...patch } : current);
+  return <section className="inspection-schedule">
+    <div className="inspection-schedule-bar">
+      <span className="inspection-schedule-title">定时巡检</span>
+      {schedule.enabled
+        ? <span>{describeSchedule(schedule, view.timezone)}{view.next_run && <> · 下次 {formatZoned(view.next_run, view.timezone)}</>}</span>
+        : <span className="inspection-schedule-off">未开启，只能手动点"立即巡检"</span>}
+      {!editing && <button type="button" className="secondary-button" onClick={startEdit}>设置</button>}
+    </div>
+    {editing && draft && <div className="inspection-schedule-form">
+      <div className="inspection-schedule-row"><label><input type="checkbox" checked={draft.enabled} onChange={(event) => update({ enabled: event.target.checked })} />开启定时巡检</label></div>
+      <div className="inspection-schedule-row">
+        <span className="inspection-schedule-label">频率</span>
+        <label><input type="radio" name="inspection-mode" checked={draft.mode === "daily"} onChange={() => update({ mode: "daily" })} disabled={!draft.enabled} />每天</label>
+        <input type="time" value={draft.time} onChange={(event) => update({ time: event.target.value })} disabled={!draft.enabled || draft.mode !== "daily"} />
+        <span className="inspection-schedule-hint">（{view.timezone}）</span>
+        <span className="inspection-schedule-gap" />
+        <label><input type="radio" name="inspection-mode" checked={draft.mode === "interval"} onChange={() => update({ mode: "interval" })} disabled={!draft.enabled} />每隔</label>
+        <input type="number" min={1} max={168} value={draft.interval_hours} onChange={(event) => update({ interval_hours: Number(event.target.value) })} disabled={!draft.enabled || draft.mode !== "interval"} />
+        <span>小时</span>
+      </div>
+      <div className="inspection-schedule-row">
+        <span className="inspection-schedule-label">扫描范围</span>
+        <span>最近</span>
+        <input type="number" min={1} max={365} value={draft.days} onChange={(event) => update({ days: Number(event.target.value) })} />
+        <span>天的问答</span>
+        <span className="inspection-schedule-hint">手动点"立即巡检"也用这个范围</span>
+      </div>
+      <p className="inspection-hint">保存后立即生效，下一次执行时间从现在算起，不会马上补跑一次。定时巡检由 worker 服务执行，worker 停止时不会执行。</p>
+      <div className="inspection-action-buttons">
+        <button type="button" className="secondary-button" onClick={() => setEditing(false)} disabled={saving}>取消</button>
+        <button type="button" className="primary-button" onClick={() => void save()} disabled={saving}>{saving ? "保存中…" : "保存"}</button>
+      </div>
+    </div>}
+  </section>;
 }
 
 function InspectionSkeleton() {

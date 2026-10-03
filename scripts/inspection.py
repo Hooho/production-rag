@@ -1,6 +1,7 @@
 import argparse
 import sys
 
+from app.inspection.schedule import load_schedule
 from app.inspection.service import KINDS, InspectionBusy, list_issues, run_inspection
 from app.models import Models
 from app.storage import Storage
@@ -13,13 +14,14 @@ from app.storage import Storage
 # 本次有新增或重新打开的问题时退出码为 1，方便定时任务判断是否需要通知。
 def main():
     parser = argparse.ArgumentParser(description="知识巡检")
-    parser.add_argument("--days", type=int, default=None, help="扫描最近多少天的问答，默认 INSPECTION_DAYS 或 30")
+    parser.add_argument("--days", type=int, default=None, help="扫描最近多少天的问答，默认用页面上定时巡检设置的扫描范围")
     args = parser.parse_args()
     models = Models()
     store = Storage(models)
     try:
         try:
-            result = run_inspection(store, models, trigger="cli", days=args.days)
+            days = args.days or load_schedule(store)["days"]
+            result = run_inspection(store, models, trigger="cli", days=days)
         except InspectionBusy as error:
             print(error)
             sys.exit(2)

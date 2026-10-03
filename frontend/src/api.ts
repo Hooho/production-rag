@@ -749,7 +749,7 @@ export type InspectionIssueFull = InspectionIssue & { events: InspectionEvent[] 
 export type InspectionRun = {
   id: string;
   status: "running" | "completed" | "failed";
-  trigger: "cli" | "api";
+  trigger: "cli" | "api" | "schedule";
   triggered_by: string | null;
   since: string;
   summary: Record<string, number>;
@@ -787,6 +787,22 @@ export function getInspectionIssue(issueId: string) {
 export function updateInspectionIssue(issueId: string, payload: { status?: "open" | "handled" | "ignored"; note?: string }) {
   return request<InspectionIssueFull>(`/inspection/issues/${encodeURIComponent(issueId)}`, {
     method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+// 定时巡检设置：daily 每天 time 执行，interval 每隔 interval_hours 小时；days 是扫描最近多少天的问答。
+export type InspectionSchedule = { enabled: boolean; mode: "daily" | "interval"; time: string; interval_hours: number; days: number; updated?: string | null; updated_by?: string | null };
+export type InspectionScheduleView = { schedule: InspectionSchedule; next_run: string | null; last_scheduled_run: string | null; timezone: string };
+
+export function getInspectionSchedule() {
+  return request<InspectionScheduleView>("/inspection/schedule");
+}
+
+export function saveInspectionSchedule(payload: Pick<InspectionSchedule, "enabled" | "mode" | "time" | "interval_hours" | "days">) {
+  return request<InspectionScheduleView>("/inspection/schedule", {
+    method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });

@@ -36,6 +36,102 @@
    white-space: nowrap;
 }
 
+.inspection-schedule {
+   margin-bottom: 18px;
+   border: 1px solid #cedfec;
+   background: #fff;
+   padding: 10px 16px;
+   font-size: 13px;
+}
+
+.inspection-schedule-bar {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: 10px;
+   color: #1d3550;
+}
+
+.inspection-schedule-bar .secondary-button {
+   margin-left: auto;
+   font-size: 12px;
+}
+
+.inspection-schedule-title {
+   color: #2563eb;
+   font-weight: 700;
+}
+
+.inspection-schedule-off {
+   color: #6c88a3;
+}
+
+.inspection-schedule-form {
+   margin-top: 12px;
+   border-top: 1px solid #e3edf5;
+   padding-top: 12px;
+}
+
+.inspection-schedule-row {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: 8px;
+   margin-bottom: 10px;
+   color: #1d3550;
+}
+
+/* 全局样式里 label 是上下排列的网格、input 占满整行，这里改回行内排列。 */
+.inspection-schedule-row label {
+   display: inline-flex;
+   align-items: center;
+   gap: 4px;
+   margin: 0;
+   color: #1d3550;
+   font-family: inherit;
+   font-size: 13px;
+   letter-spacing: normal;
+}
+
+.inspection-schedule-row input {
+   width: auto;
+   margin: 0;
+   border: 1px solid #cedfec;
+   border-radius: 6px;
+   background: #fff;
+   color: #1d3550;
+   padding: 3px 6px;
+   font-size: 13px;
+}
+
+.inspection-schedule-row input[type="checkbox"],
+.inspection-schedule-row input[type="radio"] {
+   padding: 0;
+}
+
+.inspection-schedule-row input[type="number"] {
+   width: 64px;
+}
+
+.inspection-schedule-row input:disabled {
+   background: #f4f8fc;
+   color: #9db0c3;
+}
+
+.inspection-schedule-gap {
+   width: 16px;
+}
+
+.inspection-schedule-label {
+   width: 72px;
+   color: #5e7a95;
+}
+
+.inspection-schedule-hint {
+   color: #8aa0b6;
+   font-size: 12px;
+}
+
 .inspection-tabs {
    margin-bottom: 14px;
    overflow-x: auto;

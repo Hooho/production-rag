@@ -257,3 +257,65 @@ def test_old_title_prefix_is_removed(setup, monkeypatch):
             title="知识缺口：跨境商品能不能退货"))
     inspect(client, store)
     assert issues(store, "knowledge_gap")[0]["title"] == "跨境商品能不能退货"
+
+
+# 下一次定时巡检时间：从"上次定时巡检"和"保存设置"中较晚的时间算起，关闭时没有下一次。
+def test_schedule_next_run(monkeypatch):
+    from datetime import datetime, timezone
+    from app.inspection import schedule as schedule_module
+    monkeypatch.setattr(schedule_module, "BUSINESS_TZ", "Asia/Shanghai")
+    daily = {"enabled": True, "mode": "daily", "time": "08:00", "interval_hours": 24, "days": 30,
+        "updated": "2026-10-02T23:00:00+00:00"}
+    # 北京时间 07:00 保存，当天 08:00（UTC 00:00）执行。
+    assert schedule_module.next_run(daily) == datetime(2026, 10, 3, 0, 0, tzinfo=timezone.utc)
+    # 当天 08:00 已经执行过，下一次是第二天 08:00。
+    assert schedule_module.next_run(daily, "2026-10-03T00:00:05+00:00") == datetime(2026, 10, 4, 0, 0, tzinfo=timezone.utc)
+    interval = {**daily, "mode": "interval", "interval_hours": 6}
+    assert schedule_module.next_run(interval, "2026-10-03T01:00:00+00:00") == datetime(2026, 10, 3, 7, 0, tzinfo=timezone.utc)
+    assert schedule_module.next_run({**daily, "enabled": False}) is None
+
+
+# 定时巡检设置只有管理员能看和改；保存后返回下一次执行时间，不合法的设置返回 422。
+def test_schedule_api(setup):
+    client, _ = setup
+    assert client.get("/inspection/schedule", headers=headers()).status_code == 403
+    view = client.get("/inspection/schedule", headers=headers("admin")).json()
+    assert view["schedule"]["enabled"] is False and view["next_run"] is None
+    body = {"enabled": True, "mode": "interval", "time": "08:00", "interval_hours": 12, "days": 7}
+    assert client.put("/inspection/schedule", headers=headers(), json=body).status_code == 403
+    saved = client.put("/inspection/schedule", headers=headers("admin"), json=body).json()
+    assert saved["schedule"]["interval_hours"] == 12 and saved["schedule"]["updated_by"] == "admin"
+    assert saved["next_run"] > saved["schedule"]["updated"]
+    for bad in ({**body, "time": "25:00"}, {**body, "mode": "weekly"}, {**body, "interval_hours": 0}, {**body, "days": 400}):
+        assert client.put("/inspection/schedule", headers=headers("admin"), json=bad).status_code == 422
+    # 手动巡检的扫描范围和定时设置一致。
+    started = client.post("/inspection/runs", headers=headers("admin"))
+    assert started.status_code == 202
+    client.app.state.inspection_thread.join(timeout=10)
+    run = client.get("/inspection/runs", headers=headers("admin")).json()["runs"][0]
+    from datetime import datetime, timedelta, timezone
+    since = datetime.fromisoformat(run["since"])
+    assert abs((datetime.now(timezone.utc) - since) - timedelta(days=7)) < timedelta(minutes=5)
+
+
+# worker 每轮检查：到点才执行，执行后记录为定时巡检；同一轮里不重复启动。
+def test_schedule_runner_runs_when_due(setup):
+    from datetime import datetime, timedelta, timezone
+    from app.inspection.schedule import SETTING_KEY, ScheduleRunner, save_schedule
+    from app.mysql.store import settings
+    client, store = setup
+    save_schedule(store, {"enabled": True, "mode": "interval", "interval_hours": 1, "days": 30}, "admin")
+    runner = ScheduleRunner(store, client.app.state.models)
+    assert runner.tick(monotonic=100.0) is False
+    # 把保存时间改到两小时前，模拟已经到点。
+    with store.engine.begin() as connection:
+        connection.execute(settings.update().where(settings.c.key == SETTING_KEY).values(
+            updated=(datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()))
+    assert runner.tick(monotonic=101.0) is False  # 30 秒内不重复检查
+    assert runner.tick(monotonic=200.0) is True
+    runner.thread.join(timeout=10)
+    with store.engine.connect() as connection:
+        triggers = connection.execute(select(inspection_runs.c.trigger, inspection_runs.c.status)).all()
+    assert triggers == [("schedule", "completed")]
+    # 刚执行过，下一次要再等一小时。
+    assert runner.tick(monotonic=300.0) is False

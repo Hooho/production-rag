@@ -6,6 +6,7 @@ import time
 from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import or_, select
 
+from app.inspection.schedule import ScheduleRunner
 from app.models import Models
 from app.mysql.store import document_steps, documents
 from app.storage import Storage
@@ -32,7 +33,13 @@ def main():
         recovered = recover_jobs(store)
         if recovered:
             logger.warning("jobs_recovered count=%s", recovered)
+        # 定时巡检由 worker 负责：只有一个 worker，不会重复执行；到点后在后台线程跑，不耽误文档导入。
+        inspection_schedule = ScheduleRunner(store, models)
         while True:
+            try:
+                inspection_schedule.tick()
+            except Exception:
+                logger.exception("inspection_schedule_check_failed")
             try:
                 item = store.cache.blpop(QUEUE, timeout=2)
             except RedisTimeoutError:

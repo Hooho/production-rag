@@ -30,6 +30,7 @@ from ..auth import (authenticate, check_groups, create_user, decode_access_token
 from ..evaluation.dataset import QUESTION_TYPES, append_items, corpus_files, corpus_text, generate_items, load_dataset, mark_reviewed, next_item_id, next_pair_id, select_split, validate_dataset
 from ..evaluation.results import compare_runs, delete_run, execute_run, list_runs, load_run, previous_run, start_run
 from ..evaluation.retrieval import SUITES, VARIANTS
+from ..inspection.schedule import load_schedule, save_schedule, schedule_view
 from ..inspection.service import (KINDS as INSPECTION_KINDS, LOCK_KEY as INSPECTION_LOCK, MANUAL_STATUSES,
     STATUSES as INSPECTION_STATUSES, InspectionBusy, get_issue, list_issues, list_runs as list_inspection_runs,
     run_inspection, update_issue)
@@ -100,6 +101,16 @@ class InspectionIssueInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     status: str | None = None
     note: str | None = Field(None, max_length=2000)
+
+
+# 定时巡检设置：mode 为 daily（每天 time 执行）或 interval（每隔 interval_hours 小时），days 是扫描最近多少天的问答。
+class InspectionScheduleInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool
+    mode: Literal["daily", "interval"]
+    time: str = Field("08:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    interval_hours: int = Field(24, ge=1, le=168)
+    days: int = Field(30, ge=1, le=365)
 
 
 class InspectionRunInput(BaseModel):
@@ -1384,6 +1395,19 @@ def create_app(store=None, models=None, jwt_secret=None):
             raise HTTPException(404, "问题不存在")
         return issue
 
+    @app.get("/inspection/schedule", dependencies=[Depends(require_admin)])
+    def inspection_schedule_get():
+        return schedule_view(app.state.store)
+
+    # 保存后由 worker 按新设置执行，不用重启；下一次执行时间从保存时刻算起。
+    @app.put("/inspection/schedule")
+    def inspection_schedule_put(body: InspectionScheduleInput, admin=Depends(require_admin)):
+        try:
+            save_schedule(app.state.store, body.model_dump(), admin["username"])
+        except ValueError as error:
+            raise HTTPException(422, str(error))
+        return schedule_view(app.state.store)
+
     @app.get("/inspection/runs", dependencies=[Depends(require_admin)])
     def inspection_runs_list():
         return {"runs": list_inspection_runs(app.state.store),
@@ -1395,7 +1419,8 @@ def create_app(store=None, models=None, jwt_secret=None):
         if app.state.store.cache.get(INSPECTION_LOCK):
             raise HTTPException(409, "已有巡检正在运行，请稍后再试")
         run_id = str(uuid4())
-        days = body.days if body else None
+        # 没有单独指定时，扫描范围和定时巡检的设置保持一致。
+        days = body.days if body and body.days else load_schedule(app.state.store)["days"]
 
         def work():
             try:
