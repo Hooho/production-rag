@@ -29,9 +29,13 @@ function explain(issue: InspectionIssue): { what: string; todo: string[] } {
       case "routing":
         return { what: base + "这些问题提到了订单、库存这类业务数据，像是在查数据库，却被意图识别分到了知识库检索，知识库里当然找不到。问题出在分流，不是缺文档。", todo: ["看下面「诊断结果」里每个问题提到了哪种数据、被分到了哪里，确认用户确实是在查数据。", "调整意图识别：在数据查询的识别规则里补上这类说法（app/tools/data_query.py 的 QUERY_WORDS），或者调整本地小模型、意图识别的提示词。", "改好后点「标记已处理」，修复方式选「调了分流」。下次巡检会用现在的规则重新判断，分到数据查询就自动关闭；也可以点「重新检索」马上验证。", "如果确认这个问题其实是在问制度和流程、该由知识库回答，按内容缺口处理：补充文档。"] };
       case "retrieval":
-        return { what: base + "重新检索发现：提问人能看到的资料里有比较接近的内容，但相关度没达到阈值；或者用户明确反馈过「资料里有却说找不到」。问题多半出在检索，而不是缺文档。", todo: ["对照「诊断结果」里的得分和问题原文，确认资料是否确实存在。", "资料存在的话，考虑调整文档的标题和分块、补充同义说法，或者评估检索阈值 RERANK_MIN_SCORE 是否偏高。", verify] };
-      case "content":
-        return { what: base + "重新检索发现：整个知识库里都没有足够相关的资料，需要补充文档。", todo: ["补充或更新覆盖这些问题的文档。", verify] };
+        return { what: base + "重新检索发现：提问人能看到的资料里有比较接近的内容，但相关度没达到阈值；或者用户明确反馈过「资料里有却说找不到」。问题多半出在检索，而不是缺文档。", todo: ["对照「诊断结果」里的得分和问题原文，确认资料是否确实存在。", "资料存在的话，考虑调整文档的标题和分块、补充同义说法，或者评估「设置 → 系统参数」里的相关度阈值是否偏高。", verify] };
+      case "content": {
+        const limits = detail.diagnosis?.thresholds ?? { min_score: 0.85, near_miss: 0.425, out_of_scope: 0.05 };
+        const close = (detail.diagnosis?.questions ?? []).some((item) => item.category === "content" && bandOf(item.full_top, limits) === "close");
+        if (close) return { what: base + "重新检索发现：全库里有比较接近的资料，但没达到相关度要求，而且在提问人看不到的文档里。不一定是缺文档。", todo: ["展开下面「诊断结果」里得分最高的那段，看它能不能回答这个问题。", "能回答：判断这份文档该不该共享给提问人；需要的话再在文档里补上用户的说法，让得分达标。", "不能回答：补充覆盖这些问题的文档。", verify] };
+        return { what: base + "重新检索发现：整个知识库里最相关的资料也只是沾边，需要补充文档。", todo: ["补充或更新覆盖这些问题的文档。", verify] };
+      }
       case "out_of_scope":
         return { what: base + "重新检索发现：整个知识库里连沾边的资料都没有，多半是闲聊、常识或与业务无关的问题，拒答是正确的。", todo: ["确认不属于业务范围的话，点「无需处理」。", "如果其实应该覆盖，按内容缺口处理：补充文档后点「标记已处理」。"] };
       default:
@@ -759,10 +763,26 @@ function SourceText({ text, truncated = false, open: controlledOpen, onToggle }:
 
 // 诊断结果：每个问题用一句话说明重新检索看到了什么、为什么得出这个结论。
 // 原来只列"提问人可见范围最高分 0.01 · 全库最高分 0.01"，不知道分数代表什么、多少才算够。
-function diagnosisSentence(item: InspectionDiagnosis["questions"][number], limits: { min_score: number; near_miss: number; out_of_scope: number }) {
+// 分数落在哪一段：达标（≥ 阈值）、接近（≥ 阈值 × 「差一点就找到」的比例）、沾边（≥ 超出范围分数线）、无关。
+// 原来的说明按类别套固定模板，比如全库最高 0.69 分也一律说「知识库里没有，需要补文档」，其实已经接近 0.85 的要求，
+// 更可能是表述不同或权限问题；现在按分数段换说法，并写出差多少分。
+type ScoreLimits = { min_score: number; near_miss: number; out_of_scope: number };
+type Band = "pass" | "close" | "weak" | "none";
+function bandOf(value: number | null, limits: ScoreLimits): Band {
+  const score = value ?? 0;
+  if (score >= limits.min_score) return "pass";
+  if (score >= limits.near_miss) return "close";
+  if (score >= limits.out_of_scope) return "weak";
+  return "none";
+}
+
+function diagnosisSentence(item: InspectionDiagnosis["questions"][number], limits: ScoreLimits) {
   const score = (value: number | null) => (value ?? 0).toFixed(2);
+  const gap = (value: number | null) => (limits.min_score - (value ?? 0)).toFixed(2);
   const pass = `要达到 ${limits.min_score.toFixed(2)} 才算相关，满分 1`;
   const who = item.owner;
+  const userBand = bandOf(item.user_top, limits);
+  const fullBand = bandOf(item.full_top, limits);
   switch (item.category) {
     case "routing":
       return `问题提到了「${item.routing?.data_types.join("、")}」，像是在查业务数据，但现在仍会被分到${item.routing?.route_label ?? "知识库检索"}，不会去查数据库。`;
@@ -770,11 +790,13 @@ function diagnosisSentence(item: InspectionDiagnosis["questions"][number], limit
       if (item.rerouted) return `问题提到了「${item.routing?.data_types.join("、")}」，按现在的分流规则会分到数据查询，不再去知识库检索。`;
       return `现在按 ${who} 的权限重新检索，能找到相关资料（最相关的一段得分 ${score(item.user_top)}，${pass}），这个问题已经能答。`;
     case "permission":
-      return `${who} 能看到的资料里找不到相关内容（最高只有 ${score(item.user_top)}），但整个知识库里有得分 ${score(item.full_top)} 的资料，在下面这份文档里，${who} 没有权限看到（${pass}）。`;
+      return `${who} 能看到的资料里最高只有 ${score(item.user_top)} 分，但整个知识库里有 ${score(item.full_top)} 分的资料，在下面这份文档里，${who} 没有权限看到（${pass}）。`;
     case "retrieval":
-      return `${who} 能看到的资料里最相关的一段得分 ${score(item.user_top)}，比较接近但没达到门槛（${pass}），资料可能存在，只是没被检索出来。`;
+      if (userBand === "close") return `${who} 能看到的资料里最相关的一段 ${score(item.user_top)} 分，只差 ${gap(item.user_top)} 分就达到要求（${pass}）。资料很可能就在这里，只是问法和文档的说法不一样，看下面这段能不能回答。`;
+      return `用户反馈过「资料里有却说找不到」，但 ${who} 能看到的资料里最高只有 ${score(item.user_top)} 分（${pass}）。如果资料确实在，多半是用了不同的叫法（同义词、简称），需要在文档里补上用户的说法。`;
     case "content":
-      return `整个知识库里和这个问题最相关的资料只有 ${score(item.full_top)} 分（${pass}），说明知识库里没有能回答它的内容，需要补文档。`;
+      if (fullBand === "close") return `全库最接近的一段 ${score(item.full_top)} 分，差 ${gap(item.full_top)} 分达到要求，但 ${who} 看不到这份文档（${pass}）。先看下面这段能不能回答：能回答就是权限加表述的问题，不一定要补文档。`;
+      return `整个知识库里和这个问题最相关的资料只有 ${score(item.full_top)} 分，只是沾边（${pass}），知识库里大概率没有能回答它的内容，需要补文档。`;
     case "out_of_scope":
       return `整个知识库里和这个问题最相关的资料只有 ${score(item.full_top)} 分（${pass}），几乎没有任何沾边的内容，多半是和业务无关的问题。`;
     default:
@@ -830,7 +852,7 @@ function DiagnosisChunks({ chunks, owner, minScore }: { chunks?: InspectionDiagn
       <li>
         <div className="inspection-source-head">
           <span>《{chunk.title}》{chunk.version ? ` v${chunk.version}` : ""}{chunk.page_start ? ` · 第 ${chunk.page_start} 页` : ""}{chunk.heading ? ` · ${chunk.heading}` : ""}</span>
-          <span className={`inspection-source-tag ${chunk.passed ? "is-cited" : ""}`} title="检索时相关度得分要达到这个值，资料才会交给模型回答（RERANK_MIN_SCORE）">{chunk.score.toFixed(2)} 分，{chunk.passed ? "达到" : "低于"}回答要求的 {minScore.toFixed(2)} 分</span>
+          <span className={`inspection-source-tag ${chunk.passed ? "is-cited" : ""}`} title="检索时相关度得分要达到这个值，资料才会交给模型回答（设置 → 系统参数 → 相关度阈值）">{chunk.score.toFixed(2)} 分，{chunk.passed ? "达到" : "低于"}回答要求的 {minScore.toFixed(2)} 分</span>
           <span className={`inspection-source-tag ${chunk.visible ? "" : "is-hidden"}`}>{chunk.visible ? `${owner} 能看到` : `${owner} 看不到`}</span>
         </div>
         <SourceText text={chunk.text} truncated={chunk.truncated} />

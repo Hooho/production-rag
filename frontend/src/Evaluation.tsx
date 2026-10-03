@@ -1049,7 +1049,7 @@ function FilterChips({ value, options, onChange }: { value: string; options: [st
 // 阈值扫描：同一批重排概率在不同阈值下的误杀率、漏放率和过滤后召回率。
 function SweepPanel({ run }: { run: EvalRun }) {
   const sweep = run.sweep ?? [];
-  if (sweep.length === 0) return <div className="ev-empty"><h3>这次评测没有阈值扫描</h3><p>阈值只作用在重排概率上；本次没有启用重排（例如 EMBEDDING_MODE 不是 local 或 RERANK_MODE=off），所以无法扫描。</p></div>;
+  if (sweep.length === 0) return <div className="ev-empty"><h3>这次评测没有阈值扫描</h3><p>阈值只作用在重排概率上；本次没有启用重排（EMBEDDING_MODE 不是 local，或设置页关闭了重排），所以无法扫描。</p></div>;
   const current = run.config.min_score ?? null;
   let best: EvalSweepPoint | null = null;
   for (const point of sweep) {
