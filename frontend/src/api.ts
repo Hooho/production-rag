@@ -702,7 +702,21 @@ export type InspectionIssueDetail = {
   error?: string;
   status_code?: number;
   resolution?: string;
+  // 拒答分类：离线重跑检索得出的结论，只有知识缺口有。
+  diagnosis?: InspectionDiagnosis;
+  // 标记已处理后验证没通过时的说明。
+  verification?: { passed: boolean; at: string; message: string };
   reopened?: { at: string; previous_status: InspectionStatus; new_occurrences: number };
+};
+export type InspectionDiagnosisCategory = "answerable" | "permission" | "retrieval" | "content" | "out_of_scope" | "unknown";
+export type InspectionDiagnosisDocument = { title: string; doc_key: string; owner: string; visibility: string; visibility_label?: string | null; groups: string[]; score?: number | null };
+export type InspectionDiagnosis = {
+  category: InspectionDiagnosisCategory;
+  label: string;
+  checked_at: string;
+  counts: Partial<Record<InspectionDiagnosisCategory, number>>;
+  thresholds?: { min_score: number; near_miss: number; out_of_scope: number };
+  questions: { question: string; owner: string; category: InspectionDiagnosisCategory; label: string; reason?: string; user_top: number | null; full_top: number | null; documents: InspectionDiagnosisDocument[] }[];
 };
 export type InspectionIssue = {
   id: string;

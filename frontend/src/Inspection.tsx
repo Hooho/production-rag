@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { getInspectionIssue, getInspectionSchedule, listInspectionIssues, saveInspectionSchedule, startInspection, updateInspectionIssue, type InspectionEvent, type InspectionSchedule, type InspectionScheduleView, type InspectionIssue, type InspectionIssueFull, type InspectionIssuePage, type InspectionKind, type InspectionStatus } from "./api";
+import { getInspectionIssue, getInspectionSchedule, listInspectionIssues, saveInspectionSchedule, startInspection, updateInspectionIssue, type InspectionDiagnosis, type InspectionEvent, type InspectionSchedule, type InspectionScheduleView, type InspectionIssue, type InspectionIssueFull, type InspectionIssuePage, type InspectionKind, type InspectionStatus } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./Inspection.css";
 
@@ -21,10 +21,20 @@ const TRIGGERS: Record<string, string> = { cli: "命令行", api: "手动", sche
 function explain(issue: InspectionIssue): { what: string; todo: string[] } {
   const detail = issue.detail;
   if (issue.kind === "knowledge_gap") {
-    return {
-      what: "用户问了下面这些问题，系统没能给出答案：直接拒答、判断资料不够，或者用户反馈「没答全」「资料里有却说找不到」。通常说明知识库里缺少相关文档。",
-      todo: ["先判断问题是否属于你的业务范围：闲聊、常识、和业务无关的问题，拒答是正确的，点「忽略」即可。", "属于业务范围的，补充或更新相关文档，然后点「标记已处理」；之后如果还有人问同类问题答不上，会自动重新打开。"],
-    };
+    const base = "用户问了下面这些问题，系统没能给出答案：直接拒答、判断资料不够，或者用户反馈「没答全」「资料里有却说找不到」。";
+    const verify = "处理后点「标记已处理」，下次巡检会用原来的问题重新检索验证：都能检索到资料就自动关闭，否则重新打开。";
+    switch (detail.diagnosis?.category) {
+      case "permission":
+        return { what: base + "重新检索发现：知识库里其实有相关资料，但提问人没有权限看到。", todo: ["看下面「诊断结果」里列出的文档和它们当前的可见范围，判断是该共享给提问人所在的部门，还是本来就应该保密。", "需要共享就到知识库里修改这份文档的可见范围；本来就该保密的，点「忽略」。", verify] };
+      case "retrieval":
+        return { what: base + "重新检索发现：提问人能看到的资料里有比较接近的内容，但相关度没达到阈值；或者用户明确反馈过「资料里有却说找不到」。问题多半出在检索，而不是缺文档。", todo: ["对照「诊断结果」里的得分和问题原文，确认资料是否确实存在。", "资料存在的话，考虑调整文档的标题和分块、补充同义说法，或者评估检索阈值 RERANK_MIN_SCORE 是否偏高。", verify] };
+      case "content":
+        return { what: base + "重新检索发现：整个知识库里都没有足够相关的资料，需要补充文档。", todo: ["补充或更新覆盖这些问题的文档。", verify] };
+      case "out_of_scope":
+        return { what: base + "重新检索发现：整个知识库里连沾边的资料都没有，多半是闲聊、常识或与业务无关的问题，拒答是正确的。", todo: ["确认不属于业务范围的话，点「忽略」。", "如果其实应该覆盖，按内容缺口处理：补充文档后点「标记已处理」。"] };
+      default:
+        return { what: base + "通常说明知识库里缺少相关文档。", todo: ["先判断问题是否属于你的业务范围：闲聊、常识、和业务无关的问题，拒答是正确的，点「忽略」即可。", "属于业务范围的，补充或更新相关文档，然后点「标记已处理」。" + verify] };
+    }
   }
   if (issue.kind === "suspect_content") {
     return {
@@ -285,7 +295,9 @@ function IssueRow({ issue, signals, open, onToggle, onChanged, onToast }: { issu
         <div className="inspection-item-tags">
           <span className={`inspection-kind is-${issue.kind}`}>{issue.kind_label}</span>
           <span className={`status-tag is-${STATUS_TONES[issue.status]}`}>{issue.status_label}</span>
+          {issue.detail.diagnosis && issue.status !== "resolved" && <span className={`inspection-category is-${issue.detail.diagnosis.category}`} title="离线重跑检索得出的拒答原因">{issue.detail.diagnosis.label}</span>}
           {issue.status === "open" && issue.detail.reopened && <span className="status-tag is-red">处理后再次出现</span>}
+          {issue.status === "open" && issue.detail.verification && <span className="status-tag is-red">验证未通过</span>}
         </div>
         <div className="inspection-item-title">{issue.title}</div>
         <SignalChips counts={issue.detail.signals} labels={signals} />
@@ -335,10 +347,12 @@ function IssueDetail({ issueId, signals, onChanged, onToast }: { issueId: string
   if (!issue) return <div className="inspection-detail"><LoadingSkeleton label="正在加载问题详情"><SkeletonBlock className="skeleton-line" /><SkeletonBlock className="skeleton-line-short" /></LoadingSkeleton></div>;
   const detail = issue.detail;
   return <div className="inspection-detail">
-    {detail.resolution && <div className="inspection-notice is-green">{detail.resolution}</div>}
+    {issue.status === "resolved" && detail.resolution && <div className="inspection-notice is-green">{detail.resolution}</div>}
+    {issue.status === "open" && detail.verification && <div className="inspection-notice is-red">{detail.verification.message}（{formatTime(detail.verification.at)}）</div>}
     <Explanation issue={issue} />
     {issue.status === "open" && detail.reopened && <div className="inspection-notice is-red">标记为{detail.reopened.previous_status === "handled" ? "已处理" : "已解决"}之后又出现了 {detail.reopened.new_occurrences} 次，已重新打开（{formatTime(detail.reopened.at)}）。</div>}
 
+    {issue.kind === "knowledge_gap" && detail.diagnosis && <DiagnosisDetail diagnosis={detail.diagnosis} />}
     {issue.kind === "knowledge_gap" && <div className="inspection-facts">
       <Fact label="示例问题">{detail.questions?.length ? <ul>{detail.questions.map((text) => <li key={text}>{text}</li>)}</ul> : "—"}</Fact>
       {detail.missing?.length ? <Fact label="缺失内容"><ul>{detail.missing.map((item) => <li key={item.text}>{item.text}{item.count > 1 && <span className="inspection-count">×{item.count}</span>}</li>)}</ul></Fact> : null}
@@ -506,6 +520,51 @@ function SourceText({ text, truncated = false, open: controlledOpen, onToggle }:
     <div ref={ref} className={`inspection-source-text ${open ? "is-open" : ""}`}>{text}{open && truncated && "…（原文较长，只显示前 1500 字）"}</div>
     {(overflow || open) && <button type="button" className="inspection-source-toggle" onClick={toggle}>{open ? "收起" : "展开全文"}</button>}
   </>;
+}
+
+// 诊断结果：每个问题用一句话说明重新检索看到了什么、为什么得出这个结论。
+// 原来只列"提问人可见范围最高分 0.01 · 全库最高分 0.01"，不知道分数代表什么、多少才算够。
+function diagnosisSentence(item: InspectionDiagnosis["questions"][number], limits: { min_score: number; near_miss: number; out_of_scope: number }) {
+  const score = (value: number | null) => (value ?? 0).toFixed(2);
+  const pass = `要达到 ${limits.min_score.toFixed(2)} 才算相关，满分 1`;
+  const who = item.owner;
+  switch (item.category) {
+    case "answerable":
+      return `现在按 ${who} 的权限重新检索，能找到相关资料（最相关的一段得分 ${score(item.user_top)}，${pass}），这个问题已经能答。`;
+    case "permission":
+      return `${who} 能看到的资料里找不到相关内容（最高只有 ${score(item.user_top)}），但整个知识库里有得分 ${score(item.full_top)} 的资料，在下面这份文档里，${who} 没有权限看到（${pass}）。`;
+    case "retrieval":
+      return `${who} 能看到的资料里最相关的一段得分 ${score(item.user_top)}，比较接近但没达到门槛（${pass}），资料可能存在，只是没被检索出来。`;
+    case "content":
+      return `整个知识库里和这个问题最相关的资料只有 ${score(item.full_top)} 分（${pass}），说明知识库里没有能回答它的内容，需要补文档。`;
+    case "out_of_scope":
+      return `整个知识库里和这个问题最相关的资料只有 ${score(item.full_top)} 分（${pass}），几乎没有任何沾边的内容，多半是和业务无关的问题。`;
+    default:
+      return item.reason ?? "无法判断。";
+  }
+}
+
+function DiagnosisDetail({ diagnosis }: { diagnosis: InspectionDiagnosis }) {
+  const limits = diagnosis.thresholds ?? { min_score: 0.85, near_miss: 0.425, out_of_scope: 0.05 };
+  return <div className="inspection-diagnosis">
+    <div className="inspection-diagnosis-head">
+      <span className="inspection-explain-title">诊断结果</span>
+      <span className="inspection-diagnosis-time">系统在 {formatTime(diagnosis.checked_at)} 用这些问题重新检索了一遍（只检索，不生成回答），判断答不上来的原因</span>
+    </div>
+    <ul>
+      {diagnosis.questions.map((item, index) => <li key={index}>
+        <div className="inspection-diagnosis-line">
+          <span className={`inspection-category is-${item.category}`}>{item.label}</span>
+          <span className="inspection-diagnosis-question">{item.question}</span>
+          <span className="inspection-diagnosis-meta">提问人：{item.owner}</span>
+        </div>
+        <p className="inspection-diagnosis-sentence">{diagnosisSentence(item, limits)}</p>
+        {item.documents.length > 0 && <ul className="inspection-diagnosis-docs">
+          {item.documents.map((document) => <li key={document.doc_key}>《{document.title}》 · 上传者 {document.owner} · 当前{document.visibility_label ?? document.visibility}{document.groups.length > 0 && `（${document.groups.join("、")}）`}</li>)}
+        </ul>}
+      </li>)}
+    </ul>
+  </div>;
 }
 
 function Explanation({ issue }: { issue: InspectionIssue }) {

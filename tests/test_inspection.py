@@ -319,3 +319,80 @@ def test_schedule_runner_runs_when_due(setup):
     assert triggers == [("schedule", "completed")]
     # 刚执行过，下一次要再等一小时。
     assert runner.tick(monotonic=300.0) is False
+
+
+# 按关键词打分的重排替身：问题和资料都提到"退货"时给 score，否则 0.01。
+def keyword_rerank(score):
+    return lambda self, query, documents: [score if "退货" in query and "退货" in text else 0.01 for text in documents]
+
+
+# 权限缺口：bob 看不到 alice 的私有文档，全库检索能找到。标记已处理但没改权限，验证不通过并重新打开；
+# 改成公开后再标记已处理，验证通过、自动关闭。
+def test_permission_gap_and_verification(setup, monkeypatch):
+    client, store = setup
+    document_id = upload(client)
+    monkeypatch.setattr(Models, "rerank", keyword_rerank(0.95))
+    ask(client, "退货期限是多久", owner="bob")
+    summary = inspect(client, store)
+    assert summary["diagnosed"] == 1
+    gap = issues(store, "knowledge_gap")[0]
+    diagnosis = gap["detail"]["diagnosis"]
+    assert diagnosis["category"] == "permission" and diagnosis["label"] == "权限缺口"
+    # 页面用判断门槛把分数解释成"差多少才算相关"。
+    assert diagnosis["thresholds"]["min_score"] == 0.85
+    question = diagnosis["questions"][0]
+    assert question["owner"] == "bob" and question["full_top"] == 0.95
+    assert question["documents"][0]["title"] == "售后" and question["documents"][0]["owner"] == "alice"
+    assert question["documents"][0]["visibility"] == "private"
+    # 只点了已处理、没改权限：验证不通过，重新打开。
+    assert client.patch(f"/inspection/issues/{gap['id']}", headers=headers("admin"), json={"status": "handled"}).status_code == 200
+    summary = inspect(client, store)
+    assert summary["verification_failed"] == 1
+    reopened = issues(store, "knowledge_gap")[0]
+    assert reopened["status"] == "open" and "还有 1 个检索不到" in reopened["detail"]["verification"]["message"]
+    # 改成公开后验证通过。
+    assert client.put(f"/documents/{document_id}/permission", headers=headers(),
+        json={"visibility": "public", "groups": []}).status_code == 200
+    assert client.patch(f"/inspection/issues/{gap['id']}", headers=headers("admin"), json={"status": "handled"}).status_code == 200
+    summary = inspect(client, store)
+    assert summary["verified"] == 1
+    resolved = issues(store, "knowledge_gap")[0]
+    assert resolved["status"] == "resolved" and resolved["status_by"] == "system"
+    assert resolved["detail"]["resolution"].startswith("验证通过") and "《售后》" in resolved["detail"]["resolution"]
+    assert "verification" not in resolved["detail"]
+
+
+# 其余类别：全库得分很低算超出范围，中等算内容缺口，接近阈值算检索缺口；
+# 之后补了资料、现在能检索到的，不用管理员操作就自动关闭。
+def test_gap_categories_and_auto_resolve(setup, monkeypatch):
+    client, store = setup
+    upload(client)
+    monkeypatch.setattr(Models, "rerank", lambda self, query, documents: [0.01] * len(documents))
+    ask(client, "退货要多久")
+    inspect(client, store)
+    expectations = ((0.01, "out_of_scope"), (0.2, "content"), (0.6, "retrieval"))
+    for score, category in expectations:
+        monkeypatch.setattr(Models, "rerank", lambda self, query, documents, score=score: [score] * len(documents))
+        inspect(client, store)
+        assert issues(store, "knowledge_gap")[0]["detail"]["diagnosis"]["category"] == category
+    monkeypatch.setattr(Models, "rerank", keyword_rerank(0.95))
+    summary = inspect(client, store)
+    assert summary["auto_resolved"] == 1
+    gap = issues(store, "knowledge_gap")[0]
+    assert gap["status"] == "resolved" and gap["detail"]["resolution"].startswith("现在能答")
+
+
+# 重排不可用时无法按相关度判断，不改变问题状态；主结论按出现次数和优先级取。
+def test_diagnosis_without_rerank_and_overall_category(setup, monkeypatch):
+    from app.inspection.diagnosis import overall_category
+    client, store = setup
+    upload(client)
+    monkeypatch.setattr(Models, "rerank", lambda self, query, documents: [0.01] * len(documents))
+    ask(client, "退货要多久")
+    monkeypatch.setattr(Models, "rerank", lambda self, query, documents: None)
+    inspect(client, store)
+    gap = issues(store, "knowledge_gap")[0]
+    assert gap["status"] == "open" and gap["detail"]["diagnosis"]["category"] == "unknown"
+    assert overall_category(["answerable", "answerable"]) == "answerable"
+    assert overall_category(["answerable", "content", "permission"]) == "permission"
+    assert overall_category(["content", "content", "permission"]) == "content"

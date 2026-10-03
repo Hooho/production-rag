@@ -264,6 +264,104 @@
    background: #7c3aed;
 }
 
+/* 拒答原因：方角描边标签，和类型（实心方角）、状态（圆角胶囊带圆点）区分开。 */
+.inspection-category {
+   display: inline-flex;
+   align-items: center;
+   border: 1px solid currentColor;
+   border-radius: 3px;
+   background: #fff;
+   padding: 1px 7px;
+   font-size: 11px;
+   font-weight: 600;
+   line-height: 1.5;
+   white-space: nowrap;
+}
+
+.inspection-category.is-answerable {
+   color: #1f7a4a;
+}
+
+.inspection-category.is-permission {
+   color: #b42318;
+}
+
+.inspection-category.is-retrieval {
+   color: #2563eb;
+}
+
+.inspection-category.is-content {
+   color: #b45309;
+}
+
+.inspection-category.is-out_of_scope,
+.inspection-category.is-unknown {
+   color: #6c88a3;
+}
+
+.inspection-diagnosis {
+   margin-bottom: 16px;
+   border: 1px solid #e3edf5;
+   border-radius: 6px;
+   padding: 10px 14px;
+}
+
+.inspection-diagnosis-head {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: baseline;
+   gap: 10px;
+   margin-bottom: 6px;
+}
+
+.inspection-diagnosis-time {
+   color: #8aa0b6;
+   font-size: 12px;
+}
+
+.inspection-diagnosis > ul {
+   list-style: none;
+   margin: 0;
+   padding: 0;
+}
+
+.inspection-diagnosis > ul > li {
+   padding: 6px 0;
+   border-top: 1px solid #f0f5fa;
+}
+
+.inspection-diagnosis-line {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: 8px;
+   font-size: 13px;
+}
+
+.inspection-diagnosis-question {
+   color: #1d3550;
+   font-weight: 600;
+}
+
+.inspection-diagnosis-meta {
+   color: #6c88a3;
+   font-size: 12px;
+}
+
+.inspection-diagnosis-sentence {
+   margin: 4px 0 0;
+   color: #1d3550;
+   font-size: 13px;
+   line-height: 1.7;
+}
+
+.inspection-diagnosis-docs {
+   margin: 4px 0 0;
+   padding-left: 18px;
+   color: #4b6580;
+   font-size: 12px;
+}
+
 .inspection-item-title {
    color: #1d3550;
    font-size: 14px;

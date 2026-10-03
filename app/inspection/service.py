@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from sqlalchemy import func, select
 
+from .diagnosis import CATEGORIES as DIAGNOSIS_LABELS, QUESTION_LIMIT, diagnose_question, full_scope, overall_category, thresholds
 from ..mysql.store import (chunks, document_chunks, document_heads, feedback, inspection_issue_events, inspection_issues,
     inspection_runs, run_errors, runs)
 
@@ -164,7 +165,7 @@ def classify(row):
 
 
 class Inspector:
-    def __init__(self, store, models, since, options=None):
+    def __init__(self, store, models, since, options=None, diagnose=True):
         self.store = store
         self.models = models
         self.since = since
@@ -175,6 +176,8 @@ class Inspector:
         self.touched = set()
         # 可疑内容问题对应分片在本次窗口内被引用的次数，用来计算差评率。
         self.content_cited = {}
+        # 是否对知识缺口离线重跑检索做拒答分类和自动验证（会调用 Embedding 和重排模型）。
+        self.diagnose = diagnose
 
     def run(self):
         with self.store.engine.begin() as connection:
@@ -190,6 +193,10 @@ class Inspector:
             for issue_id in self.touched:
                 self.refresh_issue(connection, issue_id)
             self.resolve_updated_content(connection)
+        # 拒答分类要调用检索，检索会自己开数据库连接，不能放在上面的事务里：先提交收集结果，再单独诊断。
+        if self.diagnose:
+            self.diagnose_gaps()
+        with self.store.engine.connect() as connection:
             for status, count in connection.execute(select(inspection_issues.c.status, func.count()).group_by(
                     inspection_issues.c.status)).all():
                 self.stats["total_" + status] = count
@@ -403,6 +410,7 @@ class Inspector:
                     new_count += 1
             values.update({"status": "open", "status_by": "system", "status_updated": self.now})
             detail["reopened"] = {"at": self.now, "previous_status": issue["status"], "new_occurrences": new_count}
+            detail.pop("resolution", None)
             self.stats["reopened"] += 1
         connection.execute(inspection_issues.update().where(inspection_issues.c.id == issue_id).values(**values))
 
@@ -425,6 +433,80 @@ class Inspector:
         for text, count in missing.most_common(SAMPLE_LIMIT):
             top_missing.append({"text": text, "count": count})
         return {"questions": questions, "missing": top_missing, "comments": comments}
+
+    # 拒答分类和自动验证：对待处理、已处理的知识缺口重跑检索，写入诊断结论。
+    #   全部问题现在都能检索到资料：自动标为已解决（"已处理"的问题就是验证通过）；
+    #   标记"已处理"但仍有问题检索不到：验证不通过，重新打开并说明还差多少。
+    # 已忽略、已解决的不再重跑。
+    # 分三步：先读出要诊断的问题和关联问答，再逐个重跑检索（不占用事务），最后一次性写回结果。
+    def diagnose_gaps(self):
+        with self.store.engine.connect() as connection:
+            issues = connection.execute(select(inspection_issues).where(inspection_issues.c.kind == "knowledge_gap",
+                inspection_issues.c.status.in_(["open", "handled"]))).mappings().all()
+            issue_rows = {}
+            for issue in issues:
+                issue_rows[issue["id"]] = connection.execute(select(runs.c.question, runs.c.trace, runs.c.owner,
+                    inspection_issue_events.c.signals).join(inspection_issue_events,
+                        inspection_issue_events.c.source_id == runs.c.id).where(
+                            inspection_issue_events.c.issue_id == issue["id"], inspection_issue_events.c.source == "run").order_by(
+                                inspection_issue_events.c.created.desc())).mappings().all()
+        if not issues:
+            return
+        scope = full_scope(self.store)
+        updates = []
+        for issue in issues:
+            rows = issue_rows[issue["id"]]
+            checked = []
+            seen = set()
+            for row in rows:
+                rewrite = (row["trace"] or {}).get("rewrite") or {}
+                standalone = rewrite.get("standalone_query") or row["question"]
+                if (row["owner"], standalone) in seen:
+                    continue
+                seen.add((row["owner"], standalone))
+                queries = rewrite.get("queries") or [standalone]
+                result = diagnose_question(self.store, self.models, row["owner"], queries, standalone, scope,
+                    feedback_missed="feedback_missed" in (row["signals"] or []))
+                checked.append({"question": row["question"], "owner": row["owner"], **result,
+                    "label": DIAGNOSIS_LABELS[result["category"]]})
+                if len(checked) >= QUESTION_LIMIT:
+                    break
+            if not checked:
+                continue
+            category = overall_category([item["category"] for item in checked])
+            counts = Counter(item["category"] for item in checked)
+            detail = dict(issue["detail"] or {})
+            detail["diagnosis"] = {"category": category, "label": DIAGNOSIS_LABELS[category], "checked_at": self.now,
+                "counts": dict(counts), "questions": checked,
+                # 判断用的门槛，页面据此把分数解释成"差多少才算相关"。
+                "thresholds": thresholds()}
+            values = {"detail": detail, "updated": self.now}
+            self.stats["diagnosed"] += 1
+            if category == "answerable":
+                titles = []
+                for item in checked:
+                    for document in item["documents"]:
+                        if document["title"] not in titles:
+                            titles.append(document["title"])
+                verified = issue["status"] == "handled"
+                detail["resolution"] = ("验证通过：" if verified else "现在能答：") + f"这 {len(checked)} 个问题按提问人的权限都能检索到相关资料" + (
+                    "（" + "、".join(f"《{title}》" for title in titles[:3]) + "）" if titles else "") + "，自动标为已解决。"
+                detail.pop("verification", None)
+                values.update(status="resolved", status_by="system", status_updated=self.now)
+                self.stats["verified" if verified else "auto_resolved"] += 1
+            elif issue["status"] == "handled":
+                unanswered = len(checked) - counts["answerable"]
+                detail["verification"] = {"passed": False, "at": self.now, "message": (
+                    f"标记已处理后重新检索验证，{len(checked)} 个问题里还有 {unanswered} 个检索不到资料"
+                    f"（{DIAGNOSIS_LABELS[category]}），已重新打开。")}
+                values.update(status="open", status_by="system", status_updated=self.now)
+                self.stats["verification_failed"] += 1
+            updates.append((issue["id"], issue["status"], values))
+        # 诊断期间管理员可能改了状态（比如点了忽略），只在状态没变时写回，不覆盖管理员的操作。
+        with self.store.engine.begin() as connection:
+            for issue_id, status, values in updates:
+                connection.execute(inspection_issues.update().where(inspection_issues.c.id == issue_id,
+                    inspection_issues.c.status == status).values(**values))
 
     # 可疑分片已经不在任何文档的当前版本中：说明内容被修改或删除了，自动标记为已解决。
     # 忽略的问题保持忽略；分片没变的问题继续保留。
