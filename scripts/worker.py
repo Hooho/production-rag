@@ -10,7 +10,7 @@ from app.inspection.schedule import ScheduleRunner
 from app.models import Models
 from app.mysql.store import document_steps, documents
 from app.storage import Storage
-from app.tools.ingestion import extract_sections_cached, parse_metadata
+from app.ingestion.parser import extract_sections_cached, parse_metadata
 
 
 logging.basicConfig(level=logging.INFO)

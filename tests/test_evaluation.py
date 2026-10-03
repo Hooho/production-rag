@@ -12,7 +12,7 @@ from app.evaluation.generation import judge_answer, summarize_generation
 from app.evaluation.results import compare_runs, execute_run, previous_run, start_run
 from app.evaluation.retrieval import import_corpus, score_question, summarize_paraphrase_pairs, threshold_sweep
 from app.models import Models
-from app.tools.chunking import chunk_document_records
+from app.ingestion.chunking import chunk_document_records
 from app.tools.search import DocumentSearchTool
 from test_app import headers as user_headers, setup  # noqa: F401  复用 API 测试的内存存储夹具
 

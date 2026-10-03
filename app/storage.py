@@ -13,7 +13,7 @@ from .mysql.store import (MySQLStore, chunks, document_chunks, document_heads, d
     document_steps, documents, metadata, orders, runs, sessions, settings, user_group_members, user_groups, users)
 from .redis.store import RedisStore
 from .models import CHUNK_CONTEXT_PROMPT_VERSION
-from .tools.chunking import CHUNK_OVERLAP, CHUNK_SIZE, chunk_document_records
+from .ingestion.chunking import CHUNK_OVERLAP, CHUNK_SIZE, chunk_document_records
 
 
 logger = logging.getLogger("production-rag")

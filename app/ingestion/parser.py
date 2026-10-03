@@ -1,3 +1,5 @@
+"""文档解析、章节提取和解析缓存，供后台入库流程使用。"""
+
 import hashlib
 import json
 import logging

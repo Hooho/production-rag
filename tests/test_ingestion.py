@@ -1,9 +1,9 @@
 import sys
 import types
 
-from app.tools.ingestion import (element_stats, extract_sections, extract_sections_cached, extract_text, parse_metadata, partition_elements,
+from app.ingestion.parser import (element_stats, extract_sections, extract_sections_cached, extract_text, parse_metadata, partition_elements,
     sections_from_elements)
-from app.tools.chunking import chunk_document, chunk_document_records, split_sections
+from app.ingestion.chunking import chunk_document, chunk_document_records, split_sections
 
 
 def test_extract_text_reads_utf8_text(tmp_path):
@@ -125,7 +125,7 @@ def test_parse_metadata_reports_quality_signals_for_markdown(tmp_path):
 
 
 def test_parse_metadata_finds_pages_without_text(monkeypatch, tmp_path):
-    import app.tools.ingestion as ingestion
+    import app.ingestion.parser as ingestion
 
     monkeypatch.setattr(ingestion, "file_properties", lambda path: {"total_pages": 4, "doc_title": None,
         "doc_author": "作者乙", "doc_created": None, "doc_modified": None})
@@ -144,7 +144,7 @@ def test_parse_metadata_finds_pages_without_text(monkeypatch, tmp_path):
 
 # 同一 PDF 第二次处理直接读取解析缓存，不再调用 Unstructured；缓存里带着元素统计。
 def test_parse_cache_skips_second_partition(monkeypatch, tmp_path):
-    import app.tools.ingestion as ingestion
+    import app.ingestion.parser as ingestion
 
     calls = []
 
