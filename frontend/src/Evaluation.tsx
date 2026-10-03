@@ -1516,7 +1516,8 @@ function DatasetBrowser({ dataset, onToast, onSaved }: { dataset: EvalDataset | 
 
   return <div>
     <div className="ev-dataset-toolbar">
-      <p className="ev-muted-note">语料：{dataset.corpus.join("、")}。共 {dataset.items.length} 题，可用于评测 {reviewedCount} 题，待人工审核 {unreviewed} 题；待审核题只在这里管理，不参与评测。无法回答 {counts["无法回答"] ?? 0} 题；标注的是“证据原文”而不是分片 ID，检索结果中只要有分片包含证据原文就算命中，分块参数变化后标注依然有效。</p>
+      {/* 只说明这个评测集是干什么的；题数、审核状态在下面的筛选里已经有了。 */}
+      <p className="ev-muted-note">系统里有很多参数（相关度阈值、候选池大小、交给模型的段数、父子分块……），默认值是按常规经验定的，放到这份资料上效果好不好并不知道。调参评测集用一组固定的题来衡量：改了参数跑一遍，看找资料和回答的分数是变好还是变差，再决定保留还是改回去。平时只看开发集；参数定下来后再跑一次留出集，确认不是只对这几道题有效。</p>
       <button className="primary-button ev-add-question-button" type="button" onClick={openAddDialog}>添加题目</button>
     </div>
     {addMode && <div className="ev-add-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeAddDialog(); }}>
