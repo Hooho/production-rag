@@ -31,6 +31,7 @@ from ..evaluation.dataset import QUESTION_TYPES, append_items, corpus_files, cor
 from ..evaluation.results import compare_runs, delete_run, execute_run, list_runs, load_run, previous_run, start_run
 from ..evaluation.retrieval import SUITES, VARIANTS
 from ..evaluation import regression, suites as special_suites
+from ..evaluation.evidence import locate_evidence
 from .. import runtime_config
 from ..inspection.diagnosis import CATEGORIES as DIAGNOSIS_CATEGORIES
 from ..inspection.schedule import load_schedule, save_schedule, schedule_view
@@ -109,6 +110,12 @@ class RuntimeSettingsInput(BaseModel):
 
 
 # 巡检复测集：新建或修改评测集。
+# 查证据原文所在的分片：页面展开题目时传入这道题的证据。
+class EvalEvidenceInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    texts: list[str] = Field(..., min_length=1, max_length=20)
+
+
 # 专项评测集：名称、说明、评测方式（retrieval / answer / dialogue）。
 class EvalSuiteInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -1261,6 +1268,12 @@ def create_app(store=None, models=None, jwt_secret=None):
         reviewed_count = len(select_split(items, "all"))
         return {"items": items, "types": QUESTION_TYPES, "corpus": corpus,
             "reviewed_count": reviewed_count, "pending_count": len(items) - reviewed_count}
+
+    # 证据原文所在的分片（评测语料当前的分片里现查，不存分片 id），本地向量模型时附带截断位置。
+    @app.post("/eval/evidence", dependencies=[Depends(require_admin)])
+    def eval_evidence(body: EvalEvidenceInput):
+        texts = [text.strip()[:1000] for text in body.texts if text.strip()]
+        return locate_evidence(app.state.store, app.state.models, texts)
 
     # 手动新增评测题：先验证题型、证据和语料一致性，再追加到项目评测集。
     @app.post("/eval/dataset/items", status_code=201, dependencies=[Depends(require_admin)])

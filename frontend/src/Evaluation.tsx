@@ -3,6 +3,7 @@ import { addEvalDatasetItem, addEvalDatasetPair, compareEvalRuns, listEvalSuites
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import Regression from "./Regression";
 import Special, { SpecialSection } from "./Special";
+import { EvidenceDetails } from "./EvidenceChunks";
 import "./Special.css";
 // 耗时格式化移到公共文件，知识库、问答、设置页共用同一套规则。
 import { durationTitle, formatDuration as formatMs, formatDurationDelta } from "./format";
@@ -1577,7 +1578,7 @@ function DatasetBrowser({ dataset, onToast, onSaved }: { dataset: EvalDataset | 
       <div className="ev-item-purpose"><span>评测目标</span><p>{DATASET_TYPE_CARD_DETAILS[item.type] ?? "检验系统能否从语料中找回与问题相关的证据。"}</p></div>
       {item.history && item.history.length > 0 && <div className="ev-item-context"><span>对话上下文 · 第 {item.history.length + 1} 轮</span><p>{item.history.join(" → ")}</p></div>}
       <h4>问题：{item.question}</h4>
-      {item.evidence.length > 0 ? <div className="ev-item-evidence"><span>证据原文</span>{item.evidence.map((text, index) => <blockquote key={index}>{text}</blockquote>)}</div> : <div className="ev-item-evidence"><span>证据原文</span><p className="ev-muted">无（只看系统是否正确拒答）</p></div>}
+      {item.evidence.length > 0 ? <div className="ev-item-evidence"><span>证据原文</span>{item.evidence.map((text, index) => <blockquote key={index}>{text}</blockquote>)}<EvidenceDetails texts={item.evidence} /></div> : <div className="ev-item-evidence"><span>证据原文</span><p className="ev-muted">无（只看系统是否正确拒答）</p></div>}
       <div className="ev-item-answer"><span>标准答案（给AI参考判断）</span><p>{item.reference_answer}</p></div>
       {/* 审核按钮放在题目底部的独立操作栏，和状态标签分离，避免用户误以为标签可以点击。 */}
       {item.reviewed !== true && <div className="ev-item-actions" aria-label="题目操作"><span className="ev-item-actions-label">操作</span><button className="ev-review-button" type="button" disabled={reviewingId === item.id} onClick={() => void reviewItem(item.id)}>{reviewingId === item.id ? "审核中…" : "审核通过"}</button></div>}

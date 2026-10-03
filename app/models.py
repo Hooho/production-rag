@@ -202,6 +202,24 @@ class Models:
             return None, None
         return counts, max_tokens
 
+    # 每段文字被向量模型截掉的位置（字符下标，没超限为 None），用于在页面上把没参与向量计算的部分标出来。
+    # 只有本地向量模型能拿到；拿不到时返回 None，页面就不标。
+    def truncation_cuts(self, texts):
+        if self.embedding_mode != "local" or not texts:
+            return None
+        try:
+            cuts = []
+            for start in range(0, len(texts), 64):
+                data = self.call_url(os.getenv("EMBEDDING_URL", "http://embedding:8090/v1"), "tokenize", {
+                    "input": texts[start:start + 64]})
+                items = sorted(data["data"], key=lambda item: item["index"])
+                for item in items:
+                    cuts.append({"tokens": int(item["tokens"]), "cut": item.get("cut"),
+                        "max_tokens": int(data["max_tokens"])})
+            return cuts if len(cuts) == len(texts) else None
+        except (KeyError, TypeError, ValueError, httpx.HTTPError):
+            return None
+
     # 调用本地交叉编码器重排候选；服务未启用时返回空结果并保留融合排序。
     def rerank(self, query, documents):
         if not runtime_value("rerank_enabled") or self.embedding_mode != "local":

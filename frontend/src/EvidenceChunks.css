@@ -1,0 +1,114 @@
+/* 证据所在分片：正文整段显示，证据高亮（黄底），没参与向量计算的部分灰色加删除线。 */
+.evc-root {
+   display: flex;
+   flex-direction: column;
+   gap: 10px;
+   margin-top: 6px;
+}
+
+.evc-note {
+   margin: 0;
+   color: #7d95ac;
+   font-size: 12px;
+   line-height: 1.6;
+}
+
+.evc-note.is-warn {
+   color: #b45309;
+}
+
+.evc-evidence {
+   margin-bottom: 4px;
+   color: #334e68;
+   font-size: 12px;
+}
+
+.evc-chunk {
+   border: 1px solid #e3edf5;
+   border-radius: 6px;
+   background: #fbfdff;
+   padding: 10px 12px;
+}
+
+.evc-chunk + .evc-chunk {
+   margin-top: 8px;
+}
+
+.evc-chunk-head {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: 4px 10px;
+   margin-bottom: 6px;
+   color: #5e7a95;
+   font-size: 12px;
+}
+
+.evc-chunk-head strong {
+   color: #1d3550;
+}
+
+.evc-tag {
+   border: 1px solid currentColor;
+   border-radius: 3px;
+   padding: 0 6px;
+   font-size: 11px;
+}
+
+.evc-tag.is-cut {
+   color: #b45309;
+}
+
+.evc-tag.is-ok {
+   color: #15803d;
+}
+
+.evc-prefix {
+   margin-bottom: 6px;
+   color: #7d95ac;
+   font-size: 12px;
+}
+
+.evc-prefix summary {
+   cursor: pointer;
+}
+
+.evc-prefix div {
+   margin-top: 4px;
+   white-space: pre-wrap;
+}
+
+.evc-content {
+   color: #334e68;
+   font-size: 13px;
+   line-height: 1.8;
+   white-space: pre-wrap;
+   word-break: break-word;
+}
+
+.evc-match {
+   border-radius: 2px;
+   background: #fde68a;
+   color: #1d3550;
+}
+
+.evc-cut {
+   color: #a3b3c4;
+   text-decoration: line-through;
+   text-decoration-color: #cbd5e1;
+}
+
+.evc-match.evc-cut {
+   background: #fef3c7;
+   color: #92400e;
+}
+
+.evc-details {
+   margin-top: 4px;
+   font-size: 12px;
+}
+
+.evc-details > summary {
+   color: #2563eb;
+   cursor: pointer;
+}

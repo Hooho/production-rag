@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { addEvalSuiteItem, createEvalSuite, deleteEvalSuite, deleteEvalSuiteItem, getEvalRun, getEvalSuite, listEvalSuites, startSpecialRun, updateEvalSuite, updateEvalSuiteItem, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSuiteBrief, type EvalSuiteFull, type EvalSuiteItem, type EvalSuiteMethod, type EvalSuiteRunEntry } from "./api";
+import { EvidenceDetails } from "./EvidenceChunks";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./Regression.css";
 import "./Special.css";
@@ -269,6 +270,7 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
             <details className="rg-details"><summary>查看内容</summary>
               {item.turns && item.turns.length > 0 && <div className="rg-text"><span className="rg-muted">前面的提问：</span><ol className="sp-turns">{item.turns.map((turn, index) => <li key={index}>{turn}</li>)}</ol></div>}
               {item.evidence && item.evidence.map((text, index) => <div key={index} className="rg-text"><span className="rg-muted">证据：</span>{text}</div>)}
+              {item.evidence && <div className="rg-text"><EvidenceDetails texts={item.evidence} /></div>}
               {item.reference_answer && <div className="rg-text"><span className="rg-muted">参考答案：</span>{item.reference_answer}</div>}
             </details>
           </div>
@@ -375,6 +377,7 @@ function SpecialQuestion({ question, method }: { question: EvalSpecialQuestion; 
         </span>
       </li>)}
     </ul>}
+    {question.evidence && question.evidence.length > 0 && <EvidenceDetails texts={question.evidence.map((item) => item.text)} />}
     {method !== "retrieval" && <div className="rg-item-meta">
       {judgement?.correctness !== undefined && judgement?.correctness !== null && <span>正确性 {judgement.correctness}</span>}
       {method === "dialogue" && <span>{question.summarized ? "触发了压缩" : "没有压缩"}</span>}

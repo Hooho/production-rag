@@ -1223,3 +1223,12 @@ export function getDataPermissions() {
 export function saveDataPermission(payload: { group_id: string; data_type: string; read: boolean; create: boolean; update: boolean; delete: boolean }) {
   return dataRequest<DataPermissionRow>("/admin/data-permissions", "PUT", payload);
 }
+
+// 证据原文所在的分片（评测语料当前的分片里现查）。match 是证据在正文里的起止位置；
+// cut 是正文里开始没参与向量计算的位置（本地向量模型才有），null 表示没被截断或拿不到。
+export type EvalEvidenceChunk = { chunk_id: string | null; title: string; position: number; heading: string | null; content: string; prefix: string | null; match: [number, number]; chars: number; token_count: number | null; max_tokens?: number; truncated: boolean | null; cut: number | null };
+export type EvalEvidenceLookup = { imported: boolean; cuts_available: boolean; items: { text: string; chunks: EvalEvidenceChunk[] }[] };
+
+export function locateEvalEvidence(texts: string[]) {
+  return request<EvalEvidenceLookup>("/eval/evidence", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ texts }) });
+}

@@ -49,11 +49,16 @@ def embeddings(body: EmbeddingInput):
 
 
 # 返回每段文字在当前模型下的真实 token 数（含 [CLS]/[SEP]）和模型的最大输入长度。
+# 超过上限时 cut 是被截掉部分在原文里的起始字符位置：模型只保留开头 MAX_TOKENS - 2 个 token（另外两个是
+# [CLS]/[SEP]），从下一个 token 开始的文字没有参与向量计算。没超限时 cut 为 null。
 @app.post("/v1/tokenize")
 def tokenize(body: TokenizeInput):
     data = []
     for index, encoding in enumerate(counter.encode_batch(body.input)):
-        data.append({"index": index, "tokens": len(encoding.ids)})
+        cut = None
+        if len(encoding.ids) > MAX_TOKENS:
+            cut = encoding.offsets[MAX_TOKENS - 1][0]
+        data.append({"index": index, "tokens": len(encoding.ids), "cut": cut})
     return {"object": "list", "data": data, "model": MODEL_NAME, "max_tokens": MAX_TOKENS}
 
 

@@ -70,3 +70,28 @@ def test_special_retrieval_run(setup, eval_dir, monkeypatch):
     detail = client.get(f"/eval/suites/{suite['id']}", headers=headers()).json()
     assert [run["id"] for run in detail["runs"]] == [second["id"], first["id"]]
     assert detail["runs"][0]["summary"]["count"] == 2
+
+
+# 证据所在分片：评测语料没导入时按当前分片规则临时切分；导入后用库里的分片，返回证据在正文里的位置。
+def test_locate_evidence(setup, eval_dir, monkeypatch):
+    client, store = setup
+    evidence = "耳机签收后七天内可以无理由退货"
+    before = client.post("/eval/evidence", headers=headers(), json={"texts": [evidence, "不存在的话"]}).json()
+    assert before["imported"] is False and before["cuts_available"] is False
+    chunk = before["items"][0]["chunks"][0]
+    start, end = chunk["match"]
+    assert chunk["content"][start:end] == evidence and chunk["title"] == "售后"
+    assert before["items"][1]["chunks"] == []
+    from app.evaluation.retrieval import import_corpus
+    import_corpus(store, client.app.state.models)
+    after = client.post("/eval/evidence", headers=headers(), json={"texts": ["耳机签收后 七天内可以无理由退货"]}).json()
+    found = after["items"][0]["chunks"][0]
+    assert after["imported"] is True and found["chunk_id"]
+    start, end = found["match"]
+    assert found["content"][start:end] == evidence
+    # 本地向量模型给出截断位置时，换算成正文里的位置（减去标题路径等前缀）。
+    monkeypatch.setattr(Models, "truncation_cuts", lambda self, texts: [
+        {"tokens": 600, "cut": len(text) - 5, "max_tokens": 512} for text in texts])
+    cut = client.post("/eval/evidence", headers=headers(), json={"texts": [evidence]}).json()["items"][0]["chunks"][0]
+    assert cut["truncated"] is True and cut["cut"] == len(cut["content"]) - 5 and cut["max_tokens"] == 512
+    assert client.post("/eval/evidence", headers=headers("alice"), json={"texts": [evidence]}).status_code == 403
