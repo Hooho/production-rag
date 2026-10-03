@@ -49,11 +49,15 @@ class Agent:
         self.order_tool = OrderTool()
         self.data_tool = DataQueryTool()
         self.search_tool = DocumentSearchTool()
+        # 主 Agent 创建自己的 LangGraph 图
         self.graph = self.build_graph()
 
     # 声明问答图及其条件分支，节点本身只返回共享状态更新。
     def build_graph(self):
+        # 创建一张以 AgentState 为共享状态的 LangGraph。
         workflow = StateGraph(AgentState)
+        
+        # 注册节点
         workflow.add_node("request", self.receive_question)
         workflow.add_node("input_guard", self.guard_input)
         workflow.add_node("memory", self.read_memory)
@@ -69,6 +73,8 @@ class Agent:
         workflow.add_node("response", self.generate_response)
         workflow.add_node("output_guard", self.guard_output)
         workflow.add_node("complete", self.complete_run)
+        
+        # 定义节点之间的连接
         workflow.add_edge(START, "request")
         # 问题先做注入检查：命中规则直接结束，不读取记忆、不调用任何模型。
         workflow.add_edge("request", "input_guard")
@@ -79,6 +85,8 @@ class Agent:
         # 记忆上限等字段又和"组装模型上下文"重复。现在去掉这一步：规则放在组装上下文，压缩结果放在回答步骤。
         workflow.add_edge("memory", "intent")
         workflow.add_edge("intent", "router")
+        
+        # 条件路由
         workflow.add_conditional_edges("router", self.route_destination, {
             "order": "order_tool", "data": "data_tool", "greeting": "greeting", "knowledge": "query",
         })
