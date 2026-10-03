@@ -5,7 +5,6 @@ import pytest
 
 from app.evaluation import dataset as dataset_module
 from app.evaluation import results as results_module
-from app.evaluation import retrieval as retrieval_module
 from app.evaluation.dataset import (QUESTION_TYPES, corpus_files, load_dataset, normalize, replace_dataset,
     seed_items, select_split, validate_dataset)
 from app.evaluation.generation import judge_answer, summarize_generation
@@ -96,7 +95,6 @@ def eval_dir(setup, tmp_path, monkeypatch):
     ]
     replace_dataset(rows, setup[1].engine)
     monkeypatch.setattr(dataset_module, "EVAL_DIR", tmp_path)
-    monkeypatch.setattr(retrieval_module, "EVAL_DIR", tmp_path)
     monkeypatch.setattr(results_module, "RESULTS_DIR", tmp_path / "results")
     return tmp_path
 

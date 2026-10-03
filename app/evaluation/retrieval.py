@@ -1,5 +1,4 @@
 import hashlib
-import json
 import math
 import os
 import time
@@ -11,7 +10,7 @@ from ..models import Models
 from ..mysql.store import chunks, document_chunks, document_heads
 from ..runtime_config import snapshot as runtime_snapshot
 from ..tools.search import DocumentSearchTool
-from .dataset import EVAL_DIR, QUESTION_TYPES, corpus_files, normalize, select_split
+from .dataset import QUESTION_TYPES, corpus_files, normalize, select_split
 
 
 # 评测语料导入到专门的评测用户下，和 alice、bob 的真实知识库完全隔离：
@@ -80,36 +79,8 @@ def current_chunk_texts(store):
     return texts
 
 
-# 读取缓存的查询改写结果。检索评测不调用大模型：改写结果每次可能不同，
-# 会让两次评测的差异混进"改写碰巧不一样"的噪声；缓存一次后反复使用，分数只受检索参数影响。
-def load_rewrites():
-    path = EVAL_DIR / "rewrites.json"
-    if not path.exists():
-        return {}
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-# 用线上相同的查询分析生成检索词，写入缓存；只在需要更新改写时手动执行（会调用大模型）。
-def refresh_rewrites(models, items):
-    rewrites = {}
-    for item in items:
-        history = []
-        for question in item.get("history", []):
-            history.append({"question": question})
-        analysis = models.analyze_query(item["question"], history, None)
-        rewrites[item["id"]] = {"question": item["question"], "queries": analysis["queries"],
-            "standalone_query": analysis["standalone_query"], "classifier": analysis.get("classifier")}
-    path = EVAL_DIR / "rewrites.json"
-    path.write_text(json.dumps(rewrites, ensure_ascii=False, indent=1), encoding="utf-8")
-    return rewrites
-
-
-# 决定一道题的检索词和重排用的完整问题：优先用缓存的改写；缓存里没有（或题目已改）时，
-# 用不调用模型的规则改写，多轮追问会把上一轮问题拼进来补全指代。
-def plan_queries(item, rewrites):
-    cached = rewrites.get(item["id"])
-    if cached and cached.get("question") == item["question"]:
-        return cached["queries"], cached["standalone_query"], "rewrite_cache"
+# 评测不调用查询改写模型，避免每次运行的随机改写影响指标。多轮追问按规则补全指代。
+def plan_queries(item):
     history = []
     for question in item.get("history", []):
         history.append({"question": question})
@@ -463,12 +434,12 @@ def return_limit_sweep(rows, threshold, pool_size):
 
 
 # 对一组题执行一次检索并打分；options 是传给 DocumentSearchTool 的变体参数。
-def evaluate_items(store, models, items, chunk_texts, rewrites, options, keep_diagnostics, on_item=None):
+def evaluate_items(store, models, items, chunk_texts, options, keep_diagnostics, on_item=None):
     tool = DocumentSearchTool()
     pool_size = options.get("pool_size") or runtime_snapshot()["rerank_candidates"]
     rows = []
     for item in items:
-        queries, rerank_query, query_source = plan_queries(item, rewrites)
+        queries, rerank_query, query_source = plan_queries(item)
         started = time.monotonic()
         retrieval = tool.execute(store, models, EVAL_OWNER, queries, rerank_query, **options)
         latency_ms = round((time.monotonic() - started) * 1000)
@@ -489,7 +460,6 @@ def evaluate_items(store, models, items, chunk_texts, rewrites, options, keep_di
 def run_retrieval(store, models, items, split, suites=(), on_progress=None, on_item=None):
     corpus = import_corpus(store, models)
     chunk_texts = current_chunk_texts(store)
-    rewrites = load_rewrites()
     selected = select_split(items, split)
     variant_names = []
     for name, variant in VARIANTS.items():
@@ -509,7 +479,7 @@ def run_retrieval(store, models, items, split, suites=(), on_progress=None, on_i
             on_item(item, row, retrieval)
         advance()
 
-    rows = evaluate_items(store, models, selected, chunk_texts, rewrites, {}, True, advance_baseline)
+    rows = evaluate_items(store, models, selected, chunk_texts, {}, True, advance_baseline)
     # 重排关闭或调用失败时没有相关性阈值，也无法做阈值扫描；配置里如实记录，避免把"未过滤"误读成"阈值很低"。
     min_score = None
     reranked = False
@@ -524,7 +494,7 @@ def run_retrieval(store, models, items, split, suites=(), on_progress=None, on_i
     variants = []
     for name in variant_names:
         variant = VARIANTS[name]
-        variant_rows = evaluate_items(store, models, selected, chunk_texts, rewrites, variant["options"], False,
+        variant_rows = evaluate_items(store, models, selected, chunk_texts, variant["options"], False,
             advance)
         variants.append({"name": name, "label": variant["label"], "suite": variant["suite"],
             "options": variant["options"], "summary": summarize(variant_rows), "funnel": funnel(variant_rows),
