@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { getInspectionIssue, getInspectionSchedule, listInspectionIssues, saveInspectionSchedule, startInspection, updateInspectionIssue, type InspectionDiagnosis, type InspectionEvent, type InspectionSchedule, type InspectionScheduleView, type InspectionIssue, type InspectionIssueFull, type InspectionIssuePage, type InspectionKind, type InspectionStatus } from "./api";
+import { verifyInspectionIssue, getInspectionIssue, getInspectionSchedule, listInspectionIssues, saveInspectionSchedule, startInspection, updateInspectionIssue, type InspectionDiagnosis, type InspectionDiagnosisChunk, type InspectionEvent, type InspectionSchedule, type InspectionScheduleView, type InspectionIssue, type InspectionIssueFull, type InspectionIssuePage, type InspectionKind, type InspectionStatus } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./Inspection.css";
 
@@ -140,7 +140,7 @@ export default function Inspection({ onToast }: { onToast: ShowToast }) {
     <header className="topbar inspection-topbar">
       <div>
         <h1>知识巡检</h1>
-        <p className="inspection-subtitle">从问答日志中收集拒答、资料不足、差评和处理失败，合并成待处理问题。只有管理员可见。</p>
+        <p className="inspection-subtitle">其实就是问题工单，把回答不出来的，报错的，资料不够的，全部列出来，统一解决。</p>
       </div>
       <div className="inspection-run">
         <span className="inspection-run-info">
@@ -329,6 +329,26 @@ function IssueDetail({ issueId, signals, onChanged, onToast }: { issueId: string
     };
   }, [issueId]);
 
+  // 重新验证：按提问人现在的权限重跑检索，结果直接写回问题，状态可能随之改变。
+  const [verifying, setVerifying] = useState(false);
+  async function verify() {
+    if (!issue) return;
+    setVerifying(true);
+    try {
+      const value = await verifyInspectionIssue(issue.id);
+      setIssue(value);
+      const result = value.verify_result ?? {};
+      if (result.verified || result.auto_resolved) onToast("success", "验证通过：问题现在都能检索到资料，已自动标为已解决");
+      else if (result.verification_failed) onToast("error", "验证未通过：仍有问题检索不到资料，已重新打开");
+      else onToast("success", `已重新验证，诊断结论：${value.detail.diagnosis?.label ?? "无法判断"}`);
+      onChanged(value);
+    } catch (reason) {
+      onToast("error", (reason as Error).message);
+    } finally {
+      setVerifying(false);
+    }
+  }
+
   async function save(status?: "open" | "handled" | "ignored") {
     if (!issue) return;
     setBusy(true);
@@ -352,7 +372,7 @@ function IssueDetail({ issueId, signals, onChanged, onToast }: { issueId: string
     <Explanation issue={issue} />
     {issue.status === "open" && detail.reopened && <div className="inspection-notice is-red">标记为{detail.reopened.previous_status === "handled" ? "已处理" : "已解决"}之后又出现了 {detail.reopened.new_occurrences} 次，已重新打开（{formatTime(detail.reopened.at)}）。</div>}
 
-    {issue.kind === "knowledge_gap" && detail.diagnosis && <DiagnosisDetail diagnosis={detail.diagnosis} />}
+    {issue.kind === "knowledge_gap" && <DiagnosisDetail diagnosis={detail.diagnosis} verifying={verifying} onVerify={() => void verify()} />}
     {issue.kind === "knowledge_gap" && <div className="inspection-facts">
       <Fact label="示例问题">{detail.questions?.length ? <ul>{detail.questions.map((text) => <li key={text}>{text}</li>)}</ul> : "—"}</Fact>
       {detail.missing?.length ? <Fact label="缺失内容"><ul>{detail.missing.map((item) => <li key={item.text}>{item.text}{item.count > 1 && <span className="inspection-count">×{item.count}</span>}</li>)}</ul></Fact> : null}
@@ -517,7 +537,7 @@ function SourceText({ text, truncated = false, open: controlledOpen, onToggle }:
     return () => observer.disconnect();
   }, [text, open]);
   return <>
-    <div ref={ref} className={`inspection-source-text ${open ? "is-open" : ""}`}>{text}{open && truncated && "…（原文较长，只显示前 1500 字）"}</div>
+    <div ref={ref} className={`inspection-source-text ${open ? "is-open" : ""}`}>{text}{open && truncated && "…（原文较长，只显示了前一部分）"}</div>
     {(overflow || open) && <button type="button" className="inspection-source-toggle" onClick={toggle}>{open ? "收起" : "展开全文"}</button>}
   </>;
 }
@@ -544,12 +564,24 @@ function diagnosisSentence(item: InspectionDiagnosis["questions"][number], limit
   }
 }
 
-function DiagnosisDetail({ diagnosis }: { diagnosis: InspectionDiagnosis }) {
+function DiagnosisDetail({ diagnosis, verifying, onVerify }: { diagnosis?: InspectionDiagnosis; verifying: boolean; onVerify: () => void }) {
+  const button = <button type="button" className="secondary-button inspection-verify-button" onClick={onVerify} disabled={verifying} title="按提问人现在的权限，用这些问题重新检索一遍">{verifying ? "验证中…" : "重新验证"}</button>;
+  if (!diagnosis) {
+    return <div className="inspection-diagnosis">
+      <div className="inspection-diagnosis-head">
+        <span className="inspection-explain-title">诊断结果</span>
+        <span className="inspection-diagnosis-time">还没有验证过。巡检时会自动验证，也可以现在手动验证一次。</span>
+        {button}
+      </div>
+    </div>;
+  }
   const limits = diagnosis.thresholds ?? { min_score: 0.85, near_miss: 0.425, out_of_scope: 0.05 };
+  const who = diagnosis.trigger === "manual" ? `${diagnosis.checked_by ?? "管理员"} 手动验证` : "巡检时系统自动验证";
   return <div className="inspection-diagnosis">
     <div className="inspection-diagnosis-head">
       <span className="inspection-explain-title">诊断结果</span>
-      <span className="inspection-diagnosis-time">系统在 {formatTime(diagnosis.checked_at)} 用这些问题重新检索了一遍（只检索，不生成回答），判断答不上来的原因</span>
+      <span className="inspection-diagnosis-time">{who}（{formatTime(diagnosis.checked_at)}）：以提问人的权限重新检索</span>
+      {button}
     </div>
     <ul>
       {diagnosis.questions.map((item, index) => <li key={index}>
@@ -562,9 +594,31 @@ function DiagnosisDetail({ diagnosis }: { diagnosis: InspectionDiagnosis }) {
         {item.documents.length > 0 && <ul className="inspection-diagnosis-docs">
           {item.documents.map((document) => <li key={document.doc_key}>《{document.title}》 · 上传者 {document.owner} · 当前{document.visibility_label ?? document.visibility}{document.groups.length > 0 && `（${document.groups.join("、")}）`}</li>)}
         </ul>}
+        <DiagnosisChunks chunks={item.chunks} owner={item.owner} minScore={limits.min_score} />
       </li>)}
     </ul>
   </div>;
+}
+
+// 重新检索时得分最高的那段资料，默认折叠：得分、是否达到相关门槛、提问人能不能看到，原文显示 3 行可展开。
+function DiagnosisChunks({ chunks, owner, minScore }: { chunks?: InspectionDiagnosisChunk[]; owner: string; minScore: number }) {
+  // 没有 chunks 字段：这次诊断是在保存资料之前做的，不是没检索到资料，要提示重新验证，不能说"没找到"。
+  if (chunks === undefined) return <div className="inspection-event-line">这次诊断没有保存检索到的资料（在加入这项功能之前做的），点右上角「重新验证」后就能看到。</div>;
+  if (chunks.length === 0) return <div className="inspection-event-line">重新检索时没有召回任何候选资料：知识库里没有能和这个问题匹配上的内容，得分按 0 计算。</div>;
+  const chunk = chunks[0];
+  return <details className="inspection-sources">
+    <summary>查看得分最高的资料（{chunk.score.toFixed(2)} 分）</summary>
+    <ol>
+      <li>
+        <div className="inspection-source-head">
+          <span>《{chunk.title}》{chunk.version ? ` v${chunk.version}` : ""}{chunk.page_start ? ` · 第 ${chunk.page_start} 页` : ""}{chunk.heading ? ` · ${chunk.heading}` : ""}</span>
+          <span className={`inspection-source-tag ${chunk.passed ? "is-cited" : ""}`} title="检索时相关度得分要达到这个值，资料才会交给模型回答（RERANK_MIN_SCORE）">{chunk.score.toFixed(2)} 分，{chunk.passed ? "达到" : "低于"}回答要求的 {minScore.toFixed(2)} 分</span>
+          <span className={`inspection-source-tag ${chunk.visible ? "" : "is-hidden"}`}>{chunk.visible ? `${owner} 能看到` : `${owner} 看不到`}</span>
+        </div>
+        <SourceText text={chunk.text} truncated={chunk.truncated} />
+      </li>
+    </ol>
+  </details>;
 }
 
 function Explanation({ issue }: { issue: InspectionIssue }) {
