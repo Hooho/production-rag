@@ -824,6 +824,9 @@ export type InspectionIssuePage = {
   status_counts: Partial<Record<InspectionStatus, number>>;
   kind_counts: Partial<Record<InspectionKind, number>>;
   reason_counts: Partial<Record<InspectionCloseReason | "none", number>>;
+  // 知识缺口按拒答分类结论计数（none 是还没诊断过的），diagnoses 是结论的中文名。
+  diagnosis_counts: Partial<Record<InspectionDiagnosisCategory | "none", number>>;
+  diagnoses: Record<InspectionDiagnosisCategory, string>;
   gap_summary: InspectionGapSummary;
   close_reasons: Record<InspectionCloseReason, string>;
   fix_types: Record<InspectionFixType, string>;
@@ -834,11 +837,12 @@ export type InspectionIssuePage = {
   signals: Record<string, string>;
 };
 
-export function listInspectionIssues(params: { status?: InspectionStatus | null; kind?: InspectionKind | null; reason?: InspectionCloseReason | "none" | null; page?: number }) {
+export function listInspectionIssues(params: { status?: InspectionStatus | null; kind?: InspectionKind | null; reason?: InspectionCloseReason | "none" | null; diagnosis?: InspectionDiagnosisCategory | "none" | null; page?: number }) {
   const query = new URLSearchParams();
   if (params.status) query.set("status", params.status);
   if (params.kind) query.set("kind", params.kind);
   if (params.reason) query.set("reason", params.reason);
+  if (params.diagnosis) query.set("diagnosis", params.diagnosis);
   query.set("page", String(params.page ?? 1));
   return request<InspectionIssuePage>(`/inspection/issues?${query.toString()}`);
 }

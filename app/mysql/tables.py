@@ -320,6 +320,9 @@ inspection_issues = Table("inspection_issues", metadata,
     Column("close_reason", String(32), index=True),
     # 标记"已处理"时选择的修复方式，见 FIX_TYPES；验证后自动变成已解决或重新打开时保留，手动改成其他状态时清空。
     Column("fix_type", String(32)),
+    # 知识缺口最近一次拒答分类的结论（answerable、permission、routing、retrieval、content、out_of_scope、unknown），
+    # 和 detail.diagnosis.category 相同，单独存一列是为了按类型筛选和计数。
+    Column("diagnosis_category", String(16), index=True),
     Column("status_by", String(32)),
     Column("status_updated", String(32)),
     Column("first_seen", String(32), nullable=False),

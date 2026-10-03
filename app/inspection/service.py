@@ -540,7 +540,7 @@ def diagnose_gap_issues(store, models, now, stats, issue_ids=None, trigger="insp
             "trigger": trigger, "checked_by": by,
             # 判断用的门槛，页面据此把分数解释成"差多少才算相关"。
             "thresholds": thresholds()}
-        values = {"detail": detail, "updated": now}
+        values = {"detail": detail, "updated": now, "diagnosis_category": category}
         stats["diagnosed"] += 1
         recheck = issue["status"] == "ignored" and issue["close_reason"] == RECHECK_REASON
         if recheck:
@@ -731,7 +731,7 @@ def run_view(row):
 
 
 # 问题列表：按出现次数和影响人数排序；同时返回各状态、各类型的数量和最近一次巡检。
-def list_issues(store, status=None, kind=None, page=1, page_size=20, reason=None, days=None):
+def list_issues(store, status=None, kind=None, page=1, page_size=20, reason=None, days=None, diagnosis=None):
     conditions = []
     if status:
         conditions.append(inspection_issues.c.status == status)
@@ -742,6 +742,11 @@ def list_issues(store, status=None, kind=None, page=1, page_size=20, reason=None
         conditions.append(inspection_issues.c.close_reason.is_(None))
     elif reason:
         conditions.append(inspection_issues.c.close_reason == reason)
+    # 按拒答分类结论筛选（只有知识缺口有）；none 是还没诊断过的。
+    if diagnosis == "none":
+        conditions.append(inspection_issues.c.diagnosis_category.is_(None))
+    elif diagnosis:
+        conditions.append(inspection_issues.c.diagnosis_category == diagnosis)
     columns = [column for column in inspection_issues.c if column.name != "vector"]
     with store.engine.connect() as connection:
         total = connection.execute(select(func.count()).select_from(inspection_issues).where(*conditions)).scalar()
@@ -758,11 +763,20 @@ def list_issues(store, status=None, kind=None, page=1, page_size=20, reason=None
         for value, count in connection.execute(select(inspection_issues.c.close_reason, func.count()).where(
                 inspection_issues.c.status == "ignored").group_by(inspection_issues.c.close_reason)).all():
             reason_counts[value or "none"] = count
+        # 知识缺口按诊断结论计数，跟随当前的状态筛选。
+        diagnosis_query = select(inspection_issues.c.diagnosis_category, func.count()).where(
+            inspection_issues.c.kind == "knowledge_gap").group_by(inspection_issues.c.diagnosis_category)
+        if status:
+            diagnosis_query = diagnosis_query.where(inspection_issues.c.status == status)
+        diagnosis_counts = {}
+        for value, count in connection.execute(diagnosis_query).all():
+            diagnosis_counts[value or "none"] = count
         gap_summary = summarize_gaps(connection, days or settings()["days"])
         last_run = connection.execute(select(inspection_runs).order_by(inspection_runs.c.started.desc()).limit(
             1)).mappings().first()
     return {"items": [issue_view(row) for row in rows], "total": total, "page": page, "page_size": page_size,
         "status_counts": status_counts, "kind_counts": kind_counts, "reason_counts": reason_counts,
+        "diagnosis_counts": diagnosis_counts, "diagnoses": DIAGNOSIS_LABELS,
         "gap_summary": gap_summary, "last_run": run_view(last_run),
         "kinds": KINDS, "statuses": STATUSES, "signals": SIGNALS, "close_reasons": CLOSE_REASONS, "fix_types": FIX_TYPES}
 

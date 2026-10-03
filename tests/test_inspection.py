@@ -525,3 +525,19 @@ def test_misrouted_data_question(setup, monkeypatch):
     assert verified["status"] == "resolved"
     assert verified["detail"]["diagnosis"]["questions"][0]["rerouted"] is True
     assert "现在都会分到数据查询" in verified["detail"]["resolution"]
+
+
+# 按拒答分类结论筛选知识缺口，并按结论计数；未知结论返回 422。
+def test_filter_by_diagnosis(setup, monkeypatch):
+    client, store = setup
+    upload(client)
+    monkeypatch.setattr(Models, "rerank", keyword_rerank(0.95))
+    ask(client, "退货期限是多久", owner="bob")
+    ask(client, "今天天气怎么样")
+    inspect(client, store)
+    listed = client.get("/inspection/issues?kind=knowledge_gap", headers=headers("admin")).json()
+    assert listed["diagnosis_counts"] == {"permission": 1, "out_of_scope": 1}
+    assert listed["diagnoses"]["permission"] == "权限缺口"
+    filtered = client.get("/inspection/issues?diagnosis=permission", headers=headers("admin")).json()
+    assert [item["title"] for item in filtered["items"]] == ["退货期限是多久"]
+    assert client.get("/inspection/issues?diagnosis=nope", headers=headers("admin")).status_code == 422

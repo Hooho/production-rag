@@ -33,6 +33,7 @@ from ..evaluation.retrieval import SUITES, VARIANTS
 from ..evaluation import regression
 from ..evaluation.memory import load_dialogues
 from .. import runtime_config
+from ..inspection.diagnosis import CATEGORIES as DIAGNOSIS_CATEGORIES
 from ..inspection.schedule import load_schedule, save_schedule, schedule_view
 from ..inspection.service import (CLOSE_REASONS, KINDS as INSPECTION_KINDS, LOCK_KEY as INSPECTION_LOCK, MANUAL_STATUSES,
     STATUSES as INSPECTION_STATUSES, InspectionBusy, get_issue, list_issues, list_runs as list_inspection_runs,
@@ -1525,7 +1526,7 @@ def create_app(store=None, models=None, jwt_secret=None):
     # 知识巡检：问题里有其他用户的提问和反馈，所有接口只允许管理员调用。
     @app.get("/inspection/issues", dependencies=[Depends(require_admin)])
     def inspection_issues_list(status: str | None = Query(None), kind: str | None = Query(None),
-                               reason: str | None = Query(None),
+                               reason: str | None = Query(None), diagnosis: str | None = Query(None),
                                page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
         if status is not None and status not in INSPECTION_STATUSES:
             raise HTTPException(422, f"未知状态：{status}")
@@ -1533,8 +1534,10 @@ def create_app(store=None, models=None, jwt_secret=None):
             raise HTTPException(422, f"未知问题类型：{kind}")
         if reason is not None and reason != "none" and reason not in CLOSE_REASONS:
             raise HTTPException(422, f"未知原因：{reason}")
+        if diagnosis is not None and diagnosis != "none" and diagnosis not in DIAGNOSIS_CATEGORIES:
+            raise HTTPException(422, f"未知诊断结论：{diagnosis}")
         result = list_issues(app.state.store, status, kind, page, page_size, reason=reason,
-            days=load_schedule(app.state.store)["days"])
+            days=load_schedule(app.state.store)["days"], diagnosis=diagnosis)
         result["running"] = bool(app.state.store.cache.get(INSPECTION_LOCK))
         return result
 

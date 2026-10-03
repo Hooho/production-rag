@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { addEvalSetItems, createEvalSet, getInspectionEvalCandidates, listEvalSets, replayInspectionEvent, verifyInspectionIssue, getInspectionIssue, getInspectionSchedule, listInspectionIssues, saveInspectionSchedule, startInspection, updateInspectionIssue, type EvalCandidates, type EvalSetBrief, type EvalSetExpect, type InspectionCloseReason, type InspectionFixType, type InspectionReplay, type InspectionGapSummary, type InspectionDiagnosis, type InspectionDiagnosisChunk, type InspectionEvent, type InspectionSchedule, type InspectionScheduleView, type InspectionIssue, type InspectionIssueFull, type InspectionIssuePage, type InspectionKind, type InspectionStatus } from "./api";
+import { addEvalSetItems, createEvalSet, getInspectionEvalCandidates, listEvalSets, replayInspectionEvent, verifyInspectionIssue, getInspectionIssue, getInspectionSchedule, listInspectionIssues, saveInspectionSchedule, startInspection, updateInspectionIssue, type EvalCandidates, type EvalSetBrief, type EvalSetExpect, type InspectionCloseReason, type InspectionFixType, type InspectionReplay, type InspectionGapSummary, type InspectionDiagnosis, type InspectionDiagnosisCategory, type InspectionDiagnosisChunk, type InspectionEvent, type InspectionSchedule, type InspectionScheduleView, type InspectionIssue, type InspectionIssueFull, type InspectionIssuePage, type InspectionKind, type InspectionStatus } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./Inspection.css";
 
@@ -12,6 +12,8 @@ const STATUS_TABS: { key: InspectionStatus | null; label: string }[] = [
   { key: "ignored", label: "无需处理" },
   { key: null, label: "全部" },
 ];
+// 诊断结论筛选的顺序：越靠前越需要管理员动手。
+const DIAGNOSIS_ORDER: InspectionDiagnosisCategory[] = ["permission", "routing", "retrieval", "content", "out_of_scope", "answerable", "unknown"];
 const STATUS_TONES: Record<InspectionStatus, string> = { open: "orange", handled: "blue", resolved: "green", ignored: "gray" };
 const FEEDBACK_REASONS: Record<string, string> = { wrong: "答错了", incomplete: "没答全", missed: "资料里有却说找不到", citation: "引用不对", other: "其他" };
 const TRIGGERS: Record<string, string> = { cli: "命令行", api: "手动", schedule: "定时" };
@@ -80,6 +82,8 @@ export default function Inspection({ onToast }: { onToast: ShowToast }) {
   const [kind, setKind] = useState<InspectionKind | null>(null);
   // "无需处理"标签页里按原因筛选；none 是没有注明原因的旧数据。
   const [reason, setReason] = useState<InspectionCloseReason | "none" | null>(null);
+  // 知识缺口按拒答分类结论筛选（只在类型选了知识缺口时显示）。
+  const [diagnosis, setDiagnosis] = useState<InspectionDiagnosisCategory | "none" | null>(null);
   const [page, setPage] = useState(1);
   const [data, setData] = useState<InspectionIssuePage | null>(null);
   const [loading, setLoading] = useState(true);
@@ -99,7 +103,7 @@ export default function Inspection({ onToast }: { onToast: ShowToast }) {
   async function reload(quiet = false) {
     if (!quiet) setLoading(true);
     try {
-      setData(await listInspectionIssues({ status, kind, reason: status === "ignored" ? reason : null, page }));
+      setData(await listInspectionIssues({ status, kind, reason: status === "ignored" ? reason : null, diagnosis: kind === "knowledge_gap" ? diagnosis : null, page }));
     } catch (reason) {
       onToast("error", (reason as Error).message);
     } finally {
@@ -109,7 +113,7 @@ export default function Inspection({ onToast }: { onToast: ShowToast }) {
 
   useEffect(() => {
     void reload();
-  }, [status, kind, reason, page]);
+  }, [status, kind, reason, diagnosis, page]);
 
   // 巡检在后台执行，运行期间每 3 秒刷新一次，结束后自动显示新结果。
   const running = data?.running ?? false;
@@ -170,9 +174,15 @@ export default function Inspection({ onToast }: { onToast: ShowToast }) {
     </div>
 
     <div className="inspection-kinds" role="group" aria-label="问题类型">
-      <button type="button" className={`inspection-chip ${kind === null ? "is-selected" : ""}`} onClick={() => { setKind(null); setPage(1); }}>全部类型</button>
-      {data && (Object.keys(data.kinds) as InspectionKind[]).map((key) => <button key={key} type="button" className={`inspection-chip ${kind === key ? "is-selected" : ""}`} onClick={() => { setKind(key); setPage(1); }}>{data.kinds[key]}<span>{data.kind_counts[key] ?? 0}</span></button>)}
+      <button type="button" className={`inspection-chip ${kind === null ? "is-selected" : ""}`} onClick={() => { setKind(null); setDiagnosis(null); setPage(1); }}>全部类型</button>
+      {data && (Object.keys(data.kinds) as InspectionKind[]).map((key) => <button key={key} type="button" className={`inspection-chip ${kind === key ? "is-selected" : ""}`} onClick={() => { setKind(key); setDiagnosis(null); setPage(1); }}>{data.kinds[key]}<span>{data.kind_counts[key] ?? 0}</span></button>)}
     </div>
+
+    {kind === "knowledge_gap" && data && <div className="inspection-kinds" role="group" aria-label="诊断结论">
+      <button type="button" className={`inspection-chip ${diagnosis === null ? "is-selected" : ""}`} onClick={() => { setDiagnosis(null); setPage(1); }}>全部结论</button>
+      {DIAGNOSIS_ORDER.filter((key) => data.diagnosis_counts[key]).map((key) => <button key={key} type="button" className={`inspection-chip is-diagnosis is-${key} ${diagnosis === key ? "is-selected" : ""}`} onClick={() => { setDiagnosis(key); setPage(1); }}>{data.diagnoses[key]}<span>{data.diagnosis_counts[key]}</span></button>)}
+      {data.diagnosis_counts.none ? <button type="button" className={`inspection-chip ${diagnosis === "none" ? "is-selected" : ""}`} onClick={() => { setDiagnosis("none"); setPage(1); }}>还没诊断<span>{data.diagnosis_counts.none}</span></button> : null}
+    </div>}
 
     {status === "ignored" && data && <div className="inspection-kinds" role="group" aria-label="无需处理的原因">
       <button type="button" className={`inspection-chip ${reason === null ? "is-selected" : ""}`} onClick={() => { setReason(null); setPage(1); }}>全部原因</button>
