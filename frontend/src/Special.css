@@ -263,3 +263,13 @@
 .sp-pick-list li label .sp-method {
    margin-left: 0;
 }
+
+.sp-evidence-label {
+   color: #7d95ac;
+}
+
+.sp-legend {
+   margin: 6px 0 4px;
+   font-size: 12px;
+   line-height: 1.6;
+}

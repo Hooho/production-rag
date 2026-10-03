@@ -22,8 +22,8 @@ const RUN_STATUS: Record<string, { label: string; tone: string }> = {
 };
 // 证据最后的去向（检索诊断里的状态）。
 const EVIDENCE_STATUS: Record<string, string> = {
-  returned: "最后返回了", beyond_limit: "被挤出返回段数", filtered_low_score: "被相关度阈值过滤", in_pool: "进了候选池没返回",
-  not_in_pool: "没进候选池", not_recalled: "没被召回",
+  returned: "交给了回答模型", beyond_limit: "重排后排名靠后，超出交给模型的段数", filtered_low_score: "重排打分低于相关度阈值，被过滤",
+  in_pool: "进了重排但没交给模型", not_in_pool: "两路合并后没进重排候选池", not_recalled: "两路检索都没找到",
 };
 
 function formatTime(value: string | null | undefined) {
@@ -336,8 +336,9 @@ function ItemForm({ suiteId, method, initial, onToast, onDone }: { suiteId: stri
   </div>;
 }
 
+// 含证据的分片在某一路检索结果里排第几：向量检索按意思相近取前 12 个分片，关键词检索（BM25）按字面取前 30 个。
 function rankText(label: string, rank: number | null, limit: number) {
-  return rank === null ? `${label}没进前 ${limit} 名` : `${label}第 ${rank} 名`;
+  return rank === null ? `${label}检索：前 ${limit} 名里没有` : `${label}检索：第 ${rank} 名`;
 }
 
 // 一个专项在一次评测里的结果：先看通过数和与上次相比的变化，没通过的排在前面；检索方式额外统计向量和关键词各找到几条证据。
@@ -348,9 +349,10 @@ export function SpecialSection({ section }: { section: EvalSpecialSection }) {
   return <div className="rg-results">
     <div className="rg-summary">
       <span><strong>{section.passed} / {section.count} 通过</strong>（{section.count ? Math.round((section.passed / section.count) * 100) : 0}%）</span>
-      {section.evidence_total ? <span>{section.evidence_total} 条证据：向量检索找到 {section.dense_found ?? 0} 条，关键词检索找到 {section.keyword_found ?? 0} 条</span> : null}
+      {section.evidence_total ? <span>{section.evidence_total} 条证据：含证据的分片进了向量检索前 12 名的 {section.dense_found ?? 0} 条，进了关键词检索前 30 名的 {section.keyword_found ?? 0} 条</span> : null}
       {section.previous ? <span>和上次（{formatTime(section.previous.created)}，{section.previous.passed} / {section.previous.count}）比：新通过 {fixed}，新失败 <strong className={regressed ? "is-fail" : ""}>{regressed}</strong></span> : <span className="rg-muted">这是第一次运行这个专项</span>}
     </div>
+    {section.evidence_total ? <p className="rg-muted sp-legend">每条证据下面：含这条证据的分片在向量检索（按意思相近，取前 12 个分片）和关键词检索（按字面匹配，取前 30 个分片）里各排第几；两路结果合并后交给重排模型打分，「最后」是它有没有交给回答模型。</p> : null}
     {section.variants && <ul className="sp-variants">
       {section.variants.map((variant, index) => <li key={variant.name} className={index === 0 ? "is-current" : ""}>
         <strong>{variant.label}</strong>
@@ -378,10 +380,11 @@ function SpecialQuestion({ question, method }: { question: EvalSpecialQuestion; 
     {question.evidence && question.evidence.length > 0 && <ul className="sp-evidence">
       {question.evidence.map((item, index) => <li key={index}>
         <span className="sp-evidence-text">{item.text}</span>
-        <span className="sp-evidence-ranks">
+        <span className="sp-evidence-ranks" title="含这条证据的分片，在向量检索（按意思相近，取前 12 个分片）和关键词检索（按字面匹配，取前 30 个分片）的结果里各排第几；最后一项是它最终有没有交给回答模型">
+          <span className="sp-evidence-label">含证据的分片</span>
           <span className={item.dense_rank === null ? "is-miss" : ""}>{rankText("向量", item.dense_rank, 12)}</span>
           <span className={item.keyword_rank === null ? "is-miss" : ""}>{rankText("关键词", item.keyword_rank, 30)}</span>
-          <span className={item.status === "returned" ? "" : "is-miss"}>{EVIDENCE_STATUS[item.status ?? "not_recalled"] ?? item.status}</span>
+          <span className={item.status === "returned" ? "" : "is-miss"}>最后：{EVIDENCE_STATUS[item.status ?? "not_recalled"] ?? item.status}</span>
         </span>
       </li>)}
     </ul>}
