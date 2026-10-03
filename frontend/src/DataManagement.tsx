@@ -6,7 +6,7 @@ import "./DataManagement.css";
 type ShowToast = (kind: "success" | "error", message: string) => void;
 type Values = Record<string, DataValue>;
 
-// 数据管理页：每种业务数据一个 Tab，只显示当前用户有查看权限的类型。
+// 业务数据页：每种业务数据一个 Tab，只显示当前用户有查看权限的类型。
 // 表格列、表单、按钮都按后端返回的字段配置和权限生成，新增一种数据不用改这个页面。
 export default function DataManagement({ onToast }: { onToast: ShowToast }) {
   const [types, setTypes] = useState<DataType[] | null>(null);
@@ -24,7 +24,7 @@ export default function DataManagement({ onToast }: { onToast: ShowToast }) {
 
   const current = types?.find((item) => item.key === active) ?? null;
   return <div className="data-page">
-    <header className="topbar"><div><h1>数据管理</h1><p className="data-subtitle">录入和维护业务数据；有权限的数据也可以直接在知识问答里用自然语言查询。</p></div></header>
+    <header className="topbar"><div><h1>业务数据</h1><p className="data-subtitle">录入和维护业务数据；有权限的数据也可以直接在知识问答里用自然语言查询。</p></div></header>
     {types === null && <DataTypesSkeleton />}
     {types !== null && types.length === 0 && <div className="data-empty">你还没有任何业务数据的查看权限，请联系管理员在「设置 → 数据权限」中为你所在的部门开通。</div>}
     {types !== null && types.length > 0 && <div className="document-detail-tabs data-tabs" role="tablist">

@@ -11,7 +11,7 @@
 
 from sqlalchemy import select
 
-from ..data.schema import DATA_TYPES
+from ..business.definitions import DATA_TYPES
 from ..mysql.store import chunks, document_heads
 from ..router.router import Router
 from ..tools.data_query import KNOWLEDGE_WORDS, TYPE_PRIORITY, mentions

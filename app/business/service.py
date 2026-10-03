@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 
 from ..mysql.store import data_audit, data_permissions
 from ..runtime_config import value as runtime_value
-from .schema import ACTIONS, DATA_TYPES, SYSTEM_FIELDS, find_field
+from .definitions import ACTIONS, DATA_TYPES, SYSTEM_FIELDS, find_field
 
 
 # "今天""这周"要按业务所在时区换算。服务器（容器）通常是 UTC，直接用 date.today()

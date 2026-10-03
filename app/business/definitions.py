@@ -1,7 +1,7 @@
 from ..mysql.store import after_sales, customers, inventory, orders, products, promotions, reviews, shipments
 
 
-# 数据管理页里每种业务数据的配置。前端表格和表单、后端校验、AI 生成的提示词、
+# 业务数据页里每种业务数据的配置。前端表格和表单、后端校验、AI 生成的提示词、
 # 聊天里 DataQueryTool 给大模型的"有哪些数据、哪些字段"说明，全部从这一份配置生成。
 # 新增一种数据只需要在 store.py 建表、在这里加配置，不用每种数据各写一套接口和工具。
 #

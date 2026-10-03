@@ -83,7 +83,7 @@ orders = Table("orders", metadata,
     Column("ordered_at", String(10)),
     *record_columns(required=False),
 )
-# 下面是数据管理页的其余业务表，字段含义、校验规则和中文名在 app/data/schema.py 里配置。
+# 下面是业务数据页的其余业务表，字段含义、校验规则和中文名在 app/business/definitions.py 里配置。
 # 日期统一存 YYYY-MM-DD 字符串，和项目里其他时间列的做法一致，按字符串比较即可排序和筛选。
 products = Table("products", metadata,
     Column("id", String(16), primary_key=True),

@@ -8,8 +8,8 @@ from openai import OpenAIError
 from sqlalchemy import func, select
 
 from ..auth import load_user
-from ..data.schema import DATA_TYPES, find_field
-from ..data.service import DataError, active, convert, row_views, today, user_permissions
+from ..business.definitions import DATA_TYPES, find_field
+from ..business.service import DataError, active, convert, row_views, today, user_permissions
 
 
 # 规则匹配数据类型的先后顺序：更具体的类型放前面。
@@ -440,7 +440,7 @@ class DataQueryTool:
         for row in rows:
             lines.append("- " + self.describe_row(data_type, row))
         lines.append("")
-        lines.append(f"以上数据来自数据管理 · {config['label']}，可在数据管理页按编号搜索核对。")
+        lines.append(f"以上数据来自业务数据 · {config['label']}，可在业务数据页按编号搜索核对。")
         return "\n".join(lines)
 
     # 把筛选条件写成中文，例如"状态 = 已发货、下单日期 ≥ 2026-09-28"。

@@ -21,9 +21,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from ..agent.service import Agent
-from ..data.generate import MAX_COUNT, generate_preview
-from ..data.schema import ACTIONS, DATA_TYPES, public_schema
-from ..data.service import (DataError, can_pick, create_batch, create_record, delete_batch, delete_record, list_records,
+from ..business.sample_data import MAX_COUNT, generate_preview
+from ..business.definitions import ACTIONS, DATA_TYPES, public_schema
+from ..business.service import (DataError, can_pick, create_batch, create_record, delete_batch, delete_record, list_records,
     permission_matrix, ref_options, require, save_permission, update_record, user_permissions)
 from ..auth import (authenticate, check_groups, create_user, decode_access_token, hash_password, issue_tokens,
     load_user, revoke_refresh_token, revoke_user_tokens, rotate_refresh_token, seed_users, set_user_groups)
@@ -244,7 +244,7 @@ def next_group_id(connection):
     return candidate
 
 
-# 数据管理：新增或修改一条记录。values 的字段由 app/data/schema.py 的配置校验，这里只限制整体结构。
+# 业务数据：新增或修改一条记录。values 的字段由 app/business/definitions.py 的配置校验，这里只限制整体结构。
 class DataRecordInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     values: dict[str, Any] = Field(max_length=30)
@@ -996,7 +996,7 @@ def create_app(store=None, models=None, jwt_secret=None):
             target.unlink(missing_ok=True)
         return {"document_id": document_key, "deleted": True, "version_count": len(paths)}
 
-    # 数据管理接口统一把校验和权限错误转换成 JSON：detail 是总的原因，errors 按字段给出原因，前端标在对应输入框上。
+    # 业务数据接口统一把校验和权限错误转换成 JSON：detail 是总的原因，errors 按字段给出原因，前端标在对应输入框上。
     @app.exception_handler(DataError)
     async def data_error_handler(request, error):
         return JSONResponse(status_code=error.status, content={"detail": error.message, "errors": error.errors})

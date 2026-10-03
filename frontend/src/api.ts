@@ -1021,8 +1021,8 @@ export function saveRuntimeSettings(changes: Record<string, RuntimeSettingValue 
   });
 }
 
-// ---- 数据管理 ----
-// 字段和数据类型配置来自后端 app/data/schema.py，页面上的表格列、表单和校验提示都按它生成。
+// ---- 业务数据 ----
+// 字段和数据类型配置来自后端 app/business/definitions.py，页面上的表格列、表单和校验提示都按它生成。
 export type DataAction = "read" | "create" | "update" | "delete";
 export type DataField = {
   name: string;
@@ -1047,7 +1047,7 @@ export type DataPreviewRow = { values: Record<string, DataValue>; labels: Record
 export type DataPreview = { rows: DataPreviewRow[]; generator: "llm" | "template"; note: string; label: string };
 export type DataPermissionRow = { group_id: string; data_type: string; can_read: boolean; can_create: boolean; can_update: boolean; can_delete: boolean };
 
-// 数据管理接口校验失败时除了总的原因，还按字段返回原因（errors），表单要把它们标在对应输入框上；
+// 业务数据接口校验失败时除了总的原因，还按字段返回原因（errors），表单要把它们标在对应输入框上；
 // 通用的 request 只保留 detail，所以这里单独处理。
 export class DataRequestError extends Error {
   errors: Record<string, string>;

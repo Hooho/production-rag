@@ -214,7 +214,7 @@ def test_order_tool_uses_data_permission(setup):
 # 模型给出的查询计划必须逐项校验：越权的数据类型、不存在的字段、敏感字段和不支持的操作符都要拒绝。
 def test_check_plan_rejects_unsafe_plans():
     import pytest
-    from app.data.service import DataError
+    from app.business.service import DataError
     from app.tools.data_query import DataQueryTool
     tool = DataQueryTool()
     permissions = {"customers": {"read"}, "orders": set()}

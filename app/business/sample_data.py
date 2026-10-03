@@ -7,7 +7,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from openai import OpenAIError
 from sqlalchemy import select
 
-from .schema import DATA_TYPES
+from .definitions import DATA_TYPES
 from .service import DataError, active, today, validate
 
 

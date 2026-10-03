@@ -1,7 +1,7 @@
 from sqlalchemy import select
 
 from ..auth import load_user
-from ..data.service import user_permissions
+from ..business.service import user_permissions
 from ..mysql.store import orders
 
 

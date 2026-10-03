@@ -9,7 +9,7 @@ import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { LOGOUT_EVENT, listDataTypes, createSession, deleteDocument, retryDocument, retryDocumentContexts, listGroups, login, logout, storedUser, updateDocumentPermission, type AuthUser, type DocumentVisibility, type Group, getDocument, getSessionHistory, listDocumentChunks, listDocuments, listHistory, sendChatStream, uploadDocument, type ChatResult, type DocumentChunk, type ChunkSource, type DocumentChunkPage, type DocumentStatus, type DocumentStep, type FeedbackRecord, type HistoryRun, type RetrievalCandidate, type RetrievalDiagnosticsData, type Source, type TraceStep } from "./api";
 
 // 评测页面放在 /eval，与知识问答、知识库并列；历史记录和评测集分别使用独立子路由。
-// 数据管理页放在 /data：录入和维护商品、订单等业务数据，也是聊天里数据查询工具的数据来源。
+// 业务数据页放在 /data：录入和维护商品、订单等业务数据，也是聊天里数据查询工具的数据来源。
 // 知识巡检页放在 /inspection，只对管理员显示。
 type Route = { page: "chat" } | { page: "knowledge"; documentId?: string } | { page: "data" } | { page: "eval"; section: EvaluationSection; setId?: string } | { page: "inspection" } | { page: "settings" };
 type ToastKind = "success" | "error";
@@ -64,7 +64,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem(sidebarStorage) === "true");
   // 原先操作结果分散在页面正文和弹窗里；根层统一托管 Toast，保证评测和知识库使用同一套提示体验。
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  // 数据管理入口：只有对至少一类业务数据有查看权限时才显示；null 表示还在查询。
+  // 业务数据入口：只有对至少一类业务数据有查看权限时才显示；null 表示还在查询。
   // 评测入口只对管理员显示（后端评测接口也只允许管理员调用）。
   const [dataAllowed, setDataAllowed] = useState<boolean | null>(null);
 
@@ -240,7 +240,7 @@ function App() {
           </div>
           <button className={route.page === "chat" ? "nav-item active" : "nav-item"} onClick={() => navigate("/chat")} title="知识问答"><span className="nav-icon"><NavIcon name="spark" /></span><span className="nav-label">知识问答</span></button>
           <button className={route.page === "knowledge" ? "nav-item active" : "nav-item"} onClick={() => navigate("/knowledge")} title="知识库"><span className="nav-icon"><NavIcon name="library" /></span><span className="nav-label">知识库</span></button>
-          {dataAllowed && <button className={route.page === "data" ? "nav-item active" : "nav-item"} onClick={() => navigate("/data")} title="数据管理"><span className="nav-icon"><NavIcon name="table" /></span><span className="nav-label">数据管理</span></button>}
+          {dataAllowed && <button className={route.page === "data" ? "nav-item active" : "nav-item"} onClick={() => navigate("/data")} title="业务数据"><span className="nav-icon"><NavIcon name="table" /></span><span className="nav-label">业务数据</span></button>}
           {user.is_admin && <button className={route.page === "eval" ? "nav-item active" : "nav-item"} onClick={() => navigate("/eval/runs")} title="评测"><span className="nav-icon"><NavIcon name="target" /></span><span className="nav-label">评测</span></button>}
           {user.is_admin && <button className={route.page === "inspection" ? "nav-item active" : "nav-item"} onClick={() => navigate("/inspection")} title="知识巡检"><span className="nav-icon"><NavIcon name="pulse" /></span><span className="nav-label">知识巡检</span></button>}
           <button className={route.page === "settings" ? "nav-item active" : "nav-item"} onClick={() => navigate("/settings")} title="设置"><span className="nav-icon"><NavIcon name="sliders" /></span><span className="nav-label">设置</span></button>
