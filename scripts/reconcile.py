@@ -47,20 +47,7 @@ def main():
 
 # 遍历整个集合，统计 Milvus 中每个版本的行数；一次遍历同时能发现 MySQL 里已经没有的版本。
 def milvus_counts(store):
-    counts = {}
-    iterator = store.vectors.query_iterator(collection_name=store.collection, batch_size=1000,
-        filter='id != ""', output_fields=["document_id"])
-    try:
-        while True:
-            batch = iterator.next()
-            if not batch:
-                break
-            for row in batch:
-                document_id = row["document_id"]
-                counts[document_id] = counts.get(document_id, 0) + 1
-    finally:
-        iterator.close()
-    return counts
+    return store.milvus.document_counts()
 
 
 # 统计 MySQL 中每个版本的分片数。
@@ -182,7 +169,7 @@ def rebuild_vectors(store, models, document_id):
         for item, vector in zip(batch, vectors):
             item["vector"] = vector
             data.append(store.vector_row(item, document_id, item["chunk_metadata"]))
-        store.vectors.upsert(collection_name=store.collection, data=data, timeout=30)
+        store.milvus.upsert(data, timeout=30)
     return len(items)
 
 

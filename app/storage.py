@@ -4,7 +4,6 @@ import hashlib
 import json
 import logging
 import math
-import re
 
 from sqlalchemy import and_, delete, func, or_, select, text
 
@@ -17,8 +16,6 @@ from .ingestion.chunking import CHUNK_OVERLAP, CHUNK_SIZE, chunk_document_record
 
 
 logger = logging.getLogger("production-rag")
-# position 用于父子分块：命中分片后按版本 id 和序号找到同一小节里的相邻分片。
-SEARCH_FIELDS = ["title", "text", "document_id", "chunk_key", "page_start", "heading", "position"]
 # Contextual Retrieval 每次请求带给模型的文档长度上限。整本书一次放不进上下文窗口，
 # 长文档按这个长度分段，每个分片只带它所在的那一段；同一段的请求前缀相同，模型服务端的缓存仍能命中。
 CONTEXT_DOCUMENT_CHARS = 20000
@@ -27,22 +24,6 @@ CONTEXT_WORKERS = 4
 # 分片上下文说明在 Redis 里的缓存时间。以前任何一步失败重试、worker 重启或重新上传，
 # 都要把几百个分片的上下文重新交给大模型生成（一本书十几分钟，还要重复付费）；缓存后只生成缓存里没有的。
 CONTEXT_CACHE_SECONDS = 7 * 24 * 3600
-
-# Milvus 过滤条件里只允许出现字母、数字、汉字和 _ . : -。
-# 过滤条件是拼出来的字符串表达式（owner == "alice" and document_id in [...]），和拼 SQL 一样：
-# 值里如果带引号或括号，就能改写表达式本身，例如 owner 为 x" or owner != "x 时会读到所有人的文档。
-# 这些值目前都来自服务端（配置的用户名、MySQL 里的版本 id 和 chunk_key），这里再校验一次，
-# 以后值的来源变了（比如用户名改成注册时自己填）也不会变成注入口。
-SAFE_FILTER_VALUE = re.compile(r"^[\w.:-]{1,128}$")
-
-
-# 把一个值转成 Milvus 过滤表达式里的字符串字面量；含其他字符时直接拒绝，而不是尝试转义。
-def filter_literal(value):
-    if not isinstance(value, str) or not SAFE_FILTER_VALUE.match(value):
-        raise ValueError(f"Milvus 过滤条件包含不允许的值：{value!r}")
-    # 不转成 \u 转义：Milvus 表达式直接支持 UTF-8 字符串，校验后的值里也没有需要转义的引号和反斜杠。
-    return json.dumps(value, ensure_ascii=False)
-
 
 class Storage:
     """组合 MySQL、Redis 和 Milvus，供 API 注入单一运行时容器。"""
@@ -53,7 +34,6 @@ class Storage:
         self.milvus = MilvusStore(models)
         self.engine = self.mysql.engine
         self.cache = self.redis.client
-        self.vectors = self.milvus.client
         self.collection = self.milvus.collection
 
     # 把一个文档版本切分、向量化并写入 Milvus 和 MySQL。写入后该版本对检索仍不可见，
@@ -179,7 +159,7 @@ class Storage:
         for row in rows:
             vector_rows.append(self.vector_row(row, document_id, row["chunk_metadata"]))
         if vector_rows:
-            self.vectors.upsert(collection_name=self.collection, data=vector_rows, timeout=10)
+            self.milvus.upsert(vector_rows)
         with self.engine.begin() as connection:
             for row in rows:
                 connection.execute(chunks.insert().values(id=row["id"], owner=row["owner"],
@@ -301,7 +281,7 @@ class Storage:
                     "chunk_key": row["chunk_key"]}, document_id, chunk_metadata))
                 updates.append((row["id"], texts[offset], chunk_metadata))
             # 先写 Milvus 再写 MySQL：Milvus 失败时 MySQL 不变，分片仍显示为缺少说明，可以再次补全。
-            self.vectors.upsert(collection_name=self.collection, data=vector_rows, timeout=10)
+            self.milvus.upsert(vector_rows)
             with self.engine.begin() as connection:
                 for chunk_id, text_value, chunk_metadata in updates:
                     connection.execute(chunks.update().where(chunks.c.id == chunk_id).values(text=text_value))
@@ -351,23 +331,15 @@ class Storage:
                 unique_keys.append(key)
         vectors = {}
         try:
-            # 分批查询：chunk_key 列表太长时过滤表达式过大，单次查询结果条数也有上限。
-            for start in range(0, len(unique_keys), 500):
-                batch = unique_keys[start:start + 500]
-                keys = []
-                for key in batch:
-                    keys.append(filter_literal(key))
-                rows = self.vectors.query(collection_name=self.collection,
-                    filter="document_id == " + filter_literal(current[0]) + " and chunk_key in [" + ", ".join(keys) + "]",
-                    output_fields=["id", "chunk_key", "vector", "text"], timeout=10)
-                for row in rows:
-                    # 带着思考过程的旧说明不复用，这个分片按新分片重新生成说明和向量。
-                    if "<think" in (row.get("text") or ""):
-                        continue
-                    vector = []
-                    for value in row["vector"]:
-                        vector.append(float(value))
-                    vectors[row["chunk_key"]] = {"vector": vector, "text": row["text"], "id": row.get("id")}
+            rows = self.milvus.query_chunks(current[0], unique_keys)
+            for row in rows:
+                # 带着思考过程的旧说明不复用，这个分片按新分片重新生成说明和向量。
+                if "<think" in (row.get("text") or ""):
+                    continue
+                vector = []
+                for value in row["vector"]:
+                    vector.append(float(value))
+                vectors[row["chunk_key"]] = {"vector": vector, "text": row["text"], "id": row.get("id")}
         except Exception:
             # 复用只是省时间，查不到就退回全量计算，不能因此让导入失败。
             logger.exception("reuse_vectors_failed document_id=%s", document_id)
@@ -472,8 +444,7 @@ class Storage:
     # 删除一个版本在 Milvus 和 MySQL 中的分片，保留版本记录和原文件，便于查看历史。
     # Milvus 按 document_id 过滤删除，写了一半的失败版本也能清理干净。
     def remove_version_data(self, document_id):
-        self.vectors.delete(collection_name=self.collection,
-            filter="document_id == " + filter_literal(document_id), timeout=10)
+        self.milvus.delete_document(document_id)
         with self.engine.begin() as connection:
             chunk_ids = connection.execute(select(document_chunks.c.chunk_id).where(
                 document_chunks.c.document_id == document_id)).scalars().all()
@@ -690,52 +661,14 @@ class Storage:
         versions = self.current_versions(owner) if versions is None else versions
         if not versions:
             return []
-        result = self.vectors.search(collection_name=self.collection, data=models.embed([question]),
-            anns_field="vector", filter=self.search_filter(versions), limit=limit,
-            output_fields=SEARCH_FIELDS, timeout=10)
-        return self.hits_to_sources(result[0], "dense", versions)
+        return self.milvus.search(models.embed([question])[0], versions, limit=limit)
 
-    # 使用 Milvus 全文检索按 BM25 召回；分词、词频和全库 IDF 统计都由 Milvus 维护。
+    # 权限和当前版本由业务层确定，BM25 的 SDK 参数由 MilvusStore 封装。
     def search_keyword(self, owner, query, limit=30, versions=None):
         versions = self.current_versions(owner) if versions is None else versions
         if not versions:
             return []
-        result = self.vectors.search(collection_name=self.collection, data=[query],
-            anns_field="sparse", filter=self.search_filter(versions), limit=limit,
-            output_fields=SEARCH_FIELDS, search_params={"metric_type": "BM25"}, timeout=10)
-        sources = self.hits_to_sources(result[0], "keyword", versions)
-        # BM25 分数不会为负；Milvus Lite 以负数距离返回，取绝对值兼容服务端和 Lite。
-        for item in sources:
-            item["score"] = abs(item["score"])
-        return sources
-
-    # 以前只按 owner 过滤，同一文档的新旧版本会同时被检索；后来只放行 document_heads 指向的当前版本。
-    # 加了文档权限后不再按 owner 过滤：别人共享和公开的文档 owner 不是当前用户。
-    # 权限完全由版本 id 列表决定，列表来自 MySQL 的权限查询（current_versions），模型和客户端都改不了它。
-    # 文档数量很大时可改用 Milvus 分区键或定期同步的"可见范围"字段。
-    @staticmethod
-    def search_filter(versions):
-        values = []
-        for version in versions:
-            values.append(filter_literal(version))
-        return "document_id in [" + ", ".join(values) + "]"
-
-    # 把 Milvus 命中结果转换为统一的来源结构。
-    # 同时带出版本号、页码和标题路径，供引用定位和检索诊断展示。
-    @staticmethod
-    def hits_to_sources(hits, method, versions):
-        sources = []
-        for hit in hits:
-            entity = hit["entity"]
-            page_start = entity.get("page_start")
-            sources.append({"id": entity.get("id", hit.get("id")), "title": entity["title"],
-                "text": entity["text"], "score": float(hit["distance"]), "method": method,
-                "document_id": entity.get("document_id"), "chunk_key": entity.get("chunk_key"),
-                "position": entity.get("position"),
-                "version": versions.get(entity.get("document_id")),
-                "page_start": page_start if page_start is not None and page_start >= 0 else None,
-                "heading": entity.get("heading") or None})
-        return sources
+        return self.milvus.search_keyword(query, versions, limit=limit)
 
     # 父子分块用：取一个版本中序号在 [position - radius, position + radius] 内的分片正文和元数据，按序号排列。
     # 只按序号范围查询，不把整份文档读出来；是否属于同一小节由调用方按标题路径判断。
@@ -758,7 +691,7 @@ class Storage:
         with self.engine.connect() as connection:
             connection.execute(text("SELECT 1"))
         self.cache.ping()
-        self.vectors.get_collection_stats(self.collection, timeout=10)
+        self.milvus.ready()
 
     # 读取设置页保存的聊天模型配置；从未保存过时返回 None，继续使用 .env。
     def load_llm_settings(self):

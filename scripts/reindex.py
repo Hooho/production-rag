@@ -69,7 +69,7 @@ def main():
                 item["vector"] = vector
                 item["position"] = item["position"] or 0
                 data.append(store.vector_row(item, item["document_id"], item["chunk_metadata"]))
-            store.vectors.upsert(collection_name=store.collection, data=data, timeout=30)
+            store.milvus.upsert(data, timeout=30)
             with store.engine.begin() as connection:
                 for item in batch:
                     connection.execute(chunks.update().where(chunks.c.id == item["id"]).values(

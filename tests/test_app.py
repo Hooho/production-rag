@@ -125,7 +125,12 @@ def setup(monkeypatch):
     store.mysql = MySQLStore.__new__(MySQLStore)
     store.mysql.engine = store.engine
     store.cache = fakeredis.FakeRedis(decode_responses=True)
-    store.vectors = TestVectors()
+    from app.milvus.store import MilvusStore
+    store.milvus = MilvusStore.__new__(MilvusStore)
+    store.milvus.client = TestVectors()
+    store.milvus.collection = models.collection
+    # 保留 SDK 替身引用供断言使用，业务代码统一经过 MilvusStore。
+    store.vectors = store.milvus.client
     store.collection = models.collection
     with store.engine.begin() as connection:
         connection.execute(orders.insert(), [
