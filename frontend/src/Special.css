@@ -273,3 +273,16 @@
    font-size: 12px;
    line-height: 1.6;
 }
+
+/* 检索方式：描边小标签，和实心底色的评测方式标签区分开。 */
+.sp-search {
+   display: inline-block;
+   margin-left: 6px;
+   border: 1px solid #cedfec;
+   border-radius: 3px;
+   padding: 0 6px;
+   color: #5e7a95;
+   font-size: 11px;
+   font-weight: 400;
+   vertical-align: middle;
+}

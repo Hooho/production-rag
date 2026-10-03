@@ -706,8 +706,10 @@ export function startSpecialRun(suiteIds: string[], compareMemory = false) {
 // ---- 专项评测集 ----
 // 评测方式：retrieval 只检索，answer 完整回答再评审，dialogue 按顺序问完一段对话。
 export type EvalSuiteMethod = "retrieval" | "answer" | "dialogue";
+// 检索、回答方式用哪几路检索：混合（默认）、只用向量、只用关键词。
+export type EvalSuiteSearchMode = "hybrid" | "dense" | "keyword";
 export type EvalSuiteRunEntry = { id: string; status: "running" | "completed" | "failed" | "interrupted"; created: string; finished: string | null; summary: { name: string; method: EvalSuiteMethod; count: number; passed: number } | null };
-export type EvalSuiteBrief = { id: string; name: string; description: string; method: EvalSuiteMethod; method_label: string; created_by: string; created: string; updated: string; item_count: number; latest: EvalSuiteRunEntry | null };
+export type EvalSuiteBrief = { id: string; name: string; description: string; method: EvalSuiteMethod; method_label: string; search_mode: EvalSuiteSearchMode; search_mode_label: string; created_by: string; created: string; updated: string; item_count: number; latest: EvalSuiteRunEntry | null };
 export type EvalSuiteItem = { id: string; question: string; evidence?: string[]; reference_answer?: string; turns?: string[]; created_by: string; created: string; updated: string };
 export type EvalSuiteFull = EvalSuiteBrief & { items: EvalSuiteItem[]; runs: EvalSuiteRunEntry[] };
 export type EvalSuiteItemInput = { question: string; evidence?: string[]; reference_answer?: string | null; turns?: string[] };
@@ -734,6 +736,8 @@ export type EvalSpecialSection = {
   description: string;
   method: EvalSuiteMethod;
   method_label: string;
+  search_mode?: EvalSuiteSearchMode;
+  search_mode_label?: string;
   count: number;
   passed: number;
   evidence_total?: number;
@@ -752,11 +756,11 @@ export function getEvalSuite(suiteId: string) {
   return request<EvalSuiteFull>(`/eval/suites/${encodeURIComponent(suiteId)}`);
 }
 
-export function createEvalSuite(payload: { name: string; description?: string; method: EvalSuiteMethod }) {
+export function createEvalSuite(payload: { name: string; description?: string; method: EvalSuiteMethod; search_mode?: EvalSuiteSearchMode }) {
   return request<EvalSuiteFull>("/eval/suites", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
 }
 
-export function updateEvalSuite(suiteId: string, payload: { name: string; description?: string; method: EvalSuiteMethod }) {
+export function updateEvalSuite(suiteId: string, payload: { name: string; description?: string; method: EvalSuiteMethod; search_mode?: EvalSuiteSearchMode }) {
   return request<EvalSuiteFull>(`/eval/suites/${encodeURIComponent(suiteId)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
 }
 

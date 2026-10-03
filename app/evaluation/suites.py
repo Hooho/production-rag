@@ -15,10 +15,16 @@ from ..runtime_config import snapshot as runtime_snapshot
 from .dataset import corpus_text, normalize, now_text
 from .generation import judge_answer
 from .results import answer_hook, list_runs
-from .retrieval import import_corpus, run_retrieval
+from ..models import Models
+from ..tools.search import DocumentSearchTool
+from .retrieval import EVAL_OWNER, current_chunk_texts, import_corpus, score_question
 
 
 METHODS = {"retrieval": "检索", "answer": "回答", "dialogue": "多轮对话"}
+# 检索、回答方式用哪几路检索。默认和线上一样向量 + 关键词混合；只用一路时能单独看出这一路的表现，
+# 例如截断专项选「只用向量」，分片后半段被截掉的影响就不会被关键词检索兜回来、看不出来。
+SEARCH_MODES = {"hybrid": "混合检索", "dense": "只用向量", "keyword": "只用关键词"}
+SEARCH_METHODS = {"hybrid": ("dense", "keyword"), "dense": ("dense",), "keyword": ("keyword",)}
 # 需要真实大模型的评测方式：回答要生成和评审，多轮对话要按顺序真的问一遍。
 LLM_METHODS = {"answer", "dialogue"}
 NAME_LIMIT = 64
@@ -29,8 +35,10 @@ TURN_LIMIT = 20
 
 
 def suite_view(row, count=0, latest=None):
+    search_mode = row["search_mode"] or "hybrid"
     return {"id": row["id"], "name": row["name"], "description": row["description"] or "", "method": row["method"],
-        "method_label": METHODS.get(row["method"], row["method"]), "created_by": row["created_by"],
+        "method_label": METHODS.get(row["method"], row["method"]), "search_mode": search_mode,
+        "search_mode_label": SEARCH_MODES.get(search_mode, search_mode), "created_by": row["created_by"],
         "created": row["created"], "updated": row["updated"], "item_count": count, "latest": latest}
 
 
@@ -64,7 +72,13 @@ def list_suites(engine):
     for row in rows:
         history = [entry for entry in suite_runs(row["id"], runs) if entry["status"] == "completed"]
         items.append(suite_view(row, counts.get(row["id"], 0), history[0] if history else None))
-    return {"items": items, "methods": METHODS}
+    return {"items": items, "methods": METHODS, "search_modes": SEARCH_MODES}
+
+
+def check_search_mode(search_mode):
+    if search_mode not in SEARCH_MODES:
+        raise ValueError("请选择检索方式")
+    return search_mode
 
 
 def check_suite_fields(connection, name, description, method, exclude=None):
@@ -85,18 +99,18 @@ def check_suite_fields(connection, name, description, method, exclude=None):
     return name, (description or "").strip() or None
 
 
-def create_suite(engine, name, description, method, username):
+def create_suite(engine, name, description, method, username, search_mode="hybrid"):
     now = now_text()
     suite_id = str(uuid4())
     with engine.begin() as connection:
         name, description = check_suite_fields(connection, name, description, method)
         connection.execute(eval_suites.insert().values(id=suite_id, name=name, description=description,
-            method=method, created_by=username, created=now, updated=now))
+            method=method, search_mode=check_search_mode(search_mode), created_by=username, created=now, updated=now))
     return get_suite(engine, suite_id)
 
 
 # 改名称和说明；评测方式只有专项里还没有题目时才能改，因为不同方式的题目字段不一样。
-def update_suite(engine, suite_id, name, description, method):
+def update_suite(engine, suite_id, name, description, method, search_mode="hybrid"):
     with engine.begin() as connection:
         row = connection.execute(select(eval_suites).where(eval_suites.c.id == suite_id)).mappings().first()
         if row is None:
@@ -106,7 +120,7 @@ def update_suite(engine, suite_id, name, description, method):
                 eval_suite_items.c.suite_id == suite_id)).scalar():
             raise ValueError("专项里已经有题目，不能再改评测方式")
         connection.execute(eval_suites.update().where(eval_suites.c.id == suite_id).values(name=name,
-            description=description, method=method, updated=now_text()))
+            description=description, method=method, search_mode=check_search_mode(search_mode), updated=now_text()))
     return get_suite(engine, suite_id)
 
 
@@ -224,7 +238,7 @@ def load_for_run(engine, suite_ids):
             if not items:
                 raise ValueError(f"「{row['name']}」还没有题目")
             loaded.append({"id": row["id"], "name": row["name"], "description": row["description"] or "",
-                "method": row["method"], "items": [{"id": item["id"], **(item["data"] or {})} for item in items]})
+                "method": row["method"], "search_mode": row["search_mode"] or "hybrid", "items": [{"id": item["id"], **(item["data"] or {})} for item in items]})
     return loaded
 
 
@@ -240,6 +254,32 @@ def method_ranks(row, chunk_id):
     return ranks
 
 
+# 按指定的几路检索逐题检索并打分，和调参评测用同一套检索和打分（DocumentSearchTool、score_question）；
+# 检索词用不调用模型的规则改写（专项题都是独立的完整问题）。
+def search_items(store, models, items, methods, progress, on_item=None):
+    import_corpus(store, models)
+    chunk_texts = current_chunk_texts(store)
+    pool_size = runtime_snapshot()["rerank_candidates"]
+    tool = DocumentSearchTool()
+    rows = []
+    config = {}
+    for done, item in enumerate(items, 1):
+        analysis = Models.fallback_query(item["question"], [], None)
+        queries, rerank_query = analysis["queries"], analysis["standalone_query"]
+        retrieval = tool.execute(store, models, EVAL_OWNER, queries, rerank_query, methods=methods)
+        row = score_question(item, retrieval, chunk_texts, pool_size)
+        row.update({"queries": queries, "rerank_query": rerank_query, "diagnostics": retrieval["diagnostics"],
+            "sources": retrieval["sources"]})
+        used = retrieval["diagnostics"]["config"]
+        config = {"pool_size": pool_size, "return_limit": used.get("return_limit"), "min_score": used.get("min_score"),
+            "reranked": used.get("reranked")}
+        if on_item:
+            on_item(item, row, retrieval)
+        rows.append(row)
+        progress(done)
+    return rows, config
+
+
 # 检索、回答方式：把专项题目当成调参题跑同一套检索（可选再回答），逐题整理成专项结果。
 def run_search_suite(store, models, suite, responder, run_id, progress):
     items = []
@@ -248,10 +288,10 @@ def run_search_suite(store, models, suite, responder, run_id, progress):
             "evidence": item.get("evidence") or [], "reference_answer": item.get("reference_answer") or "",
             "split": "dev", "reviewed": True})
     on_item = answer_hook(store, models, responder, run_id) if suite["method"] == "answer" else None
-    result = run_retrieval(store, models, items, "all", (), lambda done, total: progress(done), on_item)
+    rows, config = search_items(store, models, items, SEARCH_METHODS[suite["search_mode"]], progress, on_item)
     questions = []
     dense_found = keyword_found = evidence_total = 0
-    for item, row in zip(items, result["questions"]):
+    for item, row in zip(items, rows):
         evidence = []
         for entry in row.get("evidence") or []:
             ranks = method_ranks(row, entry.get("chunk_id")) if entry.get("chunk_id") else {}
@@ -272,12 +312,13 @@ def run_search_suite(store, models, suite, responder, run_id, progress):
         else:
             entry["passed"] = entry["found"]
         questions.append(entry)
-    section = {"questions": questions}
+    section = {"questions": questions, "search_mode": suite["search_mode"],
+        "search_mode_label": SEARCH_MODES[suite["search_mode"]]}
     if evidence_total:
         section["evidence_total"] = evidence_total
         section["dense_found"] = dense_found
         section["keyword_found"] = keyword_found
-    return section, result["config"]
+    return section, config
 
 
 # 多轮对话方式：每段对话按顺序问完，评审最后一问；compare 时每组记忆参数各跑一遍，通过与否看当前设置那组。
@@ -346,7 +387,7 @@ def run_special(store, models, run, on_progress, responder):
     run["config"].update({"settings": settings, "model_mode": models.mode, "llm_model": models.llm_model,
         "embedding_model": models.embedding_model, "rerank_model": models.rerank_model})
     if search_config:
-        for key in ("pool_size", "return_limit", "min_score", "reranked", "corpus"):
+        for key in ("pool_size", "return_limit", "min_score", "reranked"):
             run["config"][key] = search_config.get(key)
     count = sum(section["count"] for section in sections)
     passed = sum(section["passed"] for section in sections)

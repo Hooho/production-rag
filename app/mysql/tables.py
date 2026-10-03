@@ -402,6 +402,8 @@ eval_suites = Table("eval_suites", metadata,
     Column("name", String(64), nullable=False, unique=True),
     Column("description", String(500)),
     Column("method", String(16), nullable=False),
+    # 检索、回答方式用哪几路检索：hybrid 向量 + 关键词（默认，和线上一样），dense 只用向量，keyword 只用关键词。
+    Column("search_mode", String(16)),
     Column("created_by", String(32), nullable=False),
     Column("created", String(32), nullable=False),
     Column("updated", String(32), nullable=False),

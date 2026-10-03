@@ -95,3 +95,24 @@ def test_locate_evidence(setup, eval_dir, monkeypatch):
     cut = client.post("/eval/evidence", headers=headers(), json={"texts": [evidence]}).json()["items"][0]["chunks"][0]
     assert cut["truncated"] is True and cut["cut"] == len(cut["content"]) - 5 and cut["max_tokens"] == 512
     assert client.post("/eval/evidence", headers=headers("alice"), json={"texts": [evidence]}).status_code == 403
+
+
+# 检索方式选「只用向量」时只跑向量检索：关键词名次为空；改检索方式不受「有题目后不能改评测方式」的限制。
+def test_special_search_mode(setup, eval_dir, monkeypatch):
+    client, store = setup
+    monkeypatch.setattr(Models, "rerank", fake_rerank)
+    created = client.post("/eval/suites", headers=headers(), json={"name": "向量专项", "method": "retrieval",
+        "search_mode": "dense"}).json()
+    assert created["search_mode"] == "dense" and created["search_mode_label"] == "只用向量"
+    client.post(f"/eval/suites/{created['id']}/items", headers=headers(), json={"question": "耳机几天内可以退货？",
+        "evidence": ["耳机签收后七天内可以无理由退货"]})
+    special = {"suites": [{"id": created["id"], "name": created["name"]}], "compare_memory": False}
+    run = execute_run(store, client.app.state.models, [], start_run("special", None, [], special))
+    section = run["special"][0]
+    assert section["search_mode"] == "dense"
+    assert all(item["keyword_rank"] is None for question in section["questions"] for item in question["evidence"])
+    updated = client.put(f"/eval/suites/{created['id']}", headers=headers(), json={"name": "向量专项",
+        "method": "retrieval", "search_mode": "keyword"})
+    assert updated.status_code == 200 and updated.json()["search_mode"] == "keyword"
+    assert client.put(f"/eval/suites/{created['id']}", headers=headers(), json={"name": "向量专项",
+        "method": "retrieval", "search_mode": "nope"}).status_code == 422

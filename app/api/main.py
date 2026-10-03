@@ -122,6 +122,7 @@ class EvalSuiteInput(BaseModel):
     name: str = Field(..., max_length=64)
     description: str | None = Field(None, max_length=500)
     method: str = Field(..., pattern="^(retrieval|answer|dialogue)$")
+    search_mode: str = Field("hybrid", pattern="^(hybrid|dense|keyword)$")
 
 
 # 专项的一道题，字段随评测方式不同：检索要问题和证据，回答再加参考答案，多轮对话是前面几轮提问 + 最后一问 + 参考答案。
@@ -1486,7 +1487,7 @@ def create_app(store=None, models=None, jwt_secret=None):
     def eval_suite_create(body: EvalSuiteInput, admin=Depends(require_admin)):
         try:
             return special_suites.create_suite(app.state.store.engine, body.name, body.description, body.method,
-                admin["username"])
+                admin["username"], body.search_mode)
         except ValueError as error:
             raise HTTPException(422, str(error))
 
@@ -1498,7 +1499,7 @@ def create_app(store=None, models=None, jwt_secret=None):
     def eval_suite_update(suite_id: str, body: EvalSuiteInput):
         try:
             return suite_or_404(special_suites.update_suite(app.state.store.engine, suite_id, body.name,
-                body.description, body.method))
+                body.description, body.method, body.search_mode))
         except ValueError as error:
             raise HTTPException(422, str(error))
 

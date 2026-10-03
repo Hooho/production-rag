@@ -73,7 +73,8 @@ def seed_eval_data(engine):
             for suite in seed_suites():
                 suite_id = str(uuid4())
                 connection.execute(eval_suites.insert().values(id=suite_id, name=suite["name"],
-                    description=suite.get("description"), method=suite["method"], created_by="system",
+                    description=suite.get("description"), method=suite["method"],
+                    search_mode=suite.get("search_mode", "hybrid"), created_by="system",
                     created=now, updated=now))
                 for position, data in enumerate(suite["items"]):
                     connection.execute(eval_suite_items.insert().values(id=str(uuid4()), suite_id=suite_id,

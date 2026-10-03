@@ -535,7 +535,7 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
               : specialSuites.length === 0 ? <span className="ev-muted-note">还没有专项，先到「专项评测集」新建。</span>
               : <ul className="sp-pick-list">{specialSuites.map((suite) => <li key={suite.id}>
                 <label><input type="checkbox" checked={pickedSuites.includes(suite.id)} disabled={suite.item_count === 0} onChange={() => setPickedSuites((items) => items.includes(suite.id) ? items.filter((item) => item !== suite.id) : [...items, suite.id])} />
-                  <span className="sp-pick-text"><span className="sp-pick-name">{suite.name}<span className={`sp-method is-${suite.method}`}>{suite.method_label}</span><em>{suite.item_count} 题</em></span>{suite.description && <small>{suite.description}</small>}</span></label>
+                  <span className="sp-pick-text"><span className="sp-pick-name">{suite.name}<span className={`sp-method is-${suite.method}`}>{suite.method_label}</span>{suite.method !== "dialogue" && <span className="sp-search">{suite.search_mode_label}</span>}<em>{suite.item_count} 题</em></span>{suite.description && <small>{suite.description}</small>}</span></label>
               </li>)}</ul>}
             {specialSuites?.some((suite) => suite.method === "dialogue" && pickedSuites.includes(suite.id)) && <div className="sp-switch-line">
               <button type="button" role="switch" aria-checked={compareMemory} className={`sp-switch ${compareMemory ? "is-on" : ""}`} onClick={() => setCompareMemory(!compareMemory)}><span /></button>

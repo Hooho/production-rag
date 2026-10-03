@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { addEvalSuiteItem, createEvalSuite, deleteEvalSuite, deleteEvalSuiteItem, getEvalRun, getEvalSuite, listEvalSuites, startSpecialRun, updateEvalSuite, updateEvalSuiteItem, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSuiteBrief, type EvalSuiteFull, type EvalSuiteItem, type EvalSuiteMethod, type EvalSuiteRunEntry } from "./api";
+import { addEvalSuiteItem, createEvalSuite, deleteEvalSuite, deleteEvalSuiteItem, getEvalRun, getEvalSuite, listEvalSuites, startSpecialRun, updateEvalSuite, updateEvalSuiteItem, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSuiteBrief, type EvalSuiteFull, type EvalSuiteItem, type EvalSuiteMethod, type EvalSuiteSearchMode, type EvalSuiteRunEntry } from "./api";
 import { EvidenceDetails } from "./EvidenceChunks";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./Regression.css";
@@ -16,6 +16,12 @@ const METHOD_HINTS: Record<EvalSuiteMethod, string> = {
   answer: "检索后完整回答，再由评审模型和参考答案比对，要点一致算通过。需要真实大模型。题目要有问题和参考答案，证据可选。",
   dialogue: "按顺序问完一段对话，最后一问要用到前面的内容，评审模型判定要点一致算通过。需要真实大模型。题目是前面几轮提问、最后一问和参考答案。",
 };
+const SEARCH_LABELS: Record<EvalSuiteSearchMode, string> = { hybrid: "混合检索", dense: "只用向量", keyword: "只用关键词" };
+const SEARCH_HINTS: Record<EvalSuiteSearchMode, string> = {
+  hybrid: "向量 + 关键词两路一起找，和线上一样。看整条链路能不能把证据交给回答模型。",
+  dense: "只用向量检索。看向量本身找不找得到，比如分片被截断的影响不会被关键词检索兜回来。",
+  keyword: "只用关键词检索（BM25）。看字面匹配找不找得到，和「只用向量」对照着看。",
+};
 const RUN_STATUS: Record<string, { label: string; tone: string }> = {
   running: { label: "运行中", tone: "blue" }, completed: { label: "已完成", tone: "green" },
   failed: { label: "失败", tone: "red" }, interrupted: { label: "已中断", tone: "orange" },
@@ -23,7 +29,7 @@ const RUN_STATUS: Record<string, { label: string; tone: string }> = {
 // 证据最后的去向（检索诊断里的状态）。
 const EVIDENCE_STATUS: Record<string, string> = {
   returned: "交给了回答模型", beyond_limit: "重排后排名靠后，超出交给模型的段数", filtered_low_score: "重排打分低于相关度阈值，被过滤",
-  in_pool: "进了重排但没交给模型", not_in_pool: "两路合并后没进重排候选池", not_recalled: "两路检索都没找到",
+  in_pool: "进了重排但没交给模型", not_in_pool: "合并后没进重排候选池", not_recalled: "检索没找到",
 };
 
 function formatTime(value: string | null | undefined) {
@@ -33,6 +39,18 @@ function formatTime(value: string | null | undefined) {
   const pad = (number: number) => String(number).padStart(2, "0");
   const text = `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
   return date.getFullYear() === new Date().getFullYear() ? text : `${date.getFullYear()}-${text}`;
+}
+
+// 检索方式选择：多轮对话方式不用（它走完整问答流程）。随时可以改，不影响已有题目。
+function SearchModeField({ value, onChange }: { value: EvalSuiteSearchMode; onChange: (value: EvalSuiteSearchMode) => void }) {
+  return <label className="rg-field is-top"><span>检索方式</span>
+    <div className="sp-method-field">
+      <select value={value} onChange={(event) => onChange(event.target.value as EvalSuiteSearchMode)}>
+        {(Object.keys(SEARCH_LABELS) as EvalSuiteSearchMode[]).map((key) => <option key={key} value={key}>{SEARCH_LABELS[key]}</option>)}
+      </select>
+      <small>{SEARCH_HINTS[value]} 随时可以改。</small>
+    </div>
+  </label>;
 }
 
 function lines(text: string) {
@@ -51,6 +69,7 @@ function SuiteList({ onOpen, onToast }: { onOpen: (id: string) => void; onToast:
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [method, setMethod] = useState<EvalSuiteMethod>("retrieval");
+  const [searchMode, setSearchMode] = useState<EvalSuiteSearchMode>("hybrid");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -60,7 +79,7 @@ function SuiteList({ onOpen, onToast }: { onOpen: (id: string) => void; onToast:
   async function create() {
     setBusy(true);
     try {
-      const created = await createEvalSuite({ name: name.trim(), description: description.trim() || undefined, method });
+      const created = await createEvalSuite({ name: name.trim(), description: description.trim() || undefined, method, search_mode: searchMode });
       onOpen(created.id);
     } catch (reason) {
       onToast("error", (reason as Error).message);
@@ -86,6 +105,7 @@ function SuiteList({ onOpen, onToast }: { onOpen: (id: string) => void; onToast:
           <small>{METHOD_HINTS[method]} 加了题目以后不能再改。</small>
         </div>
       </label>
+      {method !== "dialogue" && <SearchModeField value={searchMode} onChange={setSearchMode} />}
       <div className="rg-buttons">
         <button type="button" className="secondary-button" onClick={() => setCreating(false)} disabled={busy}>取消</button>
         <button type="button" className="primary-button" onClick={() => void create()} disabled={busy || !name.trim()}>创建</button>
@@ -96,7 +116,7 @@ function SuiteList({ onOpen, onToast }: { onOpen: (id: string) => void; onToast:
       : <ul className="rg-sets">
         {suites.map((item) => <li key={item.id}>
           <button type="button" className="rg-set" onClick={() => onOpen(item.id)}>
-            <span className="rg-set-name">{item.name}<span className={`sp-method is-${item.method}`}>{item.method_label}</span></span>
+            <span className="rg-set-name">{item.name}<span className={`sp-method is-${item.method}`}>{item.method_label}</span>{item.method !== "dialogue" && <span className="sp-search">{item.search_mode_label}</span>}</span>
             {item.description && <span className="rg-set-description">{item.description}</span>}
             <span className="rg-set-meta">
               <span>{item.item_count} 题</span>
@@ -119,6 +139,7 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [method, setMethod] = useState<EvalSuiteMethod>("retrieval");
+  const [searchMode, setSearchMode] = useState<EvalSuiteSearchMode>("hybrid");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -176,7 +197,7 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
 
   async function saveInfo() {
     try {
-      setData({ ...(await updateEvalSuite(suiteId, { name: name.trim(), description: description.trim(), method })) });
+      setData({ ...(await updateEvalSuite(suiteId, { name: name.trim(), description: description.trim(), method, search_mode: searchMode })) });
       setRenaming(false);
     } catch (reason) {
       onToast("error", (reason as Error).message);
@@ -215,17 +236,18 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
           <small>{data.items.length > 0 ? "已经有题目，不能再改评测方式。" : METHOD_HINTS[method]}</small>
         </div>
       </label>
+      {method !== "dialogue" && <SearchModeField value={searchMode} onChange={setSearchMode} />}
       <div className="rg-buttons">
         <button type="button" className="secondary-button" onClick={() => setRenaming(false)}>取消</button>
         <button type="button" className="primary-button" onClick={() => void saveInfo()} disabled={!name.trim()}>保存</button>
       </div>
     </div> : <div className="rg-title">
       <div>
-        <h3>{data.name}<span className={`sp-method is-${data.method}`}>{data.method_label}</span></h3>
+        <h3>{data.name}<span className={`sp-method is-${data.method}`}>{data.method_label}</span>{data.method !== "dialogue" && <span className="sp-search">{data.search_mode_label}</span>}</h3>
         {data.description && <p>{data.description}</p>}
       </div>
       <div className="rg-buttons">
-        <button type="button" className="secondary-button" onClick={() => { setName(data.name); setDescription(data.description); setMethod(data.method); setRenaming(true); }}>修改</button>
+        <button type="button" className="secondary-button" onClick={() => { setName(data.name); setDescription(data.description); setMethod(data.method); setSearchMode(data.search_mode); setRenaming(true); }}>修改</button>
         {confirmDelete
           ? <><button type="button" className="secondary-button" onClick={() => setConfirmDelete(false)}>取消</button><button type="button" className="rg-danger" onClick={() => void remove()}>确认删除（题目一起删除）</button></>
           : <button type="button" className="secondary-button" onClick={() => setConfirmDelete(true)}>删除</button>}
@@ -349,7 +371,8 @@ export function SpecialSection({ section }: { section: EvalSpecialSection }) {
   return <div className="rg-results">
     <div className="rg-summary">
       <span><strong>{section.passed} / {section.count} 通过</strong>（{section.count ? Math.round((section.passed / section.count) * 100) : 0}%）</span>
-      {section.evidence_total ? <span>{section.evidence_total} 条证据：含证据的分片进了向量检索前 12 名的 {section.dense_found ?? 0} 条，进了关键词检索前 30 名的 {section.keyword_found ?? 0} 条</span> : null}
+      {section.search_mode_label && <span className="sp-search">{section.search_mode_label}</span>}
+      {section.evidence_total ? <span>{section.evidence_total} 条证据：{[section.search_mode !== "keyword" ? `含证据的分片进了向量检索前 12 名的 ${section.dense_found ?? 0} 条` : "", section.search_mode !== "dense" ? `进了关键词检索前 30 名的 ${section.keyword_found ?? 0} 条` : ""].filter(Boolean).join("，")}</span> : null}
       {section.previous ? <span>和上次（{formatTime(section.previous.created)}，{section.previous.passed} / {section.previous.count}）比：新通过 {fixed}，新失败 <strong className={regressed ? "is-fail" : ""}>{regressed}</strong></span> : <span className="rg-muted">这是第一次运行这个专项</span>}
     </div>
     {section.evidence_total ? <p className="rg-muted sp-legend">每条证据下面：含这条证据的分片在向量检索（按意思相近，取前 12 个分片）和关键词检索（按字面匹配，取前 30 个分片）里各排第几；两路结果合并后交给重排模型打分，「最后」是它有没有交给回答模型。</p> : null}
@@ -362,12 +385,12 @@ export function SpecialSection({ section }: { section: EvalSpecialSection }) {
       </li>)}
     </ul>}
     <ul className="rg-result-list">
-      {questions.map((question) => <SpecialQuestion key={question.id} question={question} method={section.method} />)}
+      {questions.map((question) => <SpecialQuestion key={question.id} question={question} method={section.method} searchMode={section.search_mode ?? "hybrid"} />)}
     </ul>
   </div>;
 }
 
-function SpecialQuestion({ question, method }: { question: EvalSpecialQuestion; method: EvalSuiteMethod }) {
+function SpecialQuestion({ question, method, searchMode }: { question: EvalSpecialQuestion; method: EvalSuiteMethod; searchMode: EvalSuiteSearchMode }) {
   const change = question.previous_passed === undefined || question.previous_passed === null || question.previous_passed === question.passed ? null
     : question.passed ? { label: "新通过", tone: "green" } : { label: "新失败", tone: "red" };
   const judgement = question.judgement;
@@ -382,8 +405,8 @@ function SpecialQuestion({ question, method }: { question: EvalSpecialQuestion; 
         <span className="sp-evidence-text">{item.text}</span>
         <span className="sp-evidence-ranks" title="含这条证据的分片，在向量检索（按意思相近，取前 12 个分片）和关键词检索（按字面匹配，取前 30 个分片）的结果里各排第几；最后一项是它最终有没有交给回答模型">
           <span className="sp-evidence-label">含证据的分片</span>
-          <span className={item.dense_rank === null ? "is-miss" : ""}>{rankText("向量", item.dense_rank, 12)}</span>
-          <span className={item.keyword_rank === null ? "is-miss" : ""}>{rankText("关键词", item.keyword_rank, 30)}</span>
+          {searchMode === "keyword" ? <span>向量检索：这次没用</span> : <span className={item.dense_rank === null ? "is-miss" : ""}>{rankText("向量", item.dense_rank, 12)}</span>}
+          {searchMode === "dense" ? <span>关键词检索：这次没用</span> : <span className={item.keyword_rank === null ? "is-miss" : ""}>{rankText("关键词", item.keyword_rank, 30)}</span>}
           <span className={item.status === "returned" ? "" : "is-miss"}>最后：{EVIDENCE_STATUS[item.status ?? "not_recalled"] ?? item.status}</span>
         </span>
       </li>)}
