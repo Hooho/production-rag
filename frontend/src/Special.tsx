@@ -122,6 +122,8 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
+  // 题目和运行记录分两个页签；发起运行后自动切到运行记录。
+  const [tab, setTab] = useState<"items" | "runs">("items");
 
   async function load() {
     const value = await getEvalSuite(suiteId);
@@ -164,6 +166,7 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
       const created = await startSpecialRun([suiteId], compareMemory);
       await load();
       setRunId(created.id);
+      setTab("runs");
     } catch (reason) {
       onToast("error", (reason as Error).message);
     } finally {
@@ -241,8 +244,13 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
       {running && <div className="rg-progress">正在运行…</div>}
     </div>
 
-    {data.runs.length > 0 && <section className="rg-section">
-      <h4>运行记录</h4>
+    <div className="document-detail-tabs ev-tabs rg-tabs" role="tablist">
+      <button type="button" role="tab" aria-selected={tab === "items"} className={tab === "items" ? "active" : ""} onClick={() => setTab("items")}>题目<span>{data.items.length}</span></button>
+      <button type="button" role="tab" aria-selected={tab === "runs"} className={tab === "runs" ? "active" : ""} onClick={() => setTab("runs")}>运行记录<span>{data.runs.length}</span></button>
+    </div>
+
+    {tab === "runs" && data.runs.length === 0 && <p className="rg-muted">还没有运行过，点上面的「运行」按钮。</p>}
+    {tab === "runs" && data.runs.length > 0 && <section className="rg-section">
       <div className="rg-runs" role="tablist">
         {data.runs.map((item) => <RunChip key={item.id} run={item} selected={item.id === runId} onClick={() => setRunId(item.id)} />)}
       </div>
@@ -251,9 +259,9 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
       {runId && selectedStatus === "running" && <p className="rg-muted">跑完后这里显示逐题结果。</p>}
     </section>}
 
-    <section className="rg-section">
+    {tab === "items" && <section className="rg-section">
       <div className="rg-section-head">
-        <h4>题目（{data.items.length}）</h4>
+        <span className="rg-muted">{data.items.length} 题</span>
         {!adding && <button type="button" className="secondary-button" onClick={() => { setEditing(null); setAdding(true); }}>添加题目</button>}
       </div>
       {adding && <ItemForm suiteId={suiteId} method={data.method} onToast={onToast} onDone={(value) => { setAdding(false); if (value) setData(value); }} />}
@@ -280,7 +288,7 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
           </div>
         </li>)}
       </ul>
-    </section>
+    </section>}
   </div>;
 }
 

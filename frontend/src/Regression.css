@@ -535,3 +535,8 @@
    color: #7d95ac;
    cursor: default;
 }
+
+/* 详情页的「题目 / 运行记录」页签，和评测页其他页签同一套样式。 */
+.rg-tabs {
+   margin: 4px 0 0;
+}
