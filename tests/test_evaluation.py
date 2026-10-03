@@ -31,9 +31,10 @@ def corpus_text():
 
 
 # 评测集字段完整、证据都能在语料里找到，无法回答题约占两成，并且五种题型都有。
+# 上限从 50 放宽到 60：加了 9 道证据在「分片超长被截断部分」的题（origin 为 claude:截断尾部）。
 def test_dataset_is_valid():
     items = load_dataset()
-    assert 30 <= len(items) <= 50
+    assert 30 <= len(items) <= 60
     assert validate_dataset(items, corpus_text()) == []
     unanswerable = 0
     types = set()
