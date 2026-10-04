@@ -1247,3 +1247,20 @@ export type EvalEvidenceLookup = { imported: boolean; cuts_available: boolean; i
 export function locateEvalEvidence(texts: string[]) {
   return request<EvalEvidenceLookup>("/eval/evidence", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ texts }) });
 }
+
+// 运行概览：近 N 天按天汇总的问答量、失败、拒答、耗时、Token 和反馈（GET /overview）。
+export type OverviewDay = { date: string; requests: number; errors: number; error_rate: number | null; knowledge: number; refused: number; refusal_rate: number | null; p50_ms: number | null; p95_ms: number | null; tokens: number; up: number; down: number };
+export type Overview = {
+  days: number; timezone: string; from: string; to: string;
+  totals: { requests: number; runs: number; errors: number; error_rate: number | null; knowledge: number; refused: number; refusal_rate: number | null; p50_ms: number | null; p95_ms: number | null; tokens: { input: number; output: number; total: number; runs_with_usage: number }; avg_tokens: number | null; feedback: number; up: number; down: number; down_rate: number | null };
+  daily: OverviewDay[];
+  stages: { stage: string; label: string; count: number; p50_ms: number | null; p95_ms: number | null }[];
+  routes: { route: string; label: string; count: number }[];
+  retrieval: { runs: number; returned_zero: number; returned_zero_rate: number | null; top_score_p50: number | null; below_threshold: number; min_score: number };
+  errors: { stages: { stage: string; label: string; count: number }[]; codes: { code: string; count: number }[] };
+  feedback_reasons: { reason: string; label: string; count: number }[];
+};
+
+export function getOverview(days: number) {
+  return request<Overview>(`/overview?days=${days}`);
+}

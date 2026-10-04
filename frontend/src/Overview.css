@@ -1,0 +1,336 @@
+/* 运行概览页：沿用主样式的配色变量（--t-xxxxxx），蓝调、绿调切换时一起变。 */
+.ov-page {
+   max-width: 1180px;
+}
+
+.ov-topbar {
+   gap: 24px;
+   margin-bottom: 20px;
+}
+
+.ov-subtitle {
+   margin-top: 8px;
+   color: var(--t-5e7a95);
+   font-size: 13px;
+}
+
+.ov-range {
+   display: inline-flex;
+   flex: none;
+   border: 1px solid var(--t-cedfec);
+   border-radius: 6px;
+   overflow: hidden;
+}
+
+.ov-range button {
+   border: 0;
+   background: #fff;
+   padding: 6px 14px;
+   color: var(--t-334e68);
+   font-size: 13px;
+   cursor: pointer;
+}
+
+.ov-range button + button {
+   border-left: 1px solid var(--t-cedfec);
+}
+
+.ov-range button.is-selected {
+   background: var(--t-2563eb);
+   color: #fff;
+}
+
+.ov-tiles {
+   display: grid;
+   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+   gap: 12px;
+   margin-bottom: 18px;
+}
+
+.ov-tile {
+   display: flex;
+   flex-direction: column;
+   gap: 4px;
+   border: 1px solid var(--t-e3edf5);
+   border-radius: 6px;
+   background: #fff;
+   padding: 12px 14px;
+}
+
+.ov-tile span {
+   color: var(--t-5e7a95);
+   font-size: 12px;
+}
+
+.ov-tile strong {
+   color: var(--t-1d3550);
+   font-size: 22px;
+   font-weight: 600;
+   font-variant-numeric: tabular-nums;
+}
+
+.ov-tile small {
+   color: var(--t-7d95ac);
+   font-size: 11px;
+   line-height: 1.5;
+}
+
+.ov-charts {
+   display: grid;
+   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+   gap: 12px;
+   margin-bottom: 18px;
+}
+
+.ov-chart {
+   border: 1px solid var(--t-e3edf5);
+   border-radius: 6px;
+   background: #fff;
+   padding: 12px 14px 6px;
+}
+
+.ov-chart h3,
+.ov-panel h2 {
+   margin: 0 0 6px;
+   color: var(--t-1d3550);
+   font-size: 14px;
+}
+
+.ov-chart-frame {
+   position: relative;
+}
+
+.ov-chart-frame svg {
+   display: block;
+   width: 100%;
+   height: auto;
+   overflow: visible;
+   outline: none;
+   touch-action: pan-y;
+}
+
+.ov-chart-frame svg:focus-visible {
+   outline: 1px solid var(--t-2563eb);
+}
+
+.ov-grid {
+   stroke: var(--t-e3edf5);
+   stroke-width: 1;
+}
+
+.ov-axis {
+   fill: var(--t-7d95ac);
+   font-size: 10px;
+}
+
+.ov-bar {
+   fill: var(--t-2563eb);
+}
+
+.ov-line {
+   fill: none;
+   stroke: var(--t-2563eb);
+   stroke-width: 2;
+   stroke-linejoin: round;
+   stroke-linecap: round;
+}
+
+.ov-dot {
+   fill: var(--t-2563eb);
+   stroke: #fff;
+   stroke-width: 2;
+}
+
+.ov-hover-band {
+   fill: var(--t-f4f8fc);
+}
+
+.ov-chart-empty {
+   position: absolute;
+   inset: 0 0 24px 56px;
+   display: grid;
+   place-items: center;
+   color: var(--t-7d95ac);
+   font-size: 12px;
+   pointer-events: none;
+}
+
+.ov-tooltip {
+   position: absolute;
+   top: 4px;
+   display: flex;
+   flex-direction: column;
+   gap: 2px;
+   transform: translateX(10px);
+   border: 1px solid var(--t-cedfec);
+   border-radius: 4px;
+   background: #fff;
+   padding: 6px 10px;
+   box-shadow: 0 6px 16px rgb(var(--t-0f172a-rgb) / 0.12);
+   font-size: 11px;
+   white-space: nowrap;
+   pointer-events: none;
+}
+
+.ov-tooltip.is-left {
+   transform: translateX(calc(-100% - 10px));
+}
+
+.ov-tooltip-title {
+   color: var(--t-7d95ac);
+}
+
+.ov-tooltip strong {
+   color: var(--t-1d3550);
+   font-size: 13px;
+}
+
+.ov-tooltip span {
+   color: var(--t-5e7a95);
+}
+
+.ov-panels {
+   display: grid;
+   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+   gap: 12px;
+}
+
+.ov-panel {
+   border: 1px solid var(--t-e3edf5);
+   border-radius: 6px;
+   background: #fff;
+   padding: 12px 14px;
+}
+
+.ov-panel > p {
+   margin: 0 0 10px;
+   color: var(--t-7d95ac);
+   font-size: 12px;
+   line-height: 1.6;
+}
+
+.ov-table {
+   width: 100%;
+   border-collapse: collapse;
+   font-size: 12px;
+}
+
+.ov-table th,
+.ov-table td {
+   border-bottom: 1px solid var(--t-f1f3f6);
+   padding: 6px 6px;
+   text-align: left;
+   color: var(--t-334e68);
+}
+
+.ov-table th {
+   color: var(--t-7d95ac);
+   font-weight: 500;
+}
+
+.ov-table .num {
+   text-align: right;
+   font-variant-numeric: tabular-nums;
+   white-space: nowrap;
+}
+
+.ov-bar-cell {
+   width: 25%;
+}
+
+.ov-inline-bar {
+   display: block;
+   min-width: 2px;
+   height: 8px;
+   border-radius: 0 4px 4px 0;
+   background: var(--t-2563eb);
+}
+
+.ov-breakdown {
+   display: flex;
+   flex-direction: column;
+   gap: 8px;
+   margin: 0;
+   padding: 0;
+   list-style: none;
+   font-size: 12px;
+}
+
+.ov-breakdown li {
+   display: grid;
+   min-height: 18px;
+   grid-template-columns: minmax(90px, 140px) 1fr auto;
+   align-items: center;
+   gap: 10px;
+}
+
+.ov-breakdown-label {
+   color: var(--t-334e68);
+}
+
+.ov-breakdown-value {
+   min-width: 72px;
+   color: var(--t-1d3550);
+   text-align: right;
+   font-variant-numeric: tabular-nums;
+}
+
+.ov-breakdown-value small {
+   margin-left: 6px;
+   color: var(--t-7d95ac);
+}
+
+.ov-facts {
+   display: flex;
+   flex-direction: column;
+   gap: 6px;
+   margin: 0;
+   font-size: 12px;
+}
+
+.ov-facts div {
+   display: flex;
+   justify-content: space-between;
+   gap: 12px;
+   border-bottom: 1px solid var(--t-f1f3f6);
+   padding-bottom: 6px;
+}
+
+.ov-facts dt {
+   color: var(--t-5e7a95);
+}
+
+.ov-facts dd {
+   margin: 0;
+   color: var(--t-1d3550);
+   font-variant-numeric: tabular-nums;
+}
+
+.ov-codes {
+   clear: both;
+   margin: 14px 0 0;
+   padding-top: 2px;
+   color: var(--t-7d95ac);
+   font-size: 12px;
+}
+
+.ov-empty {
+   color: var(--t-7d95ac);
+   font-size: 12px;
+}
+
+.ov-footnote {
+   margin: 16px 0 0;
+   color: var(--t-7d95ac);
+   font-size: 12px;
+}
+
+.ov-skeleton-tile {
+   display: block;
+   height: 86px;
+}
+
+.ov-skeleton-chart {
+   display: block;
+   height: 220px;
+}

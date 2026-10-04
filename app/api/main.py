@@ -45,6 +45,7 @@ from ..memory.service import Memory
 from ..mysql.store import (data_permissions, document_heads, document_shares, document_steps, documents, feedback,
     run_errors, runs, sessions, user_group_members, user_groups, users)
 from ..observability import FEEDBACK_REASONS, run_columns, summarize_run
+from ..overview import RANGES as OVERVIEW_RANGES, overview as build_overview
 from ..storage import Storage
 
 
@@ -1726,6 +1727,13 @@ def create_app(store=None, models=None, jwt_secret=None):
         if result is None:
             raise HTTPException(404, "问题不存在")
         return result
+
+    # 运行概览：近 N 天按天汇总的问答量、失败、拒答、耗时、Token 和反馈，只有管理员能看。
+    @app.get("/overview", dependencies=[Depends(require_admin)])
+    def get_overview(days: int = Query(7)):
+        if days not in OVERVIEW_RANGES:
+            raise HTTPException(422, "只能查看近 7、30 或 90 天")
+        return build_overview(app.state.store.engine, days)
 
     @app.get("/inspection/runs", dependencies=[Depends(require_admin)])
     def inspection_runs_list():
