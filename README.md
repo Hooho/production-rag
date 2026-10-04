@@ -45,11 +45,3 @@
 Web 控制台：
 
 > http://localhost:3001
-
-### 知识巡检
-
-管理员可以在「知识巡检」页点击「立即巡检」，也可以用命令行或定时任务执行：
-
-> docker compose exec api python -m scripts.inspection
-
-有新增或重新打开的问题时退出码为 1。判断阈值在设置页「RAG 配置 → 知识巡检」里改。
