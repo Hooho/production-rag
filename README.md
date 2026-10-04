@@ -52,4 +52,4 @@ Web 控制台：
 
 > docker compose exec api python -m scripts.inspection
 
-有新增或重新打开的问题时退出码为 1。阈值见 `.env.example` 中的 `INSPECTION_*`。
+有新增或重新打开的问题时退出码为 1。判断阈值在设置页「RAG 配置 → 知识巡检」里改。

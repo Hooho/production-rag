@@ -37,9 +37,7 @@ services:
       UPLOAD_DIR: /app/uploads
       EMBEDDING_MODE: ${EMBEDDING_MODE:-demo}
       EMBEDDING_URL: http://embedding:8090/v1
-      RERANK_MODE: ${RERANK_MODE:-local}
       RERANK_URL: http://embedding:8090/v1
-      INTENT_MODE: ${INTENT_MODE:-local}
       INTENT_URL: http://intent:8091/v1
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
@@ -87,9 +85,7 @@ services:
       UPLOAD_DIR: /app/uploads
       EMBEDDING_MODE: ${EMBEDDING_MODE:-demo}
       EMBEDDING_URL: http://embedding:8090/v1
-      RERANK_MODE: ${RERANK_MODE:-local}
       RERANK_URL: http://embedding:8090/v1
-      INTENT_MODE: ${INTENT_MODE:-local}
       INTENT_URL: http://intent:8091/v1
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}

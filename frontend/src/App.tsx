@@ -2014,7 +2014,7 @@ function ContextMissingBanner({ document, onRetry }: { document: DocumentStatus;
   const running = document.steps?.some((step) => step.step_id === "context" && step.status === "running");
   return <div className="context-missing-banner">
     <span>有 {missing} 个分片缺少上下文说明（没有生成、生成失败，或早期把模型的思考过程当成了说明），这些分片检索时少了补充的背景信息。</span>
-    {document.contextual_enabled === false ? <small>当前没有启用 Contextual Retrieval（需要 MODEL_MODE=openai 且 CONTEXTUAL_RETRIEVAL 不为 off），启用后才能补全</small>
+    {document.contextual_enabled === false ? <small>当前没有启用 Contextual Retrieval（需要 MODEL_MODE=openai，且设置页里「Contextual Retrieval」是打开的），启用后才能补全</small>
       : running ? <small>正在补全中…</small>
         : document.can_edit !== false ? <button className="secondary-button" onClick={onRetry}>补全 {missing} 个</button>
           : <small>只有上传者可以补全</small>}

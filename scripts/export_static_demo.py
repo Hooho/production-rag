@@ -19,7 +19,7 @@ from app.business.definitions import DATA_TYPES, public_schema
 from app.evaluation.dataset import QUESTION_TYPES, corpus_files, load_dataset, select_split
 from app.evaluation.results import list_runs, load_run
 from app.evaluation.suites import list_suites
-from app.runtime_config import bind
+from app.runtime_config import bind, value as runtime_value
 from app.evaluation.retrieval import SUITES, VARIANTS
 from app.mysql.store import (
     after_sales,
@@ -140,7 +140,7 @@ def document_view(connection, row, current_id, group_ids):
         "visibility": permission or "private",
         "groups": shared,
         "can_edit": row["owner"] == SNAPSHOT_USER,
-        "contextual_enabled": os.getenv("CONTEXTUAL_RETRIEVAL", "true").lower() not in {"0", "false", "no"},
+        "contextual_enabled": runtime_value("contextual_retrieval"),
     })
     missing = connection.execute(select(func.count()).select_from(
         document_chunks.join(chunks, document_chunks.c.chunk_id == chunks.c.id)

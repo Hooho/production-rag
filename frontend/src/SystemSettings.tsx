@@ -70,7 +70,7 @@ const META: Record<string, Meta> = {
     when: "之后的问答。" },
   intent_local: { label: "本地意图识别", impact: "now",
     what: "规则认不出的问题，先交给本地小模型分类（知识问答、订单、数据查询…），置信度低才交给大模型。需要 intent 服务在运行。",
-    why: "部署时通过 .env 打开（INTENT_MODE=local）：小模型在本机跑，快且不要钱，大部分问题在这一步就分好了。代码默认关，是因为没有 intent 服务时（比如直接跑测试）调用会失败。",
+    why: "小模型在本机跑，快且不要钱，大部分问题在这一步就分好了。intent 服务没在运行时，每个问题会先等最多 2 秒超时，再交给大模型，这时应该关掉。",
     effect: "关掉后规则认不出的问题都交给大模型，每次多一次调用；分流结果可能变化，巡检「分错了路」的判断也按新的分流走。" },
   contextual_retrieval: { label: "Contextual Retrieval", impact: "new_docs",
     what: "上传文档时，让大模型给每个分片写一两句「这段在讲什么」，拼在分片前面参与向量和关键词检索。",
@@ -128,7 +128,6 @@ const IMPACT_TAGS: Record<Impact, { label: string; tone: string }> = {
   new_docs: { label: "只影响新文档", tone: "new" },
   judgement: { label: "影响评测与巡检判断", tone: "judge" },
 };
-const SOURCE_LABELS: Record<string, string> = { settings: "设置页", env: ".env", default: "默认" };
 const THEME_LABELS: Record<string, string> = { blue: "蓝调", green: "绿调（青绿）" };
 const TIMEZONE_LABELS: Record<string, string> = { "Asia/Shanghai": "北京时间", "Asia/Hong_Kong": "香港", "Asia/Taipei": "台北", "Asia/Tokyo": "东京", "Asia/Singapore": "新加坡", "Europe/London": "伦敦", "Europe/Berlin": "柏林", "America/New_York": "纽约", "America/Los_Angeles": "洛杉矶", UTC: "UTC" };
 
@@ -202,7 +201,7 @@ export default function SystemSettings({ page, onToast }: { page: "rag" | "syste
   const pageOf = (key: string) => data.pages?.[byKey[key]?.group ?? ""] ?? "rag";
   const history = data.history.map((entry) => ({ ...entry, changes: entry.changes.filter((item) => pageOf(item.key) === page) })).filter((entry) => entry.changes.length > 0);
   return <div className="settings-panel sys-root">
-    <p className="settings-hint sys-lead">{page === "rag" ? "影响检索和回答效果的参数，改了会改变评测分数。" : "和 RAG 效果无关的系统设置。"}这里的值优先于 .env；没改过的项沿用 .env 或代码默认值，每项右上角标着当前值的来源。保存后 {data.cache_seconds} 秒内 api 和 worker 都会生效，不用重启。向量模型、重排模型、数据库连接等改了需要重建数据或重启的配置，仍在 .env 里。</p>
+    <p className="settings-hint sys-lead">{page === "rag" ? "影响检索和回答效果的参数，改了会改变评测分数。" : "和 RAG 效果无关的系统设置。"}没改过的项用代码默认值。保存后 {data.cache_seconds} 秒内 api 和 worker 都会生效，不用重启。向量模型、重排模型、数据库连接等改了需要重建数据或重启的配置，在 .env 里。</p>
     {Object.entries(data.groups).filter(([group]) => (data.pages?.[group] ?? "rag") === page).map(([group, title]) => {
       const items = data.items.filter((item) => item.group === group);
       const draft = drafts[group] ?? {};
@@ -247,8 +246,7 @@ export default function SystemSettings({ page, onToast }: { page: "rag" | "syste
 function SettingRow({ item, value, dirty, disabled, onChange }: { item: RuntimeSettingItem; value: RuntimeSettingValue | null | undefined; dirty: boolean; disabled: boolean; onChange: (value: RuntimeSettingValue | null) => void }) {
   const meta = META[item.key] ?? { label: item.key, what: "", impact: "now" as Impact };
   const [text, setText] = useState(value === null || value === undefined ? "" : String(meta.percent && typeof value === "number" ? Math.round(value * 100) : value));
-  // 「恢复默认」后显示的是 .env 或代码默认值。
-  const resetValue = item.env_value ?? item.default;
+  const resetValue = item.default;
   const shown = value === null ? resetValue : value;
   useEffect(() => {
     setText(shown === undefined ? "" : String(meta.percent && typeof shown === "number" ? Math.round(shown * 100) : shown));
@@ -284,9 +282,7 @@ function SettingRow({ item, value, dirty, disabled, onChange }: { item: RuntimeS
       {disabled && <p className="sys-disabled-note">{META[meta.dependsOn!]?.label}关闭时这一项不起作用。</p>}
     </div>
     <div className="sys-item-control">
-      <span className={`sys-source is-${dirty ? "dirty" : item.source}`} title={item.env ? `对应 .env 里的 ${item.env}` : "这一项没有对应的 .env 变量"}>
-        {reset ? `未保存 · 将恢复为${item.env_value !== null ? " .env 的值" : "默认值"}` : dirty ? `未保存 · 原来是 ${formatValue(item, item.value)}` : `来自${SOURCE_LABELS[item.source]}`}
-      </span>
+      {dirty && <span className="sys-source is-dirty">{reset ? "未保存 · 将恢复为默认值" : `未保存 · 原来是 ${formatValue(item, item.value)}`}</span>}
       {item.type === "bool" ? <button type="button" role="switch" aria-checked={Boolean(shown)} aria-label={meta.label} disabled={disabled} className={`sys-switch ${shown ? "is-on" : ""}`} onClick={() => onChange(!shown)}><span /></button>
         : item.type === "choice" ? <select value={String(shown)} disabled={disabled} onChange={(event) => onChange(event.target.value)}>
           {(item.choices ?? []).concat(item.choices?.includes(String(shown)) ? [] : [String(shown)]).map((choice) => <option key={choice} value={choice}>{THEME_LABELS[choice] ?? (TIMEZONE_LABELS[choice] ? `${TIMEZONE_LABELS[choice]}（${choice}）` : choice)}</option>)}

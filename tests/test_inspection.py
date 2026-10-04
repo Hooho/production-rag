@@ -260,10 +260,10 @@ def test_old_title_prefix_is_removed(setup, monkeypatch):
 
 
 # 下一次定时巡检时间：从"上次定时巡检"和"保存设置"中较晚的时间算起，关闭时没有下一次。
-def test_schedule_next_run(monkeypatch):
+def test_schedule_next_run(monkeypatch, runtime):
     from datetime import datetime, timezone
     from app.inspection import schedule as schedule_module
-    monkeypatch.setenv("BUSINESS_TZ", "Asia/Shanghai")
+    runtime(business_tz='Asia/Shanghai')
     daily = {"enabled": True, "mode": "daily", "time": "08:00", "interval_hours": 24, "days": 30,
         "updated": "2026-10-02T23:00:00+00:00"}
     # 北京时间 07:00 保存，当天 08:00（UTC 00:00）执行。

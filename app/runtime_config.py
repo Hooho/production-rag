@@ -1,15 +1,14 @@
 # 运行时参数：设置页里可以修改的参数，分两个页签：「RAG 配置」（检索、回答流程、对话记忆、知识巡检、
 # 模型服务）和「系统配置」（通用）。
-# 读取顺序：设置页保存的值 > .env > 代码默认值。设置页的值存在 settings 表（key = runtime），只存改过的项；
-# 没改过的项继续跟随 .env 和默认值。.env 里的值只做类型检查（运维写错格式时退回默认值），
-# 范围检查只在设置页保存时做。
+# 当前值 = 设置页保存的值，没改过就用代码默认值。设置页的值存在 settings 表（key = runtime），只存改过的项。
+# 这些参数不再从 .env 读：以前是「设置页 > .env > 默认值」三层，同一个参数两处都能改，页面上还要标来源，
+# 容易搞不清实际生效的是哪个。.env 只留部署相关的配置（地址、密钥、模型名、数据库连接等）。
 #
 # 原来这些值是模块常量或进程启动时读一次的环境变量，改了要重启；评测模块还在导入时把常量复制了一份，
 # 改了 search.py 里的值评测那边也不变。现在所有用到的地方都在运行时调用 value() / snapshot()。
 # api 和 worker 是两个进程，各自缓存数据库里的值 CACHE_SECONDS 秒，过期后重新读，所以保存后几秒内都会生效。
 from datetime import datetime, timezone
 import logging
-import os
 import threading
 import time
 from zoneinfo import ZoneInfo, available_timezones
@@ -31,10 +30,6 @@ GROUPS = {"retrieval": "检索", "chunking": "分片", "answer": "回答流程",
 PAGES = {"retrieval": "rag", "chunking": "rag", "answer": "rag", "memory": "rag", "inspection": "rag", "service": "rag", "general": "system"}
 
 
-def on_off(text):
-    return text.strip().lower() not in {"off", "false", "0", "no"}
-
-
 # 默认值的来由（页面上的说明在 frontend/src/SystemSettings.tsx）：
 #   rerank_min_score 0.85：开发集阈值扫描，0.85 时可回答题召回仍为 1.0，无法回答题漏放率从 0.625 降到 0.25；
 #   rerank_candidates 12：12 与 20 的召回都是 1.0，12 平均耗时约 9.2 秒（20 约 13.6 秒），漏放率从 0.625 降到 0.5；
@@ -44,54 +39,52 @@ def on_off(text):
 #   embedding_timeout 120：CPU 上一批 64 段长文本可能超过原来的 20 秒；rerank_timeout 60：重排服务冷启动要加载模型；
 #   chunk_context_max_tokens 1024：给推理模型的思考过程留额度；
 #   chunk_size 800 / chunk_overlap 120：项目初始化时定的经验值，还没有评测依据。
-# 每一项：key、所属分组、类型（float / int / bool / choice）、对应的环境变量、代码默认值、允许范围。
-# env_parse 把环境变量的字符串转成值；RERANK_MODE、INTENT_MODE 这类原来是取值字符串的，转成开关。
+#   intent_local 开：intent 服务和 api 一起部署（compose.yaml）；服务没起来时调用失败会直接交给大模型。
+# 每一项：key、所属分组、类型（float / int / bool / choice）、代码默认值、允许范围。
 SPECS = [
-    {"key": "rerank_min_score", "group": "retrieval", "type": "float", "env": "RERANK_MIN_SCORE", "default": 0.85,
+    {"key": "rerank_min_score", "group": "retrieval", "type": "float", "default": 0.85,
         "min": 0.0, "max": 1.0},
     {"key": "rerank_candidates", "group": "retrieval", "type": "int", "default": 12, "min": 5, "max": 50},
     {"key": "return_limit", "group": "retrieval", "type": "int", "default": 6, "min": 1, "max": 50},
-    {"key": "parent_context", "group": "retrieval", "type": "bool", "env": "PARENT_CONTEXT", "default": True},
+    {"key": "parent_context", "group": "retrieval", "type": "bool", "default": True},
     {"key": "parent_max_chars", "group": "retrieval", "type": "int", "default": 2400, "min": 800, "max": 6000},
     {"key": "parent_radius", "group": "retrieval", "type": "int", "default": 3, "min": 1, "max": 10},
-    {"key": "rerank_enabled", "group": "retrieval", "type": "bool", "env": "RERANK_MODE", "default": True,
-        "env_parse": lambda text: text.strip().lower() != "off"},
+    {"key": "rerank_enabled", "group": "retrieval", "type": "bool", "default": True},
     {"key": "rrf_k", "group": "retrieval", "type": "int", "default": 60, "min": 1, "max": 200, "advanced": True},
     # 分片大小和重叠只在切分文档时用，改了只影响之后导入的文档；已导入的分片不变。
-    {"key": "chunk_size", "group": "chunking", "type": "int", "env": "CHUNK_SIZE", "default": 800, "min": 200,
+    {"key": "chunk_size", "group": "chunking", "type": "int", "default": 800, "min": 200,
         "max": 2000},
-    {"key": "chunk_overlap", "group": "chunking", "type": "int", "env": "CHUNK_OVERLAP", "default": 120, "min": 0,
+    {"key": "chunk_overlap", "group": "chunking", "type": "int", "default": 120, "min": 0,
         "max": 600},
-    {"key": "sufficiency_check", "group": "answer", "type": "bool", "env": "SUFFICIENCY_CHECK", "default": True},
-    {"key": "intent_local", "group": "answer", "type": "bool", "env": "INTENT_MODE", "default": False,
-        "env_parse": lambda text: text.strip().lower() == "local"},
-    {"key": "contextual_retrieval", "group": "answer", "type": "bool", "env": "CONTEXTUAL_RETRIEVAL", "default": True},
-    {"key": "memory_trigger_tokens", "group": "memory", "type": "int", "env": "MEMORY_TRIGGER_TOKENS", "default": 2400,
+    {"key": "sufficiency_check", "group": "answer", "type": "bool", "default": True},
+    {"key": "intent_local", "group": "answer", "type": "bool", "default": True},
+    {"key": "contextual_retrieval", "group": "answer", "type": "bool", "default": True},
+    {"key": "memory_trigger_tokens", "group": "memory", "type": "int", "default": 2400,
         "min": 800, "max": 16000},
-    {"key": "memory_keep_messages", "group": "memory", "type": "int", "env": "MEMORY_KEEP_MESSAGES", "default": 6,
+    {"key": "memory_keep_messages", "group": "memory", "type": "int", "default": 6,
         "min": 2, "max": 20},
-    {"key": "gap_similarity", "group": "inspection", "type": "float", "env": "INSPECTION_GAP_SIMILARITY", "default": 0.75,
+    {"key": "gap_similarity", "group": "inspection", "type": "float", "default": 0.75,
         "min": 0.5, "max": 0.95},
-    {"key": "content_min_negative", "group": "inspection", "type": "int", "env": "INSPECTION_CONTENT_MIN_NEGATIVE",
+    {"key": "content_min_negative", "group": "inspection", "type": "int",
         "default": 2, "min": 1, "max": 20},
-    {"key": "content_min_rate", "group": "inspection", "type": "float", "env": "INSPECTION_CONTENT_MIN_RATE",
+    {"key": "content_min_rate", "group": "inspection", "type": "float",
         "default": 0.3, "min": 0.1, "max": 1.0},
-    {"key": "near_miss_ratio", "group": "inspection", "type": "float", "env": "INSPECTION_NEAR_MISS_RATIO",
+    {"key": "near_miss_ratio", "group": "inspection", "type": "float",
         "default": 0.5, "min": 0.1, "max": 0.9},
-    {"key": "out_of_scope_score", "group": "inspection", "type": "float", "env": "INSPECTION_OUT_OF_SCOPE_SCORE",
+    {"key": "out_of_scope_score", "group": "inspection", "type": "float",
         "default": 0.05, "min": 0.0, "max": 0.3},
-    {"key": "system_recheck_limit", "group": "inspection", "type": "int", "env": "INSPECTION_SYSTEM_RECHECK_LIMIT",
+    {"key": "system_recheck_limit", "group": "inspection", "type": "int",
         "default": 5, "min": 0, "max": 20},
-    {"key": "business_tz", "group": "general", "type": "choice", "env": "BUSINESS_TZ", "default": "Asia/Shanghai",
+    {"key": "business_tz", "group": "general", "type": "choice", "default": "Asia/Shanghai",
         "choices": TIMEZONES},
     # 界面配色：blue 蓝调（默认），green 绿调（青绿）。只影响页面显示，所有用户一起切换。
-    {"key": "ui_theme", "group": "general", "type": "choice", "env": "UI_THEME", "default": "blue",
+    {"key": "ui_theme", "group": "general", "type": "choice", "default": "blue",
         "choices": ["blue", "green"]},
-    {"key": "embedding_timeout", "group": "service", "type": "int", "env": "EMBEDDING_TIMEOUT_SECONDS", "default": 120,
+    {"key": "embedding_timeout", "group": "service", "type": "int", "default": 120,
         "min": 10, "max": 600},
-    {"key": "rerank_timeout", "group": "service", "type": "int", "env": "RERANK_TIMEOUT_SECONDS", "default": 60,
+    {"key": "rerank_timeout", "group": "service", "type": "int", "default": 60,
         "min": 5, "max": 300},
-    {"key": "chunk_context_max_tokens", "group": "retrieval", "type": "int", "env": "CHUNK_CONTEXT_MAX_TOKENS",
+    {"key": "chunk_context_max_tokens", "group": "retrieval", "type": "int",
         "default": 1024, "min": 256, "max": 4096, "advanced": True},
 ]
 BY_KEY = {spec["key"]: spec for spec in SPECS}
@@ -101,7 +94,7 @@ _cache = {"at": 0.0, "saved": None}
 _lock = threading.Lock()
 
 
-# api、worker 启动时把数据库连接交给这里；没绑定（脚本、部分测试）时只用 .env 和默认值。
+# api、worker 启动时把数据库连接交给这里；没绑定（脚本、部分测试）时只用默认值。
 def bind(engine):
     global _engine
     _engine = engine
@@ -116,26 +109,6 @@ def bound_engine():
 def clear_cache():
     with _lock:
         _cache.update(at=0.0, saved=None)
-
-
-def parse_env(spec, text):
-    if "env_parse" in spec:
-        return spec["env_parse"](text)
-    if spec["type"] == "bool":
-        return on_off(text)
-    if spec["type"] == "int":
-        return int(float(text))
-    if spec["type"] == "float":
-        return float(text)
-    if spec["type"] == "choice":
-        # 时区不限于下拉框里的几个，只要是合法时区就接受。
-        if spec["key"] == "business_tz":
-            ZoneInfo(text.strip())
-            return text.strip()
-        if text.strip() not in spec["choices"]:
-            raise ValueError(text)
-        return text.strip()
-    raise ValueError(spec["type"])
 
 
 # 读数据库里保存的值，缓存 CACHE_SECONDS 秒。读失败（库连不上、表还没建）时当作没有保存过，不影响问答。
@@ -159,7 +132,7 @@ def saved_values():
     return values
 
 
-# 一项的当前值和来源：settings（设置页）、env（.env）、default（代码默认值）。
+# 一项的当前值和来源：settings（设置页改过）、default（代码默认值）。
 def resolve(spec, saved=None):
     saved = saved_values() if saved is None else saved
     if spec["key"] in saved:
@@ -167,12 +140,6 @@ def resolve(spec, saved=None):
             return check(spec, saved[spec["key"]], strict=False), "settings"
         except ValueError:
             logger.warning("runtime_setting_invalid key=%s", spec["key"])
-    env = spec.get("env")
-    if env and os.getenv(env) not in (None, ""):
-        try:
-            return parse_env(spec, os.environ[env]), "env"
-        except (ValueError, TypeError, KeyError):
-            logger.warning("runtime_setting_env_invalid key=%s env=%s", spec["key"], env)
     return spec["default"], "default"
 
 
@@ -220,20 +187,14 @@ def check_relations(values):
         raise ValueError("压缩时保留的消息条数要是偶数（一问一答是 2 条）")
 
 
-# 设置页展示：每一项的当前值、来源、.env 里的值和默认值。
+# 设置页展示：每一项的当前值、是否改过和默认值。
 def view(engine=None):
     saved = saved_values()
     items = []
     for spec in SPECS:
         current, source = resolve(spec, saved)
-        env_value = None
-        if spec.get("env") and os.getenv(spec["env"]) not in (None, ""):
-            try:
-                env_value = parse_env(spec, os.environ[spec["env"]])
-            except (ValueError, TypeError, KeyError):
-                env_value = None
         item = {key: spec[key] for key in ("key", "group", "type", "default") if key in spec}
-        item.update({"value": current, "source": source, "env": spec.get("env"), "env_value": env_value,
+        item.update({"value": current, "source": source,
             "advanced": bool(spec.get("advanced"))})
         for key in ("min", "max", "choices"):
             if key in spec:
@@ -249,7 +210,7 @@ def view(engine=None):
     return {"items": items, "groups": GROUPS, "pages": PAGES, "history": history[:10], "cache_seconds": CACHE_SECONDS}
 
 
-# 保存设置页的修改。changes：{key: 新值}，值为 None 表示恢复默认（删除设置页的值，回到 .env 或默认值）。
+# 保存设置页的修改。changes：{key: 新值}，值为 None 表示恢复默认（删除设置页的值，回到代码默认值）。
 # 保存前把修改合进当前生效的值整体检查一遍约束；同时记一条修改历史（谁、什么时候、旧值、新值）。
 def save(engine, changes, username):
     from .mysql.tables import settings

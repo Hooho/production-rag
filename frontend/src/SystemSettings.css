@@ -120,31 +120,16 @@
    gap: 8px;
 }
 
-/* 当前值的来源：圆角胶囊。 */
+/* 未保存的修改提示：圆角胶囊。 */
 .sys-source {
    border-radius: 999px;
    padding: 1px 8px;
    font-size: 11px;
 }
 
-.sys-source.is-settings {
-   background: var(--t-eaf1ff);
-   color: var(--t-1d4ed8);
-}
-
-.sys-source.is-env {
-   background: #fff4e5;
-   color: #b45309;
-}
-
 .sys-source.is-dirty {
    background: #fdecec;
    color: #b42318;
-}
-
-.sys-source.is-default {
-   background: var(--t-f1f3f6);
-   color: var(--t-64748b);
 }
 
 .sys-switch {

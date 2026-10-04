@@ -13,14 +13,14 @@ def items(response):
     return {item["key"]: item for item in response.json()["items"]}
 
 
-# 读取顺序：设置页 > .env > 默认；保存后立即生效（同一进程清缓存），恢复默认后回到 .env。
-def test_runtime_settings_priority_and_reset(setup, monkeypatch):
+# 当前值 = 设置页保存的值，没改过用代码默认值；.env 里同名的旧变量不再起作用。保存后立即生效（同一进程清缓存）。
+def test_runtime_settings_save_and_reset(setup, monkeypatch):
     client, store = setup
     monkeypatch.setenv("RERANK_MIN_SCORE", "0.5")
     assert client.get("/settings/runtime", headers=headers("bob")).status_code == 403
     current = items(client.get("/settings/runtime", headers=admin()))
-    assert current["rerank_min_score"]["value"] == 0.5 and current["rerank_min_score"]["source"] == "env"
-    assert current["return_limit"]["value"] == 6 and current["return_limit"]["source"] == "default"
+    assert current["rerank_min_score"]["value"] == 0.85 and current["rerank_min_score"]["source"] == "default"
+    assert "env" not in current["rerank_min_score"]
 
     saved = client.put("/settings/runtime", headers=admin(), json={"changes": {"rerank_min_score": 0.7, "return_limit": 3}})
     assert saved.status_code == 200, saved.text
@@ -32,7 +32,7 @@ def test_runtime_settings_priority_and_reset(setup, monkeypatch):
 
     reset = client.put("/settings/runtime", headers=admin(), json={"changes": {"rerank_min_score": None}})
     current = {item["key"]: item for item in reset.json()["items"]}
-    assert current["rerank_min_score"]["value"] == 0.5 and current["rerank_min_score"]["source"] == "env"
+    assert current["rerank_min_score"]["value"] == 0.85 and current["rerank_min_score"]["source"] == "default"
 
 
 # 保存时校验范围和参数之间的约束，不合规整批不保存。

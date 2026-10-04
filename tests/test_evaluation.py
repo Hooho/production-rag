@@ -357,12 +357,12 @@ def test_judge_and_generation_summary():
 
 
 # 生成评测端到端：检索后用线上回答链路生成回答，再由评审打分，结果汇总进总览和题型分组。
-def test_generation_run_end_to_end(setup, eval_dir, monkeypatch):
+def test_generation_run_end_to_end(setup, eval_dir, monkeypatch, runtime):
     client, store = setup
     models = client.app.state.models
     monkeypatch.setattr(Models, "rerank", fake_rerank)
     # 该测试验证生成链路和评审调用次数，不验证生产阈值；显式使用较低阈值保证两道可回答题都进入评审。
-    monkeypatch.setenv("RERANK_MIN_SCORE", "0.3")
+    runtime(rerank_min_score=0.3)
 
     class FakeResponder:
         def answer(self, owner, session_id, question, sources, coverage=None):

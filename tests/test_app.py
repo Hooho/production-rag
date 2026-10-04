@@ -246,10 +246,10 @@ def test_chat_returns_explainable_execution_trace(setup):
     assert all(step["status"] == "completed" for step in steps)
 
 
-def test_models_report_exact_history_sent_to_ai(monkeypatch):
+def test_models_report_exact_history_sent_to_ai(monkeypatch, runtime):
     monkeypatch.setenv("MODEL_MODE", "openai")
     monkeypatch.setenv("LLM_API_KEY", "test-key")
-    monkeypatch.setenv("INTENT_MODE", "off")
+    runtime(intent_local=False)
     models = Models()
     history = []
     for index in range(1, 5):
@@ -561,10 +561,10 @@ def test_model_query_analysis_is_strict(monkeypatch):
     assert result["queries"] == ["退货期限", "退货时间"]
 
 
-def test_response_agent_uses_checkpointer_and_summarization(monkeypatch):
+def test_response_agent_uses_checkpointer_and_summarization(monkeypatch, runtime):
     monkeypatch.setenv("MODEL_MODE", "demo")
-    monkeypatch.setenv("MEMORY_TRIGGER_TOKENS", "1")
-    monkeypatch.setenv("MEMORY_KEEP_MESSAGES", "2")
+    runtime(memory_trigger_tokens=1)
+    runtime(memory_keep_messages=2)
     monkeypatch.delenv("LANGGRAPH_DATABASE_URL", raising=False)
     models = Models()
     models.chat_model = FakeListChatModel(responses=[
@@ -597,10 +597,10 @@ def test_response_agent_streams_answer_tokens(monkeypatch):
     responder.close()
 
 
-def test_rule_classifier_runs_before_local_and_llm(monkeypatch):
+def test_rule_classifier_runs_before_local_and_llm(monkeypatch, runtime):
     monkeypatch.setenv("MODEL_MODE", "openai")
     monkeypatch.setenv("LLM_API_KEY", "test")
-    monkeypatch.setenv("INTENT_MODE", "local")
+    runtime(intent_local=True)
     models = Models()
     def fail_local(*args):
         raise AssertionError("不应调用小模型")
@@ -615,10 +615,10 @@ def test_rule_classifier_runs_before_local_and_llm(monkeypatch):
     assert result["order_id"] == "A1001"
 
 
-def test_small_model_classifier_precedes_llm(monkeypatch):
+def test_small_model_classifier_precedes_llm(monkeypatch, runtime):
     monkeypatch.setenv("MODEL_MODE", "openai")
     monkeypatch.setenv("LLM_API_KEY", "test")
-    monkeypatch.setenv("INTENT_MODE", "local")
+    runtime(intent_local=True)
     models = Models()
     monkeypatch.setattr(models, "call_url", lambda *args, **kwargs: {
         "route": "knowledge", "intent": "knowledge_qa", "confidence": 0.91,
@@ -641,10 +641,10 @@ def test_small_model_classifier_precedes_llm(monkeypatch):
 
 
 # 小模型置信度不够时，识别过程写明未采纳的原因，再由大模型决定。
-def test_intent_trace_shows_small_model_rejected_then_llm(monkeypatch):
+def test_intent_trace_shows_small_model_rejected_then_llm(monkeypatch, runtime):
     monkeypatch.setenv("MODEL_MODE", "openai")
     monkeypatch.setenv("LLM_API_KEY", "test")
-    monkeypatch.setenv("INTENT_MODE", "local")
+    runtime(intent_local=True)
     models = Models()
     monkeypatch.setattr(models, "call_url", lambda *args, **kwargs: {
         "route": "knowledge", "intent": "knowledge_qa", "confidence": 0.35, "accepted": False,
@@ -742,10 +742,10 @@ def test_rerank_decides_order_with_standalone_query():
 
 
 # fastembed 返回 logit，转换为概率后保持顺序且不会被截断成相同分数。
-def test_rerank_logits_become_probabilities(monkeypatch):
+def test_rerank_logits_become_probabilities(monkeypatch, runtime):
     monkeypatch.setenv("MODEL_MODE", "demo")
     monkeypatch.setenv("EMBEDDING_MODE", "local")
-    monkeypatch.setenv("RERANK_MODE", "local")
+    runtime(rerank_enabled=True)
     models = Models()
     monkeypatch.setattr(models, "call_url", lambda *args, **kwargs: {"data": [
         {"index": 0, "score": 6.2}, {"index": 1, "score": 1.8},
@@ -768,14 +768,14 @@ class FixedSearchStore:
 
 
 # 重排服务超时要和"未启用"区分开：抛出带原因的异常，检索照常按 RRF 返回，并把原因写进统计和诊断。
-def test_rerank_failure_is_reported(monkeypatch):
+def test_rerank_failure_is_reported(monkeypatch, runtime):
     import httpx
     from app.models import RerankError
     from app.tools.search import DocumentSearchTool
 
     monkeypatch.setenv("MODEL_MODE", "demo")
     monkeypatch.setenv("EMBEDDING_MODE", "local")
-    monkeypatch.setenv("RERANK_MODE", "local")
+    runtime(rerank_enabled=True)
     models = Models()
 
     def timeout(*args, **kwargs):
@@ -797,7 +797,7 @@ def test_rerank_failure_is_reported(monkeypatch):
 
 
 # 重排判定全部不相关时返回空来源，阈值可通过环境变量调整。
-def test_relevance_threshold_filters_all_and_is_configurable(monkeypatch):
+def test_relevance_threshold_filters_all_and_is_configurable(monkeypatch, runtime):
     from app.tools.search import DocumentSearchTool
 
     class LowReranker:
@@ -809,7 +809,7 @@ def test_relevance_threshold_filters_all_and_is_configurable(monkeypatch):
     assert result["stats"]["filtered"] == 2
     # 默认阈值已根据开发集扫描调整为 0.85；这里验证未设置环境变量时使用新的生产默认值。
     assert result["stats"]["min_score"] == 0.85
-    monkeypatch.setenv("RERANK_MIN_SCORE", "0.03")
+    runtime(rerank_min_score=0.03)
     result = DocumentSearchTool().execute(FixedSearchStore(), LowReranker(), "alice", ["天气"], "明天东京天气")
     assert len(result["sources"]) == 1
     assert result["stats"]["min_score"] == 0.03
@@ -1291,9 +1291,9 @@ def test_sources_expand_to_parent_section(setup):
 
 
 # 关闭父子分块时来源就是命中的子块本身。
-def test_parent_context_can_be_disabled(setup, monkeypatch):
+def test_parent_context_can_be_disabled(setup, monkeypatch, runtime):
     from app.tools.search import DocumentSearchTool
-    monkeypatch.setenv("PARENT_CONTEXT", "off")
+    runtime(parent_context=False)
     client, store = setup
     import_text(client, "投资笔记", long_section_document())
     result = DocumentSearchTool().execute(store, Models(), "alice", ["第20句讲的是长期持有"], "第20句")

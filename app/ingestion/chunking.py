@@ -5,7 +5,7 @@ import re
 
 from .. import runtime_config
 
-# 代码默认值；实际切分用设置页「RAG 配置 → 分片」里的值（没改过时跟随 .env 的 CHUNK_SIZE、CHUNK_OVERLAP）。
+# 代码默认值；实际切分用设置页「RAG 配置 → 分片」里的值（没改过时就是这两个值）。
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 120
 

@@ -13,9 +13,9 @@ def test_chunk_size_and_overlap_follow_arguments():
     assert all(record["effective_overlap"] == 0 for record in small)
 
 
-def test_chunk_settings_come_from_env(monkeypatch):
-    monkeypatch.setenv("CHUNK_SIZE", "400")
-    monkeypatch.setenv("CHUNK_OVERLAP", "40")
+def test_chunk_settings_come_from_runtime(runtime):
+    runtime(chunk_size=400)
+    runtime(chunk_overlap=40)
     runtime_config.clear_cache()
     text = "\n".join(f"第{index}句话写一些内容，让段落足够长。" for index in range(200))
     records = chunk_document_records(text)

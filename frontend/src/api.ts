@@ -1108,7 +1108,7 @@ export function testLLMSettings(payload: LLMSettingsInput) {
 // ---- 系统参数 ----
 // 设置页「系统参数」：每一项的当前值、来源（settings 设置页 / env .env / default 代码默认值）、默认值和允许范围。
 export type RuntimeSettingValue = boolean | number | string;
-export type RuntimeSettingItem = { key: string; group: string; type: "float" | "int" | "bool" | "choice"; default: RuntimeSettingValue; value: RuntimeSettingValue; source: "settings" | "env" | "default"; env: string | null; env_value: RuntimeSettingValue | null; advanced: boolean; min?: number; max?: number; choices?: string[] };
+export type RuntimeSettingItem = { key: string; group: string; type: "float" | "int" | "bool" | "choice"; default: RuntimeSettingValue; value: RuntimeSettingValue; source: "settings" | "default"; advanced: boolean; min?: number; max?: number; choices?: string[] };
 export type RuntimeSettingChange = { key: string; before: RuntimeSettingValue; after: RuntimeSettingValue };
 export type RuntimeSettingsView = { items: RuntimeSettingItem[]; groups: Record<string, string>; pages?: Record<string, "rag" | "system">; history: { at: string; by: string; changes: RuntimeSettingChange[] }[]; cache_seconds: number; changed?: RuntimeSettingChange[] };
 
