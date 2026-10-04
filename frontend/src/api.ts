@@ -114,6 +114,11 @@ export type DocumentStatus = {
   groups?: string[];
   can_edit?: boolean;
 };
+// Excel、CSV 的表格识别结果：每个工作表识别到几张表、表头在哪几行、是否认出了表头。
+export type TableReport = {
+  sheets: { sheet: string | null; tables: { title: string | null; first_row: number; last_row: number; columns: number; rows: number; header_rows: number[]; header_depth: number; confidence: "high" | "low" | null; single_column: boolean; column_names: string[] }[]; text_only: boolean; empty: boolean }[];
+  hidden_sheets: string[];
+};
 export type DocumentMetadata = {
   mime_type?: string | null;
   file_size_bytes?: number | null;
@@ -123,6 +128,7 @@ export type DocumentMetadata = {
   parse_strategy?: string | null;
   table_structure_inference?: boolean | null;
   ocr_languages?: string[] | null;
+  table_report?: TableReport | null;
   page_count?: number | null;
   author?: string | null;
   author_source?: string | null;
@@ -168,6 +174,8 @@ export type DocumentChunk = {
   truncated?: boolean | null;
   page_start: number | null;
   page_end: number | null;
+  row_start?: number | null;
+  row_end?: number | null;
   element_types: string[];
   element_indexes: number[];
   chunking_strategy: string | null;

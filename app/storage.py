@@ -27,6 +27,15 @@ CONTEXT_WORKERS = 4
 # 都要把几百个分片的上下文重新交给大模型生成（一本书十几分钟，还要重复付费）；缓存后只生成缓存里没有的。
 CONTEXT_CACHE_SECONDS = 7 * 24 * 3600
 
+
+# 表格分片的行号范围，拼在 Milvus 的 heading 后面：回答来源、诊断、巡检里显示位置的地方都直接读 heading，
+# 不用给 Milvus 加字段、也不用改这些页面，就能显示「报价 / 第 12–30 行」。
+def row_range(chunk_metadata):
+    start, end = chunk_metadata.get("row_start"), chunk_metadata.get("row_end")
+    if start is None:
+        return ""
+    return f"第 {start} 行" if start == end else f"第 {start}–{end} 行"
+
 class Storage:
     """组合 MySQL、Redis 和 Milvus，供 API 注入单一运行时容器。"""
 
@@ -362,7 +371,7 @@ class Storage:
         return {"id": row["id"], "owner": row["owner"], "title": row["title"], "text": row["text"],
             "position": row["position"], "vector": row["vector"], "document_id": document_id,
             "chunk_key": row["chunk_key"], "page_start": page_start if page_start is not None else -1,
-            "heading": " / ".join(heading_path)}
+            "heading": " · ".join(part for part in (" / ".join(heading_path), row_range(chunk_metadata)) if part)}
 
     # 为上传分配 doc_key 和版本号。替换已有文档时沿用它的 doc_key，版本号为已有最大版本加 1；
     # 并发上传可能算出相同版本号，由 (doc_key, version) 唯一约束拒绝后一个。
@@ -631,6 +640,8 @@ class Storage:
             "truncated": metadata_value.get("truncated"),
             "page_start": metadata_value.get("page_start"),
             "page_end": metadata_value.get("page_end"),
+            "row_start": metadata_value.get("row_start"),
+            "row_end": metadata_value.get("row_end"),
             "element_types": metadata_value.get("element_types", []),
             "element_indexes": metadata_value.get("element_indexes", []),
             "author_source": metadata_value.get("author_source"),

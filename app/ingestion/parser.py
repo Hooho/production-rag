@@ -6,7 +6,10 @@ import logging
 from pathlib import Path
 
 
-ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf", ".docx"}
+from .spreadsheet import SPREADSHEET_EXTENSIONS, spreadsheet_sections
+
+ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf", ".docx"} | SPREADSHEET_EXTENSIONS
+UNSUPPORTED_MESSAGE = "只支持 TXT、Markdown、PDF、DOCX、Excel（.xlsx）和 CSV"
 TABLE_STRUCTURE_ENABLED = True
 # 表格模型失败后整个进程都会关闭表格结构识别；以前只记录了开关结果，看不出是什么时候、因为什么关掉的。
 TABLE_FALLBACK_REASON = None
@@ -205,6 +208,15 @@ def file_properties(path):
     return result
 
 
+# 返回已安装的某个包的版本；没有安装时为 None。
+def package_version(name):
+    from importlib.metadata import PackageNotFoundError, version
+    try:
+        return version(name)
+    except PackageNotFoundError:
+        return None
+
+
 # 返回已安装的 Unstructured 版本；没有安装时为 None。
 def unstructured_version():
     from importlib.metadata import PackageNotFoundError, version
@@ -220,6 +232,10 @@ def unstructured_version():
 # TXT/Markdown 解析只需几毫秒，不做缓存。缓存读写失败只当作未命中，不影响导入。
 def extract_sections_cached(path, cache_dir):
     suffix = Path(path).suffix.lower()
+    # Excel、CSV 自己解析，几百毫秒就完成，不做缓存；表格识别结果放进统计里，记到文档元数据。
+    if suffix in SPREADSHEET_EXTENSIONS:
+        sections, report = spreadsheet_sections(path)
+        return sections, {"table_report": report}, False
     if suffix not in {".pdf", ".docx"}:
         sections, elements = extract_sections(path)
         return sections, (element_stats(elements) if elements is not None else None), False
@@ -254,8 +270,11 @@ def extract_sections_cached(path, cache_dir):
 # stats 是已经算好的元素统计（来自解析缓存）；没有时再从 elements 现算。
 def parse_metadata(path, sections, elements=None, stats=None):
     suffix = Path(path).suffix.lower()
-    parser = "unstructured" if suffix in {".pdf", ".docx"} else "plain_text"
+    parser = "unstructured" if suffix in {".pdf", ".docx"} else ("spreadsheet" if suffix in SPREADSHEET_EXTENSIONS
+        else "plain_text")
     parser_version = unstructured_version() if parser == "unstructured" else None
+    if suffix == ".xlsx":
+        parser_version = package_version("openpyxl")
     pages = []
     authors = []
     heading_detected = False
@@ -309,9 +328,11 @@ def parse_metadata(path, sections, elements=None, stats=None):
 def extract_text(path):
     suffix = Path(path).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
-        raise ValueError("只支持 TXT、Markdown、PDF 和 DOCX")
+        raise ValueError(UNSUPPORTED_MESSAGE)
     if suffix in {".txt", ".md"}:
         return Path(path).read_text(encoding="utf-8", errors="replace")
+    if suffix in SPREADSHEET_EXTENSIONS:
+        return "\n\n".join(section["text"] for section in spreadsheet_sections(path)[0])
     elements = partition_elements(path)
     texts = []
     for element in elements:
@@ -327,9 +348,11 @@ def extract_text(path):
 def extract_sections(path):
     suffix = Path(path).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
-        raise ValueError("只支持 TXT、Markdown、PDF 和 DOCX")
+        raise ValueError(UNSUPPORTED_MESSAGE)
     if suffix in {".txt", ".md"}:
         from .chunking import split_sections
         return split_sections(extract_text(path), suffix), None
+    if suffix in SPREADSHEET_EXTENSIONS:
+        return spreadsheet_sections(path)[0], None
     elements = partition_elements(path)
     return sections_from_elements(elements), elements

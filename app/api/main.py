@@ -33,6 +33,7 @@ from ..evaluation.retrieval import SUITES, VARIANTS
 from ..evaluation import regression, suites as special_suites
 from ..evaluation.evidence import locate_evidence
 from .. import runtime_config
+from ..ingestion.parser import ALLOWED_EXTENSIONS, UNSUPPORTED_MESSAGE
 from ..inspection.diagnosis import CATEGORIES as DIAGNOSIS_CATEGORIES
 from ..inspection.schedule import load_schedule, save_schedule, schedule_view
 from ..inspection.service import (CLOSE_REASONS, KINDS as INSPECTION_KINDS, LOCK_KEY as INSPECTION_LOCK, MANUAL_STATUSES,
@@ -847,8 +848,10 @@ def create_app(store=None, models=None, jwt_secret=None):
                         groups: str = Form("", max_length=700), owner=Depends(identity)):
         filename = Path(file.filename or "document").name
         suffix = Path(filename).suffix.lower()
-        if suffix not in {".txt", ".md", ".pdf", ".docx"}:
-            raise HTTPException(415, "只支持 TXT、Markdown、PDF 和 DOCX")
+        if suffix == ".xls":
+            raise HTTPException(415, "暂不支持旧版 Excel（.xls），请在 Excel 里另存为 .xlsx 后再上传")
+        if suffix not in ALLOWED_EXTENSIONS:
+            raise HTTPException(415, UNSUPPORTED_MESSAGE)
         content = file.file.read(20 * 1024 * 1024 + 1)
         if len(content) > 20 * 1024 * 1024:
             raise HTTPException(413, "单个文件不能超过 20 MB")

@@ -154,16 +154,27 @@ def chunk_document_records(content, sections=None, source_format=None, chunk_siz
         path = section.get("heading_path", [])
         prefix = " / ".join(path)
         body_limit = max(200, chunk_size - len(prefix) - 7) if prefix else chunk_size
-        overlap_size = min(chunk_overlap, body_limit // 3)
         source_parts = section.get("parts") or [{"text": section["text"]}]
+        overlap_size = min(chunk_overlap, body_limit // 3)
+        # 表格按整行切，每行自带列名，不需要重叠；按字数取上一片末尾会把半行带进下一片。
+        if all(part.get("atomic") for part in source_parts):
+            overlap_size = 0
         units = []
         for part in source_parts:
             source = {"page_number": part.get("page_number"),
                 "element_type": part.get("element_type"),
                 "element_index": part.get("element_index"),
                 "author": part.get("author")}
-            for unit in split_units(part["text"]):
-                units.append({"text": unit, "sources": [source]})
+            # Excel、CSV 的一行带着工作表名和 Excel 行号，分片据此记下「第几行到第几行」。
+            if part.get("row") is not None:
+                source["sheet"] = part.get("sheet")
+                source["row"] = part["row"]
+            # 表格的一行（atomic）整行作为一个单元，不按句子拆开：「产品：A100；单价：35」拆开后单价就和产品分家了。
+            # 一行本身超过分片长度时，仍按下面超长单元的规则硬切。
+            pieces = [part["text"].strip()] if part.get("atomic") else split_units(part["text"])
+            for unit in pieces:
+                if unit:
+                    units.append({"text": unit, "sources": [source]})
 
         # 生成单个 chunk 记录并汇总其来源范围。
         def append_chunk(items, overlap_count=0):
@@ -174,7 +185,10 @@ def chunk_document_records(content, sections=None, source_format=None, chunk_siz
             element_types = []
             element_indexes = []
             authors = []
+            rows = []
             for source in sources:
+                if source.get("row") is not None:
+                    rows.append(source["row"])
                 page_number = source.get("page_number")
                 if isinstance(page_number, int) and page_number > 0 and page_number not in pages:
                     pages.append(page_number)
@@ -196,6 +210,8 @@ def chunk_document_records(content, sections=None, source_format=None, chunk_siz
                 "author": authors[0] if len(authors) == 1 else None,
                 "author_source": "unstructured_metadata" if len(authors) == 1 else None,
                 "char_count": len(body), "token_count": None,
+                # 表格分片的行号范围（Excel 行号，CSV 是文件里的第几行）；工作表名已经在标题路径里。
+                "row_start": min(rows) if rows else None, "row_end": max(rows) if rows else None,
                 "effective_chunk_size": body_limit, "effective_overlap": overlap_count})
 
         current = []

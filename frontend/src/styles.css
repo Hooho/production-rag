@@ -6995,3 +6995,35 @@ input:focus {
    line-height: 1.7;
    white-space: pre-wrap;
 }
+
+/* Excel、CSV 的表格识别结果，放在「文档与解析信息」表格下面。 */
+.table-report {
+   border-top: 1px solid var(--t-d6e5f2);
+   padding: 10px 14px;
+   font-size: 12px;
+   color: var(--t-334e68);
+}
+
+.table-report h4 {
+   margin: 0 0 6px;
+   font-size: 12px;
+}
+
+.table-report ul {
+   margin: 0;
+   padding-left: 18px;
+   line-height: 1.8;
+}
+
+.table-report li strong {
+   margin-right: 6px;
+}
+
+.table-report p {
+   margin: 6px 0 0;
+   color: var(--t-5e7a95);
+}
+
+.table-report .is-warn {
+   color: #b1771b;
+}

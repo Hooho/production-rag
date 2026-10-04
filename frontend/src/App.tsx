@@ -6,7 +6,7 @@ import Settings from "./Settings";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import { durationTitle, formatDuration, isDurationField } from "./format";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
-import { LOGOUT_EVENT, listDataTypes, createSession, deleteDocument, retryDocument, retryDocumentContexts, listGroups, login, logout, storedUser, updateDocumentPermission, type AuthUser, type DocumentVisibility, type Group, getDocument, getSessionHistory, listDocumentChunks, listDocuments, listHistory, sendChatStream, uploadDocument, type ChatResult, type DocumentChunk, type ChunkSource, type DocumentChunkPage, type DocumentStatus, type DocumentStep, type FeedbackRecord, type HistoryRun, type RetrievalCandidate, type RetrievalDiagnosticsData, type Source, type TraceStep } from "./api";
+import { LOGOUT_EVENT, listDataTypes, createSession, deleteDocument, retryDocument, retryDocumentContexts, listGroups, login, logout, storedUser, updateDocumentPermission, type AuthUser, type TableReport, type DocumentVisibility, type Group, getDocument, getSessionHistory, listDocumentChunks, listDocuments, listHistory, sendChatStream, uploadDocument, type ChatResult, type DocumentChunk, type ChunkSource, type DocumentChunkPage, type DocumentStatus, type DocumentStep, type FeedbackRecord, type HistoryRun, type RetrievalCandidate, type RetrievalDiagnosticsData, type Source, type TraceStep } from "./api";
 
 // 评测页面放在 /eval，与知识问答、知识库并列；历史记录和评测集分别使用独立子路由。
 // 业务数据页放在 /data：录入和维护商品、订单等业务数据，也是聊天里数据查询工具的数据来源。
@@ -1918,7 +1918,34 @@ function DocumentMetadataPanel({ document }: { document: DocumentStatus }) {
     ["作者来源", metadata.author_source ?? missing],
   ];
   // 信息项较多且说明长度不一，改用带表头的表格后，字段、值和说明能稳定对应，避免三列散排造成阅读跳跃。
-  return <details className="document-metadata-panel"><summary>文档与解析信息</summary><div className="document-metadata-table-wrap"><table className="document-metadata-table"><thead><tr><th scope="col">信息项</th><th scope="col">内容</th><th scope="col">说明</th></tr></thead><tbody>{rows.map(([label, value, note]) => <tr key={label}><th scope="row">{label}</th><td className="document-metadata-value">{value}</td><td>{note ? <small>{note}</small> : <span className="document-metadata-empty">—</span>}</td></tr>)}</tbody></table></div>{!metadata.sha256 && <p className="document-metadata-note">这是较早导入的文档，尚未保存文件和解析信息；重新上传处理后会记录这些信息。</p>}</details>;
+  return <details className="document-metadata-panel"><summary>文档与解析信息</summary><div className="document-metadata-table-wrap"><table className="document-metadata-table"><thead><tr><th scope="col">信息项</th><th scope="col">内容</th><th scope="col">说明</th></tr></thead><tbody>{rows.map(([label, value, note]) => <tr key={label}><th scope="row">{label}</th><td className="document-metadata-value">{value}</td><td>{note ? <small>{note}</small> : <span className="document-metadata-empty">—</span>}</td></tr>)}</tbody></table></div>{metadata.table_report && <TableReportView report={metadata.table_report} />}{!metadata.sha256 && <p className="document-metadata-note">这是较早导入的文档，尚未保存文件和解析信息；重新上传处理后会记录这些信息。</p>}</details>;
+}
+
+// Excel、CSV 的表格识别结果：每个工作表一行，列出识别到的表、表头位置；认不出表头的标橙色，提示整理后重新上传。
+function TableReportView({ report }: { report: TableReport }) {
+  const lines = report.sheets.map((sheet, index) => {
+    const name = sheet.sheet ? `工作表「${sheet.sheet}」` : "表格";
+    if (sheet.empty) return { key: index, name, text: "空工作表，已跳过", warn: false };
+    if (sheet.text_only) return { key: index, name, text: "没有表格，只有文字，按普通文字处理", warn: false };
+    const tables = sheet.tables.map((table, tableIndex) => {
+      const label = sheet.tables.length > 1 ? `表 ${tableIndex + 1}${table.title ? `「${table.title}」` : ""}` : (table.title ? `「${table.title}」` : "");
+      const range = `第 ${table.first_row}–${table.last_row} 行，${table.rows} 行数据 × ${table.columns} 列`;
+      if (table.header_depth > 0) {
+        const header = table.header_depth > 1 ? `表头在第 ${table.header_rows.join("、")} 行（${table.header_depth} 层）` : `表头在第 ${table.header_rows[0]} 行`;
+        return { text: `${label}${label ? "：" : ""}${header}，${range}${table.confidence === "low" ? "；整张表都是文字，表头是推测的" : ""}`, warn: table.confidence === "low" };
+      }
+      if (table.single_column) return { text: `${label}${label ? "：" : ""}单列清单，${range}`, warn: false };
+      return { text: `${label}${label ? "：" : ""}没认出表头，按列字母输出（A=…；B=…），${range}`, warn: true };
+    });
+    return { key: index, name, text: tables.map((item) => item.text).join("；"), warn: tables.some((item) => item.warn) };
+  });
+  const warned = lines.some((line) => line.warn);
+  return <div className="table-report">
+    <h4>表格识别</h4>
+    <ul>{lines.map((line) => <li key={line.key} className={line.warn ? "is-warn" : ""}><strong>{line.name}</strong>{line.text}</li>)}</ul>
+    {report.hidden_sheets.length > 0 && <p>隐藏的工作表已跳过：{report.hidden_sheets.join("、")}</p>}
+    {warned && <p className="is-warn">橙色的表没有可靠的表头，回答时可能分不清每列是什么。建议把表头整理到表格第一行、一张工作表只放一张表，再重新上传。</p>}
+  </div>;
 }
 
 // 分片技术信息的一行：名称 | 值，值下面一行小字解释；warn 是需要注意的问题，橙色显示。
@@ -1928,6 +1955,7 @@ function TechRow({ label, value, note, warn }: { label: string; value: ReactNode
 
 const PARSER_NOTES: Record<string, string> = {
   unstructured: "开源文档解析库 Unstructured，把 PDF、Word 拆成标题、正文、表格等一个个元素",
+  spreadsheet: "按工作表读取表格：找出每张表和表头，每一行转成「列名：值」，按整行切分，分片记下工作表和行号",
 };
 const PARSE_STRATEGY_LABELS: Record<string, string> = { hi_res: "高精度模式（hi_res）", fast: "快速模式（fast）", ocr_only: "纯 OCR 模式（ocr_only）", default: "默认模式" };
 const PARSE_STRATEGY_NOTES: Record<string, string> = {
@@ -1964,7 +1992,9 @@ const CONTEXT_SOURCE_LABELS: Record<string, string> = {
 // 以前 11 个字段一行一个平铺，位置、正文和排查信息混在一起；作者识别不到时每个分片都重复同一句。
 function DocumentChunkCard({ chunk, expanded, onToggle }: { chunk: DocumentChunk; expanded: boolean; onToggle: () => void }) {
   const heading = chunk.heading_path.length > 0 ? chunk.heading_path.join(" / ") : "根文档";
-  const pages = chunk.page_start && chunk.page_end ? (chunk.page_start === chunk.page_end ? `第 ${chunk.page_start} 页` : `第 ${chunk.page_start}–${chunk.page_end} 页`) : "页码未记录";
+  // 表格（Excel、CSV）的分片记的是行号，没有页码。
+  const pages = chunk.row_start != null ? (chunk.row_start === chunk.row_end ? `第 ${chunk.row_start} 行` : `第 ${chunk.row_start}–${chunk.row_end} 行`)
+    : chunk.page_start && chunk.page_end ? (chunk.page_start === chunk.page_end ? `第 ${chunk.page_start} 页` : `第 ${chunk.page_start}–${chunk.page_end} 页`) : "页码未记录";
   // 文件名去掉扩展名后和标题一样时只写一次。
   const sameName = chunk.source.replace(/\.[^.]+$/, "") === chunk.document_title;
   return <article className={`document-chunk-card ${expanded ? "expanded" : ""}`}>
@@ -1975,7 +2005,7 @@ function DocumentChunkCard({ chunk, expanded, onToggle }: { chunk: DocumentChunk
         <div className="chunk-location">
           <div><span>文档</span><strong>{chunk.document_title}{sameName ? "" : ` · ${chunk.source}`}</strong></div>
           <div><span>章节</span><strong>{heading}</strong></div>
-          <div><span>页码</span><strong>{pages}</strong></div>
+          <div><span>{chunk.row_start != null ? "行号" : "页码"}</span><strong>{pages}</strong></div>
           {chunk.author && <div><span>作者</span><strong>{chunk.author}{chunk.author_source ? `（${chunk.author_source}）` : ""}</strong></div>}
         </div>
       </section>
@@ -2057,7 +2087,7 @@ function UploadModal({ file, title, versionNote, busy, replaceTarget, sameTitle,
   const needsChoice = replaceTarget === null && sameTitle !== null && mode === null;
   return <div className="upload-modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="upload-modal">
     <div className="upload-modal-heading"><div><h2>{replaceTarget ? "上传新版本" : "上传文档"}</h2><p>{replaceTarget ? `将作为《${replaceTarget.title}》的新版本，处理完成后自动替换当前的 v${replaceTarget.version ?? 1}。` : "上传后会进入解析队列，过程逐步展示。"}</p></div><button className="upload-modal-close" onClick={onClose}>×</button></div>
-    <label className="upload-dropzone"><input type="file" accept=".txt,.md,.pdf,.docx" onChange={(event) => onFileChange(event.target.files?.[0] ?? null)} />{file ? <><span className="upload-file-icon">▤</span><strong>{file.name}</strong><small>{Math.ceil(file.size / 1024)} KB · 可解析</small></> : <><span className="upload-icon">＋</span><strong>选择或拖入文档</strong><small>支持 PDF、DOCX、Markdown、TXT · 最大 20 MB</small></>}</label>
+    <label className="upload-dropzone"><input type="file" accept=".txt,.md,.pdf,.docx,.xlsx,.csv" onChange={(event) => onFileChange(event.target.files?.[0] ?? null)} />{file ? <><span className="upload-file-icon">▤</span><strong>{file.name}</strong><small>{Math.ceil(file.size / 1024)} KB · 可解析</small></> : <><span className="upload-icon">＋</span><strong>选择或拖入文档</strong><small>支持 PDF、DOCX、Excel（.xlsx）、CSV、Markdown、TXT · 最大 20 MB</small></>}</label>
     <label className="upload-title-field">文档标题<input value={title} onChange={(event) => onTitleChange(event.target.value)} placeholder="例如：2025 售后服务政策" /></label>
     {replaceTarget === null && sameTitle && <div className="same-title-choice"><p>已存在同名文档《{sameTitle.title}》（当前 v{sameTitle.version ?? 1}）。请选择：</p><label><input type="radio" checked={mode === "version"} onChange={() => onModeChange("version")} />作为它的新版本（旧版本不再参与检索）</label><label><input type="radio" checked={mode === "new"} onChange={() => onModeChange("new")} />作为一份新文档（两份同时参与检索）</label></div>}
     {!asVersion && !needsChoice && permission}
