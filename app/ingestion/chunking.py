@@ -156,8 +156,12 @@ def chunk_document_records(content, sections=None, source_format=None, chunk_siz
         body_limit = max(200, chunk_size - len(prefix) - 7) if prefix else chunk_size
         source_parts = section.get("parts") or [{"text": section["text"]}]
         overlap_size = min(chunk_overlap, body_limit // 3)
-        # 表格按整行切，每行自带列名，不需要重叠；按字数取上一片末尾会把半行带进下一片。
-        if all(part.get("atomic") for part in source_parts):
+        # 表格每一行单独一片，每行自带列名，不需要重叠。
+        # 以前按字数把好几行拼成一片（800 字约 5–10 行），问「桂林有什么好玩的」时，那一片里还有北京、西安等
+        # 其他几行，重排模型给整片的分数被拉低，过不了相关度阈值，结果搜不到。一行一片时分片只讲一件事，
+        # 回答时父子分块会把同一张表的相邻几行拼回来。
+        row_per_chunk = all(part.get("atomic") for part in source_parts)
+        if row_per_chunk:
             overlap_size = 0
         units = []
         for part in source_parts:
@@ -230,7 +234,7 @@ def chunk_document_records(content, sections=None, source_format=None, chunk_siz
                     current = []
                 continue
             candidate = unit_text if not current else chunk_sources(current)[0] + "\n" + unit_text
-            if current and len(candidate) > body_limit:
+            if current and (row_per_chunk or len(candidate) > body_limit):
                 append_chunk(current, current_overlap)
                 overlap, overlap_sources = chunk_sources(current, overlap_size)
                 overlap_item = {"text": overlap, "sources": overlap_sources}

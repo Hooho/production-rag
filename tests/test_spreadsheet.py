@@ -111,7 +111,7 @@ def test_csv_encoding_and_confidence(tmp_path):
     assert spreadsheet_sections(text_only)[1]["sheets"][0]["tables"][0]["confidence"] == "low"
 
 
-# 按整行切：一行不会被切成两半，表格分片不重叠，分片记下行号范围。
+# 按整行切：一行一片，表格分片不重叠，分片记下行号。
 def test_rows_are_not_split_and_ranges_recorded(tmp_path):
     workbook = Workbook()
     sheet = workbook.active
@@ -122,13 +122,12 @@ def test_rows_are_not_split_and_ranges_recorded(tmp_path):
     workbook.save(path)
     sections, _ = spreadsheet_sections(path)
     records = chunk_document_records("", sections=sections, chunk_size=800, chunk_overlap=120)
-    assert len(records) > 1
+    # 一行一片：问某一行的内容时，分片里没有别的行拉低重排分数。
+    assert len(records) == 60
     assert records[0]["row_start"] == 2 and records[-1]["row_end"] == 61
     for record in records:
-        assert all(line.startswith("编号：") for line in record["content"].split("\n"))
-        assert record["effective_overlap"] == 0
-    for previous, current in zip(records, records[1:]):
-        assert current["row_start"] == previous["row_end"] + 1
+        assert record["content"].startswith("编号：") and "\n" not in record["content"]
+        assert record["row_start"] == record["row_end"] and record["effective_overlap"] == 0
 
 
 # 解析入口：Excel 不走 Unstructured，识别结果记进文档元数据。

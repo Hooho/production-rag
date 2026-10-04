@@ -21,6 +21,9 @@ from pathlib import Path
 
 
 SPREADSHEET_EXTENSIONS = {".xlsx", ".csv"}
+# 表格的切分方式，记进文档元数据；改了切分方式就换一个值，同一个文件重新上传时不算重复、会按新方式重新切。
+# row：一行一片（原来是按字数把几行拼成一片）。
+TABLE_CHUNKING = "row"
 # 表头只在表格开头这么多行里找；再往下还没找到，多半是没有表头的表。
 HEADER_SEARCH_ROWS = 5
 MAX_HEADER_DEPTH = 3
