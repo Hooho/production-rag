@@ -1110,7 +1110,7 @@ export function testLLMSettings(payload: LLMSettingsInput) {
 export type RuntimeSettingValue = boolean | number | string;
 export type RuntimeSettingItem = { key: string; group: string; type: "float" | "int" | "bool" | "choice"; default: RuntimeSettingValue; value: RuntimeSettingValue; source: "settings" | "env" | "default"; env: string | null; env_value: RuntimeSettingValue | null; advanced: boolean; min?: number; max?: number; choices?: string[] };
 export type RuntimeSettingChange = { key: string; before: RuntimeSettingValue; after: RuntimeSettingValue };
-export type RuntimeSettingsView = { items: RuntimeSettingItem[]; groups: Record<string, string>; history: { at: string; by: string; changes: RuntimeSettingChange[] }[]; cache_seconds: number; changed?: RuntimeSettingChange[] };
+export type RuntimeSettingsView = { items: RuntimeSettingItem[]; groups: Record<string, string>; pages?: Record<string, "rag" | "system">; history: { at: string; by: string; changes: RuntimeSettingChange[] }[]; cache_seconds: number; changed?: RuntimeSettingChange[] };
 
 export function getRuntimeSettings() {
   return request<RuntimeSettingsView>("/settings/runtime");

@@ -7,8 +7,8 @@ import "./Settings.css";
 
 type ShowToast = (kind: "success" | "error", message: string) => void;
 // 设置页按 Tab 分组；用户、部门和数据权限只有管理员能看到。
-type SettingsTab = "model" | "system" | "users" | "groups" | "data";
-const TAB_LABELS: Record<SettingsTab, string> = { model: "模型配置", system: "系统参数", users: "用户", groups: "部门", data: "数据权限" };
+type SettingsTab = "model" | "rag" | "system" | "users" | "groups" | "data";
+const TAB_LABELS: Record<SettingsTab, string> = { model: "模型配置", rag: "RAG 配置", system: "系统配置", users: "用户", groups: "部门", data: "数据权限" };
 type Provider = { key: string; name: string; note: string; baseUrl: string; models: string[]; keyUrl?: string; defaultKey?: string };
 
 // 各厂商都提供 OpenAI 兼容接口，选中后自动填好地址和推荐模型，只需粘贴密钥。
@@ -58,14 +58,15 @@ function SettingsLoadingSkeleton({ kind }: { kind: "model" | "list" | "permissio
 // 设置页外壳：标题和 Tab 切换。
 export default function Settings({ user, onToast }: { user: AuthUser; onToast: ShowToast }) {
   const [tab, setTab] = useState<SettingsTab>("model");
-  const tabs: SettingsTab[] = user.is_admin ? ["model", "system", "users", "groups", "data"] : ["model"];
+  const tabs: SettingsTab[] = user.is_admin ? ["model", "rag", "system", "users", "groups", "data"] : ["model"];
   return <div className="settings-page">
     <header className="topbar"><div><h1>设置</h1></div></header>
     <div className="document-detail-tabs settings-tabs" role="tablist">
       {tabs.map((key) => <button key={key} role="tab" aria-selected={tab === key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{TAB_LABELS[key]}</button>)}
     </div>
     {tab === "model" && <ModelSettings isAdmin={user.is_admin} onToast={onToast} />}
-    {tab === "system" && user.is_admin && <SystemSettings onToast={onToast} />}
+    {tab === "rag" && user.is_admin && <SystemSettings key="rag" page="rag" onToast={onToast} />}
+    {tab === "system" && user.is_admin && <SystemSettings key="system" page="system" onToast={onToast} />}
     {tab === "users" && user.is_admin && <UserSettings currentUser={user.username} onToast={onToast} />}
     {tab === "groups" && user.is_admin && <GroupSettings onToast={onToast} />}
     {tab === "data" && user.is_admin && <DataPermissionSettings onToast={onToast} />}

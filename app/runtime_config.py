@@ -1,4 +1,5 @@
-# 运行时参数：设置页「系统参数」里可以修改的检索、回答流程、对话记忆、知识巡检和通用参数。
+# 运行时参数：设置页里可以修改的参数，分两个页签：「RAG 配置」（检索、回答流程、对话记忆、知识巡检）
+# 和「系统配置」（通用、模型服务）。
 # 读取顺序：设置页保存的值 > .env > 代码默认值。设置页的值存在 settings 表（key = runtime），只存改过的项；
 # 没改过的项继续跟随 .env 和默认值。.env 里的值只做类型检查（运维写错格式时退回默认值），
 # 范围检查只在设置页保存时做。
@@ -24,7 +25,10 @@ HISTORY_LIMIT = 50
 CACHE_SECONDS = 5
 TIMEZONES = ["Asia/Shanghai", "Asia/Hong_Kong", "Asia/Taipei", "Asia/Tokyo", "Asia/Singapore", "Europe/London",
     "Europe/Berlin", "America/New_York", "America/Los_Angeles", "UTC"]
-GROUPS = {"retrieval": "检索", "answer": "回答流程", "memory": "对话记忆", "inspection": "知识巡检", "general": "通用与高级"}
+GROUPS = {"retrieval": "检索", "answer": "回答流程", "memory": "对话记忆", "inspection": "知识巡检", "general": "通用",
+    "service": "模型服务"}
+# 每组放在设置页的哪个页签：rag 是影响检索和回答效果的参数，system 是和 RAG 效果无关的系统设置。
+PAGES = {"retrieval": "rag", "answer": "rag", "memory": "rag", "inspection": "rag", "general": "system", "service": "system"}
 
 
 def on_off(text):
@@ -77,11 +81,11 @@ SPECS = [
     # 界面配色：blue 蓝调（默认），green 绿调（青绿）。只影响页面显示，所有用户一起切换。
     {"key": "ui_theme", "group": "general", "type": "choice", "env": "UI_THEME", "default": "blue",
         "choices": ["blue", "green"]},
-    {"key": "embedding_timeout", "group": "general", "type": "int", "env": "EMBEDDING_TIMEOUT_SECONDS", "default": 120,
-        "min": 10, "max": 600, "advanced": True},
-    {"key": "rerank_timeout", "group": "general", "type": "int", "env": "RERANK_TIMEOUT_SECONDS", "default": 60,
-        "min": 5, "max": 300, "advanced": True},
-    {"key": "chunk_context_max_tokens", "group": "general", "type": "int", "env": "CHUNK_CONTEXT_MAX_TOKENS",
+    {"key": "embedding_timeout", "group": "service", "type": "int", "env": "EMBEDDING_TIMEOUT_SECONDS", "default": 120,
+        "min": 10, "max": 600},
+    {"key": "rerank_timeout", "group": "service", "type": "int", "env": "RERANK_TIMEOUT_SECONDS", "default": 60,
+        "min": 5, "max": 300},
+    {"key": "chunk_context_max_tokens", "group": "retrieval", "type": "int", "env": "CHUNK_CONTEXT_MAX_TOKENS",
         "default": 1024, "min": 256, "max": 4096, "advanced": True},
 ]
 BY_KEY = {spec["key"]: spec for spec in SPECS}
@@ -233,7 +237,7 @@ def view(engine=None):
         with target.connect() as connection:
             row = connection.execute(select(settings.c.value).where(settings.c.key == HISTORY_KEY)).first()
         history = (row[0] or {}).get("items", []) if row else []
-    return {"items": items, "groups": GROUPS, "history": history[:10], "cache_seconds": CACHE_SECONDS}
+    return {"items": items, "groups": GROUPS, "pages": PAGES, "history": history[:10], "cache_seconds": CACHE_SECONDS}
 
 
 # 保存设置页的修改。changes：{key: 新值}，值为 None 表示恢复默认（删除设置页的值，回到 .env 或默认值）。

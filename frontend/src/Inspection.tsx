@@ -31,7 +31,7 @@ function explain(issue: InspectionIssue): { what: string; todo: string[] } {
       case "routing":
         return { what: base + "这些问题提到了订单、库存这类业务数据，像是在查数据库，却被意图识别分到了知识库检索，知识库里当然找不到。问题出在分流，不是缺文档。", todo: ["看下面「诊断结果」里每个问题提到了哪种数据、被分到了哪里，确认用户确实是在查数据。", "调整意图识别：在数据查询的识别规则里补上这类说法（app/tools/data_query.py 的 QUERY_WORDS），或者调整本地小模型、意图识别的提示词。", "改好后点「标记已处理」，修复方式选「调了分流」。下次巡检会用现在的规则重新判断，分到数据查询就自动关闭；也可以点「重新检索」马上验证。", "如果确认这个问题其实是在问制度和流程、该由知识库回答，按内容缺口处理：补充文档。"] };
       case "retrieval":
-        return { what: base + "重新检索发现：提问人能看到的资料里有比较接近的内容，但相关度没达到阈值；或者用户明确反馈过「资料里有却说找不到」。问题多半出在检索，而不是缺文档。", todo: ["对照「诊断结果」里的得分和问题原文，确认资料是否确实存在。", "资料存在的话，考虑调整文档的标题和分块、补充同义说法，或者评估「设置 → 系统参数」里的相关度阈值是否偏高。", verify] };
+        return { what: base + "重新检索发现：提问人能看到的资料里有比较接近的内容，但相关度没达到阈值；或者用户明确反馈过「资料里有却说找不到」。问题多半出在检索，而不是缺文档。", todo: ["对照「诊断结果」里的得分和问题原文，确认资料是否确实存在。", "资料存在的话，考虑调整文档的标题和分块、补充同义说法，或者评估「设置 → RAG 配置」里的相关度阈值是否偏高。", verify] };
       case "content": {
         const limits = detail.diagnosis?.thresholds ?? { min_score: 0.85, near_miss: 0.425, out_of_scope: 0.05 };
         const close = (detail.diagnosis?.questions ?? []).some((item) => item.category === "content" && bandOf(item.full_top, limits) === "close");
@@ -917,7 +917,7 @@ function DiagnosisChunks({ chunks, owner, minScore }: { chunks?: InspectionDiagn
       <li>
         <div className="inspection-source-head">
           <span>《{chunk.title}》{chunk.version ? ` v${chunk.version}` : ""}{chunk.page_start ? ` · 第 ${chunk.page_start} 页` : ""}{chunk.heading ? ` · ${chunk.heading}` : ""}</span>
-          <span className={`inspection-source-tag ${chunk.passed ? "is-cited" : ""}`} title="检索时相关度得分要达到这个值，资料才会交给模型回答（设置 → 系统参数 → 相关度阈值）">{chunk.score.toFixed(2)} 分，{chunk.passed ? "达到" : "低于"}回答要求的 {minScore.toFixed(2)} 分</span>
+          <span className={`inspection-source-tag ${chunk.passed ? "is-cited" : ""}`} title="检索时相关度得分要达到这个值，资料才会交给模型回答（设置 → RAG 配置 → 相关度阈值）">{chunk.score.toFixed(2)} 分，{chunk.passed ? "达到" : "低于"}回答要求的 {minScore.toFixed(2)} 分</span>
           <span className={`inspection-source-tag ${chunk.visible ? "" : "is-hidden"}`}>{chunk.visible ? `${owner} 能看到` : `${owner} 看不到`}</span>
         </div>
         <SourceText text={chunk.text} truncated={chunk.truncated} />

@@ -4,7 +4,7 @@ import { applyTheme } from "./theme";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./SystemSettings.css";
 
-// 设置页「系统参数」：检索、回答流程、对话记忆、知识巡检、通用与高级五组。
+// 设置页「RAG 配置」（检索、回答流程、对话记忆、知识巡检）和「系统配置」（通用、模型服务）共用这个组件，按 page 只显示对应的组。
 // 每一项写明作用、默认值为什么是这个值、改了会怎样、什么时候生效；后端定义在 app/runtime_config.py。
 type ShowToast = (kind: "success" | "error", message: string) => void;
 // now：之后的问答即时生效；new_docs：只影响之后上传的文档；judgement：会改变评测分数或巡检结论，改前改后不能直接比较。
@@ -16,7 +16,8 @@ const GROUP_INTROS: Record<string, string> = {
   answer: "决定问答流程里多做哪几步。",
   memory: "同一个会话里对话变长后，把早期的问答压缩成摘要。保存后回答模块在下一次提问前自动重建，不用重启。",
   inspection: "只影响知识巡检怎么归类和报问题，不影响问答本身。下一次巡检或点「重新检索」时生效，已有的问题和诊断结论不会回头重算。",
-  general: "业务时区之外的几项一般只在出问题时才调。",
+  general: "和检索、回答效果无关的系统设置。",
+  service: "调用向量模型、重排模型的等待时间，一般只在出问题时才调。",
 };
 
 const META: Record<string, Meta> = {
@@ -151,7 +152,7 @@ function formatTime(value: string) {
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-export default function SystemSettings({ onToast }: { onToast: ShowToast }) {
+export default function SystemSettings({ page, onToast }: { page: "rag" | "system"; onToast: ShowToast }) {
   const [data, setData] = useState<RuntimeSettingsView | null>(null);
   // 每组各自的未保存修改：{参数: 新值}，null 表示恢复默认。
   const [drafts, setDrafts] = useState<Record<string, Record<string, RuntimeSettingValue | null>>>({});
@@ -199,10 +200,13 @@ export default function SystemSettings({ onToast }: { onToast: ShowToast }) {
     }
   }
 
-  if (!data) return <div className="settings-panel"><LoadingSkeleton label="正在加载系统参数"><SkeletonBlock className="skeleton-line" /><SkeletonBlock className="skeleton-line-short" /></LoadingSkeleton></div>;
+  if (!data) return <div className="settings-panel"><LoadingSkeleton label="正在加载配置"><SkeletonBlock className="skeleton-line" /><SkeletonBlock className="skeleton-line-short" /></LoadingSkeleton></div>;
+  // 最近修改只列本页签的参数。
+  const pageOf = (key: string) => data.pages?.[byKey[key]?.group ?? ""] ?? "rag";
+  const history = data.history.map((entry) => ({ ...entry, changes: entry.changes.filter((item) => pageOf(item.key) === page) })).filter((entry) => entry.changes.length > 0);
   return <div className="settings-panel sys-root">
-    <p className="settings-hint sys-lead">这里的值优先于 .env；没改过的项沿用 .env 或代码默认值，每项右上角标着当前值的来源。保存后 {data.cache_seconds} 秒内 api 和 worker 都会生效，不用重启。向量模型、重排模型、分片大小、数据库连接等改了需要重建数据或重启的配置，仍在 .env 里。</p>
-    {Object.entries(data.groups).map(([group, title]) => {
+    <p className="settings-hint sys-lead">{page === "rag" ? "影响检索和回答效果的参数，改了会改变评测分数。" : "和 RAG 效果无关的系统设置。"}这里的值优先于 .env；没改过的项沿用 .env 或代码默认值，每项右上角标着当前值的来源。保存后 {data.cache_seconds} 秒内 api 和 worker 都会生效，不用重启。向量模型、重排模型、分片大小、数据库连接等改了需要重建数据或重启的配置，仍在 .env 里。</p>
+    {Object.entries(data.groups).filter(([group]) => (data.pages?.[group] ?? "rag") === page).map(([group, title]) => {
       const items = data.items.filter((item) => item.group === group);
       const draft = drafts[group] ?? {};
       const dirty = Object.keys(draft);
@@ -231,10 +235,10 @@ export default function SystemSettings({ onToast }: { onToast: ShowToast }) {
         </div>}
       </section>;
     })}
-    {data.history.length > 0 && <section className="settings-section sys-group">
+    {history.length > 0 && <section className="settings-section sys-group">
       <h2>最近修改</h2>
       <ul className="sys-history">
-        {data.history.map((entry) => <li key={entry.at}>
+        {history.map((entry) => <li key={entry.at}>
           <span className="sys-history-time">{formatTime(entry.at)} · {entry.by}</span>
           <span>{entry.changes.map((item) => `${META[item.key]?.label ?? item.key}：${byKey[item.key] ? formatValue(byKey[item.key], item.before) : item.before} → ${byKey[item.key] ? formatValue(byKey[item.key], item.after) : item.after}`).join("；")}</span>
         </li>)}

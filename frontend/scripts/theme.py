@@ -129,7 +129,7 @@ def main():
         green.append(f"   --t-{key}: #{hex_of(shifted)};\n   --t-{key}-rgb: {shifted[0]} {shifted[1]} {shifted[2]};")
     header = ("/* 界面配色（由 frontend/scripts/theme.py 生成，不要手改）。\n"
         "   变量名是蓝调下的原色；绿调把每个颜色在 OKLCH 里转到青绿色相，亮度和彩度不变，深浅、渐变、透明度都和蓝调一致。\n"
-        "   在设置页「系统参数 → 通用与高级 → 界面配色」切换，<html data-theme=\"green\"> 时用绿调。 */\n")
+        "   在设置页「系统配置 → 通用 → 界面配色」切换，<html data-theme=\"green\"> 时用绿调。 */\n")
     (SRC / "theme.css").write_text(header + ":root {\n" + "\n".join(blue) + "\n}\n\n:root[data-theme=\"green\"] {\n"
         + "\n".join(green) + "\n}\n", encoding="utf-8")
     print(f"{len(used)} 个主题色")
