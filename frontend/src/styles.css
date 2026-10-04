@@ -396,15 +396,12 @@ button {
    font-size: 15px;
 }
 
+/* 系统图标（frontend/public/logo.svg，也是浏览器标签页的图标）。原来是蓝底白字的「A」。 */
 .brand-mark {
-   display: grid;
-   place-items: center;
-   width: 28px;
-   height: 28px;
-   background: var(--t-2563eb);
-   color: #ffffff;
-   border-radius: 9px 3px 9px 3px;
-   font-weight: 800;
+   display: block;
+   flex: none;
+   width: 30px;
+   height: 30px;
 }
 
 .brand-muted {

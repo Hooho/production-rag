@@ -1,0 +1,59 @@
+<svg viewBox="44 44 172 172" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Atlas Q magnifier with folders">
+  <defs>
+    <!-- 外框渐变：薄荷 → 青蓝，覆盖整个 Q -->
+    <linearGradient id="orbQ" x1="56" y1="56" x2="216" y2="216" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#a7f3d0"/>
+      <stop offset="50%"  stop-color="#6ee7b7"/>
+      <stop offset="100%" stop-color="#0ea5b7"/>
+    </linearGradient>
+    <!-- 镜框高光 -->
+    <radialGradient id="hlQ" cx="0.3" cy="0.26" r="0.3">
+      <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.75"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <!-- 镜片内侧高光（左上小弧） -->
+    <radialGradient id="lensShine" cx="0.32" cy="0.28" r="0.42">
+      <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.9"/>
+      <stop offset="40%"  stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <g id="folderShapeQ">
+      <path d="M 4 0 H 24 Q 28 0 30 4 L 34 8 H 72 Q 76 8 76 12 V 60 Q 76 64 72 64 H 4 Q 0 64 0 60 V 4 Q 0 0 4 0 Z"/>
+    </g>
+  </defs>
+
+  <!-- Q 柄：先画，在镜框之下 -->
+  <g transform="translate(128 128) rotate(45)">
+    <rect x="62" y="-8" width="50" height="16" rx="8" fill="url(#orbQ)"/>
+  </g>
+
+  <!-- 外镜框 -->
+  <circle cx="128" cy="128" r="78" fill="url(#orbQ)"/>
+
+  <!-- 白色镜片（放大镜的玻璃） -->
+  <circle cx="128" cy="128" r="60" fill="#ffffff"/>
+  <!-- 镜片边极细圈，让镜片读起来有"玻璃边" -->
+  <circle cx="128" cy="128" r="60" fill="none" stroke="#e2e8f0" stroke-width="0.8"/>
+  <!-- 镜片左上一点高光，像玻璃反光 -->
+  <circle cx="128" cy="128" r="60" fill="url(#lensShine)"/>
+
+  <!-- 镜框高光（不画到镜片上，所以用路径裁掉中心） -->
+  <path d="M 128 50 A 78 78 0 0 0 50 128 L 78 128 A 50 50 0 0 1 128 78 Z" fill="url(#hlQ)"/>
+
+  <!-- 居中的三个文件夹（薄荷叠放，轻盈） -->
+  <!-- 后 -->
+  <g transform="translate(124 116) rotate(-14) translate(-38 -32)">
+    <use href="#folderShapeQ" fill="#d1fae5" opacity="0.9"/>
+  </g>
+  <!-- 中 -->
+  <g transform="translate(132 122) rotate(8) translate(-38 -32)">
+    <use href="#folderShapeQ" fill="#6ee7b7"/>
+    <line x1="14" y1="34" x2="56" y2="34" stroke="#0f766e" stroke-width="2" stroke-linecap="round" opacity="0.35"/>
+    <line x1="14" y1="46" x2="44" y2="46" stroke="#0f766e" stroke-width="2" stroke-linecap="round" opacity="0.25"/>
+  </g>
+  <!-- 前 -->
+  <g transform="translate(126 134) rotate(-3) translate(-38 -32)">
+    <use href="#folderShapeQ" fill="#2dd4bf"/>
+    <line x1="14" y1="34" x2="58" y2="34" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" opacity="0.9"/>
+    <line x1="14" y1="46" x2="46" y2="46" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" opacity="0.7"/>
+  </g>
+</svg>

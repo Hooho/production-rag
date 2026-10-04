@@ -237,7 +237,7 @@ function App() {
       <div className={`shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
         <aside className="sidebar">
           <div className="sidebar-heading">
-            <div className="brand"><span className="brand-mark">A</span><span className="brand-label">ATLAS</span></div>
+            <div className="brand"><img className="brand-mark" src="/logo.svg" alt="" /><span className="brand-label">ATLAS</span></div>
             <button className="sidebar-toggle" type="button" onClick={toggleSidebar} aria-label={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}><svg className="sidebar-toggle-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d={sidebarCollapsed ? "m7 4 6 6-6 6" : "m13 4-6 6 6 6"} /></svg></button>
           </div>
           <button className={route.page === "chat" ? "nav-item active" : "nav-item"} onClick={() => navigate("/chat")} title="知识问答"><span className="nav-icon"><NavIcon name="spark" /></span><span className="nav-label">知识问答</span></button>
@@ -287,7 +287,7 @@ function Login({ onLogin }: { onLogin: (user: AuthUser) => void }) {
     }
   }
 
-  return <div className="login-wrap"><form className="login-card" onSubmit={(event) => { event.preventDefault(); void submit(); }}><div className="brand"><span className="brand-mark">A</span><span>ATLAS<span className="brand-muted"> / RAG</span></span></div><div className="eyebrow">知识系统</div><h1>进入你的知识空间</h1><p>使用账号密码登录。对话按用户隔离，文档按上传者设置的可见范围共享。</p><label>用户名<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" placeholder="例如 alice" /></label><label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" placeholder="输入密码" /></label>{error && <div className="field-error">{error}</div>}<button className="primary-button" type="submit" disabled={busy || !username.trim() || !password}>{busy ? "登录中…" : "登录"} <span>→</span></button></form></div>;
+  return <div className="login-wrap"><form className="login-card" onSubmit={(event) => { event.preventDefault(); void submit(); }}><div className="brand"><img className="brand-mark" src="/logo.svg" alt="" /><span>ATLAS<span className="brand-muted"> / RAG</span></span></div><div className="eyebrow">知识系统</div><h1>进入你的知识空间</h1><p>使用账号密码登录。对话按用户隔离，文档按上传者设置的可见范围共享。</p><label>用户名<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" placeholder="例如 alice" /></label><label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" placeholder="输入密码" /></label>{error && <div className="field-error">{error}</div>}<button className="primary-button" type="submit" disabled={busy || !username.trim() || !password}>{busy ? "登录中…" : "登录"} <span>→</span></button></form></div>;
 }
 
 // 会话和历史记录并行恢复时先展示聊天结构；原来会误显示空对话，加载完成后又突然替换成历史内容。
