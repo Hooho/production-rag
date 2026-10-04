@@ -1904,6 +1904,8 @@ function DocumentMetadataPanel({ document }: { document: DocumentStatus }) {
     ["解析策略", metadata.parse_strategy ? PARSE_STRATEGY_LABELS[metadata.parse_strategy] ?? metadata.parse_strategy : (processing ? missing : "不适用 / 未记录"),
       metadata.parse_strategy ? PARSE_STRATEGY_NOTES[metadata.parse_strategy] : undefined],
     ["表格结构识别", metadata.table_structure_inference == null ? missing : metadata.table_structure_inference ? "已启用" : "未启用"],
+    ...(metadata.parse_strategy === "hi_res" ? [["OCR 语言", metadata.ocr_languages?.length ? metadata.ocr_languages.map((code) => OCR_LANGUAGE_LABELS[code] ?? code).join(" + ") : "英文（未设置，导入时的默认值）",
+      metadata.ocr_languages?.length ? "PDF 里没有文字层的部分（扫描件、图片）按这些语言识别；有文字层的直接取文字" : "这份 PDF 导入时还没设置 OCR 语言，扫描件里的中文可能识别不出；重新上传同一个文件会按中文重新识别"] as [string, string, string]] : []),
     ["页数", metadata.page_count ? String(metadata.page_count) : missing],
     ["解析耗时", metadata.parse_duration_ms != null ? formatDuration(metadata.parse_duration_ms) : missing],
     ["完整处理耗时", metadata.processing_duration_ms != null ? formatDuration(metadata.processing_duration_ms) : missing],
@@ -1933,6 +1935,7 @@ const PARSE_STRATEGY_NOTES: Record<string, string> = {
   fast: "快速模式直接读取 PDF 的文字层，不做版面识别",
   ocr_only: "纯 OCR 模式把每页当图片识别文字，用于扫描件",
 };
+const OCR_LANGUAGE_LABELS: Record<string, string> = { chi_sim: "简体中文", eng: "英文" };
 const CHUNKING_LABELS: Record<string, string> = { heading_paragraph_sentence: "按标题 → 段落 → 句子切分" };
 const ELEMENT_TYPE_LABELS: Record<string, string> = {
   NarrativeText: "正文段落", Title: "标题", ListItem: "列表项", Table: "表格", FigureCaption: "图注",

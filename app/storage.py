@@ -14,6 +14,7 @@ from .mysql.store import (MySQLStore, chunks, document_chunks, document_heads, d
 from .redis.store import RedisStore
 from .models import CHUNK_CONTEXT_PROMPT_VERSION
 from .ingestion.chunking import chunk_document_records, chunk_settings
+from .ingestion.parser import OCR_LANGUAGES
 
 
 logger = logging.getLogger("production-rag")
@@ -393,13 +394,15 @@ class Storage:
                     condition)).all()
         # 内容相同但上下文检索开关、分片大小或重叠和当前设置不同，不算重复：重新上传就按当前设置重新切分、
         # 重新算向量（评测语料也靠这个在下次评测时自动按新设置重新导入）。没记分片参数的老文档按 800 / 120 算。
+        # PDF 的 OCR 语言和当前不同（以前没设置，按英文认）也不算重复，重新上传同一份扫描件就会按中文重新识别。
         chunk_size, chunk_overlap = chunk_settings()
         for document_id, document_metadata in rows:
             if doc_key is None or contextual is None:
                 return document_id
             metadata = document_metadata or {}
             if (bool(metadata.get("contextual_retrieval")) == contextual
-                    and metadata.get("chunk_size", 800) == chunk_size and metadata.get("overlap", 120) == chunk_overlap):
+                    and metadata.get("chunk_size", 800) == chunk_size and metadata.get("overlap", 120) == chunk_overlap
+                    and (metadata.get("parse_strategy") != "hi_res" or metadata.get("ocr_languages") == OCR_LANGUAGES)):
                 return document_id
         return None
 

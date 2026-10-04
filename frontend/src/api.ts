@@ -122,6 +122,7 @@ export type DocumentMetadata = {
   parser_version?: string | null;
   parse_strategy?: string | null;
   table_structure_inference?: boolean | null;
+  ocr_languages?: string[] | null;
   page_count?: number | null;
   author?: string | null;
   author_source?: string | null;

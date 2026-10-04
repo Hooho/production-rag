@@ -96,6 +96,8 @@ def test_pdf_parser_retries_hi_res_without_table_model(monkeypatch, tmp_path):
     assert calls[0]["infer_table_structure"] is True
     assert calls[1]["strategy"] == "hi_res"
     assert calls[1]["infer_table_structure"] is False
+    # 扫描件按简体中文 + 英文做 OCR，不再用 Unstructured 默认的英文。
+    assert calls[0]["languages"] == ["chi_sim", "eng"] and calls[1]["languages"] == ["chi_sim", "eng"]
 
 
 def test_element_stats_counts_categories_dropped_and_languages():

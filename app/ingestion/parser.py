@@ -11,8 +11,13 @@ TABLE_STRUCTURE_ENABLED = True
 # 表格模型失败后整个进程都会关闭表格结构识别；以前只记录了开关结果，看不出是什么时候、因为什么关掉的。
 TABLE_FALLBACK_REASON = None
 SKIPPED_CATEGORIES = {"PageBreak", "Header", "Footer"}
-# 解析缓存格式的版本号；改了章节结构或元素统计的字段时加一，旧缓存就不会再被读到。
-PARSE_CACHE_VERSION = 1
+# 解析缓存格式的版本号；改了章节结构、元素统计的字段或解析参数时加一，旧缓存就不会再被读到。
+# 2：PDF 的 OCR 语言从默认的英文改成简体中文 + 英文。
+PARSE_CACHE_VERSION = 2
+# PDF 里没有文字层的部分（扫描件、嵌在页面里的图片）用 Tesseract 做 OCR，要告诉它认哪几种语言。
+# 以前没传，Unstructured 默认按英文（eng）认，中文会被认成乱码或漏掉；镜像里装了中文字库 tesseract-ocr-chi-sim。
+# 有文字层的 PDF 直接取文字，不受这个设置影响。
+OCR_LANGUAGES = ["chi_sim", "eng"]
 logger = logging.getLogger("production-rag-ingestion")
 
 
@@ -77,6 +82,7 @@ def partition_elements(path):
         options["strategy"] = "hi_res"
         options["include_page_breaks"] = True
         options["infer_table_structure"] = TABLE_STRUCTURE_ENABLED
+        options["languages"] = list(OCR_LANGUAGES)
     try:
         return list(partition(**options))
     except Exception as error:
@@ -281,6 +287,7 @@ def parse_metadata(path, sections, elements=None, stats=None):
     result = {"parser": parser, "parser_version": parser_version,
         "parse_strategy": "hi_res" if suffix == ".pdf" else ("default" if suffix == ".docx" else None),
         "table_structure_inference": TABLE_STRUCTURE_ENABLED if suffix == ".pdf" else None,
+        "ocr_languages": list(OCR_LANGUAGES) if suffix == ".pdf" else None,
         "table_fallback_reason": TABLE_FALLBACK_REASON if suffix == ".pdf" and not TABLE_STRUCTURE_ENABLED else None,
         "page_count": total_pages or (max(pages) if pages else None),
         "text_page_count": len(pages) if pages else None,
