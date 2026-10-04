@@ -10,12 +10,16 @@ from datetime import datetime, timezone
 import json
 import os
 import sys
+import urllib.parse
+import urllib.request
 
 sys.path.insert(0, "/app")
 
 from sqlalchemy import and_, create_engine, func, or_, select
 
+from app.auth import create_access_token
 from app.business.definitions import DATA_TYPES, public_schema
+from app.mysql.tables import inspection_issues
 from app.evaluation.dataset import QUESTION_TYPES, corpus_files, load_dataset, select_split
 from app.evaluation.results import list_runs, load_run
 from app.evaluation.suites import list_suites
@@ -183,6 +187,108 @@ def chunk_view(row, document, position):
         "effective_overlap": metadata.get("effective_overlap"), "parser": doc_metadata.get("parser"),
         "parser_version": doc_metadata.get("parser_version"), "parse_strategy": doc_metadata.get("parse_strategy"),
     }
+
+
+
+# ---- 通过运行中的 API 录下新页面（专项、复测集、知识巡检、RAG / 系统配置、证据分片）用到的只读接口响应 ----
+# 这些页面的数据由多个服务函数拼出来，直接请求本容器里的 API 最省事，也保证和页面看到的完全一致。
+# 只发 GET 和只读的证据查询（POST /eval/evidence），不改任何数据。
+API_URL = os.getenv("DEMO_API_URL", "http://127.0.0.1:8000")
+
+
+def api_get(token, path):
+    request = urllib.request.Request(f"{API_URL}{path}", headers={"Authorization": f"Bearer {token}"})
+    with urllib.request.urlopen(request, timeout=120) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def api_post(token, path, payload):
+    request = urllib.request.Request(f"{API_URL}{path}", data=json.dumps(payload).encode("utf-8"), method="POST",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+    with urllib.request.urlopen(request, timeout=300) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def collect_evidence(value, found):
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if key == "evidence" and isinstance(nested, list):
+                found.extend(text.strip() for text in nested if isinstance(text, str) and text.strip())
+            else:
+                collect_evidence(nested, found)
+    elif isinstance(value, list):
+        for nested in value:
+            collect_evidence(nested, found)
+
+
+def capture_live(engine, dataset):
+    token = create_access_token(SNAPSHOT_USER, os.environ["JWT_SECRET"])
+    get = lambda path: api_get(token, path)
+    live = {"ui": get("/settings/ui"), "runtime": get("/settings/runtime")}
+
+    # 专项评测集：列表、每个评测集的题目和运行记录、每次运行的结果。
+    live["suites"] = get("/eval/suites")
+    live["suite_details"] = {}
+    live["special_runs"] = {}
+    for brief in live["suites"]["items"]:
+        detail = get(f"/eval/suites/{urllib.parse.quote(brief['id'])}")
+        live["suite_details"][brief["id"]] = detail
+        for run in detail.get("runs", []):
+            if run["id"] not in live["special_runs"] and run.get("status") != "running":
+                live["special_runs"][run["id"]] = get(f"/eval/runs/{urllib.parse.quote(run['id'])}")
+
+    # 复测集：列表、详情、每次运行的逐题结果，以及新增题目时可选的文档。
+    live["sets"] = get("/eval/sets")
+    live["set_details"] = {}
+    live["set_runs"] = {}
+    for brief in live["sets"]["items"]:
+        set_id = urllib.parse.quote(brief["id"])
+        detail = get(f"/eval/sets/{set_id}")
+        live["set_details"][brief["id"]] = detail
+        for run in detail.get("runs", []):
+            live["set_runs"][f"{brief['id']}/{run['id']}"] = get(f"/eval/sets/{set_id}/runs/{urllib.parse.quote(run['id'])}")
+    live["eval_documents"] = get("/eval/documents")
+
+    # 知识巡检：不筛选和按每个状态筛选各录一份全量列表（计数会跟着状态变），其余筛选在页面里本地做。
+    first = get("/inspection/issues?page=1&page_size=100")
+    live["inspection_lists"] = {}
+    for status in [None, *first["statuses"].keys()]:
+        query = f"&status={status}" if status else ""
+        page, items, base = 1, [], None
+        while True:
+            result = get(f"/inspection/issues?page={page}&page_size=100{query}")
+            base = base or result
+            items.extend(result["items"])
+            if len(items) >= result["total"] or not result["items"]:
+                break
+            page += 1
+        base["items"] = items
+        live["inspection_lists"][status or "all"] = base
+    with engine.connect() as connection:
+        live["inspection_diagnosis"] = {row["id"]: row["diagnosis_category"] for row in connection.execute(
+            select(inspection_issues.c.id, inspection_issues.c.diagnosis_category)).mappings()}
+    live["inspection_issues"] = {}
+    live["inspection_candidates"] = {}
+    for issue in live["inspection_lists"]["all"]["items"]:
+        issue_id = urllib.parse.quote(issue["id"])
+        live["inspection_issues"][issue["id"]] = get(f"/inspection/issues/{issue_id}")
+        live["inspection_candidates"][issue["id"]] = get(f"/inspection/issues/{issue_id}/eval-candidates")
+    live["inspection_schedule"] = get("/inspection/schedule")
+    live["inspection_runs"] = get("/inspection/runs")
+
+    # 评测题目里「看证据所在的分片」：把调参评测集和专项评测集里出现过的证据都查一遍。
+    texts = []
+    collect_evidence(dataset, texts)
+    collect_evidence(live["suite_details"], texts)
+    texts = list(dict.fromkeys(texts))
+    live["evidence"] = {"imported": True, "cuts_available": False, "items": {}}
+    for start in range(0, len(texts), 20):
+        result = api_post(token, "/eval/evidence", {"texts": [text[:1000] for text in texts[start:start + 20]]})
+        live["evidence"]["imported"] = result["imported"]
+        live["evidence"]["cuts_available"] = result["cuts_available"]
+        for original, item in zip(texts[start:start + 20], result["items"]):
+            live["evidence"]["items"][original] = item["chunks"]
+    return live
 
 
 def main():
@@ -365,6 +471,8 @@ def main():
         "eval_suites": list_suites(engine),
         "eval_run_details": eval_run_details,
         "llm_settings": llm_settings,
+        # 新页面（专项、复测集、知识巡检、RAG / 系统配置、证据分片）的只读接口响应。
+        "live": capture_live(engine, dataset),
     }
     print(json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"), default=str))
 
