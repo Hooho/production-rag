@@ -917,6 +917,16 @@ def get_issue(store, issue_id, limit=50):
                     runs.c.top_score, runs.c.duration_ms, feedback.c.rating, feedback.c.reason, feedback.c.comment).outerjoin(
                         feedback, feedback.c.run_id == runs.c.id).where(runs.c.id.in_(run_ids))).mappings().all():
                 run_rows[item["id"]] = item
+        # 被阈值挡掉的资料原文：先从诊断记录里收集分片 id，一次查出来。
+        filtered_ids = set()
+        for item in run_rows.values():
+            for candidate in filtered_candidates(item["trace"]):
+                filtered_ids.add(candidate["chunk_id"])
+        chunk_texts = {}
+        if filtered_ids:
+            for chunk_id, content, text in connection.execute(select(chunks.c.id, chunks.c.content, chunks.c.text).where(
+                    chunks.c.id.in_(filtered_ids))).all():
+                chunk_texts[chunk_id] = content or text
         error_rows = {}
         if error_ids:
             for item in connection.execute(select(run_errors).where(run_errors.c.id.in_(error_ids))).mappings().all():
@@ -934,6 +944,7 @@ def get_issue(store, issue_id, limit=50):
             item.update({"question": found["question"], "answer": answer[:8000], "top_score": found["top_score"],
                 "returned": returned_count(found["trace"]), "citation": citation_check(found["response"]),
                 "sources": source_views(found["response"]),
+                "filtered": filtered_candidates(found["trace"], chunk_texts),
                 "call": call_summary((found["response"] or {}).get("steps"), found["trace"], found["duration_ms"]),
                 "missing": missing_items(sufficiency.get("missing")),
                 "feedback": None if found["rating"] is None else {"rating": found["rating"], "reason": found["reason"],
@@ -972,6 +983,32 @@ def source_views(response, limit=1500):
             "page_start": source.get("page_start"), "version": source.get("version"), "score": source.get("score"),
             "text": text[:limit], "truncated": len(text) > limit})
     return items
+
+
+# 被相关度阈值挡掉、没交给模型的资料（得分最高的几段）。检索返回 0 段时，页面上能看到「最相关资料得分 0.73」
+# 说的是哪一段：以前只列交给模型的资料，被挡掉的一段都看不到。诊断记录里只存了前 80 字预览，
+# 原文按分片 id 到 chunks 表里取（分片所在版本已被替换、删除时退回预览）。
+def filtered_candidates(trace, texts=None, limit=3, text_limit=1500):
+    items = []
+    for name in ("retrieval", "retrieval_retry"):
+        for candidate in ((trace or {}).get(name) or {}).get("candidates") or []:
+            if candidate.get("status") == "filtered_low_score" and candidate.get("rerank_probability") is not None:
+                items.append(candidate)
+    items.sort(key=lambda item: item["rerank_probability"], reverse=True)
+    result = []
+    seen = set()
+    for candidate in items:
+        if candidate["chunk_id"] in seen:
+            continue
+        seen.add(candidate["chunk_id"])
+        text = (texts or {}).get(candidate["chunk_id"]) or candidate.get("preview") or ""
+        result.append({"chunk_id": candidate["chunk_id"], "title": candidate.get("title"),
+            "heading": candidate.get("heading"), "version": candidate.get("version"),
+            "page_start": candidate.get("page_start"), "score": candidate["rerank_probability"],
+            "text": text[:text_limit], "truncated": len(text) > text_limit})
+        if len(result) >= limit:
+            break
+    return result
 
 
 # 一次问答的调用摘要：调用了哪些模型（用在哪几步）、重排模型、提示词版本、Token 用量和总耗时。

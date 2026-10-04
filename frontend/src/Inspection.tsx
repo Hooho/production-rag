@@ -557,6 +557,7 @@ function EventItem({ issueId, event, signals, replay, onReplayed, onToast }: { i
     {event.answer && <AnswerText label="用户看到的回答：" text={event.answer} />}
     {event.signals.includes("citation_failure") && <CitationDetail event={event} />}
     <SourceList event={event} />
+    <FilteredList event={event} />
     <CallSummary event={event} />
     {event.missing && event.missing.length > 0 && <div className="inspection-event-line">缺失：{event.missing.join("；")}</div>}
     {event.feedback && event.feedback.rating === -1 && <div className="inspection-event-line">差评{event.feedback.reason ? `：${FEEDBACK_REASONS[event.feedback.reason] ?? event.feedback.reason}` : ""}{event.feedback.comment && <>（{event.feedback.comment}）</>}</div>}
@@ -748,6 +749,25 @@ function SourceList({ event }: { event: InspectionEvent }) {
           {event.citation && <span className={`inspection-source-tag ${cited.has(source.id) ? "is-cited" : ""}`}>{cited.has(source.id) ? "模型引用了" : "模型没有引用"}</span>}
         </div>
         <SourceText text={source.text} truncated={source.truncated} open={openId === source.id} onToggle={() => setOpenId(openId === source.id ? null : source.id)} />
+      </li>)}
+    </ol>
+  </details>;
+}
+
+// 被相关度阈值挡掉、没交给模型的资料。「检索返回 0 段资料、最相关资料得分 0.73」时，这里就是那 0.73 分的一段。
+function FilteredList({ event }: { event: InspectionEvent }) {
+  const [openId, setOpenId] = useState<string | null>(null);
+  const items = event.filtered ?? [];
+  if (event.source !== "run" || items.length === 0) return null;
+  return <details className="inspection-sources">
+    <summary>查看被相关度阈值挡掉的 {items.length} 段资料（没有交给模型）</summary>
+    <ol>
+      {items.map((item) => <li key={item.chunk_id}>
+        <div className="inspection-source-head">
+          <span>《{item.title}》{item.version ? ` v${item.version}` : ""}{item.page_start ? ` · 第 ${item.page_start} 页` : ""}{item.heading ? ` · ${item.heading}` : ""}</span>
+          <span className="inspection-score" title="这段资料和问题的相关度得分，满分 1；低于回答要求的分数线，所以没交给模型">得分 {item.score.toFixed(2)}，低于分数线</span>
+        </div>
+        <SourceText text={item.text} truncated={item.truncated} open={openId === item.chunk_id} onToggle={() => setOpenId(openId === item.chunk_id ? null : item.chunk_id)} />
       </li>)}
     </ol>
   </details>;

@@ -615,3 +615,17 @@ def test_parse_quality_issue_lifecycle(setup):
     verified = client.post(f"{url}/verify", headers=headers("admin")).json()
     assert verified["status"] == "resolved" and verified["detail"]["resolution"] == "第 3 版解析正常"
     assert verified["verify_result"]["parse_checked"] == 1 and "verification" not in verified["detail"]
+
+
+# 检索返回 0 段时，详情里列出被相关度阈值挡掉的资料（得分最高的在前），原文优先取分片表里的全文。
+def test_filtered_candidates_show_blocked_sources():
+    from app.inspection.service import filtered_candidates
+    trace = {"retrieval": {"candidates": [
+        {"chunk_id": "d:1", "status": "filtered_low_score", "rerank_probability": 0.4, "title": "旅游城市", "preview": "城市：北京"},
+        {"chunk_id": "d:6", "status": "filtered_low_score", "rerank_probability": 0.73, "title": "旅游城市", "preview": "城市：桂林"},
+        {"chunk_id": "d:9", "status": "not_in_pool", "rerank_probability": None, "title": "旅游城市", "preview": "x"},
+    ]}}
+    items = filtered_candidates(trace, {"d:6": "城市：桂林；代表景点：漓江、象鼻山"})
+    assert [item["chunk_id"] for item in items] == ["d:6", "d:1"]
+    assert items[0]["score"] == 0.73 and items[0]["text"] == "城市：桂林；代表景点：漓江、象鼻山"
+    assert items[1]["text"] == "城市：北京"
