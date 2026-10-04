@@ -190,7 +190,7 @@ def chunk_view(row, document, position):
 
 
 
-# ---- 通过运行中的 API 录下新页面（专项、复测集、知识巡检、RAG / 系统配置、证据分片）用到的只读接口响应 ----
+# ---- 通过运行中的 API 录下新页面（专项、复测集、知识巡检、运行概览、RAG / 系统配置、证据分片）用到的只读接口响应 ----
 # 这些页面的数据由多个服务函数拼出来，直接请求本容器里的 API 最省事，也保证和页面看到的完全一致。
 # 只发 GET 和只读的证据查询（POST /eval/evidence），不改任何数据。
 API_URL = os.getenv("DEMO_API_URL", "http://127.0.0.1:8000")
@@ -275,6 +275,9 @@ def capture_live(engine, dataset):
         live["inspection_candidates"][issue["id"]] = get(f"/inspection/issues/{issue_id}/eval-candidates")
     live["inspection_schedule"] = get("/inspection/schedule")
     live["inspection_runs"] = get("/inspection/runs")
+
+    # 运行概览：近 7、30、90 天各录一份（按导出时的日期算）。
+    live["overview"] = {str(days): get(f"/overview?days={days}") for days in (7, 30, 90)}
 
     # 评测题目里「看证据所在的分片」：把调参评测集和专项评测集里出现过的证据都查一遍。
     texts = []
