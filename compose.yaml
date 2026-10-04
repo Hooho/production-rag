@@ -11,7 +11,14 @@ services:
   # 原来由 API 和 Worker 启动时各自 create_all 并补列，两个容器同时启动可能同时改表；
   # 现在只在这里执行一次，API 和 Worker 等它成功结束后才启动。
   migrate:
-    build: .
+    build:
+      context: .
+      # 构建时下载依赖、NLTK 资源也走 .env 里的代理；没填就是直连。
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        NLTK_DATA_BASE_URL: ${NLTK_DATA_BASE_URL:-https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages}
     command: ["alembic", "upgrade", "head"]
     env_file: .env
     environment:
@@ -23,7 +30,14 @@ services:
         condition: service_healthy
     restart: "no"
   api:
-    build: .
+    build:
+      context: .
+      # 构建时下载依赖、NLTK 资源也走 .env 里的代理；没填就是直连。
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        NLTK_DATA_BASE_URL: ${NLTK_DATA_BASE_URL:-https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages}
     env_file: .env
     environment:
       MYSQL_HOST: mysql
@@ -73,7 +87,14 @@ services:
       retries: 3
       start_period: 30s
   worker:
-    build: .
+    build:
+      context: .
+      # 构建时下载依赖、NLTK 资源也走 .env 里的代理；没填就是直连。
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        NLTK_DATA_BASE_URL: ${NLTK_DATA_BASE_URL:-https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages}
     command: ["python", "-m", "scripts.worker"]
     env_file: .env
     environment:
