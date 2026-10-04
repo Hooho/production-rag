@@ -14,7 +14,9 @@ from .runtime_config import value as runtime_value
 
 
 RANGES = (7, 30, 90)
-ROUTE_LABELS = {"knowledge": "知识问答", "order": "订单查询", "data": "数据查询", "greeting": "问候", "blocked": "被安全拦截"}
+# unknown：早期的问答记录没有存分流结果（追踪摘要是后来加的）。
+ROUTE_LABELS = {"knowledge": "知识问答", "order": "订单查询", "data": "数据查询", "greeting": "问候", "blocked": "被安全拦截",
+    "unknown": "未记录（早期问答）"}
 # 问答各阶段，按处理顺序；只列耗时有意义的几步。
 STAGES = [("input_guard", "安全检查"), ("memory", "读取对话记忆"), ("intent", "意图识别"), ("query", "问题改写"),
     ("retrieval", "检索"), ("sufficiency", "充分性判断"), ("retrieval_retry", "补充检索"), ("tool", "业务工具"),
