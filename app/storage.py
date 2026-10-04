@@ -13,7 +13,7 @@ from .mysql.store import (MySQLStore, chunks, document_chunks, document_heads, d
     document_steps, documents, metadata, orders, runs, sessions, settings, user_group_members, user_groups, users)
 from .redis.store import RedisStore
 from .models import CHUNK_CONTEXT_PROMPT_VERSION
-from .ingestion.chunking import CHUNK_OVERLAP, CHUNK_SIZE, chunk_document_records
+from .ingestion.chunking import chunk_document_records, chunk_settings
 
 
 logger = logging.getLogger("production-rag")
@@ -43,7 +43,10 @@ class Storage:
     # 要等 activate_version 把 document_heads 指向它；处理失败时旧版本继续服务。
     def ingest(self, owner, title, content, models, document_id, doc_key, on_stage=None,
                sections=None, source_format=None):
-        records = chunk_document_records(content, sections=sections, source_format=source_format)
+        # 分片大小和重叠在切分前取一次，记进文档和分片的元数据：设置页改了以后，已导入的文档保持原来的切法。
+        chunk_size, chunk_overlap = chunk_settings()
+        records = chunk_document_records(content, sections=sections, source_format=source_format,
+            chunk_size=chunk_size, chunk_overlap=chunk_overlap)
         pieces = []
         for record in records:
             pieces.append(record["embedding_text"])
@@ -51,15 +54,15 @@ class Storage:
         # 记录这个版本是否带了上下文说明：开关变化后，旧版本的向量不能复用，相同内容也要重新导入。
         self.mysql.update_document_metadata(document_id, {
             "chunking_strategy": "heading_paragraph_sentence",
-            "chunk_size": CHUNK_SIZE, "overlap": CHUNK_OVERLAP,
+            "chunk_size": chunk_size, "overlap": chunk_overlap,
             "embedding_model": models.embedding_model,
             "embedding_dimension": models.dimension,
             "contextual_retrieval": contextual,
         })
         if on_stage:
             on_stage("chunking", "completed", "文本已按标题、段落和句子边界切分", {
-                "chunk_count": len(pieces), "chunk_size": CHUNK_SIZE,
-                "overlap": CHUNK_OVERLAP, "strategy": "heading_paragraph_sentence"})
+                "chunk_count": len(pieces), "chunk_size": chunk_size,
+                "overlap": chunk_overlap, "strategy": "heading_paragraph_sentence"})
         # 增量 embedding：以前每个新版本都把全部分片重新送去 embedding，改一段也要全量重算。
         # 现在先按 chunk_key 找出和当前版本文字相同的分片，复用它们的向量，只计算新增或改过的分片。
         # chunk_key 仍按不含上下文说明的文字计算：模型每次写的说明可能措辞不同，算进去就再也复用不上了。
@@ -130,7 +133,7 @@ class Storage:
             chunk_metadata.pop("content")
             chunk_metadata.pop("embedding_text")
             chunk_metadata.update({"chunking_strategy": "heading_paragraph_sentence",
-                "chunk_size": CHUNK_SIZE, "overlap": CHUNK_OVERLAP})
+                "chunk_size": chunk_size, "overlap": chunk_overlap})
             # 记录真实 token 数和是否超过模型上限；拿不到分词结果时保持为空，不猜测。
             if token_counts:
                 chunk_metadata["token_count"] = token_counts[index]
@@ -388,10 +391,15 @@ class Storage:
             rows = connection.execute(select(documents.c.id, documents.c.document_metadata).select_from(
                 document_heads.join(documents, documents.c.id == document_heads.c.current_document_id)).where(
                     condition)).all()
+        # 内容相同但上下文检索开关、分片大小或重叠和当前设置不同，不算重复：重新上传就按当前设置重新切分、
+        # 重新算向量（评测语料也靠这个在下次评测时自动按新设置重新导入）。没记分片参数的老文档按 800 / 120 算。
+        chunk_size, chunk_overlap = chunk_settings()
         for document_id, document_metadata in rows:
             if doc_key is None or contextual is None:
                 return document_id
-            if bool((document_metadata or {}).get("contextual_retrieval")) == contextual:
+            metadata = document_metadata or {}
+            if (bool(metadata.get("contextual_retrieval")) == contextual
+                    and metadata.get("chunk_size", 800) == chunk_size and metadata.get("overlap", 120) == chunk_overlap):
                 return document_id
         return None
 

@@ -3,8 +3,16 @@
 import re
 
 
+from .. import runtime_config
+
+# 代码默认值；实际切分用设置页「RAG 配置 → 分片」里的值（没改过时跟随 .env 的 CHUNK_SIZE、CHUNK_OVERLAP）。
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 120
+
+
+# 当前的分片大小和重叠：(大小, 重叠)，单位是字符。一份文档切分前取一次，整份文档用同一组值。
+def chunk_settings():
+    return runtime_config.value("chunk_size"), runtime_config.value("chunk_overlap")
 HEADING_ENDINGS = "。！？；，、：.!?;,：,、)]}）》”’"
 
 
@@ -137,14 +145,16 @@ def chunk_sources(items, tail_length=None):
 
 
 # 将每个章节切成带页码、元素类别和来源位置的结构化分块。
-def chunk_document_records(content, sections=None, source_format=None):
+def chunk_document_records(content, sections=None, source_format=None, chunk_size=None, chunk_overlap=None):
+    if chunk_size is None or chunk_overlap is None:
+        chunk_size, chunk_overlap = chunk_settings()
     selected = sections or split_sections(content, source_format)
     chunks = []
     for section in selected:
         path = section.get("heading_path", [])
         prefix = " / ".join(path)
-        body_limit = max(200, CHUNK_SIZE - len(prefix) - 7) if prefix else CHUNK_SIZE
-        overlap_size = min(CHUNK_OVERLAP, body_limit // 3)
+        body_limit = max(200, chunk_size - len(prefix) - 7) if prefix else chunk_size
+        overlap_size = min(chunk_overlap, body_limit // 3)
         source_parts = section.get("parts") or [{"text": section["text"]}]
         units = []
         for part in source_parts:

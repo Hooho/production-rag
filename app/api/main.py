@@ -743,7 +743,7 @@ def create_app(store=None, models=None, jwt_secret=None):
         replace_id = str(body.replace_document_id) if body.replace_document_id else None
         groups = check_permission(body.visibility, body.groups)
         doc_key, version = allocate_version(owner, replace_id)
-        # 带上 Contextual Retrieval 开关：开关变化后用同一内容替换文档时要重新导入。
+        # 带上 Contextual Retrieval 开关：开关、分片大小或重叠变了以后，用同一内容替换文档时要重新导入。
         duplicate = store.find_duplicate(owner, content_sha256, doc_key, app.state.models.contextual)
         if duplicate:
             return {"document_id": duplicate, "chunks": 0, "duplicate": True}

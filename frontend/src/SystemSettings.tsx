@@ -13,6 +13,7 @@ type Meta = { label: string; unit?: string; step?: number; percent?: boolean; wh
 
 const GROUP_INTROS: Record<string, string> = {
   retrieval: "决定找哪些资料、交给模型多少。全部即时生效，不动已有文档和向量，但都会改变评测分数。",
+  chunking: "上传文档时怎么切成分片。改了只影响之后上传的文档，已导入的分片不变；要让已有文档按新值切，在知识库里重新上传。评测语料下次评测时会自动按新值重新导入。",
   answer: "决定问答流程里多做哪几步。",
   memory: "同一个会话里对话变长后，把早期的问答压缩成摘要。保存后回答模块在下一次提问前自动重建，不用重启。",
   inspection: "只影响知识巡检怎么归类和报问题，不影响问答本身。下一次巡检或点「重新检索」时生效，已有的问题和诊断结论不会回头重算。",
@@ -54,6 +55,14 @@ const META: Record<string, Meta> = {
   rrf_k: { label: "RRF 平滑常数", step: 1, impact: "judgement",
     what: "向量和关键词两张排名表合并时，每条按 1 ÷（常数 + 名次）计分。", why: "60 是论文和 Milvus、Elasticsearch 的默认值。",
     effect: "越小越看重排第一的结果，越大两边越平均。开着重排时只影响谁进候选池，一般不用调。", when: "之后的问答。" },
+  chunk_size: { label: "分片大小", unit: "字", step: 50, impact: "new_docs",
+    what: "每个分片最多多少字，标题路径（如「第三章 / 退款规则」）也算在内。按标题、段落、句子的边界切，一句话本身超长时才会从中间断开。",
+    why: "项目初始化时定的经验值，还没有评测依据。要注意：当前的向量模型 bge-small-zh 最多读 512 个 token，中文大约一字一个 token，800 字加上标题前缀经常超过 512，后面的部分就没参与向量计算（关键词检索和重排仍然看全文）。在知识库里打开分片详情，「Token 数」一栏会提示有没有被截断。",
+    effect: "调小（比如 400–500），分片基本不再被截断，向量更聚焦，但一个观点更容易被切成几片，要靠父子分块在回答时拼回来，分片数也会变多。调大，每片内容更完整，但超出 512 token 的部分对向量检索不起作用。" },
+  chunk_overlap: { label: "分片重叠", unit: "字", step: 10, impact: "new_docs",
+    what: "切下一个分片时，把上一个分片末尾这么多字再带上一遍。设为 0 就是不重叠。最多是分片大小的三分之一。",
+    why: "一个观点正好跨在两个分片的交界处时，两边各只有半句，向量和关键词都不容易搜到；带上约一两句话的重叠，至少有一片是完整的。120 约为分片大小的 15%，常见取值是 10%–20%。",
+    effect: "调成 0，分片更少、没有重复内容，但交界处的内容更难被检索到。开着父子分块时，回答阶段会把相邻分片拼回来，所以重叠主要帮的是「找到」这一步，不影响「答全」。调大，重复内容变多，向量和存储跟着增加，同一段话也更容易在检索结果里出现两次。" },
   sufficiency_check: { label: "检索充分性判断", impact: "judgement",
     what: "检索后让大模型判断资料够不够：不够就换个说法补充检索一次，仍不够就拒答；只够回答一部分时，告诉回答模型缺什么。",
     why: "防止模型拿半相关的资料硬凑答案。",
@@ -193,7 +202,7 @@ export default function SystemSettings({ page, onToast }: { page: "rag" | "syste
   const pageOf = (key: string) => data.pages?.[byKey[key]?.group ?? ""] ?? "rag";
   const history = data.history.map((entry) => ({ ...entry, changes: entry.changes.filter((item) => pageOf(item.key) === page) })).filter((entry) => entry.changes.length > 0);
   return <div className="settings-panel sys-root">
-    <p className="settings-hint sys-lead">{page === "rag" ? "影响检索和回答效果的参数，改了会改变评测分数。" : "和 RAG 效果无关的系统设置。"}这里的值优先于 .env；没改过的项沿用 .env 或代码默认值，每项右上角标着当前值的来源。保存后 {data.cache_seconds} 秒内 api 和 worker 都会生效，不用重启。向量模型、重排模型、分片大小、数据库连接等改了需要重建数据或重启的配置，仍在 .env 里。</p>
+    <p className="settings-hint sys-lead">{page === "rag" ? "影响检索和回答效果的参数，改了会改变评测分数。" : "和 RAG 效果无关的系统设置。"}这里的值优先于 .env；没改过的项沿用 .env 或代码默认值，每项右上角标着当前值的来源。保存后 {data.cache_seconds} 秒内 api 和 worker 都会生效，不用重启。向量模型、重排模型、数据库连接等改了需要重建数据或重启的配置，仍在 .env 里。</p>
     {Object.entries(data.groups).filter(([group]) => (data.pages?.[group] ?? "rag") === page).map(([group, title]) => {
       const items = data.items.filter((item) => item.group === group);
       const draft = drafts[group] ?? {};

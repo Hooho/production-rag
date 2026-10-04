@@ -25,10 +25,10 @@ HISTORY_LIMIT = 50
 CACHE_SECONDS = 5
 TIMEZONES = ["Asia/Shanghai", "Asia/Hong_Kong", "Asia/Taipei", "Asia/Tokyo", "Asia/Singapore", "Europe/London",
     "Europe/Berlin", "America/New_York", "America/Los_Angeles", "UTC"]
-GROUPS = {"retrieval": "检索", "answer": "回答流程", "memory": "对话记忆", "inspection": "知识巡检", "general": "通用",
+GROUPS = {"retrieval": "检索", "chunking": "分片", "answer": "回答流程", "memory": "对话记忆", "inspection": "知识巡检", "general": "通用",
     "service": "模型服务"}
 # 每组放在设置页的哪个页签：rag 是检索、回答和模型调用相关的参数，system 是和 RAG 无关的系统设置。
-PAGES = {"retrieval": "rag", "answer": "rag", "memory": "rag", "inspection": "rag", "service": "rag", "general": "system"}
+PAGES = {"retrieval": "rag", "chunking": "rag", "answer": "rag", "memory": "rag", "inspection": "rag", "service": "rag", "general": "system"}
 
 
 def on_off(text):
@@ -42,7 +42,8 @@ def on_off(text):
 #   parent_max_chars 2400 / parent_radius 3：父块约三个 800 字分片；
 #   rrf_k 60：论文和 Milvus、Elasticsearch 的默认值；
 #   embedding_timeout 120：CPU 上一批 64 段长文本可能超过原来的 20 秒；rerank_timeout 60：重排服务冷启动要加载模型；
-#   chunk_context_max_tokens 1024：给推理模型的思考过程留额度。
+#   chunk_context_max_tokens 1024：给推理模型的思考过程留额度；
+#   chunk_size 800 / chunk_overlap 120：项目初始化时定的经验值，还没有评测依据。
 # 每一项：key、所属分组、类型（float / int / bool / choice）、对应的环境变量、代码默认值、允许范围。
 # env_parse 把环境变量的字符串转成值；RERANK_MODE、INTENT_MODE 这类原来是取值字符串的，转成开关。
 SPECS = [
@@ -56,6 +57,11 @@ SPECS = [
     {"key": "rerank_enabled", "group": "retrieval", "type": "bool", "env": "RERANK_MODE", "default": True,
         "env_parse": lambda text: text.strip().lower() != "off"},
     {"key": "rrf_k", "group": "retrieval", "type": "int", "default": 60, "min": 1, "max": 200, "advanced": True},
+    # 分片大小和重叠只在切分文档时用，改了只影响之后导入的文档；已导入的分片不变。
+    {"key": "chunk_size", "group": "chunking", "type": "int", "env": "CHUNK_SIZE", "default": 800, "min": 200,
+        "max": 2000},
+    {"key": "chunk_overlap", "group": "chunking", "type": "int", "env": "CHUNK_OVERLAP", "default": 120, "min": 0,
+        "max": 600},
     {"key": "sufficiency_check", "group": "answer", "type": "bool", "env": "SUFFICIENCY_CHECK", "default": True},
     {"key": "intent_local", "group": "answer", "type": "bool", "env": "INTENT_MODE", "default": False,
         "env_parse": lambda text: text.strip().lower() == "local"},
@@ -203,8 +209,11 @@ def check(spec, raw, strict=True):
     return number
 
 
-# 参数之间的约束：交给模型的段数不能超过候选池；压缩时保留的消息条数按一问一答成对保留，要是偶数。
+# 参数之间的约束：交给模型的段数不能超过候选池；压缩时保留的消息条数按一问一答成对保留，要是偶数；
+# 分片重叠最多是分片大小的三分之一（切分时也按这个上限截断），否则相邻分片大半内容重复。
 def check_relations(values):
+    if values["chunk_overlap"] * 3 > values["chunk_size"]:
+        raise ValueError("分片重叠不能超过分片大小的三分之一")
     if values["return_limit"] > values["rerank_candidates"]:
         raise ValueError("交给模型的段数不能超过候选池大小")
     if values["memory_keep_messages"] % 2:
