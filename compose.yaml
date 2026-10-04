@@ -13,11 +13,10 @@ services:
   migrate:
     build:
       context: .
-      # 构建时下载依赖、NLTK 资源也走 .env 里的代理；没填就是直连。
+      # 只有下载 NLTK 资源（GitHub）这一步走 .env 里的代理；apt、pip 仍然直连，和原来一样。
+      # 原来把 HTTP_PROXY 整个传给构建，apt 也改走代理，下载 Debian 包失败（apt-get 返回 100）。
       args:
-        HTTP_PROXY: ${HTTP_PROXY:-}
-        HTTPS_PROXY: ${HTTPS_PROXY:-}
-        NO_PROXY: ${NO_PROXY:-}
+        NLTK_PROXY: ${HTTPS_PROXY:-}
         NLTK_DATA_BASE_URL: ${NLTK_DATA_BASE_URL:-https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages}
     command: ["alembic", "upgrade", "head"]
     env_file: .env
@@ -32,11 +31,10 @@ services:
   api:
     build:
       context: .
-      # 构建时下载依赖、NLTK 资源也走 .env 里的代理；没填就是直连。
+      # 只有下载 NLTK 资源（GitHub）这一步走 .env 里的代理；apt、pip 仍然直连，和原来一样。
+      # 原来把 HTTP_PROXY 整个传给构建，apt 也改走代理，下载 Debian 包失败（apt-get 返回 100）。
       args:
-        HTTP_PROXY: ${HTTP_PROXY:-}
-        HTTPS_PROXY: ${HTTPS_PROXY:-}
-        NO_PROXY: ${NO_PROXY:-}
+        NLTK_PROXY: ${HTTPS_PROXY:-}
         NLTK_DATA_BASE_URL: ${NLTK_DATA_BASE_URL:-https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages}
     env_file: .env
     environment:
@@ -89,11 +87,10 @@ services:
   worker:
     build:
       context: .
-      # 构建时下载依赖、NLTK 资源也走 .env 里的代理；没填就是直连。
+      # 只有下载 NLTK 资源（GitHub）这一步走 .env 里的代理；apt、pip 仍然直连，和原来一样。
+      # 原来把 HTTP_PROXY 整个传给构建，apt 也改走代理，下载 Debian 包失败（apt-get 返回 100）。
       args:
-        HTTP_PROXY: ${HTTP_PROXY:-}
-        HTTPS_PROXY: ${HTTPS_PROXY:-}
-        NO_PROXY: ${NO_PROXY:-}
+        NLTK_PROXY: ${HTTPS_PROXY:-}
         NLTK_DATA_BASE_URL: ${NLTK_DATA_BASE_URL:-https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages}
     command: ["python", "-m", "scripts.worker"]
     env_file: .env

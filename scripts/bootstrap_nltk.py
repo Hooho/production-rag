@@ -27,7 +27,7 @@ def download(url):
         except requests.RequestException as error:
             if attempt == ATTEMPTS:
                 raise SystemExit(f"下载 {url} 失败（已重试 {ATTEMPTS} 次）：{error}\n"
-                    "GitHub 访问不了时，在 .env 里填 HTTP_PROXY / HTTPS_PROXY，或设置构建参数 NLTK_DATA_BASE_URL 换成镜像地址。")
+                    "GitHub 访问不了时，在 .env 里填 HTTPS_PROXY（构建时作为 NLTK_PROXY 传入），或设置构建参数 NLTK_DATA_BASE_URL 换成镜像地址。")
             print(f"下载失败，{attempt * 3} 秒后重试（第 {attempt} 次）：{error}", flush=True)
             time.sleep(attempt * 3)
 
