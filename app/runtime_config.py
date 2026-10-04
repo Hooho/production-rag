@@ -1,5 +1,5 @@
-# 运行时参数：设置页里可以修改的参数，分两个页签：「RAG 配置」（检索、回答流程、对话记忆、知识巡检）
-# 和「系统配置」（通用、模型服务）。
+# 运行时参数：设置页里可以修改的参数，分两个页签：「RAG 配置」（检索、回答流程、对话记忆、知识巡检、
+# 模型服务）和「系统配置」（通用）。
 # 读取顺序：设置页保存的值 > .env > 代码默认值。设置页的值存在 settings 表（key = runtime），只存改过的项；
 # 没改过的项继续跟随 .env 和默认值。.env 里的值只做类型检查（运维写错格式时退回默认值），
 # 范围检查只在设置页保存时做。
@@ -27,8 +27,8 @@ TIMEZONES = ["Asia/Shanghai", "Asia/Hong_Kong", "Asia/Taipei", "Asia/Tokyo", "As
     "Europe/Berlin", "America/New_York", "America/Los_Angeles", "UTC"]
 GROUPS = {"retrieval": "检索", "answer": "回答流程", "memory": "对话记忆", "inspection": "知识巡检", "general": "通用",
     "service": "模型服务"}
-# 每组放在设置页的哪个页签：rag 是影响检索和回答效果的参数，system 是和 RAG 效果无关的系统设置。
-PAGES = {"retrieval": "rag", "answer": "rag", "memory": "rag", "inspection": "rag", "general": "system", "service": "system"}
+# 每组放在设置页的哪个页签：rag 是检索、回答和模型调用相关的参数，system 是和 RAG 无关的系统设置。
+PAGES = {"retrieval": "rag", "answer": "rag", "memory": "rag", "inspection": "rag", "service": "rag", "general": "system"}
 
 
 def on_off(text):

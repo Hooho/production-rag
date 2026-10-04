@@ -1626,7 +1626,7 @@ def create_app(store=None, models=None, jwt_secret=None):
     def ui_settings():
         return {"theme": runtime_config.value("ui_theme")}
 
-    # 设置页「RAG 配置」（检索、回答流程、对话记忆、知识巡检）和「系统配置」（通用、模型服务）共用这两个接口。
+    # 设置页「RAG 配置」（检索、回答流程、对话记忆、知识巡检、模型服务）和「系统配置」（通用）共用这两个接口。
     # 返回每一项的当前值、来源（设置页 / .env / 默认）、默认值和允许范围，以及最近的修改记录。
     @app.get("/settings/runtime", dependencies=[Depends(require_admin)])
     def runtime_settings_get():

@@ -4,12 +4,12 @@ import { applyTheme } from "./theme";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./SystemSettings.css";
 
-// 设置页「RAG 配置」（检索、回答流程、对话记忆、知识巡检）和「系统配置」（通用、模型服务）共用这个组件，按 page 只显示对应的组。
+// 设置页「RAG 配置」（检索、回答流程、对话记忆、知识巡检、模型服务）和「系统配置」（通用）共用这个组件，按 page 只显示对应的组。
 // 每一项写明作用、默认值为什么是这个值、改了会怎样、什么时候生效；后端定义在 app/runtime_config.py。
 type ShowToast = (kind: "success" | "error", message: string) => void;
 // now：之后的问答即时生效；new_docs：只影响之后上传的文档；judgement：会改变评测分数或巡检结论，改前改后不能直接比较。
 type Impact = "now" | "new_docs" | "judgement";
-type Meta = { label: string; unit?: string; step?: number; percent?: boolean; what: string; why: string; effect: string; when: string; impact: Impact; dependsOn?: string };
+type Meta = { label: string; unit?: string; step?: number; percent?: boolean; what: string; why?: string; effect?: string; when?: string; impact: Impact; dependsOn?: string };
 
 const GROUP_INTROS: Record<string, string> = {
   retrieval: "决定找哪些资料、交给模型多少。全部即时生效，不动已有文档和向量，但都会改变评测分数。",
@@ -105,21 +105,13 @@ const META: Record<string, Meta> = {
     effect: "调大，验证更全，巡检更慢、花费更多；调小或设为 0 更省，修好的问题要手动验证才会关闭。",
     when: "下一次巡检。" },
   business_tz: { label: "业务时区", impact: "now",
-    what: "数据查询里的「今天」「本周」，以及定时巡检的「每天几点」，都按它算。", why: "业务在中国。",
-    effect: "「今天」「本周」的边界和定时巡检的执行时刻跟着移动。已有记录都按 UTC 存，不受影响。",
-    when: "下一次查询；定时巡检的下次执行时间立即重算。" },
+    what: "数据查询里的「今天」「本周」，以及定时巡检的「每天几点」，都按它算。已有记录按 UTC 存，改了不受影响。" },
   ui_theme: { label: "界面配色", impact: "now",
-    what: "整个系统的主色调：按钮、链接、选中状态、文字、边框和背景的色调一起换。表示状态的颜色（通过是绿、失败是红、警告是橙）和图表里的数据颜色不变。",
-    why: "原来的界面就是蓝调；绿调是把每个颜色转成同样深浅的青绿色，浅色、渐变和透明度都和蓝调一致。",
-    effect: "所有用户的界面一起切换，只影响显示，不影响数据和问答。",
-    when: "保存后当前页面立即切换；其他人刷新页面后生效。" },
+    what: "整个系统的主色调：按钮、链接、选中状态、文字、边框和背景的色调一起换。表示状态的颜色（通过是绿、失败是红、警告是橙）和图表里的数据颜色不变。所有用户一起切换，其他人刷新页面后生效。" },
   embedding_timeout: { label: "向量请求超时", unit: "秒", step: 10, impact: "now",
-    what: "调用向量模型最多等多久。",
-    why: "原来是 20 秒。开启 Contextual Retrieval 后分片变长，CPU 上一批 64 段会超过 20 秒，整份文档导入失败，所以放宽到 120 秒。",
-    effect: "调小，大文档导入容易超时失败，重试要从头来；调大，服务卡住时等得更久才报错。", when: "下一次调用。" },
+    what: "调用向量模型最多等多久。" },
   rerank_timeout: { label: "重排请求超时", unit: "秒", step: 5, impact: "now",
-    what: "调用重排模型最多等多久。", why: "原来是 5 秒，重排服务启动后第一次请求要加载模型，会被误判成「重排不可用」。",
-    effect: "调小，服务刚启动时的前几个问题可能退化成不重排；调大，重排卡住时用户等得更久。", when: "下一次调用。" },
+    what: "调用重排模型最多等多久。" },
   chunk_context_max_tokens: { label: "分片说明的输出上限", unit: "Token", step: 128, impact: "new_docs", dependsOn: "contextual_retrieval",
     what: "给每个分片写说明时，大模型最多输出多少。",
     why: "说明本身只有一两句，给 1024 是为了给推理模型的思考过程留额度；原来额度太小，半截思考过程被当成说明写进了分片。",
@@ -248,7 +240,7 @@ export default function SystemSettings({ page, onToast }: { page: "rag" | "syste
 }
 
 function SettingRow({ item, value, dirty, disabled, onChange }: { item: RuntimeSettingItem; value: RuntimeSettingValue | null | undefined; dirty: boolean; disabled: boolean; onChange: (value: RuntimeSettingValue | null) => void }) {
-  const meta = META[item.key] ?? { label: item.key, what: "", why: "", effect: "", when: "", impact: "now" as Impact };
+  const meta = META[item.key] ?? { label: item.key, what: "", impact: "now" as Impact };
   const [text, setText] = useState(value === null || value === undefined ? "" : String(meta.percent && typeof value === "number" ? Math.round(value * 100) : value));
   // 「恢复默认」后显示的是 .env 或代码默认值。
   const resetValue = item.env_value ?? item.default;
@@ -279,11 +271,11 @@ function SettingRow({ item, value, dirty, disabled, onChange }: { item: RuntimeS
         <span className={`sys-impact is-${tag.tone}`}>{tag.label}</span>
       </div>
       <p className="sys-what">{meta.what}</p>
-      <dl className="sys-notes">
-        <div><dt>为什么是默认值</dt><dd>默认 {formatValue(item, item.default)}。{meta.why}</dd></div>
-        <div><dt>改了会怎样</dt><dd>{meta.effect}</dd></div>
-        <div><dt>什么时候生效</dt><dd>{meta.when}</dd></div>
-      </dl>
+      {(meta.why || meta.effect || meta.when) && <dl className="sys-notes">
+        {meta.why && <div><dt>为什么是默认值</dt><dd>默认 {formatValue(item, item.default)}。{meta.why}</dd></div>}
+        {meta.effect && <div><dt>改了会怎样</dt><dd>{meta.effect}</dd></div>}
+        {meta.when && <div><dt>什么时候生效</dt><dd>{meta.when}</dd></div>}
+      </dl>}
       {disabled && <p className="sys-disabled-note">{META[meta.dependsOn!]?.label}关闭时这一项不起作用。</p>}
     </div>
     <div className="sys-item-control">
