@@ -754,21 +754,21 @@ function SourceList({ event }: { event: InspectionEvent }) {
   </details>;
 }
 
-// 被相关度阈值挡掉、没交给模型的资料。「检索返回 0 段资料、最相关资料得分 0.73」时，这里就是那 0.73 分的一段。
+// 被相关度阈值挡掉、没交给模型的资料里得分最高的一段，样式和问题上方诊断的「查看得分最高的资料」一致。
+// 「检索返回 0 段资料、最相关资料得分 0.73」时，这里就是那 0.73 分的一段。
 function FilteredList({ event }: { event: InspectionEvent }) {
-  const [openId, setOpenId] = useState<string | null>(null);
-  const items = event.filtered ?? [];
-  if (event.source !== "run" || items.length === 0) return null;
+  const chunk = event.filtered?.[0];
+  if (event.source !== "run" || !chunk) return null;
   return <details className="inspection-sources">
-    <summary>查看被相关度阈值挡掉的 {items.length} 段资料（没有交给模型）</summary>
+    <summary>查看得分最高的资料（{chunk.score.toFixed(2)} 分）</summary>
     <ol>
-      {items.map((item) => <li key={item.chunk_id}>
+      <li>
         <div className="inspection-source-head">
-          <span>《{item.title}》{item.version ? ` v${item.version}` : ""}{item.page_start ? ` · 第 ${item.page_start} 页` : ""}{item.heading ? ` · ${item.heading}` : ""}</span>
-          <span className="inspection-score" title="这段资料和问题的相关度得分，满分 1；低于回答要求的分数线，所以没交给模型">得分 {item.score.toFixed(2)}，低于分数线</span>
+          <span>《{chunk.title}》{chunk.version ? ` v${chunk.version}` : ""}{chunk.page_start ? ` · 第 ${chunk.page_start} 页` : ""}{chunk.heading ? ` · ${chunk.heading}` : ""}</span>
+          <span className="inspection-source-tag" title="检索时相关度得分要达到这个值，资料才会交给模型回答（设置 → RAG 配置 → 相关度阈值）">{chunk.score.toFixed(2)} 分，低于回答要求{typeof chunk.min_score === "number" ? `的 ${chunk.min_score.toFixed(2)} 分` : ""}，没有交给模型</span>
         </div>
-        <SourceText text={item.text} truncated={item.truncated} open={openId === item.chunk_id} onToggle={() => setOpenId(openId === item.chunk_id ? null : item.chunk_id)} />
-      </li>)}
+        <SourceText text={chunk.text} truncated={chunk.truncated} />
+      </li>
     </ol>
   </details>;
 }

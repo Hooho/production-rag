@@ -985,15 +985,17 @@ def source_views(response, limit=1500):
     return items
 
 
-# 被相关度阈值挡掉、没交给模型的资料（得分最高的几段）。检索返回 0 段时，页面上能看到「最相关资料得分 0.73」
+# 被相关度阈值挡掉、没交给模型的资料里得分最高的一段（和问题上方的诊断一样只给一段）。检索返回 0 段时，页面上能看到「最相关资料得分 0.73」
 # 说的是哪一段：以前只列交给模型的资料，被挡掉的一段都看不到。诊断记录里只存了前 80 字预览，
 # 原文按分片 id 到 chunks 表里取（分片所在版本已被替换、删除时退回预览）。
-def filtered_candidates(trace, texts=None, limit=3, text_limit=1500):
+def filtered_candidates(trace, texts=None, limit=1, text_limit=1500):
     items = []
     for name in ("retrieval", "retrieval_retry"):
-        for candidate in ((trace or {}).get(name) or {}).get("candidates") or []:
+        retrieval = (trace or {}).get(name) or {}
+        min_score = (retrieval.get("config") or {}).get("min_score")
+        for candidate in retrieval.get("candidates") or []:
             if candidate.get("status") == "filtered_low_score" and candidate.get("rerank_probability") is not None:
-                items.append(candidate)
+                items.append({**candidate, "min_score": min_score})
     items.sort(key=lambda item: item["rerank_probability"], reverse=True)
     result = []
     seen = set()
@@ -1005,6 +1007,7 @@ def filtered_candidates(trace, texts=None, limit=3, text_limit=1500):
         result.append({"chunk_id": candidate["chunk_id"], "title": candidate.get("title"),
             "heading": candidate.get("heading"), "version": candidate.get("version"),
             "page_start": candidate.get("page_start"), "score": candidate["rerank_probability"],
+            "min_score": candidate.get("min_score"),
             "text": text[:text_limit], "truncated": len(text) > text_limit})
         if len(result) >= limit:
             break

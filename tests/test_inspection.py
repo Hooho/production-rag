@@ -626,6 +626,6 @@ def test_filtered_candidates_show_blocked_sources():
         {"chunk_id": "d:9", "status": "not_in_pool", "rerank_probability": None, "title": "旅游城市", "preview": "x"},
     ]}}
     items = filtered_candidates(trace, {"d:6": "城市：桂林；代表景点：漓江、象鼻山"})
-    assert [item["chunk_id"] for item in items] == ["d:6", "d:1"]
+    assert [item["chunk_id"] for item in items] == ["d:6"]
     assert items[0]["score"] == 0.73 and items[0]["text"] == "城市：桂林；代表景点：漓江、象鼻山"
-    assert items[1]["text"] == "城市：北京"
+    assert filtered_candidates(trace, limit=2)[1]["text"] == "城市：北京"

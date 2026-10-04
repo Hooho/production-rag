@@ -901,8 +901,8 @@ export type InspectionEvent = {
   top_score?: number | null;
   // 最终交给模型的资料段数。
   returned?: number | null;
-  // 被相关度阈值挡掉、没交给模型的资料（得分最高的几段）。
-  filtered?: { chunk_id: string; title: string | null; heading?: string | null; version?: number | null; page_start?: number | null; score: number; text: string; truncated: boolean }[];
+  // 被相关度阈值挡掉、没交给模型的资料里得分最高的一段。
+  filtered?: { chunk_id: string; title: string | null; heading?: string | null; version?: number | null; page_start?: number | null; score: number; min_score?: number | null; text: string; truncated: boolean }[];
   // 引用检查明细；回答被拦截时带模型原话。记录这项信息之前的问答为空。
   citation?: { passed: boolean; reason: "no_citation" | "unknown_source" | null; source_ids: string[]; cited: string[]; unknown: string[]; raw_answer?: string } | null;
   // 调用摘要：调用的模型及用途、重排模型、提示词版本、Token 用量、总耗时。
