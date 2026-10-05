@@ -239,7 +239,7 @@ def test_chat_returns_explainable_execution_trace(setup):
     assert "diagnostics" in steps[6]["result"] and "sources" not in steps[6]["result"]
     # 演示模式没有聊天模型，充分性判断不调用模型，直接进入组装上下文。
     assert steps[7]["result"]["checked"] is False
-    assert steps[8]["result"]["memory_token_budget"] == 2400
+    assert steps[8]["result"]["memory_token_budget"] == 6000
     assert steps[10]["result"]["issues"] == []
     assert "route" not in steps[11]["result"] and "orchestrator" not in steps[11]["result"]
     assert response.json()["orchestrator"] == "langgraph"

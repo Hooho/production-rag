@@ -1,9 +1,9 @@
+import math
 import os
-from functools import partial
+import re
 
 from langchain.agents.middleware import SummarizationMiddleware
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
-from langchain_core.messages.utils import count_tokens_approximately
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg_pool import ConnectionPool
@@ -12,8 +12,32 @@ from ..models import strip_think
 from ..runtime_config import value as runtime_value
 
 
-# 估算对话记忆的 Token：按字符数估算，不用模型报告的用量放大（那个用量包含检索资料，见下面中间件的说明）。
-memory_token_counter = partial(count_tokens_approximately, use_usage_metadata_scaling=False)
+# 中日韩文字和全角标点：常见模型的分词器里一个字通常就是一个 Token（0.6–1 个，按 1 个算偏保守）。
+WIDE_CHARS = re.compile("[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]")
+# 每条消息的角色、分隔符等格式开销。
+MESSAGE_OVERHEAD = 3
+
+
+def text_tokens(text):
+    wide = len(WIDE_CHARS.findall(text))
+    return wide + math.ceil((len(text) - wide) / 4)
+
+
+# 估算对话记忆的 Token。LangChain 默认按「字符数 ÷ 4」估算，那是按英文设计的，中文会少算到三分之一左右：
+# 7700 个汉字只算出约 2000 Token，「2400 Token 压缩」实际要到近一万字才触发。
+# 这里中日韩文字每个算 1 个 Token，其他字符仍按 4 个算 1 个；不用模型报告的用量放大（那个用量包含检索资料，见下面中间件的说明）。
+# 没有用模型自己的分词器：要和回答模型绑定、构建时下载，记忆阈值只是控制线，估算误差在两三成以内就够用。
+def memory_token_counter(messages):
+    total = 0
+    for message in messages:
+        content = message.content
+        if isinstance(content, str):
+            text = content
+        else:
+            text = "".join(item if isinstance(item, str) else str(item.get("text", "")) for item in content
+                if isinstance(item, str) or isinstance(item, dict))
+        total += text_tokens(text) + MESSAGE_OVERHEAD
+    return total
 
 
 # 是不是用户的提问（压缩生成的摘要也是一条 HumanMessage，用 lc_source 区分）。
@@ -45,7 +69,7 @@ def align_cutoff(messages, cutoff):
 #
 # 只按对话记忆本身的大小判断要不要压缩。LangChain 还有一个条件：上一次模型调用报告的总 Token 超过阈值也压缩；
 # 可那个总数包括系统提示词、检索资料和回答，知识问答一次就有三四千 Token，结果每轮都压缩，和记忆多大无关。
-# 估算 Token 时同理不用上一次调用的用量去放大（见 memory_token_counter）。
+# 估算 Token 用自己的 memory_token_counter：中文按字计数，也不用上一次调用的用量去放大。
 class ThinkFreeSummarizationMiddleware(SummarizationMiddleware):
     def _should_summarize_based_on_reported_tokens(self, messages, threshold):
         return False

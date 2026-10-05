@@ -1078,7 +1078,7 @@ function ModelMemory({ result }: { result: Record<string, unknown> }) {
     </div>}
     <div className="mem-parts">
       <div><i className="is-summary" />滚动摘要<b>{summaryCount} 条</b>{summary ? <details className="mem-fold"><summary>{summary.length} 字，展开</summary><p>{summary}</p></details> : <small>对话还没超过上限，没有摘要</small>}
-        {/* 生成规则：旧记录没有这几个字段时按默认配置（2400 Token、保留 6 条）写，模型名写成"大模型"。 */}
+        {/* 生成规则：旧记录没有这几个字段时按当时的默认配置（2400 Token、保留 6 条）写，模型名写成"大模型"。 */}
         <small className="mem-rule">记忆超过 {Number(result.memory_trigger_tokens ?? 2400)} Token 时，由 {String(result.summary_model ?? "大模型")} 把较早的对话连同旧摘要压缩成一段，{keepRule(result.memory_keep_tokens, result.memory_keep_messages)}</small></div>
       <div><i className="is-turns" />最近问答<b>{turns} 轮 · {turnMessages} 条</b><small>问题和回答原文</small></div>
     </div>

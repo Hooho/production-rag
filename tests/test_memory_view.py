@@ -112,3 +112,12 @@ def test_reported_usage_does_not_trigger():
     total = middleware.token_counter(messages)
     assert total < 100
     assert middleware._should_summarize(messages, total) is False
+
+
+# 记忆 Token 估算：中文每个字算 1 个，其他字符 4 个算 1 个，每条消息另加 3 个格式开销。
+def test_memory_token_counter_counts_chinese():
+    from langchain_core.messages import AIMessage, HumanMessage
+    from app.memory.framework import memory_token_counter
+    assert memory_token_counter([HumanMessage("段永平是谁？")]) == 6 + 3
+    assert memory_token_counter([AIMessage("abcdefgh")]) == 2 + 3
+    assert memory_token_counter([AIMessage([{"type": "text", "text": "你好abcd"}])]) == 3 + 3

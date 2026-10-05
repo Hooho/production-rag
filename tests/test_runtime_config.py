@@ -41,8 +41,8 @@ def test_runtime_settings_validation(setup):
     bad = [
         {"rerank_min_score": 1.5},
         {"return_limit": 20, "rerank_candidates": 12},
-        {"memory_keep_tokens": 1300},
-        {"memory_trigger_tokens": 2000},
+        {"memory_keep_tokens": 3100},
+        {"memory_trigger_tokens": 5000},
         {"parent_context": "yes"},
         {"rerank_candidates": 12.5},
         {"business_tz": "Mars/Base"},
@@ -86,7 +86,7 @@ def test_return_limit_sweep():
 def test_memory_settings_rebuild(setup):
     client, store = setup
     agent = client.app.state.agent.response_agent
-    assert agent.memory.trigger_tokens == 2400
+    assert agent.memory.trigger_tokens == 6000
     assert client.put("/settings/runtime", headers=admin(),
         json={"changes": {"memory_trigger_tokens": 4000, "memory_keep_tokens": 2000}}).status_code == 200
     agent.sync_memory_settings()
