@@ -80,23 +80,23 @@ class ResponseAgent:
             middleware=[self.memory.middleware, source_prompt], checkpointer=self.memory.checkpointer,
             name="rag_response_agent")
 
-    # 设置页改了对话记忆的压缩阈值或保留条数时，重建摘要中间件和回答 Agent；已有的会话记忆（Checkpoint）不受影响。
+    # 设置页改了对话记忆的压缩阈值或保留 Token 时，重建摘要中间件和回答 Agent；已有的会话记忆（Checkpoint）不受影响。
     def sync_memory_settings(self):
         if self.fixed_memory:
             return
-        trigger, keep = runtime_value("memory_trigger_tokens"), runtime_value("memory_keep_messages")
-        if (trigger, keep) == (self.memory.trigger_tokens, self.memory.keep_messages):
+        trigger, keep = runtime_value("memory_trigger_tokens"), runtime_value("memory_keep_tokens")
+        if (trigger, keep) == (self.memory.trigger_tokens, self.memory.keep_tokens):
             return
         with self.settings_lock:
-            if (trigger, keep) == (self.memory.trigger_tokens, self.memory.keep_messages):
+            if (trigger, keep) == (self.memory.trigger_tokens, self.memory.keep_tokens):
                 return
-            self.memory.trigger_tokens, self.memory.keep_messages = trigger, keep
+            self.memory.trigger_tokens, self.memory.keep_tokens = trigger, keep
             self.rebuild()
 
     # 固定压缩参数（多轮对话评测用）。
     def use_memory_settings(self, trigger, keep):
         self.fixed_memory = True
-        self.memory.trigger_tokens, self.memory.keep_messages = trigger, keep
+        self.memory.trigger_tokens, self.memory.keep_tokens = trigger, keep
         self.rebuild()
 
     # 调用带摘要中间件的回答 Agent，并返回模型实际使用的框架记忆；传入 on_token 时逐段转发模型输出。

@@ -61,8 +61,8 @@ SPECS = [
     {"key": "contextual_retrieval", "group": "answer", "type": "bool", "default": True},
     {"key": "memory_trigger_tokens", "group": "memory", "type": "int", "default": 2400,
         "min": 800, "max": 16000},
-    {"key": "memory_keep_messages", "group": "memory", "type": "int", "default": 6,
-        "min": 2, "max": 20},
+    {"key": "memory_keep_tokens", "group": "memory", "type": "int", "default": 1200,
+        "min": 200, "max": 8000},
     {"key": "gap_similarity", "group": "inspection", "type": "float", "default": 0.75,
         "min": 0.5, "max": 0.95},
     {"key": "content_min_negative", "group": "inspection", "type": "int",
@@ -176,15 +176,16 @@ def check(spec, raw, strict=True):
     return number
 
 
-# 参数之间的约束：交给模型的段数不能超过候选池；压缩时保留的消息条数按一问一答成对保留，要是偶数；
+# 参数之间的约束：交给模型的段数不能超过候选池；压缩后保留的原文最多是压缩阈值的一半
+# （否则压缩完仍然接近或超过阈值，下一轮又要压缩，等于每轮都多调一次大模型）；
 # 分片重叠最多是分片大小的三分之一（切分时也按这个上限截断），否则相邻分片大半内容重复。
 def check_relations(values):
     if values["chunk_overlap"] * 3 > values["chunk_size"]:
         raise ValueError("分片重叠不能超过分片大小的三分之一")
     if values["return_limit"] > values["rerank_candidates"]:
         raise ValueError("交给模型的段数不能超过候选池大小")
-    if values["memory_keep_messages"] % 2:
-        raise ValueError("压缩时保留的消息条数要是偶数（一问一答是 2 条）")
+    if values["memory_keep_tokens"] * 2 > values["memory_trigger_tokens"]:
+        raise ValueError("压缩后保留的原文最多是压缩阈值的一半")
 
 
 # 设置页展示：每一项的当前值、是否改过和默认值。

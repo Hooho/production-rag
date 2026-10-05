@@ -4,10 +4,10 @@ import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./Memory.css";
 
 // 会话记忆：每个用户只能看自己的会话。列表看每个会话记忆的大小和压缩情况；
-// 详情看「模型下一轮会记得什么」（滚动摘要 + 保留原文的最近几条）和每一轮之后记忆是怎么变化的。
+// 详情看「模型下一轮会记得什么」（滚动摘要 + 保留原文的最近几轮）和每一轮之后记忆是怎么变化的。
 
 const HINTS = {
-  compressions: "对话超过压缩阈值后，较早的问答会被大模型压成一段摘要，只保留最近几条原文。这里是这个会话压缩过几次。",
+  compressions: "对话超过压缩阈值后，较早的问答会被大模型压成一段摘要，只保留最近几轮原文。这里是这个会话压缩过几次。",
   memory: "下一轮提问时，回答模型会收到的对话记忆的大小（摘要 + 保留的原文），和压缩阈值对比。达到阈值就会触发下一次压缩。",
   snapshots: "对话记忆每更新一步就存一份当时的完整状态，一份叫一个快照。一轮问答通常会存 3–4 个（收到问题、检查是否压缩、生成回答、收尾）。只有最新的一个会被用到，旧快照只占空间。",
   bytes: "这个会话的记忆在数据库里占的空间，包括所有旧快照。会话越长、快照越多，占用越大。",
@@ -51,7 +51,7 @@ function MemoryList({ onOpen }: { onOpen: (sessionId: string) => void }) {
     <header className="topbar mem-topbar">
       <div>
         <h1>会话记忆</h1>
-        <p className="mem-subtitle">你的每个会话里，系统记住了什么：较早的对话压成的摘要，加上最近几条原文。只有你自己能看到。{data && ` 当前设置：超过 ${tokens(data.trigger_tokens)} Token 压缩，保留最近 ${data.keep_messages} 条原文。`}</p>
+        <p className="mem-subtitle">你的每个会话里，系统记住了什么：较早的对话压成的摘要，加上最近几轮原文。只有你自己能看到。{data && ` 当前设置：超过 ${tokens(data.trigger_tokens)} Token 压缩，压缩后保留最近不超过 ${tokens(data.keep_tokens)} Token 的原文。`}</p>
       </div>
     </header>
     {error && <div className="field-error">{error}</div>}
@@ -119,8 +119,8 @@ function MemoryDetail({ sessionId, onBack }: { sessionId: string; onBack: () => 
             {current.summary && <p className="mem-summary">{current.summary}</p>}
           </div>
           <div className="mem-block">
-            <h3>最近原文 <small>{keptRounds.length ? `第 ${keptRounds[0].index}–${keptRounds[keptRounds.length - 1].index} 轮` : ""} · 保留最近 {data.keep_messages} 条消息（一问一答算 2 条）</small></h3>
-            <p className="mem-note">追问几乎都针对最近几轮，需要原话里的细节（数字、引用、原本的说法），摘要会丢掉这些，所以最近的几条不压缩、原样保留。</p>
+            <h3>最近原文 <small>{keptRounds.length ? `第 ${keptRounds[0].index}–${keptRounds[keptRounds.length - 1].index} 轮` : ""} · 压缩时保留最近不超过 {tokens(data.keep_tokens)} Token 的整轮问答</small></h3>
+            <p className="mem-note">追问几乎都针对最近几轮，需要原话里的细节（数字、引用、原本的说法），摘要会丢掉这些，所以最近的几轮不压缩、原样保留。按整轮问答保留，不会只留下回答而丢了问题。</p>
             <TurnList turns={current.turns} rounds={keptRounds.map((turn) => turn.index)} />
           </div>
         </>}

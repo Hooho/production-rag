@@ -1,4 +1,4 @@
-# 多轮对话评测：给「对话记忆」的两个参数（超过多少 Token 开始压缩、压缩时保留最近几条）提供依据。
+# 多轮对话评测：给「对话记忆」的两个参数（超过多少 Token 开始压缩、压缩后保留多少 Token 原文）提供依据。
 # 单题评测里多轮追问是用补全后的完整问题去问的，测不到记忆；这里把一段对话按顺序真的问一遍，
 # 最后一问要用到开头几轮的内容（例如「回到我最开始问的那个称号」），看压缩之后还记不记得。
 # 和线上一样：意图识别只看最近 3 轮问答和滚动摘要，所以开头的内容只能靠摘要带过来。
@@ -14,16 +14,19 @@ from .retrieval import EVAL_OWNER
 HISTORY_LIMIT = 6
 
 
-# 要比较的参数组合：当前设置，加上压缩阈值调小 / 调大、保留条数调小 / 调大各一组，每组只改一个因素。
+# 要比较的参数组合：当前设置，加上压缩阈值调小 / 调大、保留 Token 调小 / 调大各一组，每组尽量只改一个因素。
+# 保留的 Token 最多是阈值的一半（和设置页的约束一致），阈值调小时保留的 Token 跟着收到一半以内。
 def memory_variants(settings):
-    trigger, keep = settings["memory_trigger_tokens"], settings["memory_keep_messages"]
-    variants = [{"name": "current", "label": f"当前设置（{trigger} Token / 保留 {keep} 条）", "trigger": trigger, "keep": keep}]
+    trigger, keep = settings["memory_trigger_tokens"], settings["memory_keep_tokens"]
+    variants = [{"name": "current", "label": f"当前设置（{trigger} Token / 保留 {keep} Token）", "trigger": trigger, "keep": keep}]
     for value in (max(800, trigger // 2), trigger * 2):
         if value != trigger:
-            variants.append({"name": f"trigger_{value}", "label": f"压缩阈值 {value} Token", "trigger": value, "keep": keep})
-    for value in (max(2, keep - 4), keep + 4):
-        if value != keep:
-            variants.append({"name": f"keep_{value}", "label": f"保留最近 {value} 条", "trigger": trigger, "keep": value})
+            kept = min(keep, value // 2)
+            label = f"压缩阈值 {value} Token" + (f"（保留 {kept} Token）" if kept != keep else "")
+            variants.append({"name": f"trigger_{value}", "label": label, "trigger": value, "keep": kept})
+    for value in (max(200, keep // 2), trigger // 2):
+        if value != keep and not any(item["name"] == f"keep_{value}" for item in variants):
+            variants.append({"name": f"keep_{value}", "label": f"保留最近 {value} Token", "trigger": trigger, "keep": value})
     return variants
 
 

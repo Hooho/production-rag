@@ -1268,10 +1268,10 @@ export function getOverview(days: number) {
 // 会话记忆（GET /memory/sessions、/memory/sessions/{id}）：只能看自己的会话。
 export type MemoryTurnText = { question: string; answer: string };
 export type MemorySessionBrief = { session_id: string; title: string; turns: number; compressions: number; memory_tokens: number; message_count: number; snapshots: number | null; bytes: number | null; last_active: string | null };
-export type MemorySessionList = { items: MemorySessionBrief[]; trigger_tokens: number; keep_messages: number; backend?: string };
+export type MemorySessionList = { items: MemorySessionBrief[]; trigger_tokens: number; keep_tokens: number; backend?: string };
 export type MemoryTimelineTurn = { index: number; run_id: string; created: string; question: string; rewritten: string | null; route: string | null; entered: boolean; memory_tokens: number | null; messages_before: number | null; compressed: boolean; summary: string | null; kept_turns: MemoryTurnText[] | null; compressed_turns?: MemoryTurnText[] | null };
 export type MemorySessionDetail = {
-  session_id: string; title: string; last_order: string | null; trigger_tokens: number; keep_messages: number;
+  session_id: string; title: string; last_order: string | null; trigger_tokens: number; keep_tokens: number;
   current: { summary: string; summary_tokens: number | null; turns: MemoryTurnText[]; message_count: number; estimated_tokens: number };
   timeline: MemoryTimelineTurn[];
   storage: { snapshots?: number | null; bytes?: number | null; backend: string };

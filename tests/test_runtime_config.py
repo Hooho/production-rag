@@ -41,7 +41,8 @@ def test_runtime_settings_validation(setup):
     bad = [
         {"rerank_min_score": 1.5},
         {"return_limit": 20, "rerank_candidates": 12},
-        {"memory_keep_messages": 5},
+        {"memory_keep_tokens": 1300},
+        {"memory_trigger_tokens": 2000},
         {"parent_context": "yes"},
         {"rerank_candidates": 12.5},
         {"business_tz": "Mars/Base"},
@@ -87,9 +88,9 @@ def test_memory_settings_rebuild(setup):
     agent = client.app.state.agent.response_agent
     assert agent.memory.trigger_tokens == 2400
     assert client.put("/settings/runtime", headers=admin(),
-        json={"changes": {"memory_trigger_tokens": 4000, "memory_keep_messages": 8}}).status_code == 200
+        json={"changes": {"memory_trigger_tokens": 4000, "memory_keep_tokens": 2000}}).status_code == 200
     agent.sync_memory_settings()
-    assert (agent.memory.trigger_tokens, agent.memory.keep_messages) == (4000, 8)
+    assert (agent.memory.trigger_tokens, agent.memory.keep_tokens) == (4000, 2000)
 
 
 # 多轮对话（现在是一个专项评测集）：参数组合每组只改一个因素；演示模式下按顺序问完一段对话，不写 runs 表；
@@ -99,8 +100,9 @@ def test_memory_eval_dialogue(setup):
     from app.evaluation.memory import memory_variants, run_dialogue
     from app.mysql.store import runs
     client, store = setup
-    variants = memory_variants({"memory_trigger_tokens": 2400, "memory_keep_messages": 6})
-    assert [(variant["trigger"], variant["keep"]) for variant in variants] == [(2400, 6), (1200, 6), (4800, 6), (2400, 2), (2400, 10)]
+    variants = memory_variants({"memory_trigger_tokens": 2400, "memory_keep_tokens": 1200})
+    # 阈值减半时保留的 Token 跟着收到一半以内；保留 Token 已经是阈值的一半，只能往小调。
+    assert [(variant["trigger"], variant["keep"]) for variant in variants] == [(2400, 1200), (1200, 600), (4800, 1200), (2400, 600)]
     dialogue = {"id": "t1", "turns": ["退货期限是多久"], "question": "那运费呢"}
     outcome = run_dialogue(store, client.app.state.models, "test", variants[0], dialogue)
     assert outcome["route"] == "knowledge" and outcome["summarized"] is False

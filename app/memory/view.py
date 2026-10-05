@@ -77,7 +77,7 @@ def list_sessions(engine, framework, owner, limit=50):
         ids = [row[0] for row in connection.execute(select(runs.c.session_id).where(runs.c.owner == owner).group_by(
             runs.c.session_id).order_by(func.max(runs.c.created).desc()).limit(limit)).all()]
     if not ids:
-        return {"items": [], "trigger_tokens": framework.trigger_tokens, "keep_messages": framework.keep_messages}
+        return {"items": [], "trigger_tokens": framework.trigger_tokens, "keep_tokens": framework.keep_tokens}
     grouped = {}
     for row in session_rows(engine, owner, ids):
         grouped.setdefault(row["session_id"], []).append(row)
@@ -93,7 +93,7 @@ def list_sessions(engine, framework, owner, limit=50):
             "memory_tokens": state["estimated_tokens"], "message_count": state["message_count"],
             "snapshots": stats.get("snapshots"), "bytes": stats.get("bytes"),
             "last_active": rows[-1]["created"] if rows else None})
-    return {"items": items, "trigger_tokens": framework.trigger_tokens, "keep_messages": framework.keep_messages,
+    return {"items": items, "trigger_tokens": framework.trigger_tokens, "keep_tokens": framework.keep_tokens,
         "backend": framework.backend}
 
 
@@ -116,6 +116,6 @@ def session_detail(engine, framework, owner, session_id):
         last_order = (rows[-1]["response"] or {}).get("last_order")
     return {"session_id": session_id, "title": rows[0]["question"] if rows else "",
         "current": current_memory(framework, owner, session_id), "last_order": last_order,
-        "trigger_tokens": framework.trigger_tokens, "keep_messages": framework.keep_messages,
+        "trigger_tokens": framework.trigger_tokens, "keep_tokens": framework.keep_tokens,
         "timeline": turns, "storage": {**framework.storage(owner, [session_id]).get(session_id, {}),
             "backend": framework.backend}}

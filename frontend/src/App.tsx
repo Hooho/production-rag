@@ -834,12 +834,12 @@ function formatResult(raw?: Record<string, unknown>, detail?: string, order?: st
   // 现在写成"上下文组成"（摘要 → 最近问答 → 检索来源）和"记忆用量"（已用 / 上限 + 进度条）两行，原始字段照常保存。
   const assembled = Object.hasOwn(result, "memory_token_budget") && Object.hasOwn(result, "source_count");
   const assembledHidden = new Set(["memory_token_budget", "estimated_memory_tokens", "recent_turns", "summary_characters",
-    "keep_messages", "source_count", "source_characters", "memory_managed_by", "process_method", "recent_characters"]);
+    "keep_messages", "keep_tokens", "source_count", "source_characters", "memory_managed_by", "process_method", "recent_characters"]);
   // 读取 Memory：以前 MySQL 历史、滚动摘要、Checkpoint 存储、Checkpoint 消息数各占一行，看不出哪些是完整记录、
   // 哪些是发给模型的记忆。现在分成"审计历史"（MySQL，完整记录，不发给模型）和"模型记忆"（Checkpoint，发给模型）两块。
   const memoryRead = Array.isArray(result.mysql_history) && Object.hasOwn(result, "checkpoint_messages");
   const memoryHidden = new Set(["mysql_history_count", "mysql_history", "rolling_summary", "checkpoint_backend",
-    "checkpoint_messages", "process_method", "redis_short_term", "memory_trigger_tokens", "memory_keep_messages", "summary_model"]);
+    "checkpoint_messages", "process_method", "redis_short_term", "memory_trigger_tokens", "memory_keep_messages", "memory_keep_tokens", "summary_model"]);
   const answered = Object.hasOwn(result, "summary_updated");
   const answeredHidden = new Set(["ai_memory_sent", "summary_updated", "checkpoint_messages_before",
     "checkpoint_messages_sent", "memory_trigger_tokens", "current_question"]);
@@ -1079,7 +1079,7 @@ function ModelMemory({ result }: { result: Record<string, unknown> }) {
     <div className="mem-parts">
       <div><i className="is-summary" />滚动摘要<b>{summaryCount} 条</b>{summary ? <details className="mem-fold"><summary>{summary.length} 字，展开</summary><p>{summary}</p></details> : <small>对话还没超过上限，没有摘要</small>}
         {/* 生成规则：旧记录没有这几个字段时按默认配置（2400 Token、保留 6 条）写，模型名写成"大模型"。 */}
-        <small className="mem-rule">记忆超过 {Number(result.memory_trigger_tokens ?? 2400)} Token 时，由 {String(result.summary_model ?? "大模型")} 把较早的对话连同旧摘要压缩成一段，只保留最近 {Number(result.memory_keep_messages ?? 6)} 条消息原文</small></div>
+        <small className="mem-rule">记忆超过 {Number(result.memory_trigger_tokens ?? 2400)} Token 时，由 {String(result.summary_model ?? "大模型")} 把较早的对话连同旧摘要压缩成一段，{keepRule(result.memory_keep_tokens, result.memory_keep_messages)}</small></div>
       <div><i className="is-turns" />最近问答<b>{turns} 轮 · {turnMessages} 条</b><small>问题和回答原文</small></div>
     </div>
     <small className="result-help">回答时发给模型的就是这份记忆；较早的对话超过上限后被压缩成摘要，所以比审计历史少{inMemory ? "。当前存在内存里，服务重启后记忆会丢失" : ""}</small>
@@ -1110,18 +1110,25 @@ function ContextParts({ result }: { result: Record<string, unknown> }) {
     <li key={title}><span className="intent-trace-mark"><b>{index + 1}</b></span><div><strong>{title}</strong>：{text}</div></li>)}</ol>;
 }
 
+// 压缩后保留原文的规则。现在按 Token 保留（整轮问答）；改版前的记录只有保留条数。
+function keepRule(tokens: unknown, messages: unknown) {
+  if (typeof tokens === "number") return `只保留最近不超过 ${tokens} Token 的整轮问答原文`;
+  if (typeof messages === "number") return `只保留最近 ${messages} 条消息原文`;
+  return "";
+}
+
 // 记忆用量：当前历史记忆估算 Token / 上限，附进度条；说明超过上限后怎么压缩、保留多少条消息。
 function MemoryUsage({ result }: { result: Record<string, unknown> }) {
   const used = Number(result.estimated_memory_tokens ?? 0);
   const budget = Number(result.memory_token_budget ?? 0);
-  const keep = Number(result.keep_messages ?? 0);
+  const keep = keepRule(result.keep_tokens, result.keep_messages);
   const percent = budget > 0 ? Math.min(100, Math.round((used / budget) * 100)) : 0;
   const manager = String(result.memory_managed_by ?? "SummarizationMiddleware");
   return <div className="memory-usage">
     <div className="memory-usage-line"><strong>{used} / {budget} Token</strong>
       <span className="memory-usage-track"><span className={`memory-usage-fill ${percent >= 90 ? "is-high" : ""}`} style={{ width: `${percent}%` }} /></span>
       <span>{percent}%</span></div>
-    <small className="result-help">超过 {budget} 时，较早的对话由 {manager} 压缩成摘要{keep > 0 ? `，只保留最近 ${keep} 条消息` : ""}</small>
+    <small className="result-help">超过 {budget} 时，较早的对话由 {manager} 压缩成摘要{keep ? `，${keep}` : ""}</small>
   </div>;
 }
 
@@ -1470,6 +1477,7 @@ function formatResultLabel(key: string) {
     checkpoint_messages_before: "处理前消息数",
     checkpoint_messages_sent: "本轮模型输入消息数",
     keep_messages: "摘要后保留消息数",
+    keep_tokens: "摘要后保留原文 Token",
     summary_updated: "本轮是否生成摘要",
     order_id: "订单编号",
     output_type: "输出类型",

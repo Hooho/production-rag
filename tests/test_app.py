@@ -564,21 +564,25 @@ def test_model_query_analysis_is_strict(monkeypatch):
 def test_response_agent_uses_checkpointer_and_summarization(monkeypatch, runtime):
     monkeypatch.setenv("MODEL_MODE", "demo")
     runtime(memory_trigger_tokens=1)
-    runtime(memory_keep_messages=2)
+    runtime(memory_keep_tokens=1)
     monkeypatch.delenv("LANGGRAPH_DATABASE_URL", raising=False)
     models = Models()
     models.chat_model = FakeListChatModel(responses=[
-        "第一轮回答 [S1]", "用户持续询问退货政策。", "第二轮回答 [S1]",
+        "第一轮回答 [S1]", "第二轮回答 [S1]", "用户持续询问退货政策。", "第三轮回答 [S1]",
     ])
     responder = ResponseAgent(models)
     sources = [{"id": "S1", "title": "售后政策", "text": "退货期限为七天。"}]
     first_answer, _ = responder.answer("alice", "session-1", "退货期限？", sources)
+    # 第二轮：之前只有一轮问答，至少要保留上一轮完整问答，没有可压缩的。
     second_answer, second_memory = responder.answer("alice", "session-1", "需要什么材料？", sources)
-    assert first_answer == "第一轮回答 [S1]"
-    assert second_answer == "第二轮回答 [S1]"
-    assert second_memory["summary_updated"] is True
-    assert second_memory["summary"] == "用户持续询问退货政策。"
-    assert responder.memory.inspect("alice", "session-1")["message_count"] >= 3
+    assert first_answer == "第一轮回答 [S1]" and second_answer == "第二轮回答 [S1]"
+    assert second_memory["summary_updated"] is False
+    # 第三轮：第一轮进摘要，保留第二轮完整问答和本轮问题。
+    third_answer, third_memory = responder.answer("alice", "session-1", "运费谁出？", sources)
+    assert third_answer == "第三轮回答 [S1]"
+    assert third_memory["summary_updated"] is True
+    assert third_memory["summary"] == "用户持续询问退货政策。"
+    assert [turn["question"] for turn in third_memory["turns"]] == ["需要什么材料？"]
     responder.close()
 
 

@@ -232,9 +232,9 @@ class Agent:
             "rolling_summary": framework["summary"] or "尚未生成",
             "checkpoint_backend": self.response_agent.memory.backend,
             "checkpoint_messages": framework["message_count"],
-            # 滚动摘要的生成规则：超过多少 Token 压缩、保留几条原文、用哪个模型压缩，前端写在滚动摘要下面。
+            # 滚动摘要的生成规则：超过多少 Token 压缩、保留多少 Token 原文、用哪个模型压缩，前端写在滚动摘要下面。
             "memory_trigger_tokens": self.response_agent.memory.trigger_tokens,
-            "memory_keep_messages": self.response_agent.memory.keep_messages,
+            "memory_keep_tokens": self.response_agent.memory.keep_tokens,
             "summary_model": state["models"].llm_model,
             **self.no_model_info("MySQL + PostgreSQL Checkpoint + Redis 读取", "读取历史记忆供后续阶段使用")}
         # Redis 短期状态目前只有最近订单号，只和订单追问有关；没有订单时不显示。
@@ -447,7 +447,7 @@ class Agent:
                 # 最近问答原文（问题 + 答案）的总字数，和摘要字数、来源字数一起看出上下文各块有多大。
                 "recent_characters": sum(len(turn.get("question", "")) + len(turn.get("answer", "")) for turn in context["turns"]),
                 "summary_characters": len(context["summary"]),
-                "keep_messages": self.response_agent.memory.keep_messages,
+                "keep_tokens": self.response_agent.memory.keep_tokens,
                 "source_count": len(state["sources"]),
                 "source_characters": source_characters,
                 "memory_managed_by": "SummarizationMiddleware",

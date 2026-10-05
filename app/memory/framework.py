@@ -10,10 +10,36 @@ from ..models import strip_think
 from ..runtime_config import value as runtime_value
 
 
+# 是不是用户的提问（压缩生成的摘要也是一条 HumanMessage，用 lc_source 区分）。
+def is_question(message):
+    return isinstance(message, HumanMessage) and message.additional_kwargs.get("lc_source") != "summarization"
+
+
+# 把按 Token 算出的切点对齐到一轮问答的开头。messages 的最后一条是本轮问题。
+# LangChain 按 Token 保留时，从最新的消息往前加到超出预算为止，只保证工具调用和结果不拆开，
+# 不保证一问一答成对：可能留下一段回答，而它对应的问题已经进了摘要，模型看到的上下文是断的。
+# 这里切点落在回答上时往后挪到下一个问题（多压一条，保留的原文仍在预算以内）；
+# 对齐后连上一轮完整问答都留不下（上一轮回答特别长）时，强制保留上一轮问答：这一轮会超出预算一些，
+# 下一轮压缩时它就会进摘要，不会一直超。返回 0 表示不压缩：切点前没有任何问答（例如之前只有一轮），
+# 只剩旧摘要时也不压缩，否则只是把摘要再总结一遍。
+def align_cutoff(messages, cutoff):
+    if cutoff <= 0:
+        return 0
+    questions = [index for index, message in enumerate(messages) if is_question(message)]
+    aligned = next((index for index in questions if index >= cutoff), len(messages))
+    if len(questions) >= 2:
+        aligned = min(aligned, questions[-2])
+    return aligned if any(index < aligned for index in questions) else 0
+
+
 # 推理模型压缩记忆时会把 <think> 思考过程一起写进摘要。摘要每一轮都会发给模型，
 # 思考过程白白占用记忆 Token 上限，还可能干扰回答；这里在摘要生成后去掉思考过程。
 # 回答里的思考过程保留给用户折叠查看，摘要只给模型用，所以两处处理方式不同。
+# 另外按 Token 保留原文时把切点对齐到一轮问答的开头（见 align_cutoff）。
 class ThinkFreeSummarizationMiddleware(SummarizationMiddleware):
+    def _determine_cutoff_index(self, messages):
+        return align_cutoff(messages, super()._determine_cutoff_index(messages))
+
     def _create_summary(self, messages_to_summarize):
         return strip_think(super()._create_summary(messages_to_summarize)).strip()
 
@@ -27,9 +53,9 @@ class FrameworkMemory:
     # 生成评测使用独立的进程内记忆，避免每道评测题把临时回答写入正式 PostgreSQL Checkpointer。
     def __init__(self, models, use_postgres=True):
         self.models = models
-        # 压缩阈值和保留条数在设置页修改（见 app/runtime_config.py）；改了以后回答 Agent 在下一次提问前重建中间件。
+        # 压缩阈值和压缩后保留的原文 Token 在设置页修改（见 app/runtime_config.py）；改了以后回答 Agent 在下一次提问前重建中间件。
         self.trigger_tokens = runtime_value("memory_trigger_tokens")
-        self.keep_messages = runtime_value("memory_keep_messages")
+        self.keep_tokens = runtime_value("memory_keep_tokens")
         self.pool = None
         database_url = os.getenv("LANGGRAPH_DATABASE_URL", "") if use_postgres else ""
         if database_url:
@@ -55,7 +81,7 @@ class FrameworkMemory:
             "输出简洁纯文本。\n\n历史消息：\n{messages}"
         )
         self.middleware = ThinkFreeSummarizationMiddleware(model=self.models.chat_model,
-            trigger=("tokens", self.trigger_tokens), keep=("messages", self.keep_messages),
+            trigger=("tokens", self.trigger_tokens), keep=("tokens", self.keep_tokens),
             summary_prompt=summary_prompt)
 
     # 生成同时包含用户身份和会话编号的 Checkpoint 线程编号。

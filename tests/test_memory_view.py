@@ -55,3 +55,22 @@ def test_compressed_turns_keeps_recent():
     current = {"kept_turns": [{"question": "q2", "answer": "a2"}]}
     assert compressed_turns(previous, current) == [{"question": "q1", "answer": "a1"}]
     assert compressed_turns(None, current) is None
+
+
+# 按 Token 保留原文时切点对齐到一轮问答开头：落在回答上就往后挪到下一个问题；
+# 对齐后连上一轮完整问答都留不下时，强制保留上一轮；摘要消息不算问题。
+def test_align_cutoff_keeps_whole_turns():
+    from langchain_core.messages import AIMessage, HumanMessage
+    from app.memory.framework import align_cutoff
+    summary = HumanMessage(content="摘要", additional_kwargs={"lc_source": "summarization"})
+    messages = [summary, HumanMessage("问1"), AIMessage("答1"), HumanMessage("问2"), AIMessage("答2"),
+        HumanMessage("问3"), AIMessage("答3"), HumanMessage("问4")]
+    assert align_cutoff(messages, 0) == 0
+    assert align_cutoff(messages, 3) == 3
+    assert align_cutoff(messages, 2) == 3
+    # 切点落在答3（上一轮回答太长，只留得下本轮问题）：退回保留第 3 轮整轮。
+    assert align_cutoff(messages, 6) == 5
+    assert align_cutoff(messages, 7) == 5
+    # 只有摘要和一轮之前的问答：不压缩。
+    assert align_cutoff([summary, HumanMessage("问1"), AIMessage("答1"), HumanMessage("问2")], 3) == 0
+    assert align_cutoff([HumanMessage("问1"), AIMessage("答1"), HumanMessage("问2")], 2) == 0
