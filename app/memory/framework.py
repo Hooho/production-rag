@@ -1,13 +1,19 @@
 import os
+from functools import partial
 
 from langchain.agents.middleware import SummarizationMiddleware
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages.utils import count_tokens_approximately
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg_pool import ConnectionPool
 
 from ..models import strip_think
 from ..runtime_config import value as runtime_value
+
+
+# 估算对话记忆的 Token：按字符数估算，不用模型报告的用量放大（那个用量包含检索资料，见下面中间件的说明）。
+memory_token_counter = partial(count_tokens_approximately, use_usage_metadata_scaling=False)
 
 
 # 是不是用户的提问（压缩生成的摘要也是一条 HumanMessage，用 lc_source 区分）。
@@ -36,7 +42,14 @@ def align_cutoff(messages, cutoff):
 # 思考过程白白占用记忆 Token 上限，还可能干扰回答；这里在摘要生成后去掉思考过程。
 # 回答里的思考过程保留给用户折叠查看，摘要只给模型用，所以两处处理方式不同。
 # 另外按 Token 保留原文时把切点对齐到一轮问答的开头（见 align_cutoff）。
+#
+# 只按对话记忆本身的大小判断要不要压缩。LangChain 还有一个条件：上一次模型调用报告的总 Token 超过阈值也压缩；
+# 可那个总数包括系统提示词、检索资料和回答，知识问答一次就有三四千 Token，结果每轮都压缩，和记忆多大无关。
+# 估算 Token 时同理不用上一次调用的用量去放大（见 memory_token_counter）。
 class ThinkFreeSummarizationMiddleware(SummarizationMiddleware):
+    def _should_summarize_based_on_reported_tokens(self, messages, threshold):
+        return False
+
     def _determine_cutoff_index(self, messages):
         return align_cutoff(messages, super()._determine_cutoff_index(messages))
 
@@ -82,7 +95,7 @@ class FrameworkMemory:
         )
         self.middleware = ThinkFreeSummarizationMiddleware(model=self.models.chat_model,
             trigger=("tokens", self.trigger_tokens), keep=("tokens", self.keep_tokens),
-            summary_prompt=summary_prompt)
+            summary_prompt=summary_prompt, token_counter=memory_token_counter)
 
     # 生成同时包含用户身份和会话编号的 Checkpoint 线程编号。
     @staticmethod

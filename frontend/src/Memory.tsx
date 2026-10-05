@@ -98,7 +98,8 @@ function MemoryDetail({ sessionId, onBack }: { sessionId: string; onBack: () => 
   const current = data?.current;
   const lastCompressed = data ? [...data.timeline].reverse().find((turn) => turn.compressed) : undefined;
   // 保留原文对应的轮次：最近几轮进入了回答模型的问答。
-  const entered = data ? data.timeline.filter((turn) => turn.entered) : [];
+  // 早期格式的记录（entered 为 null）无法判断，按进入过记忆算。
+  const entered = data ? data.timeline.filter((turn) => turn.entered !== false) : [];
   const keptRounds = current ? entered.slice(Math.max(0, entered.length - current.turns.length)) : [];
   return <div className="mem-page">
     <button type="button" className="mem-back" onClick={onBack}>← 全部会话</button>
@@ -128,7 +129,7 @@ function MemoryDetail({ sessionId, onBack }: { sessionId: string; onBack: () => 
 
       <section className="mem-card">
         <h2>记忆时间线</h2>
-        <p className="mem-note">每一轮的问题、检索前被补成了什么、回答前记忆有多大。标着「压缩」的那一轮可以展开，对比被压掉的原文和生成的摘要。</p>
+        <p className="mem-note">每一轮的问题、检索前被补成了什么、回答前记忆有多大。点「压缩」或「追加」展开，看这一轮回答时模型拿到的记忆：摘要和保留的原文；压缩的那一轮还能看到被压掉了哪些原文。</p>
         <div className="mem-table-wrap"><table className="mem-table mem-timeline">
           <thead><tr><th className="num">轮次</th><th>问题</th><th>改写成 <Hint text={HINTS.rewritten} /></th><th className="num">回答前记忆</th><th>记忆变化</th></tr></thead>
           <tbody>{data.timeline.map((turn) => <TimelineRow key={turn.run_id} turn={turn} />)}</tbody>
@@ -169,22 +170,40 @@ function ClampText({ label, text }: { label: string; text: string }) {
 function TimelineRow({ turn }: { turn: MemoryTimelineTurn }) {
   const [open, setOpen] = useState(false);
   let change: ReactNode;
-  if (!turn.entered) change = <span className="mem-tag is-muted" title="订单查询、数据查询、问候和没检索到资料的问题不经过回答模型，不会写进对话记忆">未写入记忆</span>;
-  else if (turn.compressed) change = <button type="button" className="mem-tag is-compress" onClick={() => setOpen(!open)} aria-expanded={open}>压缩 {open ? "▴" : "▾"}</button>;
-  else change = <span className="mem-tag">追加</span>;
+  const toggle = (label: string, className: string) => <button type="button" className={`mem-tag ${className}`} onClick={() => setOpen(!open)} aria-expanded={open}>{label} {open ? "▴" : "▾"}</button>;
+  if (turn.entered === null) change = <span className="mem-tag is-muted" title="这一轮的记录里没有保存记忆信息（早期格式），无法判断有没有写入记忆、有没有压缩">未记录</span>;
+  else if (!turn.entered) change = <span className="mem-tag is-muted" title="订单查询、数据查询、问候和没检索到资料的问题不经过回答模型，不会写进对话记忆">未写入记忆</span>;
+  else if (turn.compressed) change = toggle("压缩", "is-compress");
+  else change = toggle("追加", "is-append");
   return <>
     <tr className={open ? "is-open" : ""}>
       <td className="num">{turn.index}</td>
       <td>{turn.question}</td>
       <td className={turn.rewritten && turn.rewritten !== turn.question ? "mem-rewritten" : "mem-same"}>{turn.rewritten ? (turn.rewritten === turn.question ? "（不用改写）" : turn.rewritten) : "—"}</td>
-      <td className="num">{turn.entered && turn.memory_tokens !== null ? `${tokens(turn.memory_tokens)} Token` : "—"}</td>
+      <td className="num">{turn.entered === null ? <span className="mem-same">未记录</span> : turn.entered && turn.memory_tokens !== null ? `${tokens(turn.memory_tokens)} Token` : "—"}</td>
       <td>{change}</td>
     </tr>
-    {open && <tr className="mem-compare-row"><td colSpan={5}>
-      <div className="mem-compare">
-        <div><h4>被压掉的原文</h4>{turn.compressed_turns?.length ? <TurnList turns={turn.compressed_turns} /> : <div className="mem-empty">更早的记录里没有保存当时的记忆，看不到被压掉的原文。</div>}</div>
-        <div><h4>生成的摘要</h4>{turn.summary ? <p className="mem-summary">{turn.summary}</p> : <div className="mem-empty">没有记录到摘要内容。</div>}</div>
-      </div>
-    </td></tr>}
+    {open && <tr className="mem-compare-row"><td colSpan={5}><TurnMemory turn={turn} /></td></tr>}
   </>;
+}
+
+// 这一轮回答时模型拿到的对话记忆：摘要 + 保留的原文（压缩之后的状态），压缩的那一轮另外列出被压掉的原文。
+function TurnMemory({ turn }: { turn: MemoryTimelineTurn }) {
+  const kept = turn.kept_turns;
+  const summaryNote = !turn.summary ? "" : turn.compressed ? "本轮新生成" : "沿用之前的摘要";
+  return <div className="mem-turn-memory">
+    <h4>第 {turn.index} 轮回答时，模型拿到的记忆{turn.compressed ? "（压缩之后）" : ""}</h4>
+    <div className="mem-compare">
+      <div><h5>摘要{summaryNote && <small>{summaryNote}</small>}</h5>
+        {turn.summary ? <p className="mem-summary">{turn.summary}</p> : <div className="mem-empty">还没有压缩过，没有摘要。</div>}</div>
+      <div><h5>保留的原文{kept && kept.length > 0 && <small>{kept.length} 轮</small>}</h5>
+        {kept === null ? <div className="mem-empty">这一轮的记录里没有保存发给模型的原文。</div>
+          : kept.length === 0 ? <div className="mem-empty">没有之前的问答原文{turn.summary ? "，之前的对话都在摘要里" : "，这是会话的第一轮"}。</div>
+          : <TurnList turns={kept} rounds={turn.kept_rounds} />}</div>
+    </div>
+    {turn.compressed && <details className="mem-dropped">
+      <summary>被压掉的原文{turn.compressed_turns?.length ? `（${turn.compressed_turns.length} 轮，已并入上面的摘要）` : ""}</summary>
+      {turn.compressed_turns?.length ? <TurnList turns={turn.compressed_turns} /> : <div className="mem-empty">更早的记录里没有保存当时的记忆，看不到被压掉的原文。</div>}
+    </details>}
+  </div>;
 }

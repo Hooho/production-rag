@@ -326,6 +326,15 @@
    cursor: pointer;
 }
 
+.mem-tag.is-append {
+   cursor: pointer;
+}
+
+.mem-tag.is-append:hover {
+   border-color: var(--t-2563eb);
+   color: var(--t-1d4ed8);
+}
+
 .mem-compare-row td {
    background: var(--t-f4f8fc);
 }
@@ -336,11 +345,39 @@
    gap: 14px;
 }
 
-.mem-compare h4 {
+.mem-turn-memory h4 {
+   margin: 0 0 10px;
+   color: var(--t-1d3550);
+   font-size: 13px;
+   font-weight: 600;
+}
+
+.mem-compare h5 {
+   display: flex;
+   gap: 8px;
+   align-items: baseline;
    margin: 0 0 8px;
    color: var(--t-5e7a95);
    font-size: 12px;
    font-weight: 500;
+}
+
+.mem-compare h5 small {
+   color: var(--t-7d95ac);
+   font-weight: 400;
+}
+
+.mem-dropped {
+   margin-top: 14px;
+   border-top: 1px dashed var(--t-cedfec);
+   padding-top: 10px;
+}
+
+.mem-dropped summary {
+   margin-bottom: 8px;
+   color: var(--t-5e7a95);
+   font-size: 12px;
+   cursor: pointer;
 }
 
 .mem-storage summary {

@@ -8,7 +8,12 @@
 #   最近订单      最近一轮记录里的 last_order（和 Redis 里缓存的是同一个值）。
 from sqlalchemy import func, select
 
+from ..models import strip_think
 from ..mysql.tables import runs, sessions
+
+
+# 不经过回答模型、不写对话记忆的分流：订单查询、数据查询、问候、被安全拦截。
+NO_MEMORY_ROUTES = {"order", "data", "greeting", "blocked"}
 
 
 def steps_by_id(response):
@@ -25,24 +30,37 @@ def memory_sent(response_step):
     return None
 
 
+# 回答里的 <think> 思考过程不展示（页面看的是记住了什么内容）。
+def clean_turns(turns):
+    if turns is None:
+        return None
+    return [{"question": turn.get("question", ""), "answer": strip_think(turn.get("answer") or "").strip()}
+        for turn in turns]
+
+
 # 一轮问答在记忆里的情况。entered：这一轮有没有进入回答模型（订单、数据查询、问候、没检索到资料的拒答都不进入，
-# 也就不会写进对话记忆）；compressed：回答前触发了压缩（SummarizationMiddleware 把较早的消息压成了摘要）。
+# 也就不会写进对话记忆）；None 表示记录里没有保存这些信息（早期格式的记录），无法判断。
+# compressed：回答前触发了压缩（SummarizationMiddleware 把较早的消息压成了摘要）。
 def turn_view(index, row):
     steps = steps_by_id(row["response"])
     response_step = steps.get("response") or {}
     sent = memory_sent(response_step)
-    entered = bool(response_step.get("checkpoint_messages_sent"))
+    route = row["route"] or (row["trace"] or {}).get("route")
+    if "checkpoint_messages_sent" in response_step:
+        entered = bool(response_step["checkpoint_messages_sent"])
+    else:
+        entered = False if route in NO_MEMORY_ROUTES else None
     return {
         "index": index, "run_id": row["id"], "created": row["created"], "question": row["question"],
         "rewritten": (steps.get("query") or {}).get("standalone_query"),
-        "route": row["route"] or (row["trace"] or {}).get("route"),
+        "route": route,
         "entered": entered,
         "memory_tokens": (steps.get("context") or {}).get("estimated_memory_tokens"),
         "messages_before": response_step.get("checkpoint_messages_before"),
         "compressed": bool(response_step.get("summary_updated")),
         "summary": sent.get("memory_summary") if sent else None,
-        "kept_turns": sent.get("history_turns") if sent else None,
-        "answer": ((row["response"] or {}).get("answer") or "")[:2000],
+        "kept_turns": clean_turns(sent.get("history_turns")) if sent else None,
+        "answer": strip_think((row["response"] or {}).get("answer") or "").strip()[:2000],
     }
 
 
@@ -109,6 +127,12 @@ def session_detail(engine, framework, owner, session_id):
     for previous, current in zip([None] + entered[:-1], entered):
         if current["compressed"]:
             current["compressed_turns"] = compressed_turns(previous, current)
+    # 保留的原文对应第几轮：这一轮之前、最近进入回答模型的那几轮（早期记录无法判断，按进入过算）。
+    possible = [turn for turn in turns if turn["entered"] is not False]
+    for position, current in enumerate(possible):
+        if current["entered"]:
+            kept = len(current["kept_turns"] or [])
+            current["kept_rounds"] = [turn["index"] for turn in possible[max(0, position - kept):position]]
     for turn in turns:
         turn.pop("answer", None)
     last_order = None
