@@ -99,6 +99,9 @@ def bind(engine):
     global _engine
     _engine = engine
     clear_cache()
+    # 提示词版本也存在这个库里，换了库要丢掉缓存。
+    from . import prompts
+    prompts.clear_cache()
 
 
 # 当前绑定的数据库连接；评测题目等也存在同一个库里，没传连接的调用用它。

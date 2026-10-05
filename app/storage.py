@@ -12,7 +12,7 @@ from .milvus.store import MilvusStore
 from .mysql.store import (MySQLStore, chunks, document_chunks, document_heads, document_permissions, document_shares,
     document_steps, documents, metadata, orders, runs, sessions, settings, user_group_members, user_groups, users)
 from .redis.store import RedisStore
-from .models import CHUNK_CONTEXT_PROMPT_VERSION
+from . import prompts
 from .ingestion.chunking import chunk_document_records, chunk_settings
 from .ingestion.parser import OCR_LANGUAGES
 from .ingestion.spreadsheet import TABLE_CHUNKING
@@ -204,7 +204,7 @@ class Storage:
         def generate(index):
             block = min(block_count - 1, index * block_count // len(pieces))
             document = content[block * CONTEXT_DOCUMENT_CHARS:(block + 1) * CONTEXT_DOCUMENT_CHARS]
-            identity = json.dumps([CHUNK_CONTEXT_PROMPT_VERSION, getattr(models, "llm_model", None),
+            identity = json.dumps([prompts.identity("chunk_context"), getattr(models, "llm_model", None),
                 document, pieces[index]], ensure_ascii=False)
             key = "chunk-context:" + hashlib.sha256(identity.encode()).hexdigest()
             try:

@@ -32,7 +32,7 @@ from ..evaluation.results import compare_runs, delete_run, execute_run, import_r
 from ..evaluation.retrieval import SUITES, VARIANTS
 from ..evaluation import regression, suites as special_suites
 from ..evaluation.evidence import locate_evidence
-from .. import runtime_config
+from .. import prompts, runtime_config
 from ..ingestion.parser import ALLOWED_EXTENSIONS, UNSUPPORTED_MESSAGE
 from ..inspection.diagnosis import CATEGORIES as DIAGNOSIS_CATEGORIES
 from ..inspection.schedule import load_schedule, save_schedule, schedule_view
@@ -110,6 +110,18 @@ class EvalDatasetGenerateInput(BaseModel):
 class RuntimeSettingsInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     changes: dict[str, bool | int | float | str | None] = Field(max_length=50)
+
+
+# 提示词页：保存新版本（指令文字和一句修改说明），或改用某个已有版本（0 = 内置版本）。
+class PromptVersionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(min_length=1, max_length=prompts.MAX_LENGTH)
+    note: str = Field("", max_length=prompts.NOTE_LENGTH)
+
+
+class PromptActivateInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version: int = Field(ge=0)
 
 
 # 巡检复测集：新建或修改评测集。
@@ -1659,6 +1671,38 @@ def create_app(store=None, models=None, jwt_secret=None):
         result = runtime_config.view(app.state.store.engine)
         result["changed"] = changed
         return result
+
+    # 提示词管理（只有管理员）：查看线上问答和文档导入用到的提示词，保存新版本、回滚到旧版本。
+    @app.get("/prompts", dependencies=[Depends(require_admin)])
+    def prompt_list():
+        return prompts.view(app.state.store.engine)
+
+    @app.get("/prompts/{prompt_id}", dependencies=[Depends(require_admin)])
+    def prompt_detail(prompt_id: str):
+        result = prompts.detail(app.state.store.engine, prompt_id)
+        if result is None:
+            raise HTTPException(404, "没有这个提示词")
+        return result
+
+    @app.post("/prompts/{prompt_id}/versions")
+    def prompt_save(prompt_id: str, body: PromptVersionInput, admin=Depends(require_admin)):
+        if prompt_id not in prompts.BY_ID:
+            raise HTTPException(404, "没有这个提示词")
+        try:
+            prompts.save(app.state.store.engine, prompt_id, body.text, body.note, admin["username"])
+        except ValueError as error:
+            raise HTTPException(422, str(error))
+        return prompts.detail(app.state.store.engine, prompt_id)
+
+    @app.post("/prompts/{prompt_id}/activate")
+    def prompt_activate(prompt_id: str, body: PromptActivateInput, admin=Depends(require_admin)):
+        if prompt_id not in prompts.BY_ID:
+            raise HTTPException(404, "没有这个提示词")
+        try:
+            prompts.activate(app.state.store.engine, prompt_id, body.version, admin["username"])
+        except ValueError as error:
+            raise HTTPException(422, str(error))
+        return prompts.detail(app.state.store.engine, prompt_id)
 
     # 知识巡检：问题里有其他用户的提问和反馈，所有接口只允许管理员调用。
     @app.get("/inspection/issues", dependencies=[Depends(require_admin)])

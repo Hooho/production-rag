@@ -1284,3 +1284,32 @@ export function listMemorySessions() {
 export function getMemorySession(sessionId: string) {
   return request<MemorySessionDetail>(`/memory/sessions/${encodeURIComponent(sessionId)}`);
 }
+
+// 提示词管理（GET /prompts、/prompts/{id}，POST 保存新版本、改用某个版本）：只有管理员。
+export type PromptGroup = { key: string; label: string; description: string };
+export type PromptBrief = { id: string; group: string; label: string; where: string; active_version: number; active_label: string; versions: number; updated: string | null };
+export type PromptVersion = { version: number; label: string; text: string; note: string; created_by: string | null; created: string | null };
+export type PromptDetail = {
+  id: string; group: string; label: string; where: string; input: string; locked: string; locked_reason: string; note: string;
+  active_version: number; active_label: string; activated_by: string | null; activated_at: string | null; versions: PromptVersion[];
+};
+
+export function listPrompts() {
+  return request<{ groups: PromptGroup[]; items: PromptBrief[] }>("/prompts");
+}
+
+export function getPrompt(id: string) {
+  return request<PromptDetail>(`/prompts/${encodeURIComponent(id)}`);
+}
+
+export function savePromptVersion(id: string, text: string, note: string) {
+  return request<PromptDetail>(`/prompts/${encodeURIComponent(id)}/versions`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, note }),
+  });
+}
+
+export function activatePromptVersion(id: string, version: number) {
+  return request<PromptDetail>(`/prompts/${encodeURIComponent(id)}/activate`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version }),
+  });
+}

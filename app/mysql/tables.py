@@ -431,3 +431,14 @@ eval_runs = Table("eval_runs", metadata,
     Column("data", JSON, nullable=False),
     Column("updated", String(40), nullable=False),
 )
+
+# 提示词版本（见 app/prompts.py）：每次在「提示词」页保存生成一个新版本，只增不改；
+# 当前使用哪个版本存在 settings 表（key = prompts），回滚只改那里。内置版本（v0）在代码里，不存这张表。
+prompt_versions = Table("prompt_versions", metadata,
+    Column("prompt_id", String(32), primary_key=True),
+    Column("version", Integer, primary_key=True, autoincrement=False),
+    Column("text", Text, nullable=False),
+    Column("note", String(200), nullable=False, default=""),
+    Column("created_by", String(32), nullable=False),
+    Column("created", String(40), nullable=False),
+)

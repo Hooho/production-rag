@@ -1,7 +1,7 @@
 from langchain_core.messages import AIMessage
 from sqlalchemy import select
 
-from app.agent.response import PROMPT_VERSION, ResponseAgent
+from app.agent.response import ResponseAgent
 from app.models import Models
 from app.mysql.store import feedback, run_errors, runs
 from app.observability import run_columns, summarize_run
@@ -35,7 +35,7 @@ def test_run_trace_summary_is_saved(setup):
     assert candidate["status"] == "returned" and candidate["source_id"] == "S1"
     # chunk_key 跨版本稳定，坏例转成评测题时靠它定位原文。
     assert candidate["chunk_key"]
-    assert trace["generation"]["prompt_version"] == PROMPT_VERSION
+    assert trace["generation"]["prompt_version"] == "answer-v3/answer@内置"
     # 演示模式不调用模型，没有 Token 用量。
     assert trace["generation"]["token_usage"] is None
 

@@ -12,7 +12,7 @@ from ..security import BLOCKED_ANSWER, OUTPUT_CHECKS, check_answer, detect_injec
 from ..tools.data_query import DataQueryTool
 from ..tools.orders import OrderTool
 from ..tools.search import DocumentSearchTool
-from .response import PROMPT_MARKERS, PROMPT_VERSION, ResponseAgent
+from .response import ResponseAgent, prompt_markers, prompt_version
 
 
 class AgentState(TypedDict, total=False):
@@ -212,7 +212,7 @@ class Agent:
     # 检查回答：复述系统说明时整段拦截，移除图片和来源里没有的链接。
     # 流式接口在生成过程中已经推送了原始文字，前端收到 complete 后会用这里检查后的回答替换。
     def guard_output(self, state):
-        answer, issues = check_answer(state["answer"], state["sources"], PROMPT_MARKERS)
+        answer, issues = check_answer(state["answer"], state["sources"], prompt_markers())
         detail = "未发现问题" if not issues else f"处理了 {len(issues)} 处不安全内容"
         self.add_step(state, "output_guard", "guard", "输出安全检查", detail, {
             "issues": issues, "checked_rules": list(OUTPUT_CHECKS),
@@ -479,7 +479,7 @@ class Agent:
         result = {
             **self.chat_model_info(state, "依据检索来源生成回答并校验 [S1] 引用", bool(state["sources"])),
             # 追踪摘要据此区分回答出自哪一版提示词，并统计 Token 用量。
-            "prompt_version": PROMPT_VERSION, "token_usage": memory.get("token_usage"),
+            "prompt_version": prompt_version(), "token_usage": memory.get("token_usage"),
             "summary_updated": memory["summary_updated"],
             "checkpoint_messages_before": memory["previous_message_count"],
             "checkpoint_messages_sent": memory["message_count"],

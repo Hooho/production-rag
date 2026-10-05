@@ -3,6 +3,7 @@ import Evaluation, { type EvaluationSection } from "./Evaluation";
 import AnswerFeedback from "./Feedback";
 import Inspection from "./Inspection";
 import Overview from "./Overview";
+import Prompts from "./Prompts";
 import Memory from "./Memory";
 import Settings from "./Settings";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
@@ -13,11 +14,11 @@ import { LOGOUT_EVENT, listDataTypes, createSession, deleteDocument, retryDocume
 // 评测页面放在 /eval，与知识问答、知识库并列；历史记录和评测集分别使用独立子路由。
 // 业务数据页放在 /data：录入和维护商品、订单等业务数据，也是聊天里数据查询工具的数据来源。
 // 知识巡检页放在 /inspection，只对管理员显示。
-type Route = { page: "chat" } | { page: "knowledge"; documentId?: string } | { page: "data" } | { page: "eval"; section: EvaluationSection; setId?: string; suiteId?: string } | { page: "inspection" } | { page: "overview" } | { page: "memory"; sessionId?: string } | { page: "settings" };
+type Route = { page: "chat" } | { page: "knowledge"; documentId?: string } | { page: "data" } | { page: "eval"; section: EvaluationSection; setId?: string; suiteId?: string } | { page: "inspection" } | { page: "overview" } | { page: "memory"; sessionId?: string } | { page: "prompts"; promptId?: string } | { page: "settings" };
 type ToastKind = "success" | "error";
 type ToastMessage = { id: number; kind: ToastKind; message: string };
 type ShowToast = (kind: ToastKind, message: string) => void;
-type NavIconName = "spark" | "library" | "table" | "target" | "pulse" | "chart" | "memory" | "sliders";
+type NavIconName = "spark" | "library" | "table" | "target" | "pulse" | "chart" | "memory" | "prompt" | "sliders";
 
 // 原来侧栏使用 Unicode 字符图标，不同字体下的字重、基线和边框风格不一致；统一成内联 SVG 后，图标在收起和展开状态都保持同一套线性视觉。
 function NavIcon({ name }: { name: NavIconName }) {
@@ -29,6 +30,7 @@ function NavIcon({ name }: { name: NavIconName }) {
     pulse: <><path d="M2 10h3.5l2-5 3 10 2-6 1.5 1H18" /></>,
     chart: <><path d="M3 3v14h14" /><path d="M6.5 13V9.5M10 13V6M13.5 13v-5" /></>,
     memory: <><path d="M4 5.5h12v7.5H9l-3.5 3v-3H4z" /><path d="M7 8.5h6M7 11h4" /></>,
+    prompt: <><path d="M5 3h7l3 3v11H5z" /><path d="M12 3v3h3" /><path d="m7.5 10 2 1.5-2 1.5M10.5 14h2.5" /></>,
     sliders: <><path d="M3 5h14M3 10h14M3 15h14" /><circle cx="7" cy="5" r="1.7" fill="currentColor" stroke="none" /><circle cx="13" cy="10" r="1.7" fill="currentColor" stroke="none" /><circle cx="9" cy="15" r="1.7" fill="currentColor" stroke="none" /></>,
   };
   return <svg className="nav-svg" viewBox="0 0 20 20" aria-hidden="true" focusable="false">{shapes[name]}</svg>;
@@ -53,6 +55,8 @@ function readRoute(pathname = window.location.pathname): Route {
   if (path === "/overview") return { page: "overview" };
   if (path === "/memory") return { page: "memory" };
   if (path.startsWith("/memory/")) return { page: "memory", sessionId: decodeURIComponent(path.slice("/memory/".length)) };
+  if (path === "/prompts") return { page: "prompts" };
+  if (path.startsWith("/prompts/")) return { page: "prompts", promptId: decodeURIComponent(path.slice("/prompts/".length)) };
   if (path === "/settings") return { page: "settings" };
   if (path.startsWith("/knowledge/")) {
     return { page: "knowledge", documentId: decodeURIComponent(path.slice("/knowledge/".length)) };
@@ -254,12 +258,13 @@ function App() {
           {user.is_admin && <button className={route.page === "eval" ? "nav-item active" : "nav-item"} onClick={() => navigate("/eval/runs")} title="评测"><span className="nav-icon"><NavIcon name="target" /></span><span className="nav-label">评测</span></button>}
           {user.is_admin && <button className={route.page === "inspection" ? "nav-item active" : "nav-item"} onClick={() => navigate("/inspection")} title="知识巡检"><span className="nav-icon"><NavIcon name="pulse" /></span><span className="nav-label">知识巡检</span></button>}
           {user.is_admin && <button className={route.page === "overview" ? "nav-item active" : "nav-item"} onClick={() => navigate("/overview")} title="运行概览"><span className="nav-icon"><NavIcon name="chart" /></span><span className="nav-label">运行概览</span></button>}
+          {user.is_admin && <button className={route.page === "prompts" ? "nav-item active" : "nav-item"} onClick={() => navigate("/prompts")} title="提示词"><span className="nav-icon"><NavIcon name="prompt" /></span><span className="nav-label">提示词</span></button>}
           <button className={route.page === "settings" ? "nav-item active" : "nav-item"} onClick={() => navigate("/settings")} title="设置"><span className="nav-icon"><NavIcon name="sliders" /></span><span className="nav-label">设置</span></button>
           <div className="sidebar-bottom"><div className="status-dot" /><span className="sidebar-status-label">{user.username}{user.is_admin ? "（管理员）" : ""}</span><button className="logout-button" type="button" onClick={() => void handleLogout()}>退出登录</button></div>
         </aside>
         <main className={`main-panel ${route.page === "chat" ? "main-panel-chat" : ""}`}>
           {error && <div className="error-banner">{error}</div>}
-          {route.page === "settings" ? <Settings user={user} onToast={showToast} /> : route.page === "data" && dataAllowed ? <DataManagement onToast={showToast} /> : route.page === "eval" && user.is_admin ? <Evaluation section={route.section} setId={route.setId} suiteId={route.suiteId} onNavigate={navigate} onToast={showToast} Diagnostics={RetrievalDiagnostics} /> : route.page === "inspection" && user.is_admin ? <Inspection onToast={showToast} /> : route.page === "overview" && user.is_admin ? <Overview /> : route.page === "memory" ? <Memory sessionId={route.sessionId ?? null} onNavigate={navigate} /> : route.page === "chat" ? sessionLoading ? <ChatLoading /> : <Chat sessionId={sessionId} initialMessages={savedMessages} historyRuns={historyRuns} onNewChat={() => void startNewChat()} onOpenHistory={openHistory} onMessageSaved={recordHistory} onFeedbackSaved={recordFeedback} /> : <Knowledge user={user} documentId={route.page === "knowledge" ? route.documentId ?? null : null} onToast={showToast} onNavigate={(documentId) => navigate(documentId ? `/knowledge/${encodeURIComponent(documentId)}` : "/knowledge")} />}
+          {route.page === "settings" ? <Settings user={user} onToast={showToast} /> : route.page === "data" && dataAllowed ? <DataManagement onToast={showToast} /> : route.page === "eval" && user.is_admin ? <Evaluation section={route.section} setId={route.setId} suiteId={route.suiteId} onNavigate={navigate} onToast={showToast} Diagnostics={RetrievalDiagnostics} /> : route.page === "inspection" && user.is_admin ? <Inspection onToast={showToast} /> : route.page === "overview" && user.is_admin ? <Overview /> : route.page === "prompts" && user.is_admin ? <Prompts promptId={route.promptId ?? null} onNavigate={navigate} onToast={showToast} /> : route.page === "memory" ? <Memory sessionId={route.sessionId ?? null} onNavigate={navigate} /> : route.page === "chat" ? sessionLoading ? <ChatLoading /> : <Chat sessionId={sessionId} initialMessages={savedMessages} historyRuns={historyRuns} onNewChat={() => void startNewChat()} onOpenHistory={openHistory} onMessageSaved={recordHistory} onFeedbackSaved={recordFeedback} /> : <Knowledge user={user} documentId={route.page === "knowledge" ? route.documentId ?? null : null} onToast={showToast} onNavigate={(documentId) => navigate(documentId ? `/knowledge/${encodeURIComponent(documentId)}` : "/knowledge")} />}
         </main>
       </div>
     </>
