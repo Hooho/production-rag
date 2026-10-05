@@ -1,4 +1,5 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { getMemorySession, listMemorySessions, type MemorySessionDetail, type MemorySessionList, type MemoryTimelineTurn, type MemoryTurnText } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./Memory.css";
@@ -15,8 +16,25 @@ const HINTS = {
   rewritten: "检索之前，系统会结合最近几轮的问题，把半句话的追问补成完整的问题再去检索。这一列能看出记忆有没有帮上忙。",
 };
 
+// 提示气泡挂到 body 上、按视口定位：放在图标里时会被左侧导航栏挡住，在表格里还会被滚动容器裁掉。
+// 默认在图标下方居中，左右不超出视口；下方放不下时放到上方。
+const BUBBLE_WIDTH = 260;
 function Hint({ text }: { text: string }) {
-  return <span className="mem-hint" tabIndex={0} aria-label={text}>?<span className="mem-hint-bubble" role="tooltip">{text}</span></span>;
+  const anchor = useRef<HTMLSpanElement>(null);
+  const [style, setStyle] = useState<CSSProperties | null>(null);
+  const show = () => {
+    const rect = anchor.current?.getBoundingClientRect();
+    if (!rect) return;
+    const width = Math.min(BUBBLE_WIDTH, window.innerWidth - 16);
+    const left = Math.min(Math.max(8, rect.left + rect.width / 2 - width / 2), window.innerWidth - width - 8);
+    const below = window.innerHeight - rect.bottom > 160;
+    setStyle(below ? { left, width, top: rect.bottom + 6 } : { left, width, bottom: window.innerHeight - rect.top + 6 });
+  };
+  const hide = () => setStyle(null);
+  return <span ref={anchor} className="mem-hint" tabIndex={0} aria-label={text}
+    onMouseEnter={show} onMouseLeave={hide} onFocus={show} onBlur={hide}>?
+    {style && createPortal(<span className="mem-hint-bubble" role="tooltip" style={style}>{text}</span>, document.body)}
+  </span>;
 }
 
 function formatTime(value: string | null | undefined) {

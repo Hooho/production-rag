@@ -103,13 +103,10 @@
 }
 
 .mem-hint-bubble {
-   position: absolute;
-   top: calc(100% + 6px);
-   left: 50%;
-   z-index: 20;
-   display: none;
-   width: 260px;
-   transform: translateX(-50%);
+   position: fixed;
+   z-index: 1000;
+   display: block;
+   pointer-events: none;
    border: 1px solid var(--t-cedfec);
    border-radius: 4px;
    background: #fff;
@@ -121,11 +118,6 @@
    line-height: 1.6;
    text-align: left;
    white-space: normal;
-}
-
-.mem-hint:hover .mem-hint-bubble,
-.mem-hint:focus .mem-hint-bubble {
-   display: block;
 }
 
 .mem-usage {
