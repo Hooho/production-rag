@@ -151,7 +151,7 @@ function MemoryDetail({ sessionId, onBack }: { sessionId: string; onBack: () => 
 function TurnList({ turns, rounds }: { turns: MemoryTurnText[]; rounds?: number[] }) {
   if (turns.length === 0) return <div className="mem-empty">没有保留的原文。</div>;
   return <ol className="mem-turns">{turns.map((turn, index) => <li key={index}>
-    {rounds?.[index] && <span className="mem-round">第 {rounds[index]} 轮</span>}
+    {rounds?.[index] ? <span className="mem-round">第 {rounds[index]} 轮</span> : null}
     <div><span className="mem-role">问</span>{turn.question}</div>
     <ClampText label="答" text={turn.answer} />
   </li>)}</ol>;
@@ -190,7 +190,7 @@ function TimelineRow({ turn }: { turn: MemoryTimelineTurn }) {
 // 这一轮回答时模型拿到的对话记忆：摘要 + 保留的原文（压缩之后的状态），压缩的那一轮另外列出被压掉的原文。
 function TurnMemory({ turn }: { turn: MemoryTimelineTurn }) {
   const kept = turn.kept_turns;
-  const summaryNote = !turn.summary ? "" : turn.compressed ? "本轮新生成" : "沿用之前的摘要";
+  const summaryNote = !turn.summary ? "" : turn.compressed ? "本轮新生成：旧摘要 + 新压掉的原文一起总结而成" : "沿用之前的摘要";
   return <div className="mem-turn-memory">
     <h4>第 {turn.index} 轮回答时，模型拿到的记忆{turn.compressed ? "（压缩之后）" : ""}</h4>
     <div className="mem-compare">
@@ -201,9 +201,27 @@ function TurnMemory({ turn }: { turn: MemoryTimelineTurn }) {
           : kept.length === 0 ? <div className="mem-empty">没有之前的问答原文{turn.summary ? "，之前的对话都在摘要里" : "，这是会话的第一轮"}。</div>
           : <TurnList turns={kept} rounds={turn.kept_rounds} />}</div>
     </div>
-    {turn.compressed && <details className="mem-dropped">
-      <summary>被压掉的原文{turn.compressed_turns?.length ? `（${turn.compressed_turns.length} 轮，已并入上面的摘要）` : ""}</summary>
-      {turn.compressed_turns?.length ? <TurnList turns={turn.compressed_turns} /> : <div className="mem-empty">更早的记录里没有保存当时的记忆，看不到被压掉的原文。</div>}
-    </details>}
+    {turn.compressed && <CompressInput turn={turn} />}
   </div>;
+}
+
+// 这一轮压缩时送给大模型总结的内容：旧摘要 + 新压掉的原文，总结成上面的新摘要。
+// 不只是这几轮原文：旧摘要也一起送去重写，所以新摘要里还有更早的内容。
+function CompressInput({ turn }: { turn: MemoryTimelineTurn }) {
+  const dropped = turn.compressed_turns;
+  const rounds = dropped?.map((item) => item.round).filter((value): value is number => typeof value === "number") ?? [];
+  const droppedLabel = rounds.length ? `第 ${rounds.join("、")} 轮` : dropped?.length ? `${dropped.length} 轮` : "";
+  const previous = turn.previous_summary;
+  return <details className="mem-dropped">
+    <summary>本次送去压缩的内容：{previous ? "旧摘要 + " : ""}新压掉的原文{droppedLabel && `（${droppedLabel}）`}</summary>
+    <p className="mem-note">压缩时，大模型拿到的是「旧摘要 + 这次要压掉的原文」，把它们一起总结成一段新摘要（上面的「摘要」）。所以新摘要里除了这几轮，还有更早对话的要点。</p>
+    <div className="mem-compare">
+      <div><h5>旧摘要</h5>{previous === undefined || previous === null
+        ? <div className="mem-empty">上一轮的记录里没有保存摘要。</div>
+        : previous ? <ClampText label="摘" text={previous} /> : <div className="mem-empty">这是第一次压缩，没有旧摘要。</div>}</div>
+      <div><h5>新压掉的原文{droppedLabel && <small>{droppedLabel}</small>}</h5>{dropped?.length
+        ? <TurnList turns={dropped} rounds={dropped.map((item) => item.round ?? 0)} />
+        : <div className="mem-empty">更早的记录里没有保存当时的记忆，看不到被压掉的原文。</div>}</div>
+    </div>
+  </details>;
 }

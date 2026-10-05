@@ -65,10 +65,16 @@ def turn_view(index, row):
 
 
 # 压缩那一轮被压掉了哪些问答：上一轮回答时记忆里的原文 + 上一轮自己的问答，减去这一轮压缩后仍保留的原文。
+# 知道轮次时（previous 带 kept_rounds）每条带上 round：第几轮。
 def compressed_turns(previous, current):
     if previous is None or previous.get("kept_turns") is None:
         return None
-    before = list(previous["kept_turns"]) + [{"question": previous["question"], "answer": previous["answer"]}]
+    rounds = previous.get("kept_rounds")
+    before = [dict(turn) for turn in previous["kept_turns"]]
+    if rounds is not None and len(rounds) == len(before):
+        for turn, number in zip(before, rounds):
+            turn["round"] = number
+    before.append({"question": previous["question"], "answer": previous["answer"], "round": previous["index"]})
     kept = {turn.get("question") for turn in current.get("kept_turns") or []}
     return [turn for turn in before if turn.get("question") not in kept]
 
@@ -123,16 +129,18 @@ def session_detail(engine, framework, owner, session_id):
     if not exists and not rows:
         return None
     turns = [turn_view(index + 1, row) for index, row in enumerate(rows)]
-    entered = [turn for turn in turns if turn["entered"]]
-    for previous, current in zip([None] + entered[:-1], entered):
-        if current["compressed"]:
-            current["compressed_turns"] = compressed_turns(previous, current)
     # 保留的原文对应第几轮：这一轮之前、最近进入回答模型的那几轮（早期记录无法判断，按进入过算）。
     possible = [turn for turn in turns if turn["entered"] is not False]
     for position, current in enumerate(possible):
         if current["entered"]:
             kept = len(current["kept_turns"] or [])
             current["kept_rounds"] = [turn["index"] for turn in possible[max(0, position - kept):position]]
+    # 压缩时送给大模型总结的是「旧摘要 + 新压掉的原文」：旧摘要是上一次进入回答模型时用的摘要。
+    entered = [turn for turn in turns if turn["entered"]]
+    for previous, current in zip([None] + entered[:-1], entered):
+        if current["compressed"]:
+            current["compressed_turns"] = compressed_turns(previous, current)
+            current["previous_summary"] = previous["summary"] if previous is not None else None
     for turn in turns:
         turn.pop("answer", None)
     last_order = None

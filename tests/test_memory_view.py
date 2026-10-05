@@ -45,16 +45,17 @@ def test_memory_sessions(setup):
     assert [turn["rewritten"] for turn in timeline] == ["退货政策是什么", "订单 A1003 能否退货", "电子产品拆封后能否退货"]
     assert [turn["entered"] for turn in timeline] == [True, False, True]
     assert timeline[2]["compressed"] and timeline[2]["summary"] == "用户在问退货"
-    assert timeline[2]["compressed_turns"] == [{"question": "退货政策是什么", "answer": "退货政策是什么 的回答"}]
+    assert timeline[2]["compressed_turns"] == [{"question": "退货政策是什么", "answer": "退货政策是什么 的回答", "round": 1}]
+    assert timeline[2]["previous_summary"] == ""
     assert timeline[2]["kept_rounds"] == []
     assert detail["last_order"] == "A1003" and detail["current"]["message_count"] == 0
     assert client.get(f"/memory/sessions/{SESSION}", headers=headers("bob")).status_code == 404
 
 
 def test_compressed_turns_keeps_recent():
-    previous = {"question": "q2", "answer": "a2", "kept_turns": [{"question": "q1", "answer": "a1"}]}
+    previous = {"index": 2, "question": "q2", "answer": "a2", "kept_turns": [{"question": "q1", "answer": "a1"}], "kept_rounds": [1]}
     current = {"kept_turns": [{"question": "q2", "answer": "a2"}]}
-    assert compressed_turns(previous, current) == [{"question": "q1", "answer": "a1"}]
+    assert compressed_turns(previous, current) == [{"question": "q1", "answer": "a1", "round": 1}]
     assert compressed_turns(None, current) is None
 
 

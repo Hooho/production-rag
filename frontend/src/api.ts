@@ -1269,7 +1269,7 @@ export function getOverview(days: number) {
 export type MemoryTurnText = { question: string; answer: string };
 export type MemorySessionBrief = { session_id: string; title: string; turns: number; compressions: number; memory_tokens: number; message_count: number; snapshots: number | null; bytes: number | null; last_active: string | null };
 export type MemorySessionList = { items: MemorySessionBrief[]; trigger_tokens: number; keep_tokens: number; backend?: string };
-export type MemoryTimelineTurn = { index: number; run_id: string; created: string; question: string; rewritten: string | null; route: string | null; entered: boolean | null; memory_tokens: number | null; messages_before: number | null; compressed: boolean; summary: string | null; kept_turns: MemoryTurnText[] | null; compressed_turns?: MemoryTurnText[] | null; kept_rounds?: number[] };
+export type MemoryTimelineTurn = { index: number; run_id: string; created: string; question: string; rewritten: string | null; route: string | null; entered: boolean | null; memory_tokens: number | null; messages_before: number | null; compressed: boolean; summary: string | null; kept_turns: MemoryTurnText[] | null; compressed_turns?: (MemoryTurnText & { round?: number })[] | null; kept_rounds?: number[]; previous_summary?: string | null };
 export type MemorySessionDetail = {
   session_id: string; title: string; last_order: string | null; trigger_tokens: number; keep_tokens: number;
   current: { summary: string; summary_tokens: number | null; turns: MemoryTurnText[]; message_count: number; estimated_tokens: number };
