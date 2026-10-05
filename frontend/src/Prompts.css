@@ -225,14 +225,40 @@
 .pr-note-input {
    flex: 1 1 220px;
    min-width: 0;
+   height: 32px;
    border: 1px solid var(--t-cedfec);
    border-radius: 4px;
-   padding: 6px 10px;
+   padding: 0 10px;
    font-size: 13px;
 }
 
-.pr-small {
-   padding: 5px 10px;
+/* 主按钮和次按钮的全局样式大小不一（主按钮内边距大、圆角小），这页里并排出现，统一成同样的尺寸。 */
+.pr-page .primary-button,
+.pr-page .secondary-button {
+   height: 32px;
+   border-radius: 4px;
+   padding: 0 14px;
+   font-size: 13px;
+   font-weight: 600;
+   line-height: 30px;
+   white-space: nowrap;
+}
+
+.pr-page .secondary-button {
+   font-weight: 500;
+}
+
+.pr-page .secondary-button:disabled {
+   opacity: .5;
+   cursor: not-allowed;
+}
+
+.pr-version-actions .primary-button,
+.pr-version-actions .secondary-button {
+   height: 28px;
+   padding: 0 10px;
+   font-size: 12px;
+   line-height: 26px;
 }
 
 .pr-locked,

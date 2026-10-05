@@ -146,7 +146,7 @@ function VersionRow({ version, isActive, activeText, onLoad, onActivate }: { ver
         <button type="button" className="secondary-button" onClick={() => setOpen(!open)}>{open ? "收起" : "查看"}</button>
         <button type="button" className="secondary-button" onClick={onLoad}>载入编辑</button>
         {!isActive && (confirming
-          ? <><button type="button" className="primary-button pr-small" onClick={() => { setConfirming(false); onActivate(); }}>确认改用</button>
+          ? <><button type="button" className="primary-button" onClick={() => { setConfirming(false); onActivate(); }}>确认改用</button>
             <button type="button" className="secondary-button" onClick={() => setConfirming(false)}>取消</button></>
           : <button type="button" className="secondary-button" onClick={() => setConfirming(true)}>改用这个版本</button>)}
       </span>
