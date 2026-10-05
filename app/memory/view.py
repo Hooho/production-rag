@@ -12,8 +12,21 @@ from ..models import strip_think
 from ..mysql.tables import runs, sessions
 
 
-# 不经过回答模型、不写对话记忆的分流：订单查询、数据查询、问候、被安全拦截。
-NO_MEMORY_ROUTES = {"order", "data", "greeting", "blocked"}
+# 不经过回答模型、不写对话记忆的分流：订单查询、数据查询、问候、被安全拦截。值是页面上说明的原因。
+NO_MEMORY_ROUTES = {
+    "order": "订单查询由业务工具直接回答，不经过回答模型",
+    "data": "数据查询由业务工具直接回答，不经过回答模型",
+    "greeting": "问候直接回复，不经过回答模型",
+    "blocked": "问题被安全检查拦截，没有往下处理",
+}
+NO_SOURCE_REASON = "没检索到可用的资料（没有结果，或分数都低于阈值），直接拒答，没有调用回答模型"
+
+
+# 这一轮为什么没有写进对话记忆。
+def skip_reason(route, entered):
+    if entered is not False:
+        return None
+    return NO_MEMORY_ROUTES.get(route) or NO_SOURCE_REASON
 
 
 def steps_by_id(response):
@@ -54,7 +67,7 @@ def turn_view(index, row):
         "index": index, "run_id": row["id"], "created": row["created"], "question": row["question"],
         "rewritten": (steps.get("query") or {}).get("standalone_query"),
         "route": route,
-        "entered": entered,
+        "entered": entered, "skip_reason": skip_reason(route, entered),
         "memory_tokens": (steps.get("context") or {}).get("estimated_memory_tokens"),
         "messages_before": response_step.get("checkpoint_messages_before"),
         "compressed": bool(response_step.get("summary_updated")),

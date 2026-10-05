@@ -44,6 +44,7 @@ def test_memory_sessions(setup):
     timeline = detail["timeline"]
     assert [turn["rewritten"] for turn in timeline] == ["退货政策是什么", "订单 A1003 能否退货", "电子产品拆封后能否退货"]
     assert [turn["entered"] for turn in timeline] == [True, False, True]
+    assert timeline[1]["skip_reason"].startswith("订单查询") and timeline[0]["skip_reason"] is None
     assert timeline[2]["compressed"] and timeline[2]["summary"] == "用户在问退货"
     assert timeline[2]["compressed_turns"] == [{"question": "退货政策是什么", "answer": "退货政策是什么 的回答", "round": 1}]
     assert timeline[2]["previous_summary"] == ""

@@ -190,7 +190,7 @@ function TimelineRow({ turn }: { turn: MemoryTimelineTurn }) {
   let change: ReactNode;
   const toggle = (label: string, className: string) => <button type="button" className={`mem-tag ${className}`} onClick={() => setOpen(!open)} aria-expanded={open}>{label} {open ? "▴" : "▾"}</button>;
   if (turn.entered === null) change = <span className="mem-tag is-muted" title="这一轮的记录里没有保存记忆信息（早期格式），无法判断有没有写入记忆、有没有压缩">未记录</span>;
-  else if (!turn.entered) change = <span className="mem-tag is-muted" title="订单查询、数据查询、问候和没检索到资料的问题不经过回答模型，不会写进对话记忆">未写入记忆</span>;
+  else if (!turn.entered) change = <><span className="mem-tag is-muted">未写入记忆</span>{turn.skip_reason && <small className="mem-skip">{turn.skip_reason}，这一轮不写进对话记忆</small>}</>;
   else if (turn.compressed) change = toggle("压缩", "is-compress");
   else change = toggle("追加", "is-append");
   return <>
@@ -198,7 +198,7 @@ function TimelineRow({ turn }: { turn: MemoryTimelineTurn }) {
       <td className="num">{turn.index}</td>
       <td>{turn.question}</td>
       <td className={turn.rewritten && turn.rewritten !== turn.question ? "mem-rewritten" : "mem-same"}>{turn.rewritten ? (turn.rewritten === turn.question ? "（不用改写）" : turn.rewritten) : "—"}</td>
-      <td className="num">{turn.entered === null ? <span className="mem-same">未记录</span> : turn.entered && turn.memory_tokens !== null ? `${tokens(turn.memory_tokens)} Token` : "—"}</td>
+      <td className="num">{turn.entered === null ? <span className="mem-same">未记录</span> : turn.memory_tokens !== null && turn.memory_tokens !== undefined ? `${tokens(turn.memory_tokens)} Token` : "—"}</td>
       <td>{change}</td>
     </tr>
     {open && <tr className="mem-compare-row"><td colSpan={5}><TurnMemory turn={turn} /></td></tr>}

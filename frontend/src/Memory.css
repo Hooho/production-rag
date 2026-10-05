@@ -318,6 +318,16 @@
    cursor: pointer;
 }
 
+.mem-skip {
+   display: block;
+   max-width: 220px;
+   margin-top: 4px;
+   color: var(--t-7d95ac);
+   font-size: 12px;
+   line-height: 1.5;
+   white-space: normal;
+}
+
 .mem-tag.is-append {
    cursor: pointer;
 }
