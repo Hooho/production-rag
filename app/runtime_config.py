@@ -63,6 +63,9 @@ SPECS = [
         "min": 800, "max": 16000},
     {"key": "memory_keep_tokens", "group": "memory", "type": "int", "default": 3000,
         "min": 200, "max": 8000},
+    # 长期记忆（app/memory/long_term.py）：跨会话记住用户的偏好、身份和长期关注的主题。
+    {"key": "long_memory_enabled", "group": "memory", "type": "bool", "default": True},
+    {"key": "long_memory_max_items", "group": "memory", "type": "int", "default": 30, "min": 5, "max": 100},
     {"key": "gap_similarity", "group": "inspection", "type": "float", "default": 0.75,
         "min": 0.5, "max": 0.95},
     {"key": "content_min_negative", "group": "inspection", "type": "int",

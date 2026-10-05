@@ -6,7 +6,11 @@ from ..mysql.store import runs
 
 
 class Memory:
-    """组合 MySQL 长期历史和 Redis 短期状态。"""
+    """读取 MySQL 里本会话的问答记录（最近几个问题供问题改写）和 Redis 里的最近订单号。
+
+    这两样和 LangGraph Checkpointer 一样只在同一个会话里用，都属于短期记忆；以前注释里把 MySQL 叫「长期历史」，
+    是按存得久不久分的，容易和跨会话的长期记忆（app/memory/long_term.py）混淆。
+    """
 
     # 获取当前用户最近六轮持久化问答。
     def history(self, store, session_id, owner):

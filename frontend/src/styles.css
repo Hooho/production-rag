@@ -6627,6 +6627,14 @@ input:focus {
    color: #b45309;
 }
 
+.long-memory-used {
+   margin: 2px 0 0;
+   padding-left: 18px;
+   color: var(--t-334e68);
+   font-size: 13px;
+   line-height: 1.7;
+}
+
 .mem-fold>summary {
    width: fit-content;
    color: var(--t-2563eb);

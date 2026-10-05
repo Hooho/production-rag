@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { getMemorySession, listMemorySessions, type MemorySessionDetail, type MemorySessionList, type MemoryTimelineTurn, type MemoryTurnText } from "./api";
+import { clearLongMemory, deleteLongMemory, getLongMemory, getMemorySession, listMemorySessions, setLongMemoryEnabled, type LongMemoryItem, type LongMemoryView, type MemorySessionDetail, type MemorySessionList, type MemoryTimelineTurn, type MemoryTurnText } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./Memory.css";
 
@@ -55,11 +55,20 @@ function tokens(value: number | null | undefined) {
   return value === null || value === undefined ? "—" : value.toLocaleString("zh-CN");
 }
 
-export default function Memory({ sessionId, onNavigate }: { sessionId: string | null; onNavigate: (path: string) => void }) {
-  return sessionId ? <MemoryDetail sessionId={sessionId} onBack={() => onNavigate("/memory")} /> : <MemoryList onOpen={(id) => onNavigate(`/memory/${encodeURIComponent(id)}`)} />;
+export default function Memory({ sessionId, tab, onNavigate }: { sessionId: string | null; tab?: "long"; onNavigate: (path: string) => void }) {
+  if (tab === "long") return <LongMemory onNavigate={onNavigate} />;
+  return sessionId ? <MemoryDetail sessionId={sessionId} onBack={() => onNavigate("/memory")} /> : <MemoryList onNavigate={onNavigate} onOpen={(id) => onNavigate(`/memory/${encodeURIComponent(id)}`)} />;
 }
 
-function MemoryList({ onOpen }: { onOpen: (sessionId: string) => void }) {
+// 记忆分两种：会话记忆（短期，同一个会话里的对话，按会话存）和长期记忆（跨会话的用户偏好、身份，按用户存）。
+function MemoryTabs({ active, onNavigate }: { active: "session" | "long"; onNavigate: (path: string) => void }) {
+  return <div className="mem-tabs" role="tablist">
+    <button type="button" role="tab" aria-selected={active === "session"} className={active === "session" ? "is-active" : ""} onClick={() => onNavigate("/memory")}>会话记忆<small>短期 · 每个会话各自记</small></button>
+    <button type="button" role="tab" aria-selected={active === "long"} className={active === "long" ? "is-active" : ""} onClick={() => onNavigate("/memory/long")}>长期记忆<small>跨会话 · 记住你本人</small></button>
+  </div>;
+}
+
+function MemoryList({ onOpen, onNavigate }: { onOpen: (sessionId: string) => void; onNavigate: (path: string) => void }) {
   const [data, setData] = useState<MemorySessionList | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -68,7 +77,8 @@ function MemoryList({ onOpen }: { onOpen: (sessionId: string) => void }) {
   return <div className="mem-page">
     <header className="topbar mem-topbar">
       <div>
-        <h1>会话记忆</h1>
+        <h1>记忆</h1>
+        <MemoryTabs active="session" onNavigate={onNavigate} />
         <p className="mem-subtitle">你的每个会话里，系统记住了什么：较早的对话压成的摘要，加上最近几轮原文。只有你自己能看到。{data && ` 当前设置：超过 ${tokens(data.trigger_tokens)} Token 压缩，压缩后保留最近不超过 ${tokens(data.keep_tokens)} Token 的原文。`}</p>
       </div>
     </header>
@@ -242,4 +252,75 @@ function CompressInput({ turn }: { turn: MemoryTimelineTurn }) {
         : <div className="mem-empty">更早的记录里没有保存当时的记忆，看不到被压掉的原文。</div>}</div>
     </div>
   </details>;
+}
+
+const LONG_HINT = "每轮回答之后，系统在后台判断这一轮里有没有值得长期记住的、关于你本人的信息：回答偏好（详略、格式）、身份和职责（部门、负责的区域）、长期关注的主题。不记知识库里的内容，也不记手机号、证件号这类敏感信息。";
+
+// 长期记忆：跨会话记住的用户偏好、身份和长期关注的主题。可以逐条删除、清空，也可以关闭（关闭后既不读也不记）。
+function LongMemory({ onNavigate }: { onNavigate: (path: string) => void }) {
+  const [data, setData] = useState<LongMemoryView | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+  useEffect(() => {
+    getLongMemory().then(setData).catch((reason: Error) => setError(reason.message));
+  }, []);
+  const run = async (action: () => Promise<LongMemoryView>) => {
+    setBusy(true);
+    setError("");
+    try {
+      setData(await action());
+    } catch (reason) {
+      setError((reason as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const groups = data ? Object.entries(data.categories).map(([key, label]) => ({ key, label, items: data.items.filter((item) => item.category === key) })) : [];
+  return <div className="mem-page">
+    <header className="topbar mem-topbar">
+      <div>
+        <h1>记忆</h1>
+        <MemoryTabs active="long" onNavigate={onNavigate} />
+        <p className="mem-subtitle">跨会话记住的关于你本人的信息。新开一个会话，回答时也会参考它们：按你的偏好组织回答，理解「我负责的区域」这类说法。它们只用来调整回答方式，不会当成事实来源。只有你自己能看到。 <Hint text={LONG_HINT} /></p>
+      </div>
+    </header>
+    {error && <div className="field-error">{error}</div>}
+    {!data && !error && <LoadingSkeleton label="正在加载长期记忆"><SkeletonBlock className="mem-skeleton" /></LoadingSkeleton>}
+    {data && <>
+      <section className="mem-card long-switch">
+        <label className="long-toggle">
+          <input type="checkbox" checked={data.enabled} disabled={busy} onChange={(event) => void run(() => setLongMemoryEnabled(event.target.checked))} />
+          <span className="long-toggle-track" aria-hidden="true"><span /></span>
+          <span><strong>{data.enabled ? "已开启长期记忆" : "已关闭长期记忆"}</strong>
+            <small>{data.enabled ? `每轮回答后自动整理，最多记 ${data.max_items} 条。` : "关闭后不再记新的内容，已有的记忆也不会发给模型；可以随时重新打开。"}</small></span>
+        </label>
+        {!data.global_enabled && <p className="long-notice">管理员在设置页关闭了长期记忆，目前所有用户都不会记录和使用长期记忆。</p>}
+      </section>
+      <section className="mem-card">
+        <div className="long-head">
+          <h2>记住的内容 <small>{data.items.length} / {data.max_items} 条</small></h2>
+          {data.items.length > 0 && (confirmClear
+            ? <span className="long-actions"><button type="button" className="danger-text" disabled={busy} onClick={() => { setConfirmClear(false); void run(clearLongMemory); }}>确认清空</button><button type="button" className="link-text" onClick={() => setConfirmClear(false)}>取消</button></span>
+            : <button type="button" className="link-text" onClick={() => setConfirmClear(true)}>清空全部</button>)}
+        </div>
+        {data.items.length === 0 ? <div className="mem-empty">还没有长期记忆。聊天时说出你的偏好或身份，比如「以后回答先给结论」「我负责华东区售后」，之后在这里就能看到。</div>
+          : groups.filter((group) => group.items.length > 0).map((group) => <div className="long-group" key={group.key}>
+            <h3>{group.label}</h3>
+            <ul>{group.items.map((item) => <LongMemoryRow key={item.id} item={item} busy={busy} onNavigate={onNavigate} onDelete={() => void run(() => deleteLongMemory(item.id))} />)}</ul>
+          </div>)}
+      </section>
+    </>}
+  </div>;
+}
+
+function LongMemoryRow({ item, busy, onNavigate, onDelete }: { item: LongMemoryItem; busy: boolean; onNavigate: (path: string) => void; onDelete: () => void }) {
+  const [confirming, setConfirming] = useState(false);
+  return <li>
+    <span className="long-content">{item.content}</span>
+    <span className="long-meta">{formatTime(item.updated ?? item.created)}{item.source_session && <> · <button type="button" className="link-text" onClick={() => onNavigate(`/memory/${encodeURIComponent(item.source_session ?? "")}`)}>来自这个会话</button></>}</span>
+    {confirming
+      ? <span className="long-actions"><button type="button" className="danger-text" disabled={busy} onClick={() => { setConfirming(false); onDelete(); }}>确认删除</button><button type="button" className="link-text" onClick={() => setConfirming(false)}>取消</button></span>
+      : <button type="button" className="link-text" onClick={() => setConfirming(true)}>删除</button>}
+  </li>;
 }

@@ -250,12 +250,13 @@ class Models:
     # 按规则、本地小模型、远程 LLM 的顺序分析意图，模型异常时回退到规则。
     # 识别过程 trace 按顺序记录每一环（规则 → 本地小模型 → 大模型 → 规则兜底）的结果和是否采纳。
     # 以前只保留最终结果，没被采纳的小模型结果直接丢掉，页面上看不出先试了什么、为什么还要调用大模型。
-    def analyze_query(self, question, history, last_order, summary="", on_memory=None):
+    # profile：用户的长期记忆（app/memory/long_term.py），只有大模型这一环用得上。
+    def analyze_query(self, question, history, last_order, summary="", on_memory=None, profile=None):
         trace = []
-        analysis = self.analyze_query_steps(question, history, last_order, summary, on_memory, trace)
+        analysis = self.analyze_query_steps(question, history, last_order, summary, on_memory, trace, profile or [])
         return {**analysis, "trace": trace}
 
-    def analyze_query_steps(self, question, history, last_order, summary, on_memory, trace):
+    def analyze_query_steps(self, question, history, last_order, summary, on_memory, trace, profile=()):
         fallback = self.fallback_query(question, history, last_order)
         rule = self.rule_query(question, history, last_order)
         if rule:
@@ -293,8 +294,11 @@ class Models:
         history_text = []
         for item in history[-3:]:
             history_text.append(item["question"])
-        payload = json.dumps({"question": question, "history_summary": summary,
-            "recent_questions": history_text, "last_order": last_order}, ensure_ascii=False)
+        payload = {"question": question, "history_summary": summary,
+            "recent_questions": history_text, "last_order": last_order}
+        if profile:
+            payload["user_profile"] = [item["content"] for item in profile]
+        payload = json.dumps(payload, ensure_ascii=False)
         llm_title = f"大模型 {self.llm_model}"
         # 大模型除了最近 3 个问题，还收到滚动摘要（较早对话压缩成的摘要）。
         llm_context = self.intent_context(recent_questions, last_order, summary)
@@ -303,6 +307,8 @@ class Models:
             if on_memory:
                 # 标题用实际模型名；以前写死成"DeepSeek 查询分析"，换了模型也不变。
                 memory = {"memory_summary": summary, "history_questions": history_text}
+                if profile:
+                    memory["long_term_memory"] = [item["content"] for item in profile]
                 if last_order:
                     memory["redis_recent_order"] = last_order
                 on_memory(llm_title, memory)

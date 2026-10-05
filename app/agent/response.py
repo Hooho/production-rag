@@ -7,6 +7,7 @@ from langchain.agents.middleware import ModelRequest, dynamic_prompt
 
 from .. import prompts
 from ..memory.framework import FrameworkMemory
+from ..memory.long_term import profile_block
 from ..runtime_config import value as runtime_value
 from ..security import neutralize_tags
 
@@ -43,6 +44,8 @@ class ResponseContext(TypedDict, total=False):
     sources: list[dict[str, Any]]
     # 检索充分性判断的结论；partial 时提示模型只回答资料支持的部分。
     coverage: dict[str, Any] | None
+    # 用户的长期记忆（偏好、身份），拼在来源后面，只用于调整回答方式。
+    profile: list[dict[str, Any]]
 
 
 class ResponseAgent:
@@ -70,6 +73,7 @@ class ResponseAgent:
         def source_prompt(request: ModelRequest) -> str:
             sources = request.runtime.context.get("sources", []) if request.runtime else []
             coverage = request.runtime.context.get("coverage") if request.runtime else None
+            profile = request.runtime.context.get("profile") if request.runtime else None
             source_lines = []
             for source in sources:
                 source_lines.append(format_source(source))
@@ -79,7 +83,7 @@ class ResponseAgent:
             if coverage and coverage.get("verdict") == "partial":
                 partial_note = ("检索资料只能回答问题的一部分（缺少：" + (coverage.get("missing") or "部分信息") +
                     "）。只回答资料能支持的部分，并明确告诉用户哪些内容资料中没有。")
-            return prompts.compose("answer") + partial_note + "\n\n本次检索来源：\n" + "\n".join(source_lines)
+            return prompts.compose("answer") + partial_note + "\n\n本次检索来源：\n" + "\n".join(source_lines) + profile_block(profile)
 
         return create_agent(model=self.models.chat_model, tools=[], context_schema=ResponseContext,
             middleware=[self.memory.middleware, source_prompt], checkpointer=self.memory.checkpointer,
@@ -107,7 +111,7 @@ class ResponseAgent:
         self.rebuild()
 
     # 调用带摘要中间件的回答 Agent，并返回模型实际使用的框架记忆；传入 on_token 时逐段转发模型输出。
-    def answer(self, owner, session_id, question, sources, on_token=None, coverage=None):
+    def answer(self, owner, session_id, question, sources, on_token=None, coverage=None, profile=None):
         if not sources:
             return "知识库中没有足够资料，请补充文档或具体问题。", {
                 "summary": "", "turns": [], "message_count": 0, "estimated_tokens": 0,
@@ -129,7 +133,7 @@ class ResponseAgent:
         # 边生成边转发文字，最后一份 values 与原来 invoke 的返回值相同，记忆统计逻辑不变。
         result = None
         for mode, chunk in self.agent.stream({"messages": [{"role": "user", "content": question}]},
-                config, context={"sources": sources, "coverage": coverage}, stream_mode=["messages", "values"]):
+                config, context={"sources": sources, "coverage": coverage, "profile": profile or []}, stream_mode=["messages", "values"]):
             if mode == "values":
                 result = chunk
                 continue

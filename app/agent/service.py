@@ -223,6 +223,8 @@ class Agent:
     # 从 MySQL 读取审计历史，并从 LangGraph Checkpointer 读取模型会话状态。
     def read_memory(self, state):
         framework = self.response_agent.memory.inspect(state["owner"], state["session_id"])
+        # 长期记忆（跨会话的用户偏好、身份）：问题改写和生成回答都会用到；用户或设置页关闭时为空。
+        framework["profile"] = self.response_agent.memory.long_term.profile(state["owner"])
         history_memory = []
         for item in state["previous"]:
             response = item.get("response") or {}
@@ -236,7 +238,8 @@ class Agent:
             "memory_trigger_tokens": self.response_agent.memory.trigger_tokens,
             "memory_keep_tokens": self.response_agent.memory.keep_tokens,
             "summary_model": state["models"].llm_model,
-            **self.no_model_info("MySQL + PostgreSQL Checkpoint + Redis 读取", "读取历史记忆供后续阶段使用")}
+            "long_term_memory": [item["content"] for item in framework["profile"]],
+            **self.no_model_info("MySQL + PostgreSQL Checkpoint/Store + Redis 读取", "读取历史记忆供后续阶段使用")}
         # Redis 短期状态目前只有最近订单号，只和订单追问有关；没有订单时不显示。
         if state.get("last_order"):
             result["redis_short_term"] = {"recent_order": state.get("last_order")}
@@ -250,7 +253,8 @@ class Agent:
         started = time.monotonic()
         analysis = state["models"].analyze_query(state["question"], state["previous"],
             state.get("last_order"), summary=state["memory_context"]["summary"],
-            on_memory=lambda target, memory: self.record_ai_memory(state, target, memory))
+            on_memory=lambda target, memory: self.record_ai_memory(state, target, memory),
+            profile=state["memory_context"].get("profile"))
         # 这一步的重点是识别过程：先列出每一环的结果和是否采纳，再给最终结果；
         # 候选意图已经写在小模型那一环里，不再单独列出。
         # 调用了哪个模型、怎么调用的，识别过程里每一环已经写清楚，不再单独列"模型调用 / 调用方式"。
@@ -461,7 +465,7 @@ class Agent:
         sent_before = len(state["ai_memories"])
         answer, memory = self.response_agent.answer(state["owner"], state["session_id"],
             state["question"], state["sources"], on_token=state.get("on_token"),
-            coverage=state.get("coverage"))
+            coverage=state.get("coverage"), profile=(state.get("memory_context") or {}).get("profile"))
         # 没有来源时回答是固定的拒答文本，本来就没有引用；原来也做引用校验，会把拒答替换成
         # "模型没有返回可校验的引用"，用户看到的像是出错而不是"知识库没有资料"。
         citation = None
@@ -473,6 +477,8 @@ class Agent:
                 answer = CITATION_REJECTED
             self.record_ai_memory(state, "LangChain 回答 Agent", {
                 "memory_summary": memory["summary"], "history_turns": memory["turns"],
+                **({"long_term_memory": [item["content"] for item in state["memory_context"]["profile"]]}
+                    if (state.get("memory_context") or {}).get("profile") else {}),
             })
         # 记忆压缩发生在回答模型调用之前（SummarizationMiddleware），结果记在本步；
         # 以前回头写进检索前的"应用框架记忆策略"步骤，时间顺序对不上。

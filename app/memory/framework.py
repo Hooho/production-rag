@@ -6,10 +6,13 @@ from langchain.agents.middleware import SummarizationMiddleware
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.store.memory import InMemoryStore
+from langgraph.store.postgres import PostgresStore
 from psycopg_pool import ConnectionPool
 
 from .. import prompts
 from ..models import strip_think
+from .long_term import LongTermMemory
 from ..runtime_config import value as runtime_value
 
 
@@ -101,10 +104,15 @@ class FrameworkMemory:
                 kwargs={"autocommit": True, "prepare_threshold": 0})
             self.checkpointer = PostgresSaver(self.pool)
             self.checkpointer.setup()
+            # 长期记忆（跨会话）存在 LangGraph Store 里，和 Checkpointer（短期记忆，按会话）共用同一个库和连接池。
+            self.store = PostgresStore(self.pool)
+            self.store.setup()
             self.backend = "postgres"
         else:
             self.checkpointer = InMemorySaver()
+            self.store = InMemoryStore()
             self.backend = "memory"
+        self.long_term = LongTermMemory(models, self.store)
         self.middleware = None
         self.summary_identity = None
         self.rebuild()

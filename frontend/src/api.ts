@@ -1313,3 +1313,25 @@ export function activatePromptVersion(id: string, version: number) {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version }),
   });
 }
+
+// 长期记忆（GET /memory/long 等）：跨会话记住的用户偏好、身份和长期关注的主题，只能看、改自己的。
+export type LongMemoryItem = { id: string; content: string; category: string; created?: string; updated?: string; source_session?: string; source_run?: string };
+export type LongMemoryView = { enabled: boolean; global_enabled: boolean; max_items: number; categories: Record<string, string>; items: LongMemoryItem[] };
+
+export function getLongMemory() {
+  return request<LongMemoryView>("/memory/long");
+}
+
+export function setLongMemoryEnabled(enabled: boolean) {
+  return request<LongMemoryView>("/memory/long/settings", {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }),
+  });
+}
+
+export function deleteLongMemory(id: string) {
+  return request<LongMemoryView>(`/memory/long/items/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export function clearLongMemory() {
+  return request<LongMemoryView>("/memory/long/items", { method: "DELETE" });
+}

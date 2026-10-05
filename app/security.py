@@ -83,7 +83,8 @@ SENTENCE_END = "。！？!?\n；;"
 
 # 伪造的来源标签。来源用 <source> 标签包起来交给模型，文档里如果自带 </source>，
 # 就能提前"关闭"标签，把后面的文字伪装成标签外的系统说明；这里改成全角尖括号让它失效。
-SOURCE_TAG = re.compile(r"<(/?)(source)", re.IGNORECASE)
+# 用户画像（长期记忆）用 <user_profile> 标签，同样不能被资料或记忆内容伪造。
+SOURCE_TAG = re.compile(r"<(/?)(source|user_profile)", re.IGNORECASE)
 
 # 回答中的 Markdown 图片、Markdown 链接和裸链接。
 MARKDOWN_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")

@@ -6,11 +6,11 @@ def admin():
     return headers("admin")
 
 
-# 列表：6 段提示词，分线上问答和文档导入两组，没改过时都用内置版本。
+# 列表：7 段提示词，分线上问答和文档导入两组，没改过时都用内置版本。
 def test_prompt_list(setup):
     client, store = setup
     body = client.get("/prompts", headers=admin()).json()
-    assert [item["id"] for item in body["items"]] == ["intent", "sufficiency", "answer", "memory_summary", "data_query", "chunk_context"]
+    assert [item["id"] for item in body["items"]] == ["intent", "sufficiency", "answer", "memory_summary", "data_query", "long_memory", "chunk_context"]
     assert {item["active_label"] for item in body["items"]} == {"内置"}
     assert client.get("/prompts", headers=headers("alice")).status_code == 403
 

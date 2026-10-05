@@ -119,6 +119,11 @@ class PromptVersionInput(BaseModel):
     note: str = Field("", max_length=prompts.NOTE_LENGTH)
 
 
+class LongMemorySettingsInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool
+
+
 class PromptActivateInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     version: int = Field(ge=0)
@@ -685,6 +690,30 @@ def create_app(store=None, models=None, jwt_secret=None):
             raise HTTPException(404, "会话不存在")
         return detail
 
+    # 长期记忆：跨会话记住的用户偏好、身份和长期关注的主题。同样只能看、改自己的。
+    def long_term():
+        return app.state.agent.response_agent.memory.long_term
+
+    @app.get("/memory/long")
+    def get_long_memory(owner=Depends(identity)):
+        return long_term().view(owner)
+
+    @app.put("/memory/long/settings")
+    def set_long_memory(body: LongMemorySettingsInput, owner=Depends(identity)):
+        long_term().set_enabled(owner, body.enabled)
+        return long_term().view(owner)
+
+    @app.delete("/memory/long/items/{key}")
+    def delete_long_memory(key: str, owner=Depends(identity)):
+        if not long_term().delete(owner, key):
+            raise HTTPException(404, "这条记忆不存在")
+        return long_term().view(owner)
+
+    @app.delete("/memory/long/items")
+    def clear_long_memory(owner=Depends(identity)):
+        long_term().clear(owner)
+        return long_term().view(owner)
+
     # 返回当前用户最近保存的问答记录，供控制台刷新后恢复显示。
     @app.get("/history")
     def get_saved_history(owner=Depends(identity)):
@@ -1224,6 +1253,11 @@ def create_app(store=None, models=None, jwt_secret=None):
                 connection.execute(runs.insert().values(id=request_id, session_id=session_id,
                     owner=owner, question=body.question, response=result,
                     created=datetime.now(timezone.utc).isoformat(), **run_columns(summarize_run(result))))
+            # 长期记忆在后台提取，不增加这次回答的等待时间；提取失败只记日志。
+            try:
+                app.state.agent.response_agent.memory.long_term.schedule(owner, session_id, request_id, body.question, result)
+            except Exception:
+                logger.warning("long_memory_schedule_failed trace_id=%s", request.state.trace_id, exc_info=True)
             return result
         finally:
             # 解锁失败不覆盖已经提交的成功结果，锁会自动过期。

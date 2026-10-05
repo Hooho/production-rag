@@ -411,3 +411,180 @@
    margin: 0;
    color: var(--t-1d3550);
 }
+
+/* 记忆页的两个标签：会话记忆（短期）和长期记忆。 */
+.mem-tabs {
+   display: flex;
+   flex-wrap: wrap;
+   gap: 8px;
+   margin: 12px 0 4px;
+}
+
+.mem-tabs button {
+   display: grid;
+   gap: 2px;
+   border: 1px solid var(--t-e3edf5);
+   border-radius: 6px;
+   background: #fff;
+   padding: 8px 14px;
+   color: var(--t-334e68);
+   font-size: 14px;
+   font-weight: 600;
+   text-align: left;
+   cursor: pointer;
+}
+
+.mem-tabs button small {
+   color: var(--t-7d95ac);
+   font-size: 12px;
+   font-weight: 400;
+}
+
+.mem-tabs button.is-active {
+   border-color: var(--t-2563eb);
+   background: var(--t-eaf1ff);
+   color: var(--t-1d4ed8);
+}
+
+.mem-page .link-text,
+.mem-page .danger-text {
+   border: 0;
+   background: none;
+   padding: 0;
+   color: var(--t-2563eb);
+   font-size: 12px;
+   cursor: pointer;
+}
+
+.mem-page .danger-text {
+   color: #dc2626;
+   font-weight: 600;
+}
+
+.long-switch {
+   display: grid;
+   gap: 10px;
+}
+
+.long-toggle {
+   display: flex;
+   align-items: center;
+   gap: 12px;
+   cursor: pointer;
+}
+
+.long-toggle input {
+   position: absolute;
+   opacity: 0;
+   pointer-events: none;
+}
+
+.long-toggle-track {
+   position: relative;
+   flex: 0 0 auto;
+   width: 38px;
+   height: 22px;
+   border-radius: 11px;
+   background: var(--t-cbd5e1);
+   transition: background .15s;
+}
+
+.long-toggle-track span {
+   position: absolute;
+   top: 3px;
+   left: 3px;
+   width: 16px;
+   height: 16px;
+   border-radius: 50%;
+   background: #fff;
+   transition: transform .15s;
+}
+
+.long-toggle input:checked + .long-toggle-track {
+   background: var(--t-2563eb);
+}
+
+.long-toggle input:checked + .long-toggle-track span {
+   transform: translateX(16px);
+}
+
+.long-toggle input:focus-visible + .long-toggle-track {
+   outline: 2px solid var(--t-93c5fd);
+   outline-offset: 2px;
+}
+
+.long-toggle strong {
+   display: block;
+   color: var(--t-1d3550);
+   font-size: 14px;
+}
+
+.long-toggle small {
+   display: block;
+   margin-top: 2px;
+   color: var(--t-5e7a95);
+   font-family: inherit;
+   font-size: 12px;
+}
+
+.long-notice {
+   margin: 0;
+   border-left: 3px solid #d97706;
+   background: #fffbeb;
+   padding: 6px 10px;
+   color: var(--t-334e68);
+   font-size: 13px;
+}
+
+.long-head {
+   display: flex;
+   align-items: baseline;
+   justify-content: space-between;
+   gap: 8px;
+}
+
+.long-head h2 small {
+   margin-left: 6px;
+   color: var(--t-7d95ac);
+   font-size: 12px;
+   font-weight: 400;
+}
+
+.long-group h3 {
+   margin: 14px 0 6px;
+   color: var(--t-5e7a95);
+   font-size: 12px;
+   font-weight: 600;
+}
+
+.long-group ul {
+   margin: 0;
+   padding: 0;
+   list-style: none;
+}
+
+.long-group li {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: baseline;
+   gap: 6px 12px;
+   border-top: 1px solid var(--t-f1f3f6);
+   padding: 9px 0;
+   font-size: 13px;
+}
+
+.long-content {
+   flex: 1 1 280px;
+   min-width: 0;
+   color: var(--t-173b5b);
+}
+
+.long-meta {
+   color: var(--t-7d95ac);
+   font-size: 12px;
+}
+
+.long-actions {
+   display: inline-flex;
+   gap: 10px;
+}

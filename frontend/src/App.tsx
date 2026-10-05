@@ -14,7 +14,7 @@ import { LOGOUT_EVENT, listDataTypes, createSession, deleteDocument, retryDocume
 // 评测页面放在 /eval，与知识问答、知识库并列；历史记录和评测集分别使用独立子路由。
 // 业务数据页放在 /data：录入和维护商品、订单等业务数据，也是聊天里数据查询工具的数据来源。
 // 知识巡检页放在 /inspection，只对管理员显示。
-type Route = { page: "chat" } | { page: "knowledge"; documentId?: string } | { page: "data" } | { page: "eval"; section: EvaluationSection; setId?: string; suiteId?: string } | { page: "inspection" } | { page: "overview" } | { page: "memory"; sessionId?: string } | { page: "prompts"; promptId?: string } | { page: "settings" };
+type Route = { page: "chat" } | { page: "knowledge"; documentId?: string } | { page: "data" } | { page: "eval"; section: EvaluationSection; setId?: string; suiteId?: string } | { page: "inspection" } | { page: "overview" } | { page: "memory"; sessionId?: string; tab?: "long" } | { page: "prompts"; promptId?: string } | { page: "settings" };
 type ToastKind = "success" | "error";
 type ToastMessage = { id: number; kind: ToastKind; message: string };
 type ShowToast = (kind: ToastKind, message: string) => void;
@@ -54,6 +54,7 @@ function readRoute(pathname = window.location.pathname): Route {
   if (path === "/inspection") return { page: "inspection" };
   if (path === "/overview") return { page: "overview" };
   if (path === "/memory") return { page: "memory" };
+  if (path === "/memory/long") return { page: "memory", tab: "long" };
   if (path.startsWith("/memory/")) return { page: "memory", sessionId: decodeURIComponent(path.slice("/memory/".length)) };
   if (path === "/prompts") return { page: "prompts" };
   if (path.startsWith("/prompts/")) return { page: "prompts", promptId: decodeURIComponent(path.slice("/prompts/".length)) };
@@ -253,7 +254,7 @@ function App() {
           </div>
           <button className={route.page === "chat" ? "nav-item active" : "nav-item"} onClick={() => navigate("/chat")} title="知识问答"><span className="nav-icon"><NavIcon name="spark" /></span><span className="nav-label">知识问答</span></button>
           <button className={route.page === "knowledge" ? "nav-item active" : "nav-item"} onClick={() => navigate("/knowledge")} title="知识库"><span className="nav-icon"><NavIcon name="library" /></span><span className="nav-label">知识库</span></button>
-          <button className={route.page === "memory" ? "nav-item active" : "nav-item"} onClick={() => navigate("/memory")} title="会话记忆"><span className="nav-icon"><NavIcon name="memory" /></span><span className="nav-label">会话记忆</span></button>
+          <button className={route.page === "memory" ? "nav-item active" : "nav-item"} onClick={() => navigate("/memory")} title="记忆"><span className="nav-icon"><NavIcon name="memory" /></span><span className="nav-label">记忆</span></button>
           {dataAllowed && <button className={route.page === "data" ? "nav-item active" : "nav-item"} onClick={() => navigate("/data")} title="业务数据"><span className="nav-icon"><NavIcon name="table" /></span><span className="nav-label">业务数据</span></button>}
           {user.is_admin && <button className={route.page === "eval" ? "nav-item active" : "nav-item"} onClick={() => navigate("/eval/runs")} title="评测"><span className="nav-icon"><NavIcon name="target" /></span><span className="nav-label">评测</span></button>}
           {user.is_admin && <button className={route.page === "inspection" ? "nav-item active" : "nav-item"} onClick={() => navigate("/inspection")} title="知识巡检"><span className="nav-icon"><NavIcon name="pulse" /></span><span className="nav-label">知识巡检</span></button>}
@@ -264,7 +265,7 @@ function App() {
         </aside>
         <main className={`main-panel ${route.page === "chat" ? "main-panel-chat" : ""}`}>
           {error && <div className="error-banner">{error}</div>}
-          {route.page === "settings" ? <Settings user={user} onToast={showToast} /> : route.page === "data" && dataAllowed ? <DataManagement onToast={showToast} /> : route.page === "eval" && user.is_admin ? <Evaluation section={route.section} setId={route.setId} suiteId={route.suiteId} onNavigate={navigate} onToast={showToast} Diagnostics={RetrievalDiagnostics} /> : route.page === "inspection" && user.is_admin ? <Inspection onToast={showToast} /> : route.page === "overview" && user.is_admin ? <Overview /> : route.page === "prompts" && user.is_admin ? <Prompts promptId={route.promptId ?? null} onNavigate={navigate} onToast={showToast} /> : route.page === "memory" ? <Memory sessionId={route.sessionId ?? null} onNavigate={navigate} /> : route.page === "chat" ? sessionLoading ? <ChatLoading /> : <Chat sessionId={sessionId} initialMessages={savedMessages} historyRuns={historyRuns} onNewChat={() => void startNewChat()} onOpenHistory={openHistory} onMessageSaved={recordHistory} onFeedbackSaved={recordFeedback} /> : <Knowledge user={user} documentId={route.page === "knowledge" ? route.documentId ?? null : null} onToast={showToast} onNavigate={(documentId) => navigate(documentId ? `/knowledge/${encodeURIComponent(documentId)}` : "/knowledge")} />}
+          {route.page === "settings" ? <Settings user={user} onToast={showToast} /> : route.page === "data" && dataAllowed ? <DataManagement onToast={showToast} /> : route.page === "eval" && user.is_admin ? <Evaluation section={route.section} setId={route.setId} suiteId={route.suiteId} onNavigate={navigate} onToast={showToast} Diagnostics={RetrievalDiagnostics} /> : route.page === "inspection" && user.is_admin ? <Inspection onToast={showToast} /> : route.page === "overview" && user.is_admin ? <Overview /> : route.page === "prompts" && user.is_admin ? <Prompts promptId={route.promptId ?? null} onNavigate={navigate} onToast={showToast} /> : route.page === "memory" ? <Memory sessionId={route.sessionId ?? null} tab={route.tab} onNavigate={navigate} /> : route.page === "chat" ? sessionLoading ? <ChatLoading /> : <Chat sessionId={sessionId} initialMessages={savedMessages} historyRuns={historyRuns} onNewChat={() => void startNewChat()} onOpenHistory={openHistory} onMessageSaved={recordHistory} onFeedbackSaved={recordFeedback} /> : <Knowledge user={user} documentId={route.page === "knowledge" ? route.documentId ?? null : null} onToast={showToast} onNavigate={(documentId) => navigate(documentId ? `/knowledge/${encodeURIComponent(documentId)}` : "/knowledge")} />}
         </main>
       </div>
     </>
@@ -844,7 +845,7 @@ function formatResult(raw?: Record<string, unknown>, detail?: string, order?: st
   // 哪些是发给模型的记忆。现在分成"审计历史"（MySQL，完整记录，不发给模型）和"模型记忆"（Checkpoint，发给模型）两块。
   const memoryRead = Array.isArray(result.mysql_history) && Object.hasOwn(result, "checkpoint_messages");
   const memoryHidden = new Set(["mysql_history_count", "mysql_history", "rolling_summary", "checkpoint_backend",
-    "checkpoint_messages", "process_method", "redis_short_term", "memory_trigger_tokens", "memory_keep_messages", "memory_keep_tokens", "summary_model"]);
+    "checkpoint_messages", "process_method", "redis_short_term", "memory_trigger_tokens", "memory_keep_messages", "memory_keep_tokens", "summary_model", "long_term_memory"]);
   const answered = Object.hasOwn(result, "summary_updated");
   const answeredHidden = new Set(["ai_memory_sent", "summary_updated", "checkpoint_messages_before",
     "checkpoint_messages_sent", "memory_trigger_tokens", "current_question"]);
@@ -863,6 +864,7 @@ function formatResult(raw?: Record<string, unknown>, detail?: string, order?: st
   if (memoryRead) {
     entries = [...entries, ["audit_history", result], ["model_memory", result]];
     if (result.redis_short_term) entries.push(["short_state", result.redis_short_term]);
+    if (Array.isArray(result.long_term_memory)) entries.push(["long_memory", result.long_term_memory]);
   }
   if (assembled) entries = [...entries, ["context_parts", result], ["memory_usage", result]];
   if (routed) entries = [["route_summary", routeSummary(result)], ["route_basis", result.basis ?? result.reason], ...entries];
@@ -892,6 +894,7 @@ function formatResult(raw?: Record<string, unknown>, detail?: string, order?: st
                   : key === "audit_history" ? <AuditHistory result={value as Record<string, unknown>} />
                     : key === "model_memory" ? <ModelMemory result={value as Record<string, unknown>} />
                       : key === "short_state" ? <ShortState value={value as Record<string, unknown>} />
+                        : key === "long_memory" ? <LongMemoryUsed items={value as unknown[]} />
                         : key === "context_parts" ? <ContextParts result={value as Record<string, unknown>} />
                           : key === "memory_usage" ? <MemoryUsage result={value as Record<string, unknown>} />
                             : key === "answer_history" ? <AnswerHistory result={value as Record<string, unknown>} />
@@ -1099,6 +1102,15 @@ function ShortState({ value }: { value: Record<string, unknown> }) {
   </div>;
 }
 
+// 长期记忆：跨会话记住的用户偏好、身份，问题改写和生成回答时作为用户画像发给模型。
+function LongMemoryUsed({ items }: { items: unknown[] }) {
+  return <div className="mem-block">
+    <div className="mem-head"><code className="model-tag">PostgreSQL · Store</code><strong>长期记忆 {items.length} 条</strong></div>
+    <small className="result-help">{items.length ? "跨会话记住的偏好和身份，问题改写和生成回答时作为用户画像发给模型，只用来调整回答方式" : "还没有长期记忆，或已在「会话记忆 › 长期记忆」里关闭"}</small>
+    {items.length > 0 && <ul className="long-memory-used">{items.map((item, index) => <li key={index}>{String(item)}</li>)}</ul>}
+  </div>;
+}
+
 // 组装模型上下文的三块内容，按发给模型的顺序排列：滚动摘要 → 最近问答原文 → 检索来源。
 function ContextParts({ result }: { result: Record<string, unknown> }) {
   const summary = Number(result.summary_characters ?? 0);
@@ -1177,7 +1189,8 @@ function AIMemorySent({ items }: { items: unknown[] }) {
     const summary = String(call.memory_summary ?? call.existing_summary ?? "");
     // 没有最近订单时不显示"近期订单记忆：无"；旧记录里值为空的也一样。
     const hasOrder = Boolean(call.redis_recent_order);
-    return <article className="ai-memory-entry" key={`${String(call.target ?? "模型调用")}-${index}`}><strong>{String(call.target ?? "模型调用")}</strong>{summary ? <details className="ai-memory-summary"><summary>查看滚动摘要（{summary.length} 字）</summary><p>{summary}</p></details> : null}{questions.length > 0 ? <ol>{questions.map((question, questionIndex) => <li key={questionIndex}>{String(question)}</li>)}</ol> : null}{turns.length > 0 ? <MemoryHistory items={turns} /> : null}{hasOrder ? <p><span>近期订单记忆：</span>{formatResultValue(call.redis_recent_order)}</p> : null}{!summary && questions.length === 0 && turns.length === 0 && !hasOrder ? <span>本次调用未携带历史内容</span> : null}</article>;
+    const profile = Array.isArray(call.long_term_memory) ? call.long_term_memory : [];
+    return <article className="ai-memory-entry" key={`${String(call.target ?? "模型调用")}-${index}`}><strong>{String(call.target ?? "模型调用")}</strong>{summary ? <details className="ai-memory-summary"><summary>查看滚动摘要（{summary.length} 字）</summary><p>{summary}</p></details> : null}{questions.length > 0 ? <ol>{questions.map((question, questionIndex) => <li key={questionIndex}>{String(question)}</li>)}</ol> : null}{turns.length > 0 ? <MemoryHistory items={turns} /> : null}{hasOrder ? <p><span>近期订单记忆：</span>{formatResultValue(call.redis_recent_order)}</p> : null}{profile.length > 0 ? <p><span>长期记忆：</span>{profile.map(String).join("；")}</p> : null}{!summary && questions.length === 0 && turns.length === 0 && !hasOrder && profile.length === 0 ? <span>本次调用未携带历史内容</span> : null}</article>;
   })}</div>;
 }
 
