@@ -1,0 +1,374 @@
+/* 会话记忆页：沿用主样式的配色变量（--t-xxxxxx），蓝调、绿调切换时一起变。 */
+.mem-page {
+   max-width: 1080px;
+}
+
+.mem-topbar {
+   margin-bottom: 20px;
+}
+
+.mem-subtitle {
+   margin-top: 8px;
+   color: var(--t-5e7a95);
+   font-size: 13px;
+   line-height: 1.7;
+}
+
+.mem-subtitle code {
+   border-radius: 3px;
+   background: var(--t-f4f8fc);
+   padding: 0 4px;
+}
+
+.mem-empty {
+   color: var(--t-7d95ac);
+   font-size: 13px;
+   padding: 8px 0;
+}
+
+.mem-skeleton {
+   display: block;
+   height: 260px;
+}
+
+/* 宽屏不加滚动容器：overflow 会把表头问号的说明气泡裁掉；窄屏才横向滚动。 */
+@media (max-width: 760px) {
+   .mem-table-wrap {
+      overflow-x: auto;
+   }
+}
+
+.mem-table {
+   width: 100%;
+   border-collapse: collapse;
+   border: 1px solid var(--t-e3edf5);
+   background: #fff;
+   font-size: 13px;
+}
+
+.mem-table th,
+.mem-table td {
+   border-bottom: 1px solid var(--t-f1f3f6);
+   padding: 9px 12px;
+   color: var(--t-334e68);
+   text-align: left;
+   vertical-align: top;
+}
+
+.mem-table th {
+   background: var(--t-f4f8fc);
+   color: var(--t-5e7a95);
+   font-weight: 500;
+   white-space: nowrap;
+}
+
+.mem-table .num {
+   text-align: right;
+   font-variant-numeric: tabular-nums;
+   white-space: nowrap;
+}
+
+.mem-table tbody tr {
+   cursor: pointer;
+}
+
+.mem-table tbody tr:hover {
+   background: var(--t-f4f8fc);
+}
+
+.mem-timeline tbody tr {
+   cursor: default;
+}
+
+.mem-title-cell strong {
+   color: var(--t-1d3550);
+   font-weight: 500;
+}
+
+/* 问号说明：鼠标移上去或键盘聚焦时显示。 */
+.mem-hint {
+   position: relative;
+   display: inline-grid;
+   place-items: center;
+   width: 15px;
+   height: 15px;
+   margin-left: 2px;
+   border: 1px solid var(--t-cedfec);
+   border-radius: 50%;
+   color: var(--t-7d95ac);
+   font-size: 10px;
+   font-weight: 600;
+   vertical-align: 1px;
+   cursor: help;
+}
+
+.mem-hint-bubble {
+   position: absolute;
+   top: calc(100% + 6px);
+   left: 50%;
+   z-index: 20;
+   display: none;
+   width: 260px;
+   transform: translateX(-50%);
+   border: 1px solid var(--t-cedfec);
+   border-radius: 4px;
+   background: #fff;
+   padding: 8px 10px;
+   box-shadow: 0 6px 16px rgb(var(--t-0f172a-rgb) / 0.12);
+   color: var(--t-334e68);
+   font-size: 12px;
+   font-weight: 400;
+   line-height: 1.6;
+   text-align: left;
+   white-space: normal;
+}
+
+.mem-hint:hover .mem-hint-bubble,
+.mem-hint:focus .mem-hint-bubble {
+   display: block;
+}
+
+.mem-usage {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: 6px 12px;
+   margin-bottom: 14px;
+   font-size: 13px;
+}
+
+.mem-usage.is-compact {
+   margin: 0;
+   flex-wrap: nowrap;
+   font-size: 12px;
+}
+
+.mem-usage-track {
+   width: 220px;
+   height: 8px;
+   border-radius: 4px;
+   background: var(--t-e3edf5);
+   overflow: hidden;
+}
+
+.mem-usage.is-compact .mem-usage-track {
+   width: 80px;
+}
+
+.mem-usage-fill {
+   display: block;
+   height: 100%;
+   border-radius: 4px;
+   background: var(--t-2563eb);
+}
+
+.mem-usage-fill.is-over {
+   background: #c2410c;
+}
+
+.mem-usage-text {
+   color: var(--t-334e68);
+   font-variant-numeric: tabular-nums;
+   white-space: nowrap;
+}
+
+.mem-back {
+   margin-bottom: 12px;
+   border: 0;
+   background: none;
+   padding: 0;
+   color: var(--t-2563eb);
+   font-size: 13px;
+   cursor: pointer;
+}
+
+.mem-detail-head {
+   margin-bottom: 18px;
+}
+
+.mem-detail-head h1 {
+   margin: 0;
+   font-size: 22px;
+}
+
+.mem-card {
+   margin-bottom: 16px;
+   border: 1px solid var(--t-e3edf5);
+   border-radius: 6px;
+   background: #fff;
+   padding: 16px 18px;
+}
+
+.mem-card h2 {
+   margin: 0 0 12px;
+   color: var(--t-1d3550);
+   font-size: 15px;
+}
+
+.mem-block + .mem-block {
+   margin-top: 16px;
+   border-top: 1px solid var(--t-f1f3f6);
+   padding-top: 14px;
+}
+
+.mem-block h3 {
+   margin: 0 0 8px;
+   color: var(--t-1d3550);
+   font-size: 14px;
+}
+
+.mem-block h3 small {
+   margin-left: 6px;
+   color: var(--t-7d95ac);
+   font-size: 12px;
+   font-weight: 400;
+}
+
+.mem-note {
+   margin: 0 0 10px;
+   color: var(--t-7d95ac);
+   font-size: 12px;
+   line-height: 1.7;
+}
+
+.mem-summary {
+   margin: 0;
+   border-left: 3px solid var(--t-2563eb);
+   background: var(--t-f4f8fc);
+   padding: 10px 12px;
+   color: var(--t-1d3550);
+   font-size: 13px;
+   line-height: 1.8;
+   white-space: pre-wrap;
+}
+
+.mem-turns {
+   display: flex;
+   flex-direction: column;
+   gap: 10px;
+   margin: 0;
+   padding: 0;
+   list-style: none;
+   font-size: 13px;
+   line-height: 1.7;
+}
+
+.mem-turns li {
+   border: 1px solid var(--t-f1f3f6);
+   border-radius: 4px;
+   padding: 8px 10px;
+   color: var(--t-334e68);
+}
+
+.mem-round {
+   display: inline-block;
+   margin-bottom: 2px;
+   color: var(--t-7d95ac);
+   font-size: 12px;
+}
+
+.mem-role {
+   display: inline-block;
+   width: 22px;
+   color: var(--t-7d95ac);
+}
+
+.mem-answer {
+   display: -webkit-box;
+   -webkit-box-orient: vertical;
+   -webkit-line-clamp: 3;
+   overflow: hidden;
+   white-space: pre-wrap;
+}
+
+.mem-answer.is-open {
+   display: block;
+}
+
+.mem-more {
+   margin-left: 6px;
+   border: 0;
+   background: none;
+   padding: 0;
+   color: var(--t-2563eb);
+   font-size: 12px;
+   cursor: pointer;
+}
+
+.mem-rewritten {
+   color: var(--t-1d3550);
+}
+
+.mem-same {
+   color: var(--t-7d95ac);
+}
+
+.mem-tag {
+   display: inline-block;
+   border: 1px solid var(--t-cedfec);
+   border-radius: 3px;
+   background: #fff;
+   padding: 0 6px;
+   color: var(--t-5e7a95);
+   font-size: 12px;
+   white-space: nowrap;
+}
+
+.mem-tag.is-muted {
+   border-style: dashed;
+   color: var(--t-7d95ac);
+}
+
+.mem-tag.is-compress {
+   border-color: var(--t-2563eb);
+   background: var(--t-eaf1ff);
+   color: var(--t-1d4ed8);
+   cursor: pointer;
+}
+
+.mem-compare-row td {
+   background: var(--t-f4f8fc);
+}
+
+.mem-compare {
+   display: grid;
+   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+   gap: 14px;
+}
+
+.mem-compare h4 {
+   margin: 0 0 8px;
+   color: var(--t-5e7a95);
+   font-size: 12px;
+   font-weight: 500;
+}
+
+.mem-storage summary {
+   color: var(--t-1d3550);
+   font-size: 14px;
+   font-weight: 600;
+   cursor: pointer;
+}
+
+.mem-storage dl {
+   display: flex;
+   flex-direction: column;
+   gap: 6px;
+   margin: 12px 0 0;
+   font-size: 13px;
+}
+
+.mem-storage dl div {
+   display: flex;
+   gap: 16px;
+}
+
+.mem-storage dt {
+   width: 90px;
+   color: var(--t-5e7a95);
+}
+
+.mem-storage dd {
+   margin: 0;
+   color: var(--t-1d3550);
+}

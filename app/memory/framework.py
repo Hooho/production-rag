@@ -112,6 +112,37 @@ class FrameworkMemory:
                 parts.append(str(item.get("text", "")))
         return "\n".join(parts)
 
+    # 每个会话的快照数和占用空间（字节），供「会话记忆」页面显示：{session_id: {"snapshots": n, "bytes": n}}。
+    # PostgreSQL 时直接按表统计：checkpoints 每个快照一行，checkpoint_blobs 存消息等大块数据，checkpoint_writes 存步骤中途的写入。
+    # 进程内存储（测试、评测）只能数快照，没有占用空间。
+    def storage(self, owner, session_ids):
+        threads = {self.thread_id(owner, session_id): session_id for session_id in session_ids}
+        result = {session_id: {"snapshots": 0, "bytes": 0 if self.pool is not None else None} for session_id in session_ids}
+        if not threads:
+            return result
+        if self.pool is None:
+            for thread, session_id in threads.items():
+                result[session_id]["snapshots"] = sum(1 for _ in self.checkpointer.list(
+                    {"configurable": {"thread_id": thread}}))
+            return result
+        names = list(threads)
+        queries = [
+            ("snapshots", "SELECT thread_id, count(*), coalesce(sum(pg_column_size(checkpoint) + pg_column_size(metadata)), 0) "
+                "FROM checkpoints WHERE thread_id = ANY(%s) GROUP BY thread_id"),
+            ("blobs", "SELECT thread_id, 0, coalesce(sum(length(blob)), 0) FROM checkpoint_blobs "
+                "WHERE thread_id = ANY(%s) GROUP BY thread_id"),
+            ("writes", "SELECT thread_id, 0, coalesce(sum(length(blob)), 0) FROM checkpoint_writes "
+                "WHERE thread_id = ANY(%s) GROUP BY thread_id"),
+        ]
+        with self.pool.connection() as connection:
+            for kind, sql in queries:
+                for thread, count, size in connection.execute(sql, (names,)).fetchall():
+                    item = result[threads[thread]]
+                    if kind == "snapshots":
+                        item["snapshots"] = count
+                    item["bytes"] += int(size or 0)
+        return result
+
     # 关闭 PostgreSQL 连接池；内存 Checkpointer 不需要释放资源。
     def close(self):
         if self.pool is not None:

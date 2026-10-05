@@ -42,6 +42,7 @@ from ..inspection.service import (CLOSE_REASONS, KINDS as INSPECTION_KINDS, LOCK
 from ..agent.response import ResponseAgent
 from ..models import Models
 from ..memory.service import Memory
+from ..memory.view import list_sessions as list_memory, session_detail as memory_detail
 from ..mysql.store import (data_permissions, document_heads, document_shares, document_steps, documents, feedback,
     run_errors, runs, sessions, user_group_members, user_groups, users)
 from ..observability import FEEDBACK_REASONS, run_columns, summarize_run
@@ -659,6 +660,18 @@ def create_app(store=None, models=None, jwt_secret=None):
         value = str(session_id)
         check_session(app.state.store, value, owner)
         return {"messages": app.state.memory.history(app.state.store, value, owner)}
+
+    # 会话记忆：只能看自己的会话（对话内容是个人数据，管理员也看不到别人的）。
+    @app.get("/memory/sessions")
+    def list_memory_sessions(owner=Depends(identity)):
+        return list_memory(app.state.store.engine, app.state.agent.response_agent.memory, owner)
+
+    @app.get("/memory/sessions/{session_id}")
+    def get_memory_session(session_id: UUID, owner=Depends(identity)):
+        detail = memory_detail(app.state.store.engine, app.state.agent.response_agent.memory, owner, str(session_id))
+        if detail is None:
+            raise HTTPException(404, "会话不存在")
+        return detail
 
     # 返回当前用户最近保存的问答记录，供控制台刷新后恢复显示。
     @app.get("/history")
