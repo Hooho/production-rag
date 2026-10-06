@@ -668,7 +668,7 @@ function RunSummary({ steps, answer, sources, traceId }: { steps: TraceStep[]; a
     <div className="result-row"><span>模型调用</span><div className="result-value">
       {models.length === 0 ? <strong>本次没有调用大模型</strong> : <>
         <strong>{models.length} 次</strong>
-        <div className="run-chips">{models.map((step) => <code className="model-tag" key={step.id}>{step.title} · {String(step.result?.model_called).split("（")[0]}</code>)}</div>
+        <div className="run-chips">{models.map((step) => <Fragment key={step.id}>{modelTags(step.result?.model_called).map((tag, index) => <StackTag key={index} kind="model" variant={tag.variant} title={step.title}>{step.title} · {tag.label}</StackTag>)}</Fragment>)}</div>
         {usage && typeof usage.input === "number" && <small className="result-help">Token：输入 {usage.input} · 输出 {usage.output ?? 0}（组织回答这一次；其他调用未记录用量）</small>}
       </>}
     </div></div>
@@ -679,9 +679,9 @@ function RunSummary({ steps, answer, sources, traceId }: { steps: TraceStep[]; a
           : <small className="result-help run-warn">没有引用任何来源（共 {sourceCount} 条来源）</small>}
     </div></div>}
     <div className="result-row"><span>结果保存</span><div className="result-value">
-      <div className="run-store"><code className="model-tag">MySQL · runs 表</code><span>问题、回答与来源、{steps.length} 个处理阶段、追踪摘要</span></div>
+      <div className="run-store"><StackTag kind="store">MySQL · runs 表</StackTag><span>问题、回答与来源、{steps.length} 个处理阶段、追踪摘要</span></div>
       <small className="result-help">追踪摘要：路由 {routeLabel} · {refused ? "已拒答" : "未拒答"} · 耗时 {formatDuration(total)}{topScore !== null ? ` · 检索最高分 ${formatNumber(topScore, 2)}` : ""}</small>
-      <div className="run-store"><code className="model-tag">PostgreSQL · Checkpoint</code><span>本轮问答消息和滚动摘要</span></div>
+      <div className="run-store"><StackTag kind="store">PostgreSQL · Checkpoint</StackTag><span>本轮问答消息和滚动摘要</span></div>
       <small className="result-help">在「Agent 组织回答」时已写入，下一轮提问时作为对话记忆读取</small>
       {traceId && <small className="result-help">链路编号 {traceId}</small>}
     </div></div>
@@ -689,8 +689,95 @@ function RunSummary({ steps, answer, sources, traceId }: { steps: TraceStep[]; a
 }
 
 // 展示后端返回的权威执行结果，包含分流、工具参数和检索命中。
+// 模型和组件标签：分四类，一眼区分这一步用了什么——
+//   model      模型（实心彩色）：大模型、向量模型、重排模型、本地小模型各一种颜色
+//   framework  框架组件（浅底描边）：LangGraph 靛蓝、LangChain 青色
+//   store      存储（灰底）：MySQL、PostgreSQL、Redis、Milvus
+//   algo       算法和程序规则（白底虚线）：BM25、RRF、阈值过滤、规则匹配、引用检查等
+type StackKind = "model" | "framework" | "store" | "algo";
+type StackTagItem = { kind: StackKind; variant?: string; label: string; muted?: string };
+const STACK_ICONS: Record<StackKind, string> = { model: "✦", framework: "◇", store: "▤", algo: "ƒ" };
+
+// muted：试过但没用上（意图识别里没被采纳、调用失败的那一环），颜色变淡，鼠标移上去显示原因。
+function StackTag({ kind, variant, children, title, muted }: { kind: StackKind; variant?: string; children: ReactNode; title?: string; muted?: boolean }) {
+  return <span className={`stack-tag is-${kind}${variant ? ` is-${variant}` : ""}${muted ? " is-muted" : ""}`} title={title}><i aria-hidden="true">{STACK_ICONS[kind]}</i>{children}</span>;
+}
+
+// 模型字段（"MiniMax-M3（聊天大模型）；bge-small-zh（向量模型）"）拆成模型标签。
+function modelTags(value: unknown): StackTagItem[] {
+  if (typeof value !== "string" || !value) return [];
+  return value.split("；").map((part) => {
+    const match = part.trim().match(/^(.+?)（(.+)）$/);
+    const name = match ? match[1] : part.trim();
+    const type = match ? match[2] : "";
+    const variant = type.includes("向量") ? "embedding" : type.includes("重排") ? "rerank" : type.includes("小模型") ? "small" : "llm";
+    return { kind: "model" as const, variant, label: name };
+  });
+}
+
+const LANGGRAPH = (name: string): StackTagItem => ({ kind: "framework", variant: "langgraph", label: `LangGraph · ${name}` });
+const LANGCHAIN = (name: string): StackTagItem => ({ kind: "framework", variant: "langchain", label: `LangChain · ${name}` });
+const STORE = (name: string): StackTagItem => ({ kind: "store", label: name });
+const ALGO = (name: string): StackTagItem => ({ kind: "algo", label: name });
+
+// 每一步用到的模型和组件，按处理顺序排列。从步骤结果推出来，旧记录也能显示。
+function stepTags(step: TraceStep): StackTagItem[] {
+  const result = (step.result ?? {}) as Record<string, unknown>;
+  const models = modelTags(result.model_called);
+  const method = String(result.process_method ?? "");
+  switch (step.id) {
+    case "request": return [LANGGRAPH("StateGraph")];
+    case "input_guard": return [ALGO("注入检查")];
+    case "memory": return [STORE("MySQL"), LANGGRAPH("Checkpointer"),
+      ...(Array.isArray(result.long_term_memory) ? [LANGGRAPH("Store")] : []),
+      ...(result.redis_short_term ? [STORE("Redis")] : [])];
+    case "intent": {
+      const tags: StackTagItem[] = [];
+      // 意图识别按「规则 → 本地小模型 → 大模型 → 规则兜底」逐环尝试，每一环都列出来；没被采纳的变淡。
+      for (const item of (Array.isArray(result.trace) ? result.trace : []) as Array<Record<string, unknown>>) {
+        const title = String(item.title ?? "");
+        let tag: StackTagItem | null = null;
+        if (item.stage === "rule") tag = ALGO("规则匹配");
+        else if (item.stage === "small_model") tag = { kind: "model", variant: "small", label: title.replace(/^本地小模型\s*/, "") || "本地小模型" };
+        else if (item.stage === "llm") tag = { kind: "model", variant: "llm", label: title.replace(/^大模型\s*/, "") || "大模型" };
+        else if (item.stage === "fallback") tag = ALGO("规则兜底");
+        if (tag) tags.push(item.accepted === false ? { ...tag, muted: `未采纳：${String(item.result ?? "")}` } : tag);
+      }
+      return tags;
+    }
+    case "router": return [ALGO("路由规则")];
+    case "query": {
+      const llm = method.match(/通过 (.+?) 模型改写/);
+      if (llm) return [{ kind: "model", variant: "llm", label: llm[1] }];
+      return method.includes("规则") ? [ALGO("规则补全")] : [];
+    }
+    case "retrieval":
+    case "retrieval_retry": {
+      const embedding = models.filter((item) => item.variant === "embedding");
+      const rerank = models.filter((item) => item.variant === "rerank");
+      return [...embedding, ALGO("BM25"), ALGO("RRF"), ...rerank, ALGO("阈值过滤"), STORE("Milvus")];
+    }
+    case "sufficiency": return models;
+    case "context": return [LANGCHAIN("SummarizationMiddleware")];
+    case "response": return [LANGCHAIN("Agent"), ...(models.length ? [LANGCHAIN("ChatOpenAI"), ...models] : []),
+      ...(result.citation_check ? [ALGO("引用检查")] : [])];
+    case "order_tool": return [LANGCHAIN("Tool"), STORE("MySQL")];
+    case "data_tool": return [LANGCHAIN("Tool"), ...models, ...(method.includes("规则") ? [ALGO("规则查询计划")] : []), STORE("MySQL")];
+    case "greeting": return [ALGO("固定回答")];
+    case "output_guard": return [ALGO("输出检查")];
+    case "complete": return [STORE("MySQL"), STORE("PostgreSQL")];
+    default: return models;
+  }
+}
+
+function StepTags({ step }: { step: TraceStep }) {
+  const tags = stepTags(step);
+  if (tags.length === 0) return null;
+  return <span className="step-tags">{tags.map((tag, index) => <StackTag key={index} kind={tag.kind} variant={tag.variant} muted={Boolean(tag.muted)} title={tag.muted}>{tag.label}</StackTag>)}</span>;
+}
+
 function TraceTimeline({ steps, live = false, answer, sources, traceId }: { steps: TraceStep[]; live?: boolean; answer?: string; sources?: Source[]; traceId?: string }) {
-  return <details className={`trace-timeline ${live ? "is-live" : ""}`} open={live || undefined}><summary className="trace-toggle"><span>{live ? "当前处理阶段" : "处理阶段"}</span><strong>{steps.length} 个阶段{totalElapsed(steps) !== null ? ` · 共 ${formatDuration(totalElapsed(steps))}` : ""}{live ? " · 实时更新" : ""}</strong><span className="panel-chevron">⌄</span></summary><div className="trace-body">{steps.map((step, index) => <details className={`trace-step ${step.status}`} key={step.id} open={live || undefined}><summary><span className="step-number">{String(index + 1).padStart(2, "0")}</span><span className="step-status">{step.status === "failed" ? "!" : step.status === "running" ? "·" : "✓"}</span><span className="step-copy"><strong>{step.title}</strong><small>{(step.status !== "failed" && stepPurpose(step.result)) || step.detail}</small></span>{step.duration_ms !== undefined && <time title={durationTitle(step.duration_ms)}>{formatDuration(step.duration_ms)}</time>}</summary><div className="step-result">{step.id === "complete" && step.status !== "failed" ? <RunSummary steps={steps} answer={answer} sources={sources} traceId={traceId} /> : formatResult(step.result, step.status !== "failed" && stepPurpose(step.result) ? step.detail : undefined, step.field_order)}</div></details>)}{live && steps.length === 0 && <LoadingSkeleton className="trace-waiting" label="正在等待处理阶段"><SkeletonBlock className="skeleton-line" /><SkeletonBlock className="skeleton-line-short" /></LoadingSkeleton>}</div></details>;
+  return <details className={`trace-timeline ${live ? "is-live" : ""}`} open={live || undefined}><summary className="trace-toggle"><span>{live ? "当前处理阶段" : "处理阶段"}</span><strong>{steps.length} 个阶段{totalElapsed(steps) !== null ? ` · 共 ${formatDuration(totalElapsed(steps))}` : ""}{live ? " · 实时更新" : ""}</strong><span className="panel-chevron">⌄</span></summary><div className="trace-body">{steps.map((step, index) => <details className={`trace-step ${step.status}`} key={step.id} open={live || undefined}><summary><span className="step-number">{String(index + 1).padStart(2, "0")}</span><span className="step-status">{step.status === "failed" ? "!" : step.status === "running" ? "·" : "✓"}</span><span className="step-copy"><strong>{step.title}</strong><small>{(step.status !== "failed" && stepPurpose(step.result)) || step.detail}</small>{step.status !== "running" && <StepTags step={step} />}</span>{step.duration_ms !== undefined && <time title={durationTitle(step.duration_ms)}>{formatDuration(step.duration_ms)}</time>}</summary><div className="step-result">{step.id === "complete" && step.status !== "failed" ? <RunSummary steps={steps} answer={answer} sources={sources} traceId={traceId} /> : formatResult(step.result, step.status !== "failed" && stepPurpose(step.result) ? step.detail : undefined, step.field_order)}</div></details>)}{live && steps.length === 0 && <LoadingSkeleton className="trace-waiting" label="正在等待处理阶段"><SkeletonBlock className="skeleton-line" /><SkeletonBlock className="skeleton-line-short" /></LoadingSkeleton>}</div></details>;
 }
 
 // 普通字段只保留名称和值，避免说明占满页面；这里只为需要排查的复杂字段提供解释。
@@ -1138,7 +1225,7 @@ function bracketTags(text: string) {
 function AuditHistory({ result }: { result: Record<string, unknown> }) {
   const items = Array.isArray(result.mysql_history) ? result.mysql_history : [];
   return <div className="mem-block">
-    <div className="mem-head"><code className="model-tag">MySQL · runs 表</code><strong>{items.length} 轮问答</strong></div>
+    <div className="mem-head"><StackTag kind="store">MySQL · runs 表</StackTag><strong>{items.length} 轮问答</strong></div>
     <small className="result-help">每一轮问答的完整记录，用于显示历史和统计，不直接发给模型</small>
     {items.length > 0 && <details className="mem-fold"><summary>查看 {items.length} 轮问答</summary><MemoryHistory items={items} /></details>}
   </div>;
@@ -1155,7 +1242,7 @@ function ModelMemory({ result }: { result: Record<string, unknown> }) {
   const inMemory = String(result.checkpoint_backend ?? "postgres") !== "postgres";
   return <div className="mem-block">
     <div className="mem-head">
-      <code className={`model-tag ${inMemory ? "is-warn" : ""}`}>{inMemory ? "内存（未连上 PostgreSQL）" : "PostgreSQL · Checkpoint"}</code>
+      {inMemory ? <code className="model-tag is-warn">内存（未连上 PostgreSQL）</code> : <StackTag kind="framework" variant="langgraph">LangGraph · Checkpointer（PostgreSQL）</StackTag>}
       <strong>{total} 条消息</strong>
     </div>
     {total > 0 && <div className="mem-bar">
@@ -1175,7 +1262,7 @@ function ModelMemory({ result }: { result: Record<string, unknown> }) {
 // Redis 短期状态：目前只有最近订单号，订单追问时使用。
 function ShortState({ value }: { value: Record<string, unknown> }) {
   return <div className="mem-block">
-    <div className="mem-head"><code className="model-tag">Redis</code><strong>最近订单 {String(value.recent_order ?? "—")}</strong></div>
+    <div className="mem-head"><StackTag kind="store">Redis</StackTag><strong>最近订单 {String(value.recent_order ?? "—")}</strong></div>
     <small className="result-help">追问"它到哪了"这类问题时，用这个订单号补全</small>
   </div>;
 }
@@ -1183,7 +1270,7 @@ function ShortState({ value }: { value: Record<string, unknown> }) {
 // 长期记忆：跨会话记住的用户偏好、身份，问题改写和生成回答时作为用户画像发给模型。
 function LongMemoryUsed({ items }: { items: unknown[] }) {
   return <div className="mem-block">
-    <div className="mem-head"><code className="model-tag">PostgreSQL · Store</code><strong>长期记忆 {items.length} 条</strong></div>
+    <div className="mem-head"><StackTag kind="framework" variant="langgraph">LangGraph · Store（PostgreSQL）</StackTag><strong>长期记忆 {items.length} 条</strong></div>
     <small className="result-help">{items.length ? "跨会话记住的偏好和身份，问题改写和生成回答时作为用户画像发给模型，只用来调整回答方式" : "还没有长期记忆，或已在「会话记忆 › 长期记忆」里关闭"}</small>
     {items.length > 0 && <ul className="long-memory-used">{items.map((item, index) => <li key={index}>{String(item)}</li>)}</ul>}
   </div>;
@@ -1375,8 +1462,8 @@ function RetrievalDiagnostics({ data, embeddingModel }: { data: RetrievalDiagnos
   const step = scope ? 1 : 0;
   // 召回方式按类型各占一行；模型名用标签样式包起来，和普通文字区分开。
   const recallLines: ReactNode[] = [];
-  if (methods.includes("dense")) recallLines.push(<small key="dense">向量：<code className="model-tag">{embeddingModel || "向量模型"}</code>按语义相似（embedding 服务 /v1/embeddings）</small>);
-  if (methods.includes("keyword")) recallLines.push(<small key="keyword">关键词：<code className="model-tag">BM25</code>按字面匹配（Milvus 全文检索）</small>);
+  if (methods.includes("dense")) recallLines.push(<small key="dense">向量：<StackTag kind="model" variant="embedding">{embeddingModel || "向量模型"}</StackTag>按语义相似（embedding 服务 /v1/embeddings）</small>);
+  if (methods.includes("keyword")) recallLines.push(<small key="keyword">关键词：<StackTag kind="algo">BM25</StackTag>按字面匹配（Milvus 全文检索）</small>);
   // 诊断对象字段较多，先用可折叠说明解释处理链路，降低只看数字时的理解成本。
   return <div className="diag">
     {/* 检索过程：召回 → 融合 → 重排 → 过滤 → 返回，一环接一环写明做了什么、剩下多少。
@@ -1395,7 +1482,7 @@ function RetrievalDiagnostics({ data, embeddingModel }: { data: RetrievalDiagnos
       <li><span className="intent-trace-mark"><b>{step + 2}</b></span><div><strong>融合</strong>：去重后 {candidates.length} 个 chunk，用 RRF（k={config.rrf_k}）按名次合并排序
         <small>得分 = Σ 1 / ({config.rrf_k} + 名次)，只看名次不看原始分数；被多路命中的片段更靠前</small></div></li>
       <li><span className="intent-trace-mark"><b>{step + 3}</b></span><div><strong>重排</strong>：{config.reranked
-        ? <>RRF 前 {config.rerank_candidates} 个 chunk 交给 <code className="model-tag">{config.rerank_model}</code>重新打分，重排问题「{config.rerank_query || "当前问题"}」</>
+        ? <>RRF 前 {config.rerank_candidates} 个 chunk 交给 <StackTag kind="model" variant="rerank">{config.rerank_model}</StackTag>重新打分，重排问题「{config.rerank_query || "当前问题"}」</>
         : config.rerank_error ? <>重排失败：{config.rerank_error}，最终顺序由 RRF 决定</> : <>未启用重排，最终顺序由 RRF 决定</>}
         {config.reranked && <small>交叉编码器把问题和片段放在一起逐条打分，重排概率 = sigmoid(logit)，最终顺序只看重排概率；调用 embedding 服务 /v1/rerank</small>}</div></li>
       <li><span className="intent-trace-mark"><b>{step + 4}</b></span><div><strong>过滤</strong>：{config.reranked && config.min_score !== null

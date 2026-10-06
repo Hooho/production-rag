@@ -6653,6 +6653,87 @@ input:focus {
    color: var(--t-173b5b);
 }
 
+/* 模型和组件标签（App.tsx 的 StackTag）：模型实心彩色、框架组件浅底描边、存储灰底、算法和规则白底虚线。 */
+.stack-tag {
+   display: inline-flex;
+   align-items: center;
+   gap: 3px;
+   margin: 0 2px;
+   border: 1px solid transparent;
+   border-radius: 4px;
+   padding: 0 6px;
+   font-size: 11px;
+   font-weight: 500;
+   line-height: 18px;
+   white-space: nowrap;
+   vertical-align: 1px;
+}
+
+.stack-tag i {
+   font-size: 10px;
+   font-style: normal;
+   opacity: .85;
+}
+
+.stack-tag.is-model {
+   color: #fff;
+}
+
+.stack-tag.is-model.is-llm {
+   background: #7c3aed;
+}
+
+.stack-tag.is-model.is-embedding {
+   background: #2563eb;
+}
+
+.stack-tag.is-model.is-rerank {
+   background: #0d9488;
+}
+
+.stack-tag.is-model.is-small {
+   background: #16a34a;
+}
+
+.stack-tag.is-framework.is-langgraph {
+   border-color: #a5b4fc;
+   background: #eef2ff;
+   color: #3730a3;
+}
+
+.stack-tag.is-framework.is-langchain {
+   border-color: #67e8f9;
+   background: #ecfeff;
+   color: #155e75;
+}
+
+.stack-tag.is-store {
+   border-color: #cbd5e1;
+   background: #eef1f5;
+   color: #334155;
+}
+
+.stack-tag.is-algo {
+   border: 1px dashed #94a3b8;
+   background: #fff;
+   color: #475569;
+}
+
+.stack-tag.is-muted {
+   opacity: .45;
+}
+
+.step-tags {
+   display: flex;
+   flex-wrap: wrap;
+   gap: 4px;
+   margin-top: 2px;
+}
+
+.step-tags .stack-tag {
+   margin: 0;
+}
+
 .model-tag.is-warn {
    border-color: #f1c58a;
    background: #fdf1e2;
