@@ -360,7 +360,21 @@ function Chat({ sessionId, initialMessages, historyRuns, onNewChat, onOpenHistor
     followRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
   };
 
+  // 上层的 initialMessages 有两种变化：切换会话（换成另一组消息，要回到底部），和本页刚问完、反馈后同步上去的
+  // （内容和这里已经一样）。后一种不能再强制滚到底：以前回答一完成就同步上去，又触发这里，用户往上翻着也被拉回底部。
+  const latestMessages = useRef(messages);
+  latestMessages.current = messages;
+  const mounted = useRef(false);
   useEffect(() => {
+    const current = latestMessages.current;
+    const same = current.length === initialMessages.length
+      && current.every((item, index) => item.request_id === initialMessages[index].request_id);
+    // 第一次显示（包括从别的页面切回来）时也要回到底部。
+    if (!mounted.current) {
+      mounted.current = true;
+      requestAnimationFrame(() => scrollToBottom(true));
+    }
+    if (same) return;
     setMessages(initialMessages);
     setCollapsedMessages(collapsedStateForLast(initialMessages));
     requestAnimationFrame(() => scrollToBottom(true));
