@@ -486,12 +486,39 @@ function MarkdownAnswer({ content, streaming = false }: { content: string; strea
   </>;
 }
 
+// Markdown 表格的一行：去掉两端的竖线后按竖线拆成单元格（\| 是单元格里的竖线，不拆）。
+function tableCells(line: string) {
+  return line.trim().replace(/^\|/, "").replace(/\|$/, "").split(/(?<!\\)\|/).map((cell) => cell.trim().replace(/\\\|/g, "|"));
+}
+
+const TABLE_ROW = /^\s*\|.*\|\s*$/;
+const TABLE_DIVIDER = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/;
+
 function MarkdownBody({ content }: { content: string }) {
   const blocks: ReactNode[] = [];
   const lines = content.split(/\r?\n/);
   let paragraph: string[] = [];
   let listType: "ul" | "ol" | null = null;
   let listItems: string[] = [];
+  // 表格：表头一行 + 分隔行（|---|---|）+ 数据行。以前不认表格，各行被当成一段拼在一起，满屏都是竖线。
+  let tableLines: string[] = [];
+
+  function flushTable() {
+    if (tableLines.length === 0) return;
+    if (tableLines.length >= 2 && TABLE_DIVIDER.test(tableLines[1])) {
+      const header = tableCells(tableLines[0]);
+      const aligns = tableCells(tableLines[1]).map((cell) => cell.endsWith(":") ? (cell.startsWith(":") ? "center" : "right") : "left") as Array<"left" | "center" | "right">;
+      const rows = tableLines.slice(2).map(tableCells);
+      blocks.push(<div className="answer-table" key={`table-${blocks.length}`}><table>
+        <thead><tr>{header.map((cell, index) => <th key={index} style={{ textAlign: aligns[index] ?? "left" }}>{renderInlineMarkdown(cell)}</th>)}</tr></thead>
+        <tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{header.map((_, index) => <td key={index} style={{ textAlign: aligns[index] ?? "left" }}>{renderInlineMarkdown(row[index] ?? "")}</td>)}</tr>)}</tbody>
+      </table></div>);
+    } else {
+      // 只有竖线、没有分隔行的不是表格（或者生成到一半还没输出分隔行），按普通文字显示。
+      for (const line of tableLines) blocks.push(<p key={`paragraph-${blocks.length}`}>{renderInlineMarkdown(line.trim())}</p>);
+    }
+    tableLines = [];
+  }
 
   function flushParagraph() {
     if (paragraph.length === 0) return;
@@ -509,6 +536,13 @@ function MarkdownBody({ content }: { content: string }) {
 
   for (const rawLine of lines) {
     const line = rawLine.trimEnd();
+    if (TABLE_ROW.test(line) || (tableLines.length === 1 && TABLE_DIVIDER.test(line))) {
+      flushParagraph();
+      flushList();
+      tableLines.push(line);
+      continue;
+    }
+    flushTable();
     if (!line.trim()) {
       flushParagraph();
       flushList();
@@ -540,6 +574,7 @@ function MarkdownBody({ content }: { content: string }) {
     }
     paragraph.push(line.trim());
   }
+  flushTable();
   flushParagraph();
   flushList();
   return <>{blocks}</>;

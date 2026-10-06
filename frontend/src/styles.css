@@ -1002,6 +1002,38 @@ h2 {
    font-size: 12px;
 }
 
+/* 回答里的 Markdown 表格：窄屏时表格横向滚动，不撑破回答区域。 */
+.answer-table {
+   max-width: 100%;
+   margin: 10px 0 14px;
+   overflow-x: auto;
+}
+
+.answer-table table {
+   min-width: 60%;
+   border-collapse: collapse;
+   font-size: 14px;
+   line-height: 1.7;
+}
+
+.answer-table th,
+.answer-table td {
+   border: 1px solid var(--t-dbe3ec);
+   padding: 7px 12px;
+   vertical-align: top;
+}
+
+.answer-table th {
+   background: var(--t-f4f8fc);
+   color: var(--t-1d3550);
+   font-weight: 700;
+   white-space: nowrap;
+}
+
+.answer-table tbody tr:nth-child(even) td {
+   background: rgb(var(--t-f4f9fd-rgb) / .6);
+}
+
 .answer blockquote {
    margin: 0 0 12px;
    padding-left: 12px;
