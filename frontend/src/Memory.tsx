@@ -145,7 +145,7 @@ function MemoryDetail({ sessionId, onBack }: { sessionId: string; onBack: () => 
         {current.message_count === 0 ? <div className="mem-empty">这个会话还没有进入过回答模型（订单查询、数据查询、问候和没检索到资料的问题不会写进对话记忆），所以没有记忆。</div> : <>
           <div className="mem-block">
             <h3>摘要 <Hint text={HINTS.summary} /> <small>{current.summary ? `${lastCompressed ? `第 ${lastCompressed.index} 轮时生成` : "已生成"}${current.summary_tokens ? ` · ${tokens(current.summary_tokens)} Token` : ""}` : "还没有触发压缩，所以没有摘要"}</small></h3>
-            {current.summary && <p className="mem-summary">{current.summary}</p>}
+            {current.summary && <Summary text={current.summary} />}
           </div>
           <div className="mem-block">
             <h3>最近原文 <small>{keptRounds.length ? `第 ${keptRounds[0].index}–${keptRounds[keptRounds.length - 1].index} 轮` : ""} · 压缩时保留最近不超过 {tokens(data.keep_tokens)} Token 的整轮问答</small></h3>
@@ -223,7 +223,7 @@ function TurnMemory({ turn }: { turn: MemoryTimelineTurn }) {
     <h4>第 {turn.index} 轮回答时，模型拿到的记忆{turn.compressed ? "（压缩之后）" : ""}</h4>
     <div className="mem-compare">
       <div><h5>摘要{summaryNote && <small>{summaryNote}</small>}</h5>
-        {turn.summary ? <p className="mem-summary">{turn.summary}</p> : <div className="mem-empty">还没有压缩过，没有摘要。</div>}</div>
+        {turn.summary ? <Summary text={turn.summary} /> : <div className="mem-empty">还没有压缩过，没有摘要。</div>}</div>
       <div><h5>保留的原文{kept && kept.length > 0 && <small>{kept.length} 轮</small>}</h5>
         {kept === null ? <div className="mem-empty">这一轮的记录里没有保存发给模型的原文。</div>
           : kept.length === 0 ? <div className="mem-empty">没有之前的问答原文{turn.summary ? "，之前的对话都在摘要里" : "，这是会话的第一轮"}。</div>
@@ -323,4 +323,20 @@ function LongMemoryRow({ item, busy, onNavigate, onDelete }: { item: LongMemoryI
       ? <span className="long-actions"><button type="button" className="danger-text" disabled={busy} onClick={() => { setConfirming(false); onDelete(); }}>确认删除</button><button type="button" className="link-text" onClick={() => setConfirming(false)}>取消</button></span>
       : <button type="button" className="link-text" onClick={() => setConfirming(true)}>删除</button>}
   </li>;
+}
+
+// 摘要可能很长：默认最多显示 150px 高，超出的部分渐隐，点「展开全部」看完整内容。
+const SUMMARY_MAX = 150;
+function Summary({ text }: { text: string }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [open, setOpen] = useState(false);
+  const [overflow, setOverflow] = useState(false);
+  useEffect(() => {
+    const element = ref.current;
+    if (element) setOverflow(element.scrollHeight > SUMMARY_MAX + 4);
+  }, [text]);
+  return <div className={`mem-summary-wrap${overflow && !open ? " is-clamped" : ""}`}>
+    <p ref={ref} className="mem-summary" style={overflow && !open ? { maxHeight: SUMMARY_MAX } : undefined}>{text}</p>
+    {overflow && <button type="button" className="mem-more mem-summary-toggle" onClick={() => setOpen(!open)}>{open ? "收起" : "展开全部"}</button>}
+  </div>;
 }

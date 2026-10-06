@@ -234,6 +234,18 @@
    white-space: pre-wrap;
 }
 
+/* 摘要折叠：超过 150px 时只露出前面一段，底部渐隐，下面是「展开全部」。 */
+.mem-summary-wrap.is-clamped .mem-summary {
+   overflow: hidden;
+   -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent);
+   mask-image: linear-gradient(to bottom, #000 70%, transparent);
+}
+
+.mem-summary-toggle {
+   display: inline-block;
+   margin-top: 4px;
+}
+
 .mem-turns {
    display: flex;
    flex-direction: column;
