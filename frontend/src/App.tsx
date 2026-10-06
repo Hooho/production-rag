@@ -216,13 +216,20 @@ function App() {
     localStorage.setItem(sidebarStorage, String(nextCollapsed));
   }
 
+  // 问答完成后同步到上层：历史记录，以及当前会话的消息。知识问答页切走时会卸载，切回来按 savedMessages 重新显示；
+  // 以前只更新了历史记录，切到别的页面再回来就看不到刚问的问题（要刷新页面重新加载才有）。
   function recordHistory(run: HistoryRun) {
     setHistoryRuns((items) => [...items, run]);
+    if (run.session_id === sessionId) {
+      setSavedMessages((items) => items.some((item) => item.request_id === run.id) ? items
+        : [...items, { ...run.response, request_id: run.response.request_id || run.id, feedback: run.feedback }]);
+    }
   }
 
-  // 反馈保存后同步到历史记录，切换会话再切回来时仍显示已提交的反馈。
+  // 反馈保存后同步到历史记录和当前会话的消息，切换会话或页面再切回来时仍显示已提交的反馈。
   function recordFeedback(value: FeedbackRecord) {
     setHistoryRuns((items) => items.map((item) => item.id === value.request_id ? { ...item, feedback: value } : item));
+    setSavedMessages((items) => items.map((item) => item.request_id === value.request_id ? { ...item, feedback: value } : item));
   }
 
   // 成功提示短暂展示，失败提示多停留一会儿，避免用户来不及读完错误原因。
