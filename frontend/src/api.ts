@@ -1289,7 +1289,7 @@ export function getMemorySession(sessionId: string) {
 export type PromptGroup = { key: string; label: string; description: string };
 export type PromptBrief = { id: string; group: string; label: string; where: string; active_version: number; active_label: string; versions: number; updated: string | null };
 export type PromptVersion = { version: number; label: string; text: string; note: string; created_by: string | null; created: string | null };
-export type PromptPart = "instructions" | "locked" | { input: string };
+export type PromptPart = "instructions" | "locked" | { input: string; template: string };
 export type PromptBox = { title: string; parts: PromptPart[] };
 export type PromptDetail = {
   id: string; group: string; label: string; where: string; input: string; locked: string; locked_reason: string; note: string;

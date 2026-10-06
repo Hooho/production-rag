@@ -417,6 +417,16 @@
    background: #fffbeb;
 }
 
+.pr-example-toggle {
+   margin-left: auto;
+   border: 0;
+   background: none;
+   padding: 0;
+   color: var(--t-2563eb);
+   font-size: 12px;
+   cursor: pointer;
+}
+
 .pr-box {
    margin-top: 10px;
    border: 1px solid var(--t-e3edf5);

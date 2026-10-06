@@ -156,6 +156,38 @@ SPECS = [
 ]
 BY_ID = {spec["id"]: spec for spec in SPECS}
 
+# 输入部分的模板写法：每次调用时代码填进去的是什么。页面默认显示模板，点「看示例」才显示下面 LAYOUTS 里的示例，
+# 免得让人以为输入是写死的。按每个提示词里输入出现的顺序排列。
+INPUT_TEMPLATES = {
+    "intent": ['{"question": "<本轮问题>",\n'
+        ' "history_summary": "<滚动摘要：更早对话的要点，没有时为空>",\n'
+        ' "recent_questions": ["<最近 3 个问题>"],\n'
+        ' "last_order": "<最近订单号，没有时为 null>",\n'
+        ' "user_profile": ["<长期记忆，没有时不带这个字段>"]}'],
+    "sufficiency": ['{"question": "<改写后的完整问题>",\n'
+        ' "sources": "<本轮检索到的资料，每条以 [S1] [S2] 开头>"}'],
+    "answer": ["本次检索来源：\n<source id=\"S1\" title=\"<文档标题>\">\n<资料内容>\n</source>\n……\n\n"
+        "<资料只能回答一部分时：一句话说明缺什么>\n\n"
+        "<用户有长期记忆时：<user_profile> 列出每条记忆，再加一句使用说明>",
+        "<滚动摘要>\n<保留的最近几轮问答原文>\n<本轮问题>"],
+    "memory_summary": ["<旧摘要 + 这次要压掉的历史消息>"],
+    "data_query": ['{"question": "<本轮问题>",\n "today": "<今天的日期>", "weekday": <星期几>,\n'
+        ' "data_types": [<可以查询的数据类型和字段>]}'],
+    "long_memory": ['{"question": "<本轮问题>",\n "answer": "<本轮回答，前 1500 字>",\n'
+        ' "memories": [<这个用户已有的长期记忆，带编号>]}'],
+    "chunk_context": ["<document>\n<全文，或全文中的一段>\n</document>\n<chunk>\n<要补充说明的分片>\n</chunk>"],
+}
+
+
+def boxes(prompt_id):
+    templates = iter(INPUT_TEMPLATES[prompt_id])
+    result = []
+    for box in LAYOUTS[prompt_id]["boxes"]:
+        parts = [dict(part, template=next(templates)) if isinstance(part, dict) else part for part in box["parts"]]
+        result.append({**box, "parts": parts})
+    return result
+
+
 # 页面上「发给模型的完整内容」的样子：按消息分成几个框，每个框由几段组成——
 #   instructions  指令（可以修改）
 #   locked        固定部分（不能修改）；locked_display 是页面上显示的写法（去掉模板占位符）
@@ -357,7 +389,7 @@ def detail(engine, prompt_id):
     layout = LAYOUTS[prompt_id]
     return {**{key: spec.get(key, "") for key in ("id", "group", "label", "where", "input", "locked", "locked_reason", "note")},
         "locked_label": layout["locked_label"], "locked_display": layout.get("locked_display", spec["locked"]),
-        "boxes": layout["boxes"],
+        "boxes": boxes(prompt_id),
         "active_version": version, "active_label": version_label(version),
         "activated_by": info.get("by"), "activated_at": info.get("at"), "versions": versions}
 

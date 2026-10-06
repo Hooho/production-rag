@@ -56,6 +56,8 @@ function PromptEditor({ promptId, onChanged, onToast }: { promptId: string; onCh
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
+  // 输入部分默认显示模板（代码每次填进去的是什么），切换后显示一次调用的示例。
+  const [showExample, setShowExample] = useState(false);
   const active = data?.versions.find((item) => item.version === data.active_version) ?? null;
   const apply = (detail: PromptDetail) => {
     setData(detail);
@@ -109,10 +111,11 @@ function PromptEditor({ promptId, onChanged, onToast }: { promptId: string; onCh
       <div className="pr-legend-bar">
         <span><i className="is-edit" />指令（点击修改）</span>
         {data.locked && <span><i className="is-locked" />{data.locked_label}（固定）</span>}
-        <span><i className="is-input" />输入（每次调用时填入，下面是示例）</span>
+        <span><i className="is-input" />输入（每次调用时由代码填入）</span>
+        <button type="button" className="pr-example-toggle" onClick={() => setShowExample(!showExample)}>{showExample ? "看模板" : "看示例"}</button>
       </div>
       {data.boxes.map((box, boxIndex) => <div className="pr-box" key={boxIndex}>
-        <div className="pr-box-title">{box.title}{box.parts.every((part) => typeof part === "object") ? "（示例）" : ""}</div>
+        <div className="pr-box-title">{box.title}{showExample && box.parts.some((part) => typeof part === "object") ? "（示例）" : ""}</div>
         {box.parts.map((part, partIndex) => {
           if (part === "instructions") return editing
             ? <div className="pr-seg is-edit is-editing" key={partIndex}>
@@ -127,7 +130,9 @@ function PromptEditor({ promptId, onChanged, onToast }: { promptId: string; onCh
             </div>
             : <Segment key={partIndex} kind="edit" tip="指令：告诉模型怎么判断、怎么做。点击修改，保存后生成新版本。" onClick={() => setEditing(true)}>{draft}</Segment>;
           if (part === "locked") return data.locked ? <Segment key={partIndex} kind="locked" tip={`${data.locked_label}，不能修改。${data.locked_reason}`}>{data.locked_display}</Segment> : null;
-          return <Segment key={partIndex} kind="input" tip={`输入，不能修改：每次调用时由代码填进去的数据，这里是示例。${data.input}`}>{part.input}</Segment>;
+          return <Segment key={partIndex} kind="input" tip={showExample
+            ? `输入，不能修改：每次调用时由代码填进去的数据，这里是一次调用的示例。${data.input}`
+            : `输入，不能修改：每次调用时由代码填进去的数据，尖括号里是要填的内容。${data.input}`}>{showExample ? part.input : part.template}</Segment>;
         })}
       </div>)}
     </section>
