@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { clearLongMemory, deleteLongMemory, getLongMemory, getMemorySession, listMemorySessions, setLongMemoryEnabled, type LongMemoryItem, type LongMemoryView, type MemorySessionDetail, type MemorySessionList, type MemoryTimelineTurn, type MemoryTurnText } from "./api";
+import { clearLongMemory, deleteLongMemory, getLongMemory, getMemorySession, listMemorySessions, setLongMemoryEnabled, type LongMemoryItem, type LongMemoryLog, type LongMemoryView, type MemorySessionDetail, type MemorySessionList, type MemoryTimelineTurn, type MemoryTurnText } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./Memory.css";
 
@@ -262,9 +262,17 @@ function LongMemory({ onNavigate }: { onNavigate: (path: string) => void }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [tab, setTab] = useState<"saved" | "logs">("saved");
   useEffect(() => {
     getLongMemory().then(setData).catch((reason: Error) => setError(reason.message));
   }, []);
+  // 有正在后台提取的记录时，每 3 秒刷新一次，提取完成后自动显示结果。
+  const waiting = data?.logs.some(isPending) ?? false;
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = window.setInterval(() => { getLongMemory().then(setData).catch(() => undefined); }, 3000);
+    return () => window.clearInterval(timer);
+  }, [waiting]);
   const run = async (action: () => Promise<LongMemoryView>) => {
     setBusy(true);
     setError("");
@@ -298,17 +306,23 @@ function LongMemory({ onNavigate }: { onNavigate: (path: string) => void }) {
         {!data.global_enabled && <p className="long-notice">管理员在设置页关闭了长期记忆，目前所有用户都不会记录和使用长期记忆。</p>}
       </section>
       <section className="mem-card">
-        <div className="long-head">
-          <h2>记住的内容 <small>{data.items.length} / {data.max_items} 条</small></h2>
-          {data.items.length > 0 && (confirmClear
-            ? <span className="long-actions"><button type="button" className="danger-text" disabled={busy} onClick={() => { setConfirmClear(false); void run(clearLongMemory); }}>确认清空</button><button type="button" className="link-text" onClick={() => setConfirmClear(false)}>取消</button></span>
-            : <button type="button" className="link-text" onClick={() => setConfirmClear(true)}>清空全部</button>)}
+        <div className="long-tabs" role="tablist">
+          <button type="button" role="tab" aria-selected={tab === "saved"} className={tab === "saved" ? "is-active" : ""} onClick={() => setTab("saved")}>保存的记忆 <small>{data.items.length} / {data.max_items}</small></button>
+          <button type="button" role="tab" aria-selected={tab === "logs"} className={tab === "logs" ? "is-active" : ""} onClick={() => setTab("logs")}>提取记录 <small>{data.logs.length}</small></button>
         </div>
-        {data.items.length === 0 ? <div className="mem-empty">还没有长期记忆。聊天时说出你的偏好或身份，比如「以后回答先给结论」「我负责华东区售后」，之后在这里就能看到。</div>
-          : groups.filter((group) => group.items.length > 0).map((group) => <div className="long-group" key={group.key}>
-            <h3>{group.label}</h3>
-            <ul>{group.items.map((item) => <LongMemoryRow key={item.id} item={item} busy={busy} onNavigate={onNavigate} onDelete={() => void run(() => deleteLongMemory(item.id))} />)}</ul>
-          </div>)}
+        {tab === "saved" ? <>
+          <div className="long-head">
+            <p className="long-tab-note">回答时会作为「用户画像」发给模型的内容，按类别分组。</p>
+            {data.items.length > 0 && (confirmClear
+              ? <span className="long-actions"><button type="button" className="danger-text" disabled={busy} onClick={() => { setConfirmClear(false); void run(clearLongMemory); }}>确认清空</button><button type="button" className="link-text" onClick={() => setConfirmClear(false)}>取消</button></span>
+              : <button type="button" className="link-text" onClick={() => setConfirmClear(true)}>清空全部</button>)}
+          </div>
+          {data.items.length === 0 ? <div className="mem-empty">还没有长期记忆。聊天时说出你的偏好或身份，比如「以后回答先给结论」「我负责华东区售后」，之后在这里就能看到。</div>
+            : groups.filter((group) => group.items.length > 0).map((group) => <div className="long-group" key={group.key}>
+              <h3>{group.label}</h3>
+              <ul>{group.items.map((item) => <LongMemoryRow key={item.id} item={item} busy={busy} onNavigate={onNavigate} onDelete={() => void run(() => deleteLongMemory(item.id))} />)}</ul>
+            </div>)}
+        </> : <LongMemoryLogs logs={data.logs} limit={data.log_limit} onNavigate={onNavigate} />}
       </section>
     </>}
   </div>;
@@ -323,6 +337,73 @@ function LongMemoryRow({ item, busy, onNavigate, onDelete }: { item: LongMemoryI
       ? <span className="long-actions"><button type="button" className="danger-text" disabled={busy} onClick={() => { setConfirming(false); onDelete(); }}>确认删除</button><button type="button" className="link-text" onClick={() => setConfirming(false)}>取消</button></span>
       : <button type="button" className="link-text" onClick={() => setConfirming(true)}>删除</button>}
   </li>;
+}
+
+// 提取超过 2 分钟还是「进行中」，多半是服务重启、后台任务丢了，不再等。
+const PENDING_TIMEOUT = 120_000;
+function isPending(log: LongMemoryLog) {
+  return log.status === "pending" && Date.now() - new Date(log.updated ?? log.created).getTime() < PENDING_TIMEOUT;
+}
+
+const LOG_STATUS: Record<LongMemoryLog["status"], { label: string; className: string }> = {
+  pending: { label: "提取中", className: "is-pending" },
+  changed: { label: "有变化", className: "is-changed" },
+  none: { label: "没有新内容", className: "is-muted" },
+  skipped: { label: "跳过", className: "is-muted" },
+  failed: { label: "失败", className: "is-failed" },
+};
+
+// 提取记录：每轮回答之后后台提取的过程和结果。多数问答里没有值得记的个人信息，「没有新内容」是正常结果。
+function LongMemoryLogs({ logs, limit, onNavigate }: { logs: LongMemoryLog[]; limit: number; onNavigate: (path: string) => void }) {
+  return <>
+    <p className="long-tab-note">每轮回答之后，系统在后台让大模型读这一轮问答和已有记忆，决定要新增、修改还是删除。这里是每次提取的记录，只保留最近 {limit} 条；关闭长期记忆期间不提取，也没有记录。</p>
+    {logs.length === 0 ? <div className="mem-empty">还没有提取记录。开启长期记忆后，问答一次就会出现在这里。</div>
+      : <ul className="long-logs">{logs.map((log) => <LongMemoryLogRow key={`${log.run_id}-${log.created}`} log={log} onNavigate={onNavigate} />)}</ul>}
+  </>;
+}
+
+function LongMemoryLogRow({ log, onNavigate }: { log: LongMemoryLog; onNavigate: (path: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const stale = log.status === "pending" && !isPending(log);
+  const status = stale ? { label: "未完成", className: "is-failed" } : LOG_STATUS[log.status];
+  const changes = log.changes;
+  const counts = changes ? [["新增", changes.added.length], ["修改", changes.updated.length], ["删除", changes.deleted.length]].filter(([, count]) => count) : [];
+  const ignored = changes?.ignored ?? [];
+  const summary = log.status === "changed" ? counts.map(([label, count]) => `${label} ${count} 条`).join("，")
+    : log.status === "none" ? (ignored.length ? `模型提出了 ${ignored.length} 条，都没通过校验` : "这一轮没有值得长期记住的个人信息")
+    : stale ? "超过 2 分钟没有结果，可能服务重启后后台任务中断"
+    : log.status === "pending" ? "后台正在提取…"
+    : log.status === "failed" ? "提取失败，这次回答不受影响" : log.reason ?? "";
+  const expandable = Boolean(changes || (log.status === "failed" && log.reason));
+  return <li className={open ? "is-open" : ""}>
+    <div className="long-log-head">
+      <span className={`mem-tag long-status ${status.className}`}>{status.label}</span>
+      <span className="long-log-question">{log.question || "—"}</span>
+      <span className="long-meta">{formatTime(log.created)}{log.session_id && <> · <button type="button" className="link-text" onClick={() => onNavigate(`/memory/${encodeURIComponent(log.session_id ?? "")}`)}>查看会话</button></>}</span>
+    </div>
+    <div className="long-log-summary">
+      <span>{summary}</span>
+      {expandable && <button type="button" className="link-text" onClick={() => setOpen(!open)} aria-expanded={open}>{open ? "收起" : "详情"}</button>}
+    </div>
+    {open && <div className="long-log-detail">
+      {changes && <>
+        {changes.added.length > 0 && <LogChange label="新增" className="is-add" items={changes.added} />}
+        {changes.updated.length > 0 && <LogChange label="修改" className="is-update" items={changes.updated.map((item) => typeof item === "string" ? item : `${item.before} → ${item.after}`)} />}
+        {changes.deleted.length > 0 && <LogChange label="删除" className="is-delete" items={changes.deleted} />}
+        {ignored.length > 0 && <LogChange label="未采用" className="is-ignored" items={ignored.map((item) => `${item.content || "（空）"}（${item.reason}）`)} />}
+        {!counts.length && !ignored.length && <p className="long-log-line">模型判断这一轮没有需要新增、修改或删除的记忆。</p>}
+      </>}
+      {log.status === "failed" && log.reason && <p className="long-log-line">错误：{log.reason}</p>}
+      <p className="long-log-meta">{[log.model && `模型 ${log.model}`, log.duration_ms !== undefined && `耗时 ${(log.duration_ms / 1000).toFixed(1)} 秒`, log.total !== undefined && `提取后共 ${log.total} 条`].filter(Boolean).join(" · ")}</p>
+    </div>}
+  </li>;
+}
+
+function LogChange({ label, className, items }: { label: string; className: string; items: string[] }) {
+  return <div className={`long-log-change ${className}`}>
+    <span className="long-log-label">{label}</span>
+    <ul>{items.map((item, index) => <li key={index}>{item}</li>)}</ul>
+  </div>;
 }
 
 // 摘要可能很长：默认最多显示 150px 高，超出的部分渐隐，点「展开全部」看完整内容。

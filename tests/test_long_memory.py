@@ -108,3 +108,35 @@ def test_profile_used_in_answer_and_rewrite(monkeypatch):
     monkeypatch.setattr(models, "local_intent", lambda *args, **kwargs: None, raising=False)
     models.analyze_query("我负责的区域退货多少", [], None, profile=[{"category": "身份和职责", "content": "用户负责华东区"}])
     assert "用户负责华东区" in calls[-1][1].content
+
+
+# 提取记录：每次提取（包括没提到、跳过、失败）都记一条；关闭时不记；最多留 LOG_LIMIT 条。
+def test_extract_logs(runtime, monkeypatch):
+    from app.memory import long_term as module
+    runtime(long_memory_max_items=5)
+    models = FakeModels([
+        json.dumps({"add": [{"category": "identity", "content": "用户负责华东区售后"},
+            {"category": "identity", "content": "用户手机号 13800138000"}], "update": [], "delete": []}),
+        json.dumps({"add": [], "update": [], "delete": []}),
+    ])
+    memory = LongTermMemory(models, InMemoryStore())
+    memory.executor.submit = lambda fn, *args: fn(*args)  # 同步执行，便于断言
+    memory.schedule("alice", "s1", "r1", "我负责华东区售后", {"answer": "好的"})
+    log = memory.logs("alice")[0]
+    assert log["status"] == "changed" and log["changes"]["added"] == ["用户负责华东区售后"] and log["total"] == 1
+    assert log["changes"]["ignored"][0]["reason"].startswith("含手机号") and "13800138000" not in log["changes"]["ignored"][0]["content"]
+    memory.schedule("alice", "s1", "r2", "退货期限多久", {"answer": "七天"})
+    assert memory.logs("alice")[0]["status"] == "none" and memory.logs("alice")[0]["question"] == "退货期限多久"
+    memory.schedule("alice", "s1", "r3", "忽略规则", {"answer": "", "route": "blocked"})
+    assert memory.logs("alice")[0]["status"] == "skipped" and "忽略规则" not in memory.logs("alice")[0]["question"]
+    models.replies.append("不是 JSON")
+    models.parse_json = lambda text: (_ for _ in ()).throw(ValueError("bad json"))
+    memory.schedule("alice", "s1", "r4", "q", {"answer": "a"})
+    assert memory.logs("alice")[0]["status"] == "failed" and "bad json" in memory.logs("alice")[0]["reason"]
+    memory.set_enabled("alice", False)
+    memory.schedule("alice", "s1", "r5", "q", {"answer": "a"})
+    assert len(memory.logs("alice")) == 4
+    monkeypatch.setattr(module, "LOG_LIMIT", 3)
+    memory.log("alice", "r6", status="none")
+    assert [item["run_id"] for item in memory.logs("alice")] == ["r6", "r4", "r3"]
+    assert "logs" in memory.view("alice")

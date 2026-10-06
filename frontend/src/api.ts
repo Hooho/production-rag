@@ -1319,7 +1319,9 @@ export function activatePromptVersion(id: string, version: number) {
 
 // 长期记忆（GET /memory/long 等）：跨会话记住的用户偏好、身份和长期关注的主题，只能看、改自己的。
 export type LongMemoryItem = { id: string; content: string; category: string; created?: string; updated?: string; source_session?: string; source_run?: string };
-export type LongMemoryView = { enabled: boolean; global_enabled: boolean; max_items: number; categories: Record<string, string>; items: LongMemoryItem[] };
+export type LongMemoryChanges = { added: string[]; updated: ({ before: string; after: string } | string)[]; deleted: string[]; ignored?: { content: string; reason: string }[] };
+export type LongMemoryLog = { run_id: string | null; session_id?: string; question?: string; status: "pending" | "changed" | "none" | "skipped" | "failed"; reason?: string; model?: string | null; changes?: LongMemoryChanges; total?: number; duration_ms?: number; created: string; updated?: string };
+export type LongMemoryView = { enabled: boolean; global_enabled: boolean; max_items: number; categories: Record<string, string>; items: LongMemoryItem[]; logs: LongMemoryLog[]; log_limit: number };
 
 export function getLongMemory() {
   return request<LongMemoryView>("/memory/long");

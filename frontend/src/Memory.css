@@ -600,3 +600,143 @@
    display: inline-flex;
    gap: 10px;
 }
+
+/* 长期记忆里的两个标签：保存的记忆、提取记录。 */
+.long-tabs {
+   display: flex;
+   gap: 4px;
+   margin: -4px 0 12px;
+   border-bottom: 1px solid var(--t-e3edf5);
+}
+
+.long-tabs button {
+   margin-bottom: -1px;
+   border: 0;
+   border-bottom: 2px solid transparent;
+   background: none;
+   padding: 6px 12px 8px;
+   color: var(--t-5e7a95);
+   font-size: 14px;
+   font-weight: 600;
+   cursor: pointer;
+}
+
+.long-tabs button small {
+   margin-left: 4px;
+   color: var(--t-7d95ac);
+   font-size: 12px;
+   font-weight: 400;
+}
+
+.long-tabs button.is-active {
+   border-bottom-color: var(--t-2563eb);
+   color: var(--t-1d4ed8);
+}
+
+.long-tab-note {
+   margin: 0 0 8px;
+   color: var(--t-7d95ac);
+   font-size: 12px;
+   line-height: 1.6;
+}
+
+.long-logs {
+   margin: 0;
+   padding: 0;
+   list-style: none;
+}
+
+.long-logs > li {
+   border-top: 1px solid var(--t-f1f3f6);
+   padding: 10px 0;
+   font-size: 13px;
+}
+
+.long-log-head {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: baseline;
+   gap: 6px 10px;
+}
+
+.long-log-question {
+   flex: 1 1 260px;
+   min-width: 0;
+   color: var(--t-173b5b);
+}
+
+.long-log-summary {
+   display: flex;
+   flex-wrap: wrap;
+   gap: 4px 10px;
+   margin-top: 4px;
+   color: var(--t-5e7a95);
+   font-size: 12px;
+}
+
+.mem-tag.long-status.is-changed {
+   border-color: #16a34a;
+   background: #f0fdf4;
+   color: #166534;
+}
+
+.mem-tag.long-status.is-pending {
+   border-color: var(--t-2563eb);
+   background: var(--t-eaf1ff);
+   color: var(--t-1d4ed8);
+}
+
+.mem-tag.long-status.is-failed {
+   border-color: #dc2626;
+   background: #fef2f2;
+   color: #991b1b;
+}
+
+.long-log-detail {
+   margin-top: 8px;
+   border-radius: 4px;
+   background: var(--t-f4f8fc);
+   padding: 8px 12px;
+}
+
+.long-log-change {
+   display: flex;
+   gap: 10px;
+   padding: 3px 0;
+}
+
+.long-log-label {
+   flex: 0 0 auto;
+   min-width: 40px;
+   font-size: 12px;
+   font-weight: 600;
+   line-height: 1.8;
+}
+
+.long-log-change.is-add .long-log-label { color: #166534; }
+.long-log-change.is-update .long-log-label { color: var(--t-1d4ed8); }
+.long-log-change.is-delete .long-log-label { color: #991b1b; }
+.long-log-change.is-ignored .long-log-label { color: var(--t-7d95ac); }
+
+.long-log-change ul {
+   margin: 0;
+   padding: 0;
+   list-style: none;
+   color: var(--t-334e68);
+   line-height: 1.8;
+}
+
+.long-log-change.is-ignored ul {
+   color: var(--t-7d95ac);
+}
+
+.long-log-line {
+   margin: 2px 0;
+   color: var(--t-334e68);
+}
+
+.long-log-meta {
+   margin: 6px 0 0;
+   color: var(--t-7d95ac);
+   font-size: 12px;
+}
