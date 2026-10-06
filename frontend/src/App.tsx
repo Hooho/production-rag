@@ -774,6 +774,17 @@ function TagList({ tags }: { tags: StackTagItem[] }) {
   return <span className="step-tags">{tags.map((tag, index) => <StackTag key={index} kind={tag.kind} variant={tag.variant} muted={Boolean(tag.muted)} title={tag.muted}>{tag.label}</StackTag>)}</span>;
 }
 
+// 把一段文字里出现的模型、组件名原地换成标签，其余文字照常显示。
+function inlineTags(text: string, tags: StackTagItem[]): ReactNode[] {
+  const labels = tags.map((tag) => tag.label).filter(Boolean).sort((a, b) => b.length - a.length);
+  if (labels.length === 0) return [text];
+  const pattern = new RegExp(`(${labels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`);
+  return text.split(pattern).map((part, index) => {
+    const tag = tags.find((item) => item.label === part);
+    return tag ? <StackTag key={index} kind={tag.kind} variant={tag.variant}>{tag.label}</StackTag> : <Fragment key={index}>{part}</Fragment>;
+  });
+}
+
 // 展开后的「模型调用」「调用方式 / 处理方式」两行：模型显示成模型标签；调用方式先列出用到的组件标签，
 // 原来的文字说明（地址、计算方式）放在下面作为补充。
 function StackField({ field, value, step }: { field: string; value: unknown; step?: TraceStep }) {
@@ -781,8 +792,14 @@ function StackField({ field, value, step }: { field: string; value: unknown; ste
     const tags = modelTags(value);
     return tags.length ? <TagList tags={tags} /> : <ResultFieldValue value={value} field={field} />;
   }
-  const tags = step ? stepTags(step).filter((tag) => tag.kind !== "model") : [];
-  if (tags.length === 0) return <ResultFieldValue value={value} field={field} />;
+  const all = step ? stepTags(step) : [];
+  const tags = all.filter((tag) => tag.kind !== "model");
+  if (tags.length === 0) {
+    // 只用到模型的步骤（比如问题改写「通过 MiniMax-M3 模型改写问题」）：把文字里的模型名原地换成标签。
+    const models = all.filter((tag) => tag.kind === "model");
+    if (typeof value === "string" && models.length) return <span>{inlineTags(value, models)}</span>;
+    return <ResultFieldValue value={value} field={field} />;
+  }
   return <><TagList tags={tags} />{typeof value === "string" && value.trim() && <small className="result-help">{value}</small>}</>;
 }
 
@@ -1329,7 +1346,7 @@ function MemoryUsage({ result }: { result: Record<string, unknown> }) {
     <div className="memory-usage-line"><strong>{used} / {budget} Token</strong>
       <span className="memory-usage-track"><span className={`memory-usage-fill ${percent >= 90 ? "is-high" : ""}`} style={{ width: `${percent}%` }} /></span>
       <span>{percent}%</span></div>
-    <small className="result-help">超过 {budget} 时，较早的对话由 {manager} 压缩成摘要{keep ? `，${keep}` : ""}</small>
+    <small className="result-help">超过 {budget} 时，较早的对话由 <StackTag kind="framework" variant="langchain">{manager}</StackTag> 压缩成摘要{keep ? `，${keep}` : ""}</small>
   </div>;
 }
 

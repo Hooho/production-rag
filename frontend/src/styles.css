@@ -6661,17 +6661,17 @@ input:focus {
    gap: 3px;
    margin: 0 2px;
    border: 1px solid transparent;
-   border-radius: 4px;
-   padding: 0 6px;
-   font-size: 11px;
+   border-radius: 3px;
+   padding: 0 5px;
+   font-size: 10px;
    font-weight: 500;
-   line-height: 18px;
+   line-height: 16px;
    white-space: nowrap;
    vertical-align: 1px;
 }
 
 .stack-tag i {
-   font-size: 10px;
+   font-size: 9px;
    font-style: normal;
    opacity: .85;
 }
