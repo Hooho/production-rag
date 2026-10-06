@@ -375,6 +375,118 @@
    padding: 10px 12px;
 }
 
+/* 发给模型的完整内容：按消息分框，每框里的指令、固定部分、输入用不同底色和左侧色条区分。 */
+.pr-legend-bar {
+   display: flex;
+   flex-wrap: wrap;
+   gap: 6px 16px;
+   margin: 14px 0 10px;
+   color: var(--t-5e7a95);
+   font-size: 12px;
+}
+
+.pr-legend-bar span {
+   display: inline-flex;
+   align-items: center;
+   gap: 6px;
+}
+
+.pr-legend-bar i {
+   display: inline-block;
+   box-sizing: border-box;
+   width: 16px;
+   height: 12px;
+   border-radius: 2px;
+}
+
+.pr-legend-bar i.is-edit,
+.pr-seg.is-edit {
+   border-left: 3px solid var(--t-2563eb);
+   background: var(--t-eaf1ff);
+}
+
+.pr-legend-bar i.is-locked,
+.pr-seg.is-locked {
+   border-left: 3px solid #94a3b8;
+   background: #f1f5f9;
+}
+
+.pr-legend-bar i.is-input,
+.pr-seg.is-input {
+   border-left: 3px dashed #d97706;
+   background: #fffbeb;
+}
+
+.pr-box {
+   margin-top: 10px;
+   border: 1px solid var(--t-e3edf5);
+   border-radius: 6px;
+   background: #fff;
+   padding: 8px;
+}
+
+.pr-box-title {
+   margin: 0 0 6px 2px;
+   color: var(--t-7d95ac);
+   font-size: 12px;
+   font-weight: 600;
+}
+
+.pr-seg {
+   margin-top: 4px;
+   border-radius: 3px;
+   padding: 8px 12px;
+   color: var(--t-334e68);
+   font-size: 13px;
+   line-height: 1.8;
+   white-space: pre-wrap;
+   word-break: break-word;
+   cursor: help;
+}
+
+.pr-seg:focus-visible {
+   outline: 2px solid var(--t-93c5fd);
+   outline-offset: 1px;
+}
+
+.pr-seg.is-edit {
+   color: var(--t-173b5b);
+   cursor: text;
+}
+
+.pr-seg.is-edit:hover {
+   background: #dbe7ff;
+}
+
+.pr-seg.is-input {
+   color: #7c5a1d;
+   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+   font-size: 12px;
+}
+
+.pr-seg.is-editing {
+   background: #fff;
+   cursor: default;
+}
+
+.pr-seg.is-editing:hover {
+   background: #fff;
+}
+
+.pr-tip {
+   position: fixed;
+   z-index: 1000;
+   border: 1px solid var(--t-cedfec);
+   border-radius: 4px;
+   background: #fff;
+   padding: 8px 10px;
+   box-shadow: 0 6px 16px rgb(15 23 42 / .12);
+   color: var(--t-334e68);
+   font-size: 12px;
+   line-height: 1.6;
+   pointer-events: none;
+}
+
 /* 窄屏：列表放到上面，不再固定，否则会盖住下面的编辑区。 */
 @media (max-width: 860px) {
    .pr-layout {

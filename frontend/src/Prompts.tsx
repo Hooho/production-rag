@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { activatePromptVersion, getPrompt, listPrompts, savePromptVersion, type PromptBrief, type PromptDetail, type PromptGroup, type PromptVersion } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./Prompts.css";
@@ -54,11 +55,13 @@ function PromptEditor({ promptId, onChanged, onToast }: { promptId: string; onCh
   const [draft, setDraft] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(false);
   const active = data?.versions.find((item) => item.version === data.active_version) ?? null;
   const apply = (detail: PromptDetail) => {
     setData(detail);
     setDraft(detail.versions.find((item) => item.version === detail.active_version)?.text ?? "");
     setNote("");
+    setEditing(false);
   };
   useEffect(() => {
     getPrompt(promptId).then(apply).catch((reason: Error) => setError(reason.message));
@@ -103,31 +106,37 @@ function PromptEditor({ promptId, onChanged, onToast }: { promptId: string; onCh
       <p className="pr-where">{data.where}</p>
       {data.note && <p className="pr-note">{data.note}</p>}
 
-      <h3>指令 <small>可以修改</small></h3>
-      <textarea className="pr-textarea" value={draft} onChange={(event) => setDraft(event.target.value)} rows={Math.min(14, Math.max(5, Math.ceil(draft.length / 60)))} spellCheck={false} />
-      <div className="pr-editbar">
-        <span className={draft.length > 4000 ? "pr-count is-over" : "pr-count"}>{draft.length} / 4000 字</span>
-        <input className="pr-note-input" value={note} maxLength={200} placeholder="修改说明（可选），例如：回答改成先给结论" onChange={(event) => setNote(event.target.value)} />
-        <button type="button" className="secondary-button" disabled={!dirty || saving} onClick={() => setDraft(active.text)}>撤销修改</button>
-        <button type="button" className="primary-button" disabled={!dirty || saving || !draft.trim() || draft.length > 4000} onClick={() => void save()}>{saving ? "保存中…" : "保存为新版本"}</button>
+      <div className="pr-legend-bar">
+        <span><i className="is-edit" />指令（点击修改）</span>
+        {data.locked && <span><i className="is-locked" />{data.locked_label}（固定）</span>}
+        <span><i className="is-input" />输入（每次调用时填入，下面是示例）</span>
       </div>
-      {dirty && <div className="pr-diff-box"><h4>和当前版本（{active.label}）相比</h4><Diff before={active.text} after={draft} /></div>}
-
-      {data.locked && <>
-        <h3>固定部分 <small>不能修改</small></h3>
-        <p className="pr-reason">{data.locked_reason}</p>
-        <pre className="pr-locked">{data.locked}</pre>
-      </>}
-      <h3>输入</h3>
-      <p className="pr-input">{data.input}</p>
-      <p className="pr-help">发给模型的是「指令{data.locked ? " + 固定部分" : ""}」，后面再接上面这些输入。</p>
+      {data.boxes.map((box, boxIndex) => <div className="pr-box" key={boxIndex}>
+        <div className="pr-box-title">{box.title}{box.parts.every((part) => typeof part === "object") ? "（示例）" : ""}</div>
+        {box.parts.map((part, partIndex) => {
+          if (part === "instructions") return editing
+            ? <div className="pr-seg is-edit is-editing" key={partIndex}>
+              <textarea className="pr-textarea" autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} rows={Math.min(14, Math.max(4, Math.ceil(draft.length / 60)))} spellCheck={false} />
+              <div className="pr-editbar">
+                <span className={draft.length > 4000 ? "pr-count is-over" : "pr-count"}>{draft.length} / 4000 字</span>
+                <input className="pr-note-input" value={note} maxLength={200} placeholder="修改说明（可选），例如：回答改成先给结论" onChange={(event) => setNote(event.target.value)} />
+                <button type="button" className="secondary-button" disabled={saving} onClick={() => { setDraft(active.text); setNote(""); setEditing(false); }}>{dirty ? "撤销修改" : "收起"}</button>
+                <button type="button" className="primary-button" disabled={!dirty || saving || !draft.trim() || draft.length > 4000} onClick={() => void save()}>{saving ? "保存中…" : "保存为新版本"}</button>
+              </div>
+              {dirty && <div className="pr-diff-box"><h4>和当前版本（{active.label}）相比</h4><Diff before={active.text} after={draft} /></div>}
+            </div>
+            : <Segment key={partIndex} kind="edit" tip="指令：告诉模型怎么判断、怎么做。点击修改，保存后生成新版本。" onClick={() => setEditing(true)}>{draft}</Segment>;
+          if (part === "locked") return data.locked ? <Segment key={partIndex} kind="locked" tip={`${data.locked_label}，不能修改。${data.locked_reason}`}>{data.locked_display}</Segment> : null;
+          return <Segment key={partIndex} kind="input" tip={`输入，不能修改：每次调用时由代码填进去的数据，这里是示例。${data.input}`}>{part.input}</Segment>;
+        })}
+      </div>)}
     </section>
 
     <section className="pr-card">
       <h2>版本历史</h2>
       <ol className="pr-versions">{data.versions.map((version) =>
         <VersionRow key={version.version} version={version} isActive={version.version === data.active_version} activeText={active.text}
-          onLoad={() => { setDraft(version.text); setNote(`基于 ${version.label} 修改`); }} onActivate={() => void activate(version)} />)}
+          onLoad={() => { setDraft(version.text); setNote(`基于 ${version.label} 修改`); setEditing(true); }} onActivate={() => void activate(version)} />)}
       </ol>
     </section>
   </div>;
@@ -192,4 +201,25 @@ function Diff({ before, after }: { before: string; after: string }) {
       : piece.kind === "added" ? <ins key={index}>{piece.text}</ins> : <del key={index}>{piece.text}</del>)}</p>
     <p className="pr-legend"><ins>新增</ins><del>删除</del></p>
   </>;
+}
+
+// 完整提示词里的一段。hover 或聚焦（手机上点一下）时显示说明；指令段点击进入编辑。
+// 说明气泡挂到 body 上按视口定位，不会被卡片或导航栏挡住。
+function Segment({ kind, tip, onClick, children }: { kind: "edit" | "locked" | "input"; tip: string; onClick?: () => void; children: ReactNode }) {
+  const anchor = useRef<HTMLDivElement>(null);
+  const [style, setStyle] = useState<CSSProperties | null>(null);
+  const show = () => {
+    const rect = anchor.current?.getBoundingClientRect();
+    if (!rect) return;
+    const width = Math.min(320, window.innerWidth - 16);
+    const left = Math.min(Math.max(8, rect.left + 24), window.innerWidth - width - 8);
+    setStyle(rect.top > 120 ? { left, width, bottom: window.innerHeight - rect.top + 6 } : { left, width, top: rect.bottom + 6 });
+  };
+  const hide = () => setStyle(null);
+  return <div ref={anchor} className={`pr-seg is-${kind}`} tabIndex={0} role={onClick ? "button" : undefined} aria-label={tip}
+    onMouseEnter={show} onMouseLeave={hide} onFocus={show} onBlur={hide}
+    onClick={onClick} onKeyDown={(event) => { if (onClick && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onClick(); } }}>
+    {children}
+    {style && createPortal(<span className="pr-tip" role="tooltip" style={style}>{tip}</span>, document.body)}
+  </div>;
 }

@@ -156,6 +156,62 @@ SPECS = [
 ]
 BY_ID = {spec["id"]: spec for spec in SPECS}
 
+# 页面上「发给模型的完整内容」的样子：按消息分成几个框，每个框由几段组成——
+#   instructions  指令（可以修改）
+#   locked        固定部分（不能修改）；locked_display 是页面上显示的写法（去掉模板占位符）
+#   input         每次调用时由代码填入的数据，这里给一个段永平知识库的示例
+# 只用于展示，不参与拼接：实际发送的内容见 compose() 和各调用处。
+PAYLOAD_INTENT = (
+    '{"question": "他最失败的投资是什么",\n'
+    ' "history_summary": "用户在了解段永平的投资经历，已问过他最大的一笔投资。",\n'
+    ' "recent_questions": ["段永平最大的一笔投资是什么"],\n'
+    ' "last_order": null,\n'
+    ' "user_profile": ["用户长期关注段永平的投资"]}'
+)
+SOURCE_EXAMPLE = (
+    '<source id="S1" title="段永平投资问答录">\n'
+    '段永平谈到自己犯过的错误时说，最大的错误是错过而不是做错……\n'
+    '</source>'
+)
+LAYOUTS = {
+    "intent": {"locked_label": "输出格式", "boxes": [
+        {"title": "系统提示词", "parts": ["instructions", "locked"]},
+        {"title": "用户消息", "parts": [{"input": PAYLOAD_INTENT}]},
+    ]},
+    "sufficiency": {"locked_label": "输出格式", "boxes": [
+        {"title": "系统提示词", "parts": ["instructions", "locked"]},
+        {"title": "用户消息", "parts": [{"input": '{"question": "段永平最失败的投资是什么",\n'
+            ' "sources": "[S1] 段永平谈到自己犯过的错误时说，最大的错误是错过而不是做错……\n[S2] ……"}'}]},
+    ]},
+    "answer": {"locked_label": "引用和安全规则", "boxes": [
+        {"title": "系统提示词", "parts": ["instructions", "locked", {"input": "本次检索来源：\n" + SOURCE_EXAMPLE + "\n\n"
+            "<user_profile>\n- [长期关注] 用户长期关注段永平的投资\n</user_profile>\n"
+            "<user_profile> 里是这个用户的长期信息……只用于调整回答的详略、格式和称呼……"}]},
+        {"title": "对话记忆和本轮问题", "parts": [{"input": "[摘要] 用户在了解段永平的投资经历……\n"
+            "[用户] 段永平最大的一笔投资是什么\n[助手] 根据检索来源，段永平最大的一笔投资是苹果 [S1]……\n"
+            "[用户] 他最失败的投资是什么"}]},
+    ]},
+    "memory_summary": {"locked_label": "固定格式", "locked_display": "历史消息：", "boxes": [
+        {"title": "发给模型的消息", "parts": ["instructions", "locked", {"input": "[摘要] 用户在了解段永平的投资经历……\n"
+            "[用户] 段永平最大的一笔投资是什么\n[助手] 根据检索来源……"}]},
+    ]},
+    "data_query": {"locked_label": "输出格式", "boxes": [
+        {"title": "系统提示词", "parts": ["instructions", "locked"]},
+        {"title": "用户消息", "parts": [{"input": '{"question": "上周华东区退了多少单",\n "today": "2026-10-06", "weekday": 2,\n'
+            ' "data_types": [{"data_type": "after_sales", "label": "售后工单", "fields": [……]}, ……]}'}]},
+    ]},
+    "long_memory": {"locked_label": "输出格式", "boxes": [
+        {"title": "系统提示词", "parts": ["instructions", "locked"]},
+        {"title": "用户消息", "parts": [{"input": '{"question": "以后回答先给结论，我主要关注段永平的投资",\n'
+            ' "answer": "好的……",\n "memories": [{"id": "a1", "category": "identity", "content": "用户负责华东区售后"}]}'}]},
+    ]},
+    "chunk_context": {"locked_label": "", "boxes": [
+        {"title": "系统提示词", "parts": ["instructions"]},
+        {"title": "用户消息", "parts": [{"input": "<document>\n段永平投资问答录（全文或全文的一段）……\n</document>\n"
+            "<chunk>\n他后来把这部分股票卖了，回头看卖早了……\n</chunk>"}]},
+    ]},
+}
+
 _lock = threading.Lock()
 _cache = {"at": 0.0, "state": None}
 
@@ -298,7 +354,10 @@ def detail(engine, prompt_id):
         "note": row["note"], "created_by": row["created_by"], "created": row["created"]} for row in rows]
     versions.append({"version": 0, "label": version_label(0), "text": spec["instructions"],
         "note": "代码里写的原始版本", "created_by": None, "created": None})
+    layout = LAYOUTS[prompt_id]
     return {**{key: spec.get(key, "") for key in ("id", "group", "label", "where", "input", "locked", "locked_reason", "note")},
+        "locked_label": layout["locked_label"], "locked_display": layout.get("locked_display", spec["locked"]),
+        "boxes": layout["boxes"],
         "active_version": version, "active_label": version_label(version),
         "activated_by": info.get("by"), "activated_at": info.get("at"), "versions": versions}
 
