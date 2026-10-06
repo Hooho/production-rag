@@ -6662,16 +6662,17 @@ input:focus {
    margin: 0 2px;
    border: 1px solid transparent;
    border-radius: 3px;
-   padding: 0 5px;
-   font-size: 10px;
+   padding: 0 4px;
+   /* 跟着所在文字的字号走（略小一点），嵌在句子里不突兀。 */
+   font-size: .9em;
    font-weight: 500;
-   line-height: 16px;
+   line-height: 1.45;
    white-space: nowrap;
    vertical-align: 1px;
 }
 
 .stack-tag i {
-   font-size: 9px;
+   font-size: .85em;
    font-style: normal;
    opacity: .85;
 }

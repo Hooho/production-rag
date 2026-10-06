@@ -1499,7 +1499,7 @@ function RetrievalDiagnostics({ data, embeddingModel }: { data: RetrievalDiagnos
   // 召回方式按类型各占一行；模型名用标签样式包起来，和普通文字区分开。
   const recallLines: ReactNode[] = [];
   if (methods.includes("dense")) recallLines.push(<small key="dense">向量：<StackTag kind="model" variant="embedding">{embeddingModel || "向量模型"}</StackTag>按语义相似（embedding 服务 /v1/embeddings）</small>);
-  if (methods.includes("keyword")) recallLines.push(<small key="keyword">关键词：<StackTag kind="algo">BM25</StackTag>按字面匹配（Milvus 全文检索）</small>);
+  if (methods.includes("keyword")) recallLines.push(<small key="keyword">关键词：<StackTag kind="algo">BM25</StackTag>按字面匹配（<StackTag kind="store">Milvus</StackTag>全文检索）</small>);
   // 诊断对象字段较多，先用可折叠说明解释处理链路，降低只看数字时的理解成本。
   return <div className="diag">
     {/* 检索过程：召回 → 融合 → 重排 → 过滤 → 返回，一环接一环写明做了什么、剩下多少。
@@ -1511,11 +1511,11 @@ function RetrievalDiagnostics({ data, embeddingModel }: { data: RetrievalDiagnos
         {scope.documents.length > 0 && <details className="mem-fold"><summary>查看文档列表</summary><ul className="scope-list">{scope.documents.map((item) =>
           <li key={item.document_id}>{item.title}<em>v{item.version}</em><span>{item.source === "own" ? "自己上传" : item.source === "public" ? `公开 · ${item.owner}` : `共享 · ${item.owner}${item.groups.length > 0 ? ` · ${item.groups.join("、")}` : ""}`}</span></li>)}</ul>
           {scope.total > scope.documents.length && <small>只列出前 {scope.documents.length} 份</small>}</details>}
-        <small>范围由服务端按登录身份从 MySQL 查出，作为过滤条件交给 Milvus 的向量和关键词检索，模型和前端都改不了</small></div></li>}
+        <small>范围由服务端按登录身份从 <StackTag kind="store">MySQL</StackTag>查出，作为过滤条件交给 <StackTag kind="store">Milvus</StackTag>的向量和关键词检索，模型和前端都改不了</small></div></li>}
       <li><span className="intent-trace-mark"><b>{step + 1}</b></span><div><strong>召回</strong>：{queries.length} 个检索词 × {methodNames.join(" + ")}，{lists.length} 张排名表，命中 {totalHits} 个 chunk（含重复）
         {queries.map((query, index) => <small key={query} className="diag-process-query"><em>Q{index + 1}</em>{query}</small>)}
         {recallLines}</div></li>
-      <li><span className="intent-trace-mark"><b>{step + 2}</b></span><div><strong>融合</strong>：去重后 {candidates.length} 个 chunk，用 RRF（k={config.rrf_k}）按名次合并排序
+      <li><span className="intent-trace-mark"><b>{step + 2}</b></span><div><strong>融合</strong>：去重后 {candidates.length} 个 chunk，用 <StackTag kind="algo">RRF</StackTag>（k={config.rrf_k}）按名次合并排序
         <small>得分 = Σ 1 / ({config.rrf_k} + 名次)，只看名次不看原始分数；被多路命中的片段更靠前</small></div></li>
       <li><span className="intent-trace-mark"><b>{step + 3}</b></span><div><strong>重排</strong>：{config.reranked
         ? <>RRF 前 {config.rerank_candidates} 个 chunk 交给 <StackTag kind="model" variant="rerank">{config.rerank_model}</StackTag>重新打分，重排问题「{config.rerank_query || "当前问题"}」</>
