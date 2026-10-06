@@ -1346,7 +1346,7 @@ function MemoryUsage({ result }: { result: Record<string, unknown> }) {
     <div className="memory-usage-line"><strong>{used} / {budget} Token</strong>
       <span className="memory-usage-track"><span className={`memory-usage-fill ${percent >= 90 ? "is-high" : ""}`} style={{ width: `${percent}%` }} /></span>
       <span>{percent}%</span></div>
-    <small className="result-help">超过 {budget} 时，较早的对话由 <StackTag kind="framework" variant="langchain">{manager}</StackTag> 压缩成摘要{keep ? `，${keep}` : ""}</small>
+    <small className="result-help">超过 {budget} 时，较早的对话由 <StackTag kind="framework" variant="langchain">LangChain · {manager}</StackTag> 压缩成摘要{keep ? `，${keep}` : ""}</small>
   </div>;
 }
 
