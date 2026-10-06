@@ -6655,6 +6655,7 @@ input:focus {
 
 /* 模型和组件标签（App.tsx 的 StackTag）：模型实心彩色、框架组件浅底描边、存储灰底、算法和规则白底虚线。 */
 .stack-tag {
+   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
    display: inline-flex;
    align-items: center;
    gap: 3px;
@@ -6744,7 +6745,7 @@ input:focus {
    margin: 2px 0 0;
    padding-left: 18px;
    color: var(--t-334e68);
-   font-size: 13px;
+   font-size: 12px;
    line-height: 1.7;
 }
 

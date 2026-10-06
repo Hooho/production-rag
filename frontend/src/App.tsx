@@ -770,14 +770,24 @@ function stepTags(step: TraceStep): StackTagItem[] {
   }
 }
 
-function StepTags({ step }: { step: TraceStep }) {
-  const tags = stepTags(step);
-  if (tags.length === 0) return null;
+function TagList({ tags }: { tags: StackTagItem[] }) {
   return <span className="step-tags">{tags.map((tag, index) => <StackTag key={index} kind={tag.kind} variant={tag.variant} muted={Boolean(tag.muted)} title={tag.muted}>{tag.label}</StackTag>)}</span>;
 }
 
+// 展开后的「模型调用」「调用方式 / 处理方式」两行：模型显示成模型标签；调用方式先列出用到的组件标签，
+// 原来的文字说明（地址、计算方式）放在下面作为补充。
+function StackField({ field, value, step }: { field: string; value: unknown; step?: TraceStep }) {
+  if (field === "model_called") {
+    const tags = modelTags(value);
+    return tags.length ? <TagList tags={tags} /> : <ResultFieldValue value={value} field={field} />;
+  }
+  const tags = step ? stepTags(step).filter((tag) => tag.kind !== "model") : [];
+  if (tags.length === 0) return <ResultFieldValue value={value} field={field} />;
+  return <><TagList tags={tags} />{typeof value === "string" && value.trim() && <small className="result-help">{value}</small>}</>;
+}
+
 function TraceTimeline({ steps, live = false, answer, sources, traceId }: { steps: TraceStep[]; live?: boolean; answer?: string; sources?: Source[]; traceId?: string }) {
-  return <details className={`trace-timeline ${live ? "is-live" : ""}`} open={live || undefined}><summary className="trace-toggle"><span>{live ? "当前处理阶段" : "处理阶段"}</span><strong>{steps.length} 个阶段{totalElapsed(steps) !== null ? ` · 共 ${formatDuration(totalElapsed(steps))}` : ""}{live ? " · 实时更新" : ""}</strong><span className="panel-chevron">⌄</span></summary><div className="trace-body">{steps.map((step, index) => <details className={`trace-step ${step.status}`} key={step.id} open={live || undefined}><summary><span className="step-number">{String(index + 1).padStart(2, "0")}</span><span className="step-status">{step.status === "failed" ? "!" : step.status === "running" ? "·" : "✓"}</span><span className="step-copy"><strong>{step.title}</strong><small>{(step.status !== "failed" && stepPurpose(step.result)) || step.detail}</small>{step.status !== "running" && <StepTags step={step} />}</span>{step.duration_ms !== undefined && <time title={durationTitle(step.duration_ms)}>{formatDuration(step.duration_ms)}</time>}</summary><div className="step-result">{step.id === "complete" && step.status !== "failed" ? <RunSummary steps={steps} answer={answer} sources={sources} traceId={traceId} /> : formatResult(step.result, step.status !== "failed" && stepPurpose(step.result) ? step.detail : undefined, step.field_order)}</div></details>)}{live && steps.length === 0 && <LoadingSkeleton className="trace-waiting" label="正在等待处理阶段"><SkeletonBlock className="skeleton-line" /><SkeletonBlock className="skeleton-line-short" /></LoadingSkeleton>}</div></details>;
+  return <details className={`trace-timeline ${live ? "is-live" : ""}`} open={live || undefined}><summary className="trace-toggle"><span>{live ? "当前处理阶段" : "处理阶段"}</span><strong>{steps.length} 个阶段{totalElapsed(steps) !== null ? ` · 共 ${formatDuration(totalElapsed(steps))}` : ""}{live ? " · 实时更新" : ""}</strong><span className="panel-chevron">⌄</span></summary><div className="trace-body">{steps.map((step, index) => <details className={`trace-step ${step.status}`} key={step.id} open={live || undefined}><summary><span className="step-number">{String(index + 1).padStart(2, "0")}</span><span className="step-status">{step.status === "failed" ? "!" : step.status === "running" ? "·" : "✓"}</span><span className="step-copy"><strong>{step.title}</strong><small>{(step.status !== "failed" && stepPurpose(step.result)) || step.detail}</small></span>{step.duration_ms !== undefined && <time title={durationTitle(step.duration_ms)}>{formatDuration(step.duration_ms)}</time>}</summary><div className="step-result">{step.id === "complete" && step.status !== "failed" ? <RunSummary steps={steps} answer={answer} sources={sources} traceId={traceId} /> : formatResult(step.result, step.status !== "failed" && stepPurpose(step.result) ? step.detail : undefined, step.field_order, step)}</div></details>)}{live && steps.length === 0 && <LoadingSkeleton className="trace-waiting" label="正在等待处理阶段"><SkeletonBlock className="skeleton-line" /><SkeletonBlock className="skeleton-line-short" /></LoadingSkeleton>}</div></details>;
 }
 
 // 普通字段只保留名称和值，避免说明占满页面；这里只为需要排查的复杂字段提供解释。
@@ -965,7 +975,7 @@ function sortFields(entries: Array<[string, unknown]>, order?: string[]) {
     .map((item) => item.entry);
 }
 
-function formatResult(raw?: Record<string, unknown>, detail?: string, order?: string[]) {
+function formatResult(raw?: Record<string, unknown>, detail?: string, order?: string[], step?: TraceStep) {
   if (!raw) return <span className="result-empty">无附加结果</span>;
   const normalized = normalizeModelFields(raw);
   const result: Record<string, unknown> = detail ? { step_detail: detail } : {};
@@ -1067,13 +1077,22 @@ function formatResult(raw?: Record<string, unknown>, detail?: string, order?: st
                               // 不写调用次数：小模型和大模型两次调用会合并成一段，按段数计次会误导。
                               : key === "ai_memory_sent" && Array.isArray(value) ? <details className="ai-memory-collapse"><summary>展开查看</summary><AIMemorySent items={value} /></details>
                                 : key === "ai_memory_sent" ? <strong>此条历史记录未保存模型实际输入</strong>
-                                  : <ResultFieldValue value={value} field={key} />;
+                                  : key === "model_called" || key === "call_method" || key === "process_method" ? <StackField field={key} value={value} step={step} />
+                                    : <ResultFieldValue value={value} field={key} />;
     return <div className={`result-row result-${key}`} key={key}><span>{formatResultLabel(key)}</span><div className="result-value">{rendered}{queried ? <QueryRewriteNote field={key} result={result} /> : <ResultFieldHelp field={key} value={value} />}</div></div>;
   })}</div>;
 }
 
 // 意图识别过程：按顺序列出规则、本地小模型、大模型、规则兜底每一环的结果，标明采纳还是交给下一环。
 // 以前只能从"发送给 AI 的记忆"里猜调用了哪些模型，看不出先后、结果和为什么还要调用大模型。
+// 识别过程每一环的名称：小模型、大模型显示成模型标签，规则显示成规则标签。
+function IntentStageTitle({ stage, title }: { stage: string; title: string }) {
+  if (stage === "small_model") return <><strong>本地小模型</strong> <StackTag kind="model" variant="small">{title.replace(/^本地小模型\s*/, "") || "本地小模型"}</StackTag></>;
+  if (stage === "llm") return <><strong>大模型</strong> <StackTag kind="model" variant="llm">{title.replace(/^大模型\s*/, "") || "大模型"}</StackTag></>;
+  if (stage === "rule" || stage === "fallback") return <StackTag kind="algo">{title}</StackTag>;
+  return <strong>{title}</strong>;
+}
+
 function IntentTrace({ items }: { items: unknown[] }) {
   return <ol className="intent-trace">{items.map((item, index) => {
     const step = typeof item === "object" && item !== null ? item as Record<string, unknown> : {};
@@ -1087,7 +1106,7 @@ function IntentTrace({ items }: { items: unknown[] }) {
     }
     return <li key={index} className={accepted ? "is-accepted" : ""}>
       <span className="intent-trace-mark"><b>{index + 1}</b></span>
-      <div><strong>{String(step.title ?? "")}</strong>：{String(step.result ?? "")}
+      <div><IntentStageTitle stage={String(step.stage ?? "")} title={String(step.title ?? "")} />：{String(step.result ?? "")}
         <em className={`status-tag is-${accepted ? "green" : "gray"}`}>{accepted ? "采纳" : last ? "未采纳" : "未采纳，交给下一环"}</em>
         {candidateText.length > 0 && <small>候选：{candidateText.join(" · ")}</small>}
         <IntentContext context={step.context} /></div>
@@ -1125,10 +1144,10 @@ function SufficiencyTrace({ result }: { result: Record<string, unknown> }) {
     }
     else if (index === 0 && verdict !== "sufficient") action = "→ 没有可用的补充检索词，未补充检索";
     else if (index > 0 && !retryUsed) action = "→ 补充后没有变好，沿用第 1 轮的来源和结论";
-    const title = index === 0 ? `第 1 轮判断${model ? `（${model}）` : ""}` : `第 ${index + 1} 轮判断（补充检索后）`;
+    const title = index === 0 ? "第 1 轮判断" : `第 ${index + 1} 轮判断（补充检索后）`;
     return <li key={index} className={index === accepted ? "is-accepted" : ""}>
       <span className="intent-trace-mark"><b>{index + 1}</b></span>
-      <div><strong>{title}</strong>：{VERDICT_LABELS[verdict] ?? verdict}
+      <div><strong>{title}</strong>{model && <> <StackTag kind="model" variant="llm">{model}</StackTag></>}：{VERDICT_LABELS[verdict] ?? verdict}
         {missing && <small>缺少：{missing}</small>}
         {rewrite && <small>建议补充检索：{rewrite}</small>}
         {Boolean(judgement.error) && <small>{String(judgement.error)}</small>}
@@ -1647,6 +1666,7 @@ function formatResultLabel(key: string) {
     methods: "命中方式",
     model: "模型",
     model_called: "模型调用",
+    long_memory: "长期记忆",
     model_name: "模型名称",
     model_type: "模型类型",
     model_mode: "模型模式",
