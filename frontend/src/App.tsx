@@ -344,22 +344,35 @@ function Chat({ sessionId, initialMessages, historyRuns, onNewChat, onOpenHistor
   const [error, setError] = useState("");
   const [collapsedMessages, setCollapsedMessages] = useState<Record<string, boolean>>({});
   const messagesRef = useRef<HTMLDivElement>(null);
+  // 是否跟随到底部：用户往上滚动查看之前的内容时停止跟随，以用户操作优先；滚回底部附近又恢复跟随。
+  // 以前生成过程中每来一段文字都滚到底，用户往上翻一点就被拉回去。
+  const followRef = useRef(true);
+  const scrollToBottom = (force = false) => {
+    const element = messagesRef.current;
+    if (!element || (!force && !followRef.current)) return;
+    if (force) followRef.current = true;
+    // 生成过程中用瞬时滚动：平滑滚动的中途也会触发 scroll 事件，会被误判成用户往上滚。
+    element.scrollTo({ top: element.scrollHeight, behavior: "auto" });
+  };
+  const handleScroll = () => {
+    const element = messagesRef.current;
+    if (!element) return;
+    followRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
+  };
 
   useEffect(() => {
     setMessages(initialMessages);
     setCollapsedMessages(collapsedStateForLast(initialMessages));
-    requestAnimationFrame(() => messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: "smooth" }));
+    requestAnimationFrame(() => scrollToBottom(true));
   }, [initialMessages]);
 
   useEffect(() => {
     setCollapsedMessages(collapsedStateForLast(messages));
-    messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: "smooth" });
+    requestAnimationFrame(() => scrollToBottom());
   }, [messages.length]);
 
   useEffect(() => {
-    if (busy || pendingQuestion) {
-      messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: "smooth" });
-    }
+    if (busy || pendingQuestion) scrollToBottom();
   }, [busy, pendingQuestion, streamSteps, streamAnswer]);
 
   useEffect(() => {
@@ -371,6 +384,8 @@ function Chat({ sessionId, initialMessages, historyRuns, onNewChat, onOpenHistor
     const current = (retry ?? question).trim();
     if (!current || !sessionId || busy) return;
     if (retry === undefined) setQuestion("");
+    // 发出新问题时回到底部并恢复跟随。
+    requestAnimationFrame(() => scrollToBottom(true));
     setBusy(true); setError(""); setPendingError(""); setPendingQuestion(current); setStreamSteps([]); setStreamAnswer("");
     try {
       const result = await sendChatStream({ session_id: sessionId, request_id: crypto.randomUUID(), question: current },
@@ -411,7 +426,7 @@ function Chat({ sessionId, initialMessages, historyRuns, onNewChat, onOpenHistor
     onOpenHistory(session);
   }
 
-  return <section className="chat-layout"><HistoryRail runs={localHistory} activeSessionId={sessionId} onSelect={selectHistory} onNewChat={onNewChat} busy={busy} /><div className="chat-column"><div className="messages" ref={messagesRef}>{messages.length === 0 && !busy && !pendingQuestion && <div className="empty-state"><div className="empty-orbit">✦</div><h2>从一个问题开始</h2><p>试试“退货政策是什么？”或“查询订单 A1001”。</p></div>}{messages.map((message, index) => { const requestId = message.request_id || `message-${index}`; const questionText = message.steps.find((step) => step.id === "request")?.result?.question as string ?? "本轮问题"; const collapsed = collapsedMessages[requestId] ?? false; return <article className={`message-card ${collapsed ? "is-collapsed" : ""}`} key={requestId}><div className="message-index">{String(index + 1).padStart(2, "0")}</div><div className="message-content"><button className="message-toggle" onClick={() => toggleMessage(requestId)} aria-expanded={!collapsed}><span className="question-line">{questionText}</span><span className="collapse-icon">{collapsed ? "＋" : "−"}</span></button>{!collapsed && <div className="message-body"><TraceTimeline steps={message.steps} answer={message.answer} sources={message.sources} traceId={message.trace_id} /><div className="answer"><MarkdownAnswer content={message.answer} /></div>{message.request_id && <AnswerFeedback requestId={message.request_id} initial={message.feedback} onSaved={saveFeedback} />}{message.sources.length > 0 && <details className="sources-panel"><summary><span>来源</span><strong>{message.sources.length} 条检索结果</strong><span className="panel-chevron">⌄</span></summary><div className="sources">{/* 每条来源默认只显示一行正文，点击展开查看全文；以前长文本超出面板被截断，又没法看到完整内容。 */}{message.sources.map((source) => <details className="source" key={source.id}><summary><span>{source.id}</span><div><strong>{source.title}<small className="source-location">{sourceLocation(source.version, source.page_start, source.heading)}</small></strong><p>{source.text}</p></div><span className="source-toggle" aria-hidden="true">⌄</span></summary></details>)}</div></details>}<div className="trace">链路编号：{message.trace_id}</div></div>}</div></article>; })}{pendingQuestion && <article className="message-card pending-message"><div className="message-index">{String(messages.length + 1).padStart(2, "0")}</div><div className="message-content"><div className="pending-question"><span className="question-line">{pendingQuestion}</span>{busy && <span className="pending-indicator"><span className="pulse-dot" />处理中</span>}</div><div className="message-body"><TraceTimeline steps={streamSteps} live={busy} />{streamAnswer ? <div className="answer"><MarkdownAnswer content={streamAnswer} /></div> : busy ? <ChatAnswerSkeleton /> : null}{pendingError && <div className="pending-error"><span>本次处理未完成，已保留收到的阶段记录：{pendingError}</span>{!busy && <button type="button" className="pending-retry" onClick={() => void submit(pendingQuestion)}>重试</button>}</div>}</div></div></article>}</div><div className="composer"><textarea value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submit(); } }} placeholder="询问知识库，或调用业务工具…" rows={3} /><button className="send-button" onClick={() => void submit()} disabled={busy || !sessionId}>{busy ? "处理中…" : "发送 ↑"}</button></div>{error && <div className="field-error">{error}</div>}</div></section>;
+  return <section className="chat-layout"><HistoryRail runs={localHistory} activeSessionId={sessionId} onSelect={selectHistory} onNewChat={onNewChat} busy={busy} /><div className="chat-column"><div className="messages" ref={messagesRef} onScroll={handleScroll}>{messages.length === 0 && !busy && !pendingQuestion && <div className="empty-state"><div className="empty-orbit">✦</div><h2>从一个问题开始</h2><p>试试“退货政策是什么？”或“查询订单 A1001”。</p></div>}{messages.map((message, index) => { const requestId = message.request_id || `message-${index}`; const questionText = message.steps.find((step) => step.id === "request")?.result?.question as string ?? "本轮问题"; const collapsed = collapsedMessages[requestId] ?? false; return <article className={`message-card ${collapsed ? "is-collapsed" : ""}`} key={requestId}><div className="message-index">{String(index + 1).padStart(2, "0")}</div><div className="message-content"><button className="message-toggle" onClick={() => toggleMessage(requestId)} aria-expanded={!collapsed}><span className="question-line">{questionText}</span><span className="collapse-icon">{collapsed ? "＋" : "−"}</span></button>{!collapsed && <div className="message-body"><TraceTimeline steps={message.steps} answer={message.answer} sources={message.sources} traceId={message.trace_id} /><div className="answer"><MarkdownAnswer content={message.answer} /></div>{message.request_id && <AnswerFeedback requestId={message.request_id} initial={message.feedback} onSaved={saveFeedback} />}{message.sources.length > 0 && <details className="sources-panel"><summary><span>来源</span><strong>{message.sources.length} 条检索结果</strong><span className="panel-chevron">⌄</span></summary><div className="sources">{/* 每条来源默认只显示一行正文，点击展开查看全文；以前长文本超出面板被截断，又没法看到完整内容。 */}{message.sources.map((source) => <details className="source" key={source.id}><summary><span>{source.id}</span><div><strong>{source.title}<small className="source-location">{sourceLocation(source.version, source.page_start, source.heading)}</small></strong><p>{source.text}</p></div><span className="source-toggle" aria-hidden="true">⌄</span></summary></details>)}</div></details>}<div className="trace">链路编号：{message.trace_id}</div></div>}</div></article>; })}{pendingQuestion && <article className="message-card pending-message"><div className="message-index">{String(messages.length + 1).padStart(2, "0")}</div><div className="message-content"><div className="pending-question"><span className="question-line">{pendingQuestion}</span>{busy && <span className="pending-indicator"><span className="pulse-dot" />处理中</span>}</div><div className="message-body"><TraceTimeline steps={streamSteps} live={busy} />{streamAnswer ? <div className="answer"><MarkdownAnswer content={streamAnswer} streaming={busy} /></div> : busy ? <ChatAnswerSkeleton /> : null}{pendingError && <div className="pending-error"><span>本次处理未完成，已保留收到的阶段记录：{pendingError}</span>{!busy && <button type="button" className="pending-retry" onClick={() => void submit(pendingQuestion)}>重试</button>}</div>}</div></div></article>}</div><div className="composer"><textarea value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submit(); } }} placeholder="询问知识库，或调用业务工具…" rows={3} /><button className="send-button" onClick={() => void submit()} disabled={busy || !sessionId}>{busy ? "处理中…" : "发送 ↑"}</button></div>{error && <div className="field-error">{error}</div>}</div></section>;
 }
 
 // 回答流首个文字片段到达前使用内容骨架；原来只有阶段圆点，回答区域会显得空白且不稳定。
@@ -438,14 +453,21 @@ function renderInlineMarkdown(text: string): ReactNode[] {
 
 // 按段落、标题和列表拆分回答，支持当前回答模型实际使用的常见 Markdown 格式。
 // 推理模型把思考过程放在 <think>…</think> 里，以前原样显示在回答开头，和正式回答混在一起。
-// 这里把思考过程折叠成默认收起的"模型思考过程"，正文照常渲染；流式输出时思考还没结束（没有闭合标签）也先折叠。
-function MarkdownAnswer({ content }: { content: string }) {
+// 这里把思考过程放进"模型思考过程"折叠块，正文照常渲染。
+// 生成过程中（streaming）折叠块展开，能看到模型正在想什么；以前一开始就收起，思考阶段的几十秒里什么都看不到。
+// 回答完成后收起，只留正式回答；用户在生成过程中手动收起也照办。
+function MarkdownAnswer({ content, streaming = false }: { content: string; streaming?: boolean }) {
+  const [open, setOpen] = useState(streaming);
+  useEffect(() => {
+    setOpen(streaming);
+  }, [streaming]);
   const match = content.match(/<think>([\s\S]*?)(<\/think>|$)/);
   if (!match) return <MarkdownBody content={content} />;
   const thinking = match[1].trim();
   const answer = (content.slice(0, match.index) + content.slice((match.index ?? 0) + match[0].length)).trim();
   return <>
-    {thinking && <details className="answer-thinking"><summary>模型思考过程</summary><p>{thinking}</p></details>}
+    {thinking && <details className="answer-thinking" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary>模型思考过程{streaming && !match[2] ? "（思考中…）" : ""}</summary><p>{thinking}</p></details>}
     <MarkdownBody content={answer} />
   </>;
 }
