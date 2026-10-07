@@ -80,8 +80,38 @@ def summarize_run(result):
         citation = response.get("citation_check")
         if citation:
             summary["citation"] = {"passed": citation.get("passed"), "reason": citation.get("reason"),
-                "source_count": len(citation.get("source_ids") or []), "unknown": citation.get("unknown") or []}
+                "source_count": len(citation.get("source_ids") or []), "unknown": citation.get("unknown") or [],
+                "self_refusal": citation.get("reason") == "no_citation" and looks_like_refusal(citation.get("raw_answer"))}
+    if summary["refused"]:
+        summary["refusal_reason"] = refusal_reason(summary)
     return summary
+
+
+# 模型没标引用、但原话是在说「资料里没有」：这是模型自己拒答，不是忘了标引用。按常见说法粗略判断。
+SELF_REFUSAL_WORDS = ("资料不足", "没有足够", "无法回答", "未找到", "没有找到", "未提及", "没有提及", "无法确定",
+    "没有相关", "未包含", "没有包含", "不包含")
+
+
+def looks_like_refusal(text):
+    return any(word in (text or "") for word in SELF_REFUSAL_WORDS)
+
+
+# 拒答原因，按发生的先后判断：充分性判断拒答 → 检索没有资料（没召回到 / 都低于阈值）→ 引用检查拦截。
+# 只对固定拒答文本的问答判断；模型自己措辞、又标了引用的拒答识别不出来，不在统计里。
+def refusal_reason(summary):
+    if (summary.get("sufficiency") or {}).get("refused"):
+        return "sufficiency"
+    citation = summary.get("citation") or {}
+    if citation and not citation.get("passed"):
+        if citation.get("reason") == "unknown_source":
+            return "unknown_source"
+        return "self_refusal" if citation.get("self_refusal") else "no_citation"
+    retry = summary.get("retrieval_retry") if (summary.get("sufficiency") or {}).get("retry_used") else None
+    search = retry or summary.get("retrieval") or {}
+    if search and not search.get("returned"):
+        hits = (search.get("dense_hits") or 0) + (search.get("keyword_hits") or 0)
+        return "below_threshold" if hits and search.get("filtered") else "no_hits"
+    return "other"
 
 
 # 意图识别经过的环节（规则 → 本地小模型 → 大模型 → 规则兜底），每环是否采纳；大模型没被采纳时记下原因，

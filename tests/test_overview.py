@@ -81,3 +81,37 @@ def test_overview_intent_hit_rates(setup):
     assert stages["fallback"]["accepted"] == 2 and stages["fallback"]["hit_rate"] is None and stages["fallback"]["share"] == 0.3333
     assert {item["cause"]: item["count"] for item in view["fallback_causes"]} == {"error": 1, "invalid": 1}
     assert intent_path({"trace": old_trace})[2] == {"stage": "llm", "accepted": False, "failure": "invalid"}
+
+
+# 拒答原因和安全检查的分布。
+def test_overview_refusals_and_security(setup):
+    from app.observability import refusal_reason, summarize_run
+    client, store = setup
+    traces = {
+        "a": {"route": "knowledge", "retrieval": {"returned": 0, "dense_hits": 0, "keyword_hits": 0}},
+        "b": {"route": "knowledge", "retrieval": {"returned": 0, "dense_hits": 5, "keyword_hits": 2, "filtered": 7}},
+        "c": {"route": "knowledge", "retrieval": {"returned": 3}, "sufficiency": {"verdict": "insufficient", "refused": True}},
+        "d": {"route": "knowledge", "retrieval": {"returned": 3}, "citation": {"passed": False, "reason": "unknown_source"},
+            "security": {"redacted_sources": 2, "output_issues": [{"type": "link_removed"}]}},
+        "e": {"route": "knowledge", "retrieval": {"returned": 3}, "citation": {"passed": False, "reason": "no_citation", "self_refusal": True}},
+        "f": {"route": "knowledge", "retrieval": {"returned": 3}, "sufficiency": {"verdict": "partial"}},
+        "g": {"route": "blocked", "security": {"blocked": True, "rules": [{"rule": "override"}, {"rule": "override"}]}},
+    }
+    with store.engine.begin() as connection:
+        for key, trace in traces.items():
+            connection.execute(runs.insert().values(id=key, session_id="s", owner="alice", question="q", response={},
+                created="2026-10-04T02:00:00+00:00", route=trace["route"], refused=key not in ("f", "g"), duration_ms=1,
+                top_score=None, trace=trace))
+    result = overview(store.engine, 7, now=datetime(2026, 10, 4, 8, 0, tzinfo=timezone.utc))
+    reasons = {item["reason"]: item["count"] for item in result["refusals"]["reasons"]}
+    assert reasons == {"no_hits": 1, "below_threshold": 1, "sufficiency": 1, "unknown_source": 1, "self_refusal": 1}
+    assert result["refusals"]["partial"] == 1
+    security = result["security"]
+    assert security["blocked"] == 1 and security["rules"] == [{"key": "override", "label": "要求忽略原有指令", "count": 1}]
+    assert security["redacted_runs"] == 1 and security["redacted"] == 2 and security["issues"][0]["label"] == "来源外链接"
+    # 摘要里记下拒答原因；模型原话在说资料没有、又没标引用，算模型自己拒答。
+    summary = summarize_run({"route": "knowledge", "answer": "模型没有返回可校验的引用", "steps": [
+        {"id": "retrieval", "result": {"stats": {"returned": 2}}},
+        {"id": "response", "result": {"citation_check": {"passed": False, "reason": "no_citation", "raw_answer": "资料中没有提及这一点。"}}}]})
+    assert summary["refusal_reason"] == "self_refusal"
+    assert refusal_reason({"citation": {"passed": False, "reason": "no_citation"}}) == "no_citation"

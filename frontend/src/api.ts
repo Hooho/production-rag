@@ -1258,6 +1258,8 @@ export type Overview = {
   routes: { route: string; label: string; count: number }[];
   retrieval: { runs: number; returned_zero: number; returned_zero_rate: number | null; top_score_p50: number | null; below_threshold: number; min_score: number };
   intent: { runs: number; stages: { stage: string; label: string; reached: number; accepted: number; hit_rate: number | null; share: number | null }[]; fallback_causes: { cause: string; label: string; count: number }[] };
+  refusals: { total: number; partial: number; reasons: { reason: string; label: string; count: number }[] };
+  security: { runs: number; blocked: number; blocked_rate: number | null; rules: { key: string; label: string; count: number }[]; redacted_runs: number; redacted: number; output_runs: number; issues: { key: string; label: string; count: number }[] };
   errors: { stages: { stage: string; label: string; count: number }[]; codes: { code: string; count: number }[] };
   feedback_reasons: { reason: string; label: string; count: number }[];
 };

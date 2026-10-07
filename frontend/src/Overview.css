@@ -334,3 +334,10 @@
    display: block;
    height: 220px;
 }
+
+.ov-sub {
+   margin: 14px 0 6px;
+   color: var(--t-5e7a95);
+   font-size: 12px;
+   font-weight: 600;
+}

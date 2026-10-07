@@ -222,7 +222,7 @@ def test_rejected_answer_is_kept_for_inspection(setup, monkeypatch):
     assert check["raw_answer"] == "今西纮史是一位研究者 [S3]。"
     response = {"answer": result["answer"], "route": "knowledge", "steps": state["steps"], "sources": state["sources"]}
     summary = summarize_run(response)
-    assert summary["citation"] == {"passed": False, "reason": "unknown_source", "source_count": 2, "unknown": ["S3"]}
+    assert summary["citation"] == {"passed": False, "reason": "unknown_source", "source_count": 2, "unknown": ["S3"], "self_refusal": False}
     summary["retrieval"] = {"returned": 2, "top_score": 0.99, "candidates": []}
     run_id = str(uuid4())
     with store.engine.begin() as connection:

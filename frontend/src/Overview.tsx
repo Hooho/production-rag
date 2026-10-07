@@ -99,6 +99,19 @@ export default function Overview() {
             <div><dt>最高分低于相关度阈值 {data.retrieval.min_score.toFixed(2)}</dt><dd>{count(data.retrieval.below_threshold)} 次</dd></div>
           </dl>}
         </Panel>
+        <Panel title="拒答原因" note="知识问答里回答「资料不足」或被引用检查拦截的原因，按处理顺序。没检索到资料、充分性判断资料不足是知识缺口，该补文档；相关度都低于阈值，看阈值是否太严；后三类是回答被引用检查拦截，看模型和回答提示词。">
+          <Breakdown items={data.refusals.reasons.map((item) => ({ key: item.reason, label: item.label, count: item.count }))} emptyText="这段时间没有拒答" />
+          {data.refusals.partial > 0 && <p className="ov-codes">另有 {count(data.refusals.partial)} 次没有拒答，但充分性判断认为资料只能回答一部分，也是知识缺口。</p>}
+        </Panel>
+        <Panel title="安全检查" note="问题进模型前、来源交给模型前、回答返回前各检查一次。">
+          <dl className="ov-facts">
+            <div><dt>问题被拦截</dt><dd>{count(data.security.blocked)} 次（{percent(data.security.blocked_rate)}）</dd></div>
+            <div><dt>来源里清理掉注入句子</dt><dd>{count(data.security.redacted_runs)} 次问答，共 {count(data.security.redacted)} 句</dd></div>
+            <div><dt>回答里处理了不安全内容</dt><dd>{count(data.security.output_runs)} 次</dd></div>
+          </dl>
+          {data.security.rules.length > 0 && <><h3 className="ov-sub">拦截命中的规则</h3><Breakdown items={data.security.rules} /></>}
+          {data.security.issues.length > 0 && <><h3 className="ov-sub">回答检查处理的问题</h3><Breakdown items={data.security.issues} /></>}
+        </Panel>
         <Panel title="失败发生在" note="失败前最后完成的一步，失败出在它之后的那一步；具体错误到知识巡检的「系统问题」里看。">
           {data.errors.stages.length === 0 ? <Empty text="这段时间没有失败" /> : <>
             <Breakdown items={data.errors.stages.map((item) => ({ key: item.stage, label: `${item.label}之后`, count: item.count }))} />

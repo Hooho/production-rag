@@ -9,7 +9,8 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 
 from .mysql.tables import feedback, run_errors, runs
-from .observability import FEEDBACK_REASONS, intent_path
+from .observability import FEEDBACK_REASONS, intent_path, refusal_reason
+from .security import OUTPUT_CHECKS, RULE_INFO
 from .runtime_config import value as runtime_value
 
 
@@ -27,6 +28,17 @@ STAGE_LABELS = dict(STAGES)
 INTENT_STAGES = [("rule", "规则命中"), ("small_model", "本地小模型"), ("llm", "大模型"), ("fallback", "规则兜底")]
 # 走到规则兜底的原因：大模型调用出错、输出不符合格式、没有启用大模型（演示模式）。
 FALLBACK_CAUSES = {"error": "大模型调用失败", "invalid": "大模型输出不合规", "no_llm": "未启用大模型"}
+# 拒答原因，按处理顺序：前两类是知识缺口，中间是检索阈值，后三类是回答阶段被引用检查拦截。
+REFUSAL_REASONS = [
+    ("no_hits", "没检索到资料"),
+    ("sufficiency", "充分性判断：资料不足"),
+    ("below_threshold", "相关度都低于阈值"),
+    ("self_refusal", "模型自己说资料不足"),
+    ("no_citation", "没有标注引用"),
+    ("unknown_source", "引用了不存在的来源"),
+    ("other", "其他"),
+]
+OUTPUT_LABELS = {item["rule"]: item["label"] for item in OUTPUT_CHECKS}
 STEP_LABELS = {**STAGE_LABELS, "request": "收到请求", "router": "分流", "context": "整理资料", "complete": "完成"}
 
 
@@ -86,6 +98,9 @@ def overview(engine, days=7, now=None):
     knowledge = refused = 0
     retrieval = {"runs": 0, "returned_zero": 0, "filtered": 0, "top_scores": []}
     intent = {"runs": 0, "reached": {}, "accepted": {}, "causes": {}}
+    refusals = {}
+    partial = 0
+    security = {"blocked": 0, "rules": {}, "redacted_runs": 0, "redacted": 0, "output_runs": 0, "issues": {}}
     for row in run_rows:
         day = daily.get(local_day(row["created"], zone))
         if day is None:
@@ -100,6 +115,11 @@ def overview(engine, days=7, now=None):
             if row["refused"]:
                 refused += 1
                 day["refused"] += 1
+                reason = trace.get("refusal_reason") or refusal_reason(trace)
+                refusals[reason] = refusals.get(reason, 0) + 1
+            elif (trace.get("sufficiency") or {}).get("verdict") == "partial":
+                partial += 1
+        count_security(security, route, trace.get("security") or {})
         if row["duration_ms"] is not None:
             durations.append(row["duration_ms"])
             day["durations"].append(row["duration_ms"])
@@ -181,6 +201,9 @@ def overview(engine, days=7, now=None):
             "top_score_p50": percentile(scores, 0.5), "below_threshold": sum(1 for score in scores if score < min_score),
             "min_score": min_score},
         "intent": intent_view(intent),
+        "refusals": {"total": refused, "partial": partial,
+            "reasons": [{"reason": key, "label": label, "count": refusals[key]} for key, label in REFUSAL_REASONS if refusals.get(key)]},
+        "security": security_view(security, total_runs),
         "errors": {"stages": sorted([{"stage": key, "label": STEP_LABELS.get(key, key), "count": count}
             for key, count in error_stages.items()], key=lambda item: -item["count"]),
             "codes": sorted([{"code": key, "count": count} for key, count in error_codes.items()],
@@ -222,3 +245,30 @@ def intent_view(intent):
     return {"runs": total, "stages": stages,
         "fallback_causes": sorted([{"cause": key, "label": FALLBACK_CAUSES.get(key, key), "count": count}
             for key, count in intent["causes"].items()], key=lambda item: -item["count"])}
+
+
+# 安全检查：问题被拦截（按命中的规则）、来源里清理掉的注入句子、回答检查处理的问题（按类型）。
+def count_security(security, route, item):
+    if route == "blocked" or item.get("blocked"):
+        security["blocked"] += 1
+        for rule in {hit.get("rule") for hit in item.get("rules") or [] if isinstance(hit, dict)}:
+            security["rules"][rule] = security["rules"].get(rule, 0) + 1
+    redacted = item.get("redacted_sources") or 0
+    if redacted:
+        security["redacted_runs"] += 1
+        security["redacted"] += redacted
+    issues = [issue.get("type") for issue in item.get("output_issues") or [] if isinstance(issue, dict)]
+    if issues:
+        security["output_runs"] += 1
+        for kind in issues:
+            security["issues"][kind] = security["issues"].get(kind, 0) + 1
+
+
+def security_view(security, total):
+    def ranked(counts, labels):
+        return sorted([{"key": key, "label": labels.get(key, key), "count": value} for key, value in counts.items()],
+            key=lambda item: -item["count"])
+    return {"runs": total, "blocked": security["blocked"], "blocked_rate": rate(security["blocked"], total),
+        "rules": ranked(security["rules"], {key: value["label"] for key, value in RULE_INFO.items()}),
+        "redacted_runs": security["redacted_runs"], "redacted": security["redacted"],
+        "output_runs": security["output_runs"], "issues": ranked(security["issues"], OUTPUT_LABELS)}
