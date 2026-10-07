@@ -1257,6 +1257,7 @@ export type Overview = {
   stages: { stage: string; label: string; count: number; p50_ms: number | null; p95_ms: number | null }[];
   routes: { route: string; label: string; count: number }[];
   retrieval: { runs: number; returned_zero: number; returned_zero_rate: number | null; top_score_p50: number | null; below_threshold: number; min_score: number };
+  intent: { runs: number; stages: { stage: string; label: string; reached: number; accepted: number; hit_rate: number | null; share: number | null }[]; fallback_causes: { cause: string; label: string; count: number }[] };
   errors: { stages: { stage: string; label: string; count: number }[]; codes: { code: string; count: number }[] };
   feedback_reasons: { reason: string; label: string; count: number }[];
 };

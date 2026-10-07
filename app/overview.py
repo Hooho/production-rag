@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 
 from .mysql.tables import feedback, run_errors, runs
-from .observability import FEEDBACK_REASONS
+from .observability import FEEDBACK_REASONS, intent_path
 from .runtime_config import value as runtime_value
 
 
@@ -23,6 +23,10 @@ STAGES = [("input_guard", "安全检查"), ("memory", "读取对话记忆"), ("i
     ("response", "生成回答"), ("output_guard", "回答检查")]
 STAGE_LABELS = dict(STAGES)
 # 失败记录里的 last_step 是失败前最后完成的一步，比上面多几个不计耗时的步骤。
+# 意图识别的四个环节，按尝试顺序。
+INTENT_STAGES = [("rule", "规则命中"), ("small_model", "本地小模型"), ("llm", "大模型"), ("fallback", "规则兜底")]
+# 走到规则兜底的原因：大模型调用出错、输出不符合格式、没有启用大模型（演示模式）。
+FALLBACK_CAUSES = {"error": "大模型调用失败", "invalid": "大模型输出不合规", "no_llm": "未启用大模型"}
 STEP_LABELS = {**STAGE_LABELS, "request": "收到请求", "router": "分流", "context": "整理资料", "complete": "完成"}
 
 
@@ -57,8 +61,16 @@ def overview(engine, days=7, now=None):
     # 起点取业务时区那一天的零点，换回 UTC 和库里存的 ISO 字符串比较。
     start = datetime.combine(first_day, datetime.min.time(), zone).astimezone(timezone.utc).isoformat()
     with engine.connect() as connection:
-        run_rows = connection.execute(select(runs.c.created, runs.c.route, runs.c.refused, runs.c.duration_ms,
+        run_rows = connection.execute(select(runs.c.id, runs.c.created, runs.c.route, runs.c.refused, runs.c.duration_ms,
             runs.c.top_score, runs.c.trace).where(runs.c.created >= start)).mappings().all()
+        # 追踪摘要里还没有识别路径的旧问答，从完整记录的意图识别步骤里补出来（只查这些行）。
+        missing = [row["id"] for row in run_rows if needs_intent_path(row["trace"])]
+        old_paths = {}
+        for index in range(0, len(missing), 200):
+            for row in connection.execute(select(runs.c.id, runs.c.response).where(
+                    runs.c.id.in_(missing[index:index + 200]))).mappings():
+                step = next((item for item in (row["response"] or {}).get("steps", []) if item.get("id") == "intent"), None)
+                old_paths[row["id"]] = intent_path((step or {}).get("result") or {})
         error_rows = connection.execute(select(run_errors.c.created, run_errors.c.last_step,
             run_errors.c.status_code, run_errors.c.error).where(run_errors.c.created >= start)).mappings().all()
         feedback_rows = connection.execute(select(feedback.c.updated, feedback.c.rating, feedback.c.reason).where(
@@ -73,6 +85,7 @@ def overview(engine, days=7, now=None):
     tokens = {"input": 0, "output": 0, "total": 0, "runs_with_usage": 0}
     knowledge = refused = 0
     retrieval = {"runs": 0, "returned_zero": 0, "filtered": 0, "top_scores": []}
+    intent = {"runs": 0, "reached": {}, "accepted": {}, "causes": {}}
     for row in run_rows:
         day = daily.get(local_day(row["created"], zone))
         if day is None:
@@ -99,6 +112,9 @@ def overview(engine, days=7, now=None):
             for key in ("input", "output", "total"):
                 tokens[key] += usage.get(key) or 0
             day["tokens"] += usage.get("total") or 0
+        path = (trace.get("intent") or {}).get("path") or old_paths.get(row["id"])
+        if path:
+            count_intent(intent, path)
         search = trace.get("retrieval") or {}
         if search:
             retrieval["runs"] += 1
@@ -164,6 +180,7 @@ def overview(engine, days=7, now=None):
             "returned_zero_rate": rate(retrieval["returned_zero"], retrieval["runs"]),
             "top_score_p50": percentile(scores, 0.5), "below_threshold": sum(1 for score in scores if score < min_score),
             "min_score": min_score},
+        "intent": intent_view(intent),
         "errors": {"stages": sorted([{"stage": key, "label": STEP_LABELS.get(key, key), "count": count}
             for key, count in error_stages.items()], key=lambda item: -item["count"]),
             "codes": sorted([{"code": key, "count": count} for key, count in error_codes.items()],
@@ -171,3 +188,37 @@ def overview(engine, days=7, now=None):
         "feedback_reasons": sorted([{"reason": key, "label": FEEDBACK_REASONS.get(key, key), "count": count}
             for key, count in reasons.items()], key=lambda item: -item["count"]),
     }
+
+
+def needs_intent_path(trace):
+    item = (trace or {}).get("intent")
+    return bool(item) and not item.get("path")
+
+
+# 一次识别经过的环节：每一环「到达」加一，被采纳的那一环「命中」加一；走到兜底时记下原因。
+def count_intent(intent, path):
+    intent["runs"] += 1
+    for item in path:
+        stage = item["stage"]
+        intent["reached"][stage] = intent["reached"].get(stage, 0) + 1
+        if item.get("accepted"):
+            intent["accepted"][stage] = intent["accepted"].get(stage, 0) + 1
+    if any(item["stage"] == "fallback" for item in path):
+        llm = next((item for item in path if item["stage"] == "llm"), None)
+        cause = (llm or {}).get("failure") or "no_llm"
+        intent["causes"][cause] = intent["causes"].get(cause, 0) + 1
+
+
+# 命中率 = 这一环命中 / 到达这一环的次数；占比 = 这一环命中 / 全部识别次数，四环占比加起来是 100%。
+# 规则兜底一到就采纳，命中率没有意义，只看占比和原因。
+def intent_view(intent):
+    total = intent["runs"]
+    stages = []
+    for stage, label in INTENT_STAGES:
+        reached = intent["reached"].get(stage, 0)
+        accepted = intent["accepted"].get(stage, 0)
+        stages.append({"stage": stage, "label": label, "reached": reached, "accepted": accepted,
+            "hit_rate": None if stage == "fallback" else rate(accepted, reached), "share": rate(accepted, total)})
+    return {"runs": total, "stages": stages,
+        "fallback_causes": sorted([{"cause": key, "label": FALLBACK_CAUSES.get(key, key), "count": count}
+            for key, count in intent["causes"].items()], key=lambda item: -item["count"])}

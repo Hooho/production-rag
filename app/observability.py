@@ -46,7 +46,7 @@ def summarize_run(result):
     intent = steps.get("intent", {}).get("result", {})
     if intent:
         summary["intent"] = {"intent": intent.get("intent"), "classifier": intent.get("classifier"),
-            "confidence": intent.get("confidence")}
+            "confidence": intent.get("confidence"), "path": intent_path(intent)}
     query = steps.get("query", {}).get("result", {})
     if query:
         summary["rewrite"] = {"standalone_query": query.get("standalone_query"),
@@ -82,6 +82,26 @@ def summarize_run(result):
             summary["citation"] = {"passed": citation.get("passed"), "reason": citation.get("reason"),
                 "source_count": len(citation.get("source_ids") or []), "unknown": citation.get("unknown") or []}
     return summary
+
+
+# 意图识别经过的环节（规则 → 本地小模型 → 大模型 → 规则兜底），每环是否采纳；大模型没被采纳时记下原因，
+# 运行概览按它统计每一环的命中率。没有识别过程记录的旧问答返回 None。
+INTENT_STAGES = ("rule", "small_model", "llm", "fallback")
+
+
+def intent_path(intent):
+    trace = intent.get("trace")
+    if not isinstance(trace, list):
+        return None
+    path = []
+    for item in trace:
+        if not isinstance(item, dict) or item.get("stage") not in INTENT_STAGES:
+            continue
+        entry = {"stage": item["stage"], "accepted": bool(item.get("accepted"))}
+        if item["stage"] == "llm" and not entry["accepted"]:
+            entry["failure"] = "error" if "调用失败" in str(item.get("result") or "") else "invalid"
+        path.append(entry)
+    return path or None
 
 
 # 检索摘要：统计数字、阈值、最高分，以及排在前面的候选（含跨版本稳定的 chunk_key，转成评测题时用得上）。

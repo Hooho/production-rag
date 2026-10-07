@@ -77,6 +77,20 @@ export default function Overview() {
         <Panel title="问题分流" note="每个问题被分到哪条处理路线。">
           <Breakdown items={data.routes.map((item) => ({ key: item.route, label: item.label, count: item.count }))} />
         </Panel>
+        <Panel title="意图识别" note="每个问题依次尝试：规则 → 本地小模型 → 大模型，前一环认不出才交给下一环；大模型出错或没启用时由规则兜底。命中率 = 这一环命中 / 到达这一环的次数；占比 = 这一环命中 / 全部识别次数。">
+          {data.intent.runs === 0 ? <Empty /> : <>
+            <table className="ov-table">
+              <thead><tr><th>环节</th><th className="num">到达</th><th className="num">命中</th><th className="num">命中率</th><th className="num">占比</th><th aria-hidden="true" /></tr></thead>
+              <tbody>{data.intent.stages.map((stage) => <tr key={stage.stage}>
+                <td>{stage.label}</td><td className="num">{count(stage.reached)}</td><td className="num">{count(stage.accepted)}</td>
+                <td className="num">{stage.stage === "fallback" ? "—" : percent(stage.hit_rate)}</td><td className="num">{percent(stage.share)}</td>
+                <td className="ov-bar-cell"><span className="ov-inline-bar" style={{ width: `${(stage.share ?? 0) * 100}%` }} /></td>
+              </tr>)}</tbody>
+            </table>
+            {data.intent.fallback_causes.length > 0 && <p className="ov-codes">走到规则兜底的原因：{data.intent.fallback_causes.map((item) => `${item.label} ${item.count} 次`).join("，")}</p>}
+            {data.intent.stages.find((stage) => stage.stage === "small_model")?.reached === 0 && <p className="ov-codes">本地小模型没有到达过：设置页里没有开启本地小模型，规则认不出的问题直接交给大模型。</p>}
+          </>}
+        </Panel>
         <Panel title="检索" note="只统计走了知识检索的问答（含拒答）。">
           {data.retrieval.runs === 0 ? <Empty /> : <dl className="ov-facts">
             <div><dt>检索次数</dt><dd>{count(data.retrieval.runs)}</dd></div>

@@ -48,3 +48,36 @@ def test_overview_api_admin_only(setup):
     assert client.get("/overview", headers=headers("bob")).status_code == 403
     assert client.get("/overview?days=5", headers=headers("admin")).status_code == 422
     assert client.get("/overview?days=30", headers=headers("admin")).json()["days"] == 30
+
+
+# 意图识别四个环节的命中率：命中 / 到达；占比：命中 / 全部识别。旧记录从完整记录的识别过程里补出路径。
+def test_overview_intent_hit_rates(setup):
+    from app.observability import intent_path
+    client, store = setup
+    rule = [{"stage": "rule", "accepted": True}]
+    small = [{"stage": "rule", "accepted": False}, {"stage": "small_model", "accepted": True}]
+    llm = [{"stage": "rule", "accepted": False}, {"stage": "small_model", "accepted": False}, {"stage": "llm", "accepted": True}]
+    fallback = [{"stage": "rule", "accepted": False}, {"stage": "small_model", "accepted": False},
+        {"stage": "llm", "accepted": False, "failure": "error"}, {"stage": "fallback", "accepted": True}]
+    with store.engine.begin() as connection:
+        for index, path in enumerate([rule, rule, small, llm, fallback]):
+            connection.execute(runs.insert().values(id=f"i{index}", session_id="s", owner="alice", question="q", response={},
+                created="2026-10-04T02:00:00+00:00", route="knowledge", refused=False, duration_ms=1, top_score=None,
+                trace={"intent": {"classifier": "x", "path": path}}))
+        # 旧记录：摘要里没有 path，从 response 的意图识别步骤里补。
+        old_trace = [{"stage": "rule", "result": "未命中", "accepted": False},
+            {"stage": "small_model", "result": "x", "accepted": False},
+            {"stage": "llm", "result": "输出不符合格式要求", "accepted": False}, {"stage": "fallback", "accepted": True}]
+        connection.execute(runs.insert().values(id="old", session_id="s", owner="alice", question="q",
+            response={"steps": [{"id": "intent", "result": {"trace": old_trace}}]},
+            created="2026-10-04T02:00:00+00:00", route="knowledge", refused=False, duration_ms=1, top_score=None,
+            trace={"intent": {"classifier": "fallback"}}))
+    view = overview(store.engine, 7, now=datetime(2026, 10, 4, 8, 0, tzinfo=timezone.utc))["intent"]
+    stages = {item["stage"]: item for item in view["stages"]}
+    assert view["runs"] == 6
+    assert (stages["rule"]["reached"], stages["rule"]["accepted"], stages["rule"]["hit_rate"]) == (6, 2, 0.3333)
+    assert (stages["small_model"]["reached"], stages["small_model"]["accepted"], stages["small_model"]["hit_rate"]) == (4, 1, 0.25)
+    assert (stages["llm"]["reached"], stages["llm"]["accepted"], stages["llm"]["hit_rate"]) == (3, 1, 0.3333)
+    assert stages["fallback"]["accepted"] == 2 and stages["fallback"]["hit_rate"] is None and stages["fallback"]["share"] == 0.3333
+    assert {item["cause"]: item["count"] for item in view["fallback_causes"]} == {"error": 1, "invalid": 1}
+    assert intent_path({"trace": old_trace})[2] == {"stage": "llm", "accepted": False, "failure": "invalid"}
