@@ -1,0 +1,44 @@
+/* 输入安全检查的两层：第一层规则匹配、第二层攻击样本向量匹配，各自一个小标题，组之间用细线分开。 */
+.guard-layers {
+   display: grid;
+   gap: 14px;
+}
+
+.guard-layers > section + section {
+   border-top: 1px dashed var(--t-cedfec);
+   padding-top: 12px;
+}
+
+.guard-layers h5 {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: baseline;
+   gap: 4px 8px;
+   margin: 0 0 8px;
+   color: var(--t-1d3550);
+   font-size: 13px;
+   font-weight: 600;
+}
+
+.guard-layers h5 b {
+   border-radius: 3px;
+   background: var(--t-eaf1ff);
+   padding: 0 6px;
+   color: var(--t-1d4ed8);
+   font-size: 11px;
+   font-weight: 600;
+}
+
+.guard-layers h5 small {
+   display: inline;
+   margin: 0;
+   color: var(--t-7d95ac);
+   font-size: 12px;
+   font-weight: 400;
+}
+
+.guard-layers p.guard-layer-note {
+   margin: 0;
+   color: var(--t-7d95ac);
+   font-size: 12px;
+}

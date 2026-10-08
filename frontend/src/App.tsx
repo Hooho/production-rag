@@ -5,6 +5,7 @@ import Inspection from "./Inspection";
 import Overview from "./Overview";
 import Maintenance, { MAINTENANCE_TABS, type MaintenanceTab } from "./Maintenance";
 import Memory from "./Memory";
+import "./guard.css";
 import Settings from "./Settings";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import { durationTitle, formatDuration, isDurationField } from "./format";
@@ -1233,19 +1234,73 @@ function outputGuardConclusion(result: Record<string, unknown>) {
   return `已处理 ${hits.length} 处：${names.map((name) => `「${name}」`).join("")}`;
 }
 
+// 输入安全检查分两层：先规则匹配（写死的正则），没命中再和攻击样本比语义相似度。结论按两层分别写。
 function guardConclusion(result: Record<string, unknown>) {
   const hits = (Array.isArray(result.rules) ? result.rules : []) as GuardHit[];
   const catalog = (Array.isArray(result.checked_rules) ? result.checked_rules : []) as GuardRule[];
-  if (hits.length === 0) return catalog.length > 0 ? `通过：没有命中注入规则（共检查 ${catalog.length} 类）` : "通过：没有命中注入规则";
-  const names = [...new Set(hits.map((hit) => catalog.find((item) => item.rule === hit.rule)?.label ?? String(hit.rule)))];
-  return `已拦截：命中「${names.join("」「")}」，不检索也不回答`;
+  const rules = catalog.filter((item) => item.rule !== VECTOR_RULE);
+  const vector = vectorCheck(catalog);
+  if (hits.some((hit) => hit.rule === VECTOR_RULE)) return `已拦截：和已知攻击样本意思相近（相似度 ${formatScore(vector?.score)}），不检索也不回答`;
+  if (hits.length > 0) {
+    const names = [...new Set(hits.map((hit) => catalog.find((item) => item.rule === hit.rule)?.label ?? String(hit.rule)))];
+    return `已拦截：规则命中「${names.join("」「")}」，不检索也不回答`;
+  }
+  const ruleText = rules.length > 0 ? `规则 ${rules.length} 类都没命中` : "没有命中注入规则";
+  if (!vector || vector.error || vector.score === null || vector.score === undefined) return `通过：${ruleText}`;
+  if (vector.action === "log") return `通过：${ruleText}；和攻击样本相似度 ${formatScore(vector.score)} 超过阈值 ${formatScore(vector.threshold)}，当前只记录、不拦截`;
+  return `通过：${ruleText}，和攻击样本最高相似度 ${formatScore(vector.score)}，低于阈值 ${formatScore(vector.threshold)}`;
+}
+
+// 向量样本比对的结果写在清单里 rule 为 vector_similar 的一项（app/security_samples.py 的 catalog_entry）。
+const VECTOR_RULE = "vector_similar";
+type VectorCheck = { score?: number | null; threshold?: number; action?: "block" | "log" | null; sample?: string; error?: string };
+
+function vectorCheck(catalog: GuardRule[]) {
+  return (catalog.find((item) => item.rule === VECTOR_RULE) as (GuardRule & { vector?: VectorCheck }) | undefined)?.vector;
+}
+
+function formatScore(value: number | null | undefined) {
+  return typeof value === "number" ? value.toFixed(2) : "—";
 }
 
 // 安全检查的规则清单（输入、输出共用）：每类写明中文名称、检查什么、示例或处理方式，命中的标红并附上命中的原文。
+// 输入安全检查（记录里有 blocked）分两组显示：第一层规则匹配、第二层攻击样本向量匹配；输出安全检查只有一组。
 function GuardRules({ result }: { result: Record<string, unknown> }) {
   const hits = (Array.isArray(result.rules) ? result.rules : []) as GuardHit[];
   const catalog = (Array.isArray(result.checked_rules) ? result.checked_rules : []) as GuardRule[];
   if (catalog.length === 0) return <span>此条记录未保存规则清单</span>;
+  if (!Object.hasOwn(result, "blocked")) return <GuardRuleList catalog={catalog} hits={hits} />;
+  const rules = catalog.filter((item) => item.rule !== VECTOR_RULE);
+  const entry = catalog.find((item) => item.rule === VECTOR_RULE) as (GuardRule & { vector?: VectorCheck }) | undefined;
+  const ruleHit = hits.some((hit) => hit.rule !== VECTOR_RULE);
+  return <div className="guard-layers">
+    <section>
+      <h5><b>第一层</b>规则匹配<small>固定写法的正则，命中直接拦截</small></h5>
+      <GuardRuleList catalog={rules} hits={hits} />
+    </section>
+    <section>
+      <h5><b>第二层</b>攻击样本向量匹配<small>规则没命中时，和攻击样本比语义相似度</small></h5>
+      {entry ? <VectorRule entry={entry} blocked={hits.some((hit) => hit.rule === VECTOR_RULE)} />
+        : <p className="guard-layer-note">{ruleHit ? "规则已经命中，没有再做向量比对。" : "没有做向量比对（未开启，或是更早的记录）。"}</p>}
+    </section>
+  </div>;
+}
+
+function VectorRule({ entry, blocked }: { entry: GuardRule & { vector?: VectorCheck }; blocked: boolean }) {
+  const vector = entry.vector ?? {};
+  const skipped = Boolean(vector.error) || vector.score === null || vector.score === undefined;
+  const [tag, color] = blocked ? ["命中，已拦截", "red"] : vector.action === "log" ? ["超过阈值，只记录", "orange"] : skipped ? ["跳过", "gray"] : ["未命中", "green"];
+  return <ol className="intent-trace guard-rules">
+    <li className={blocked ? "is-accepted" : ""}>
+      <span className="intent-trace-mark"><b>1</b></span>
+      <div><strong>{entry.label ?? "和已知攻击样本相似"}</strong>
+        <em className={`status-tag is-${color}`}>{tag}</em>
+        {entry.description && <small>{entry.description}</small>}</div>
+    </li>
+  </ol>;
+}
+
+function GuardRuleList({ catalog, hits }: { catalog: GuardRule[]; hits: GuardHit[] }) {
   return <ol className="intent-trace guard-rules">{catalog.map((item, index) => {
     const matched = hits.filter((hit) => hit.rule === item.rule);
     return <li key={item.rule} className={matched.length > 0 ? "is-accepted" : ""}>
