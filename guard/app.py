@@ -58,15 +58,54 @@ RETRY_SECONDS = 60
 # 而是悄悄改用旧式分词器去转换，这个模型没有旧式分词器需要的文件，最后报一个看不出原因的
 # 「TypeError: stat: path should be string ... not NoneType」。先下载，失败时就是明确的网络错误。
 def download(token):
-    from huggingface_hub import snapshot_download
-    path = Path(snapshot_download(MODEL_NAME, token=token, allow_patterns=MODEL_FILES))
-    files = sorted(item.name for item in path.iterdir())
+    try:
+        from huggingface_hub import snapshot_download
+        path = Path(snapshot_download(MODEL_NAME, token=token, allow_patterns=MODEL_FILES))
+    except Exception as error:
+        # 有些镜像（例如 hf-mirror.com）返回的文件响应里缺少 huggingface_hub 要校验的版本信息，
+        # 它会报「Distant resource does not seem to be on huggingface.co」。这时改成逐个文件直接下载。
+        logger.warning("huggingface_hub 下载失败（%s: %s），改为逐个文件直接下载", type(error).__name__, str(error)[:200])
+        path = download_directly(token)
+    files = sorted(item.name for item in path.iterdir() if not item.name.endswith(".part"))
     logger.info("模型文件已下载到 %s：%s", path, "、".join(files))
     if "tokenizer.json" not in files and not any(name.endswith(".model") for name in files):
         raise RuntimeError(f"没有分词器文件（tokenizer.json），已下载的文件：{'、'.join(files)}")
     if not any(name.endswith(".safetensors") for name in files):
         raise RuntimeError(f"没有模型权重（.safetensors），已下载的文件：{'、'.join(files)}")
     return path
+
+
+# 不经过 huggingface_hub：先用接口拿到文件列表和大小，再按 {HF_ENDPOINT}/{模型}/resolve/main/{文件} 逐个下载。
+# 下载到 .part 临时文件，完成后再改名；已经下完、大小对得上的文件不重复下载。
+def download_directly(token):
+    import fnmatch
+    import requests
+    endpoint = (os.getenv("HF_ENDPOINT") or "https://huggingface.co").rstrip("/")
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    target = Path(os.getenv("HF_HOME", Path.home() / ".cache" / "huggingface")) / "guard-models" / MODEL_NAME.replace("/", "--")
+    target.mkdir(parents=True, exist_ok=True)
+    response = requests.get(f"{endpoint}/api/models/{MODEL_NAME}", params={"blobs": "true"}, headers=headers, timeout=30)
+    response.raise_for_status()
+    siblings = response.json().get("siblings") or []
+    wanted = [item for item in siblings if any(fnmatch.fnmatch(item["rfilename"], pattern) for pattern in MODEL_FILES)]
+    if not wanted:
+        raise RuntimeError(f"{endpoint} 返回的文件列表里没有需要的文件：{[item.get('rfilename') for item in siblings]}")
+    for item in wanted:
+        name, size = item["rfilename"], item.get("size")
+        final = target / name
+        if final.exists() and (size is None or final.stat().st_size == size):
+            continue
+        part = target / (name + ".part")
+        with requests.get(f"{endpoint}/{MODEL_NAME}/resolve/main/{name}", headers=headers, stream=True, timeout=60) as download:
+            download.raise_for_status()
+            with open(part, "wb") as handle:
+                for chunk in download.iter_content(chunk_size=1024 * 1024):
+                    handle.write(chunk)
+        if size is not None and part.stat().st_size != size:
+            raise RuntimeError(f"{name} 下载不完整：{part.stat().st_size} / {size} 字节")
+        part.rename(final)
+        logger.info("已下载 %s（%s MB）", name, round(final.stat().st_size / 1024 / 1024, 1))
+    return target
 
 
 def describe(error):
