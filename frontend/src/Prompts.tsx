@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { createPortal } from "react-dom";
 import { activatePromptVersion, getPrompt, listPrompts, savePromptVersion, type PromptBrief, type PromptDetail, type PromptGroup, type PromptVersion } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
+import { MaintenanceHeader } from "./Maintenance";
 import "./Prompts.css";
 
 // 提示词管理（只有管理员）：线上问答和文档导入用到的 6 段大模型提示词。
@@ -24,12 +25,9 @@ export default function Prompts({ promptId, onNavigate, onToast }: { promptId: s
   useEffect(() => { void reload(); }, []);
   const selected = promptId ?? list?.items[0]?.id ?? null;
   return <div className="pr-page">
-    <header className="topbar pr-topbar">
-      <div>
-        <h1>提示词</h1>
+    <MaintenanceHeader active="prompts" onNavigate={onNavigate}>
         <p className="pr-subtitle">线上问答和文档导入用到的大模型提示词。每段分成可以修改的「指令」和不能修改的「固定部分」（代码要解析的输出格式、安全规则）。保存后生成新版本并立即生效，随时可以改回旧版本或内置版本。</p>
-      </div>
-    </header>
+    </MaintenanceHeader>
     {error && <div className="field-error">{error}</div>}
     {!list && !error && <LoadingSkeleton label="正在加载提示词"><SkeletonBlock className="pr-skeleton" /></LoadingSkeleton>}
     {list && <div className="pr-layout">
@@ -38,7 +36,7 @@ export default function Prompts({ promptId, onNavigate, onToast }: { promptId: s
           <h2>{group.label}</h2>
           <p>{group.description}</p>
           {list.items.filter((item) => item.group === group.key).map((item) =>
-            <button type="button" key={item.id} className={item.id === selected ? "pr-item is-active" : "pr-item"} onClick={() => onNavigate(`/prompts/${item.id}`)}>
+            <button type="button" key={item.id} className={item.id === selected ? "pr-item is-active" : "pr-item"} onClick={() => onNavigate(`/maintenance/prompts/${item.id}`)}>
               <strong>{item.label}</strong>
               <span><b className={item.active_version ? "pr-badge is-custom" : "pr-badge"}>{item.active_label}</b>{item.versions > 0 && ` · 共 ${item.versions} 个版本`}</span>
             </button>)}

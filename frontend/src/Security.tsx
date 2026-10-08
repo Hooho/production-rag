@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { addInjectionSample, checkFalsePositives, checkInjection, confirmInjectionSample, deleteInjectionSample, getInjectionSamples, type InjectionCheck, type InjectionFalsePositives, type InjectionSample, type InjectionView } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
+import { MaintenanceHeader } from "./Maintenance";
 import "./Security.css";
 
 // 安全样本（只有管理员）：输入安全检查第二层的向量样本库。
@@ -42,12 +43,9 @@ export default function Security({ onNavigate, onToast }: { onNavigate: (path: s
   };
   const settings = data?.settings;
   return <div className="sec-page">
-    <header className="topbar sec-topbar">
-      <div>
-        <h1>安全样本</h1>
+    <MaintenanceHeader active="security" onNavigate={onNavigate}>
         <p className="sec-subtitle">输入安全检查分两层：先用规则匹配固定写法，没命中再和这里的攻击样本比语义相似度，换了说法的攻击也能认出来。新出现的攻击加一条样本就能防，不用改代码。</p>
-      </div>
-    </header>
+    </MaintenanceHeader>
     {error && <div className="field-error">{error}</div>}
     {!data && !error && <LoadingSkeleton label="正在加载安全样本"><SkeletonBlock className="sec-skeleton" /></LoadingSkeleton>}
     {data && settings && <>
