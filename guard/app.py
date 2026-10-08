@@ -47,6 +47,36 @@ def report_progress(done):
         logger.info("正在下载或加载模型，缓存目录已有 %s MB（模型约 1 GB，下载完后还要加载几十秒）", cache_size_mb())
 
 
+# 需要下载的文件：配置、分词器、权重。其他格式的权重（.bin、onnx 等）不下载。
+MODEL_FILES = ["*.json", "*.safetensors", "*.model", "*.txt"]
+ATTEMPTS = 5
+RETRY_SECONDS = 60
+
+
+# 先把模型文件完整下载到本地，再从本地目录加载。
+# 以前直接 from_pretrained(模型名)：分词器文件 tokenizer.json 下载失败时 transformers 不报网络错误，
+# 而是悄悄改用旧式分词器去转换，这个模型没有旧式分词器需要的文件，最后报一个看不出原因的
+# 「TypeError: stat: path should be string ... not NoneType」。先下载，失败时就是明确的网络错误。
+def download(token):
+    from huggingface_hub import snapshot_download
+    path = Path(snapshot_download(MODEL_NAME, token=token, allow_patterns=MODEL_FILES))
+    files = sorted(item.name for item in path.iterdir())
+    logger.info("模型文件已下载到 %s：%s", path, "、".join(files))
+    if "tokenizer.json" not in files and not any(name.endswith(".model") for name in files):
+        raise RuntimeError(f"没有分词器文件（tokenizer.json），已下载的文件：{'、'.join(files)}")
+    if not any(name.endswith(".safetensors") for name in files):
+        raise RuntimeError(f"没有模型权重（.safetensors），已下载的文件：{'、'.join(files)}")
+    return path
+
+
+def describe(error):
+    message = f"{type(error).__name__}: {str(error)[:300]}"
+    if "gated" in message.lower() or "401" in message or "403" in message:
+        message += "（需要先在 Hugging Face 上同意模型许可，并在 .env 里设置 HF_TOKEN）"
+    return message
+
+
+# 网络一类的临时错误自动重试几次（每次间隔 60 秒），重试期间状态仍是 loading；没有权限的错误不重试。
 def load():
     started = time.monotonic()
     done = Event()
@@ -56,22 +86,29 @@ def load():
         logger.warning("没有设置 HF_TOKEN，需要申请许可的模型会下载失败")
     Thread(target=report_progress, args=(done,), daemon=True).start()
     try:
-        import torch
-        from transformers import AutoModelForSequenceClassification, AutoTokenizer
-        torch.set_num_threads(int(os.getenv("GUARD_THREADS", "2")))
-        token = os.getenv("HF_TOKEN") or None
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, token=token)
-        model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, token=token)
-        model.eval()
-        runtime.update({"torch": torch, "tokenizer": tokenizer, "model": model, "benign": benign_index(model.config)})
-        state.update({"status": "ready", "error": None})
-        logger.info("模型就绪，用时 %s 秒", round(time.monotonic() - started))
-    except Exception as error:
-        message = f"{type(error).__name__}: {str(error)[:300]}"
-        if "gated" in message.lower() or "401" in message or "403" in message:
-            message += "（需要先在 Hugging Face 上同意模型许可，并在 .env 里设置 HF_TOKEN）"
-        state.update({"status": "failed", "error": message})
-        logger.error("模型加载失败：%s", message)
+        for attempt in range(1, ATTEMPTS + 1):
+            try:
+                import torch
+                from transformers import AutoModelForSequenceClassification, AutoTokenizer
+                torch.set_num_threads(int(os.getenv("GUARD_THREADS", "2")))
+                path = download(os.getenv("HF_TOKEN") or None)
+                tokenizer = AutoTokenizer.from_pretrained(path)
+                model = AutoModelForSequenceClassification.from_pretrained(path)
+                model.eval()
+                runtime.update({"torch": torch, "tokenizer": tokenizer, "model": model, "benign": benign_index(model.config)})
+                state.update({"status": "ready", "error": None})
+                logger.info("模型就绪，用时 %s 秒", round(time.monotonic() - started))
+                return
+            except Exception as error:
+                message = describe(error)
+                logger.exception("第 %s 次加载失败：%s", attempt, message)
+                if "许可" in message or attempt == ATTEMPTS:
+                    state.update({"status": "failed", "error": message})
+                    logger.error("模型加载失败：%s（重启 guard 会重新尝试：docker-compose restart guard）", message)
+                    return
+                state.update({"status": "loading", "error": f"第 {attempt} 次失败，{RETRY_SECONDS} 秒后重试：{message}"})
+                logger.warning("%s 秒后重试", RETRY_SECONDS)
+                time.sleep(RETRY_SECONDS)
     finally:
         done.set()
 
