@@ -5,8 +5,11 @@
 #
 # 下载：模型在 Hugging Face 上需要先同意 Llama 许可，再用 HF_TOKEN 下载（只在第一次，之后在 guard_cache 卷里）。
 # 服务启动后在后台加载，不阻塞启动；没加载好或加载失败时 /v1/classify 返回 503，api 那边当作跳过这一层，不影响问答。
+import logging
 import os
-from threading import Thread
+import time
+from pathlib import Path
+from threading import Event, Thread
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -17,6 +20,10 @@ MAX_TOKENS = 512
 state = {"status": "loading", "error": None}
 runtime = {}
 app = FastAPI(title="Prompt Injection Guard")
+# 加载在后台线程里，以前不写日志，docker-compose logs 只看得到健康检查，不知道下载到哪一步了。
+# 现在开始、完成、失败各写一行，下载期间每 15 秒报一次缓存目录的大小。
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:     guard %(message)s")
+logger = logging.getLogger("guard")
 
 
 # 「正常」那一类的下标：Prompt Guard 2 是 benign / malicious 两类，第 1 版是 BENIGN / INJECTION / JAILBREAK 三类。
@@ -28,7 +35,26 @@ def benign_index(config):
     return 0
 
 
+def cache_size_mb():
+    root = Path(os.getenv("HF_HOME", Path.home() / ".cache" / "huggingface"))
+    if not root.exists():
+        return 0
+    return round(sum(item.stat().st_size for item in root.rglob("*") if item.is_file()) / 1024 / 1024)
+
+
+def report_progress(done):
+    while not done.wait(15):
+        logger.info("正在下载或加载模型，缓存目录已有 %s MB（模型约 1 GB，下载完后还要加载几十秒）", cache_size_mb())
+
+
 def load():
+    started = time.monotonic()
+    done = Event()
+    logger.info("开始加载 %s（缓存目录已有 %s MB；第一次要从 %s 下载）", MODEL_NAME, cache_size_mb(),
+        os.getenv("HF_ENDPOINT") or "https://huggingface.co")
+    if not os.getenv("HF_TOKEN"):
+        logger.warning("没有设置 HF_TOKEN，需要申请许可的模型会下载失败")
+    Thread(target=report_progress, args=(done,), daemon=True).start()
     try:
         import torch
         from transformers import AutoModelForSequenceClassification, AutoTokenizer
@@ -39,11 +65,15 @@ def load():
         model.eval()
         runtime.update({"torch": torch, "tokenizer": tokenizer, "model": model, "benign": benign_index(model.config)})
         state.update({"status": "ready", "error": None})
+        logger.info("模型就绪，用时 %s 秒", round(time.monotonic() - started))
     except Exception as error:
         message = f"{type(error).__name__}: {str(error)[:300]}"
         if "gated" in message.lower() or "401" in message or "403" in message:
             message += "（需要先在 Hugging Face 上同意模型许可，并在 .env 里设置 HF_TOKEN）"
         state.update({"status": "failed", "error": message})
+        logger.error("模型加载失败：%s", message)
+    finally:
+        done.set()
 
 
 Thread(target=load, daemon=True).start()
