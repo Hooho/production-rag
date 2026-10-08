@@ -263,7 +263,11 @@ services:
     environment:
       PROMPT_GUARD_MODEL: ${PROMPT_GUARD_MODEL:-meta-llama/Llama-Prompt-Guard-2-86M}
       HF_TOKEN: ${HF_TOKEN:-}
+      # 连不上 huggingface.co 时在 .env 里把 HF_ENDPOINT 换成镜像（例如 https://hf-mirror.com，带 HF_TOKEN 也能下需要许可的模型）。
       HF_ENDPOINT: ${HF_ENDPOINT:-https://huggingface.co}
+      # 新版 huggingface_hub 默认从 Xet 存储（xethub.hf.co）下载大文件，这个域名镜像不代理，换了 HF_ENDPOINT 也会卡住；
+      # 关掉后走普通下载，直连和镜像都能用。
+      HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-mysql,redis,milvus,embedding,intent,guard,localhost,127.0.0.1}
