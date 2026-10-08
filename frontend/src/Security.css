@@ -435,3 +435,22 @@
    font-size: 12px;
    font-weight: 600;
 }
+
+.sec-status-line {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: baseline;
+   gap: 4px 16px;
+}
+
+.sec-status-line h2 {
+   margin: 0;
+}
+
+.sec-on {
+   color: #166534;
+}
+
+.sec-off {
+   color: #991b1b;
+}

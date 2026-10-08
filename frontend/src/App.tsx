@@ -1238,7 +1238,8 @@ function outputGuardConclusion(result: Record<string, unknown>) {
 function guardConclusion(result: Record<string, unknown>) {
   const hits = (Array.isArray(result.rules) ? result.rules : []) as GuardHit[];
   const catalog = (Array.isArray(result.checked_rules) ? result.checked_rules : []) as GuardRule[];
-  const rules = catalog.filter((item) => item.rule !== VECTOR_RULE && item.rule !== MODEL_RULE);
+  const rules = catalog.filter((item) => item.rule !== VECTOR_RULE && item.rule !== MODEL_RULE && item.rule !== RULES_OFF);
+  const rulesOff = catalog.some((item) => item.rule === RULES_OFF);
   const vector = vectorCheck(catalog);
   const judged = modelCheck(catalog);
   if (hits.some((hit) => hit.rule === VECTOR_RULE)) return `已拦截：和已知攻击样本意思相近（相似度 ${formatScore(vector?.score)}），不检索也不回答`;
@@ -1247,13 +1248,16 @@ function guardConclusion(result: Record<string, unknown>) {
     const names = [...new Set(hits.map((hit) => catalog.find((item) => item.rule === hit.rule)?.label ?? String(hit.rule)))];
     return `已拦截：规则命中「${names.join("」「")}」，不检索也不回答`;
   }
-  const parts = [rules.length > 0 ? `规则 ${rules.length} 类都没命中` : "没有命中注入规则"];
+  const parts = [rulesOff ? "规则匹配已关闭" : rules.length > 0 ? `规则 ${rules.length} 类都没命中` : "没有命中注入规则"];
   if (vector && typeof vector.score === "number") parts.push(vector.action === "log"
     ? `和攻击样本相似度 ${formatScore(vector.score)} 超过阈值（只记录）` : `和攻击样本最高相似度 ${formatScore(vector.score)}`);
   if (judged && typeof judged.score === "number") parts.push(judged.action === "log"
     ? `模型判断攻击概率 ${formatScore(judged.score)} 超过阈值（只记录）` : `模型判断攻击概率 ${formatScore(judged.score)}`);
   return `通过：${parts.join("，")}`;
 }
+
+// 第一层规则匹配在设置里关闭时，清单里只有这一项。
+const RULES_OFF = "rule_layer_off";
 
 // 向量样本比对的结果写在清单里 rule 为 vector_similar 的一项（app/security_samples.py 的 catalog_entry）。
 const VECTOR_RULE = "vector_similar";
@@ -1282,14 +1286,15 @@ function GuardRules({ result }: { result: Record<string, unknown> }) {
   const catalog = (Array.isArray(result.checked_rules) ? result.checked_rules : []) as GuardRule[];
   if (catalog.length === 0) return <span>此条记录未保存规则清单</span>;
   if (!Object.hasOwn(result, "blocked")) return <GuardRuleList catalog={catalog} hits={hits} />;
-  const rules = catalog.filter((item) => item.rule !== VECTOR_RULE && item.rule !== MODEL_RULE);
+  const rules = catalog.filter((item) => item.rule !== VECTOR_RULE && item.rule !== MODEL_RULE && item.rule !== RULES_OFF);
   const entry = catalog.find((item) => item.rule === VECTOR_RULE) as (GuardRule & { vector?: VectorCheck }) | undefined;
   const modelEntry = catalog.find((item) => item.rule === MODEL_RULE) as (GuardRule & { model_check?: ModelCheck }) | undefined;
   const ruleHit = hits.some((hit) => hit.rule !== VECTOR_RULE && hit.rule !== MODEL_RULE);
+  const rulesOff = catalog.some((item) => item.rule === RULES_OFF);
   return <div className="guard-layers">
     <section>
       <h5><b>第一层</b>规则匹配<small>固定写法的正则，命中直接拦截</small></h5>
-      <GuardRuleList catalog={rules} hits={hits} />
+      {rulesOff ? <p className="guard-layer-note">规则匹配已在设置里关闭，这一层跳过。</p> : <GuardRuleList catalog={rules} hits={hits} />}
     </section>
     <section>
       <h5><b>第二层</b>攻击样本向量匹配<small>规则没命中时，和攻击样本比语义相似度</small></h5>

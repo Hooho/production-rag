@@ -1740,6 +1740,7 @@ def create_app(store=None, models=None, jwt_secret=None):
     def injection_view():
         items = injection_samples().items()
         return {"categories": INJECTION_CATEGORIES, "sources": INJECTION_SOURCES,
+            "rules_enabled": runtime_config.value("injection_rules_enabled"),
             "settings": {"enabled": runtime_config.value("injection_vector_enabled"),
                 "threshold": runtime_config.value("injection_vector_threshold"),
                 "action": runtime_config.value("injection_vector_action")},

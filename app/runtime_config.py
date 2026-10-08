@@ -69,6 +69,9 @@ SPECS = [
     {"key": "long_memory_max_items", "group": "memory", "type": "int", "default": 30, "min": 5, "max": 100},
     # 输入安全检查的第二层：和已知攻击样本比语义相似度（app/security_samples.py）。
     # 默认只记录不拦截：阈值要先在「安全样本」页的误拦检查里确认，再改成拦截。
+    # 输入安全检查三层各有一个开关：规则匹配 → 攻击样本向量匹配 → 注入检测模型，前一层拦下就不再往后查。
+    # 第一层：写死的正则（app/security.py）。关掉后检索来源里的注入句子照样清理，只是问题本身不再按规则检查。
+    {"key": "injection_rules_enabled", "group": "security", "type": "bool", "default": True},
     {"key": "injection_vector_enabled", "group": "security", "type": "bool", "default": True},
     {"key": "injection_vector_threshold", "group": "security", "type": "float", "default": 0.85,
         "min": 0.5, "max": 0.99},

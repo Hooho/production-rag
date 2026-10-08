@@ -50,6 +50,10 @@ export default function Security({ onNavigate, onToast }: { onNavigate: (path: s
     {error && <div className="field-error">{error}</div>}
     {!data && !error && <LoadingSkeleton label="正在加载安全样本"><SkeletonBlock className="sec-skeleton" /></LoadingSkeleton>}
     {data && settings && <>
+      <section className="sec-card sec-status sec-status-line">
+        <h2>第一层 · 规则匹配</h2>
+        <p><b className={data.rules_enabled ? "sec-on" : "sec-off"}>{data.rules_enabled ? "已开启" : "已关闭"}</b>　写死的正则，认 4 类常见注入写法，命中直接拦截。三层都可以在 <button type="button" className="link-text" onClick={() => onNavigate("/maintenance/rag")}>RAG 配置 › 安全检查</button> 里单独开关。</p>
+      </section>
       <section className="sec-card sec-status">
         <h2>第二层 · 攻击样本向量匹配</h2>
         <dl>

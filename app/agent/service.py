@@ -206,9 +206,14 @@ class Agent:
         from ..security_model import catalog_entry as model_entry
         from ..security_samples import catalog_entry as vector_entry
         question = state["question"]
-        hits = detect_injection(question)
+        # 三层各自有开关（设置页「安全检查」）。第一层关闭时清单里只放一项「已关闭」，前端据此显示。
+        if runtime_value("injection_rules_enabled"):
+            hits = detect_injection(question)
+            checked = injection_rule_catalog()
+        else:
+            hits = []
+            checked = [{"rule": "rule_layer_off", "label": "规则匹配", "description": "已在设置里关闭，这一层跳过。"}]
         detail = "未发现注入特征" if not hits else "命中注入规则，已拒绝处理"
-        checked = injection_rule_catalog()
         samples, guard = self.injection_samples, self.injection_model
         # 规则命中的问题进样本库的「待确认」，管理员确认后，同类的换个说法在第二层也能认出来。
         if hits and samples is not None:

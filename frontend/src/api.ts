@@ -1347,7 +1347,7 @@ export function clearLongMemory() {
 // 安全样本（只有管理员）：输入安全检查第二层的向量样本库。
 export type InjectionSample = { id: string; text: string; category: string; source: string; status: "active" | "candidate"; created: string; created_by?: string | null; rules?: string[] };
 export type GuardHealth = { status: "ready" | "loading" | "failed" | "unreachable" | "missing"; error?: string | null; model?: string };
-export type InjectionView = { categories: Record<string, string>; sources: Record<string, string>; settings: { enabled: boolean; threshold: number; action: "log" | "block" }; model: { enabled: boolean; threshold: number; action: "log" | "block"; health: GuardHealth }; items: InjectionSample[]; candidates: InjectionSample[] };
+export type InjectionView = { categories: Record<string, string>; sources: Record<string, string>; rules_enabled: boolean; settings: { enabled: boolean; threshold: number; action: "log" | "block" }; model: { enabled: boolean; threshold: number; action: "log" | "block"; health: GuardHealth }; items: InjectionSample[]; candidates: InjectionSample[] };
 export type InjectionMatch = { id: string; text: string; category: string; score: number };
 export type InjectionCheck = { rules: { rule: string; text: string }[]; matches: InjectionMatch[]; threshold: number; action: "log" | "block"; model: { score?: number; model?: string; error?: string } | null; model_threshold: number; model_action: "log" | "block" };
 export type InjectionFalsePositives = { threshold: number; checked: number; builtin: number; recent: number; over: number; items: { question: string; source: "builtin" | "recent"; score: number; sample: string; category: string; rules: string[] }[] };
