@@ -42,3 +42,9 @@
    color: var(--t-7d95ac);
    font-size: 12px;
 }
+
+/* 每层下面的规则缩进到标题文字下面，看得出是这一层的子项。 */
+.guard-layers .intent-trace,
+.guard-layers p.guard-layer-note {
+   padding-left: 16px;
+}
