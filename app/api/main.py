@@ -482,7 +482,7 @@ def create_app(store=None, models=None, jwt_secret=None):
         if isinstance(error, openai.APIConnectionError):
             return "连不上大模型服务，请检查网络或代理后重试"
         if isinstance(error, openai.AuthenticationError):
-            return "大模型密钥无效，请在设置页检查模型配置"
+            return "大模型密钥无效，请在「系统维护 › 模型配置」里检查"
         if isinstance(error, openai.RateLimitError):
             return "大模型请求过于频繁或账户余额不足，请稍后重试"
         return "依赖服务暂不可用，请稍后重试"

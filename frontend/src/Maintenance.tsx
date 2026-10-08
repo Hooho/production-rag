@@ -1,25 +1,36 @@
+import { ModelSettings } from "./Settings";
+import SystemSettings from "./SystemSettings";
+import Prompts from "./Prompts";
+import Security from "./Security";
 import "./Maintenance.css";
 
-// 系统维护：管理员维护系统行为的地方，和日常的问答、知识库、评测分开。
-// 目前两块：提示词（线上问答和文档导入发给大模型的提示词）、安全样本（输入安全检查的攻击样本库）。
-// 每块是一个标签，地址分别是 /maintenance/prompts 和 /maintenance/security；旧地址 /prompts、/security 仍然能打开。
-export type MaintenanceTab = "prompts" | "security";
+// 系统维护（只有管理员）：维护系统怎么运行的地方，和日常的问答、知识库、评测分开。
+// 模型配置、RAG 配置、系统配置原来在「设置」页，提示词、安全样本原来各占一个导航；都属于系统配置，放在一起，用标签切换。
+// 「设置」页只留用户、部门、数据权限（普通用户在那里查看当前模型配置）。
+// 地址是 /maintenance/<标签>，提示词详情是 /maintenance/prompts/<id>；旧地址 /prompts、/security 仍然能打开。
+export type MaintenanceTab = "model" | "rag" | "system" | "prompts" | "security";
+type ShowToast = (kind: "success" | "error", message: string) => void;
 
-const TABS: { id: MaintenanceTab; label: string; note: string; path: string }[] = [
-  { id: "prompts", label: "提示词", note: "发给大模型的提示词 · 版本和回滚", path: "/maintenance/prompts" },
-  { id: "security", label: "安全样本", note: "输入安全检查 · 攻击样本库", path: "/maintenance/security" },
+export const MAINTENANCE_TABS: { id: MaintenanceTab; label: string }[] = [
+  { id: "model", label: "模型配置" },
+  { id: "rag", label: "RAG 配置" },
+  { id: "system", label: "系统配置" },
+  { id: "prompts", label: "提示词" },
+  { id: "security", label: "安全样本" },
 ];
 
-export function MaintenanceHeader({ active, onNavigate, children }: { active: MaintenanceTab; onNavigate: (path: string) => void; children: React.ReactNode }) {
-  return <header className="topbar mt-topbar">
-    <div>
-      <h1>系统维护</h1>
-      <div className="mt-tabs" role="tablist" aria-label="系统维护">
-        {TABS.map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={tab.id === active} className={tab.id === active ? "is-active" : ""} onClick={() => onNavigate(tab.path)}>
-          {tab.label}<small>{tab.note}</small>
-        </button>)}
-      </div>
-      {children}
+export default function Maintenance({ tab, promptId, onNavigate, onToast }: { tab: MaintenanceTab; promptId: string | null; onNavigate: (path: string) => void; onToast: ShowToast }) {
+  return <div className={`mt-page is-${tab}`}>
+    <header className="topbar"><div><h1>系统维护</h1></div></header>
+    <div className="document-detail-tabs mt-tabs" role="tablist" aria-label="系统维护">
+      {MAINTENANCE_TABS.map((item) => <button key={item.id} type="button" role="tab" aria-selected={item.id === tab} className={item.id === tab ? "active" : ""} onClick={() => onNavigate(`/maintenance/${item.id}`)}>{item.label}</button>)}
     </div>
-  </header>;
+    <div className="mt-body">
+      {tab === "model" && <ModelSettings isAdmin onToast={onToast} />}
+      {tab === "rag" && <SystemSettings key="rag" page="rag" onToast={onToast} />}
+      {tab === "system" && <SystemSettings key="system" page="system" onToast={onToast} />}
+      {tab === "prompts" && <Prompts promptId={promptId} onNavigate={onNavigate} onToast={onToast} />}
+      {tab === "security" && <Security onNavigate={onNavigate} onToast={onToast} />}
+    </div>
+  </div>;
 }

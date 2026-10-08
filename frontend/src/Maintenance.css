@@ -1,41 +1,21 @@
-/* 系统维护页的标题和标签：标签和「记忆」页的会话记忆 / 长期记忆同一种样式。 */
-.mt-topbar {
-   margin-bottom: 20px;
+/* 系统维护页：标签和「设置」页同一种下划线样式。标题和标签栏宽度固定，切换标签时不跳；
+   内容宽度按标签走：配置表单窄一些，提示词、安全样本宽一些。 */
+.mt-page {
+   max-width: 1180px;
 }
 
 .mt-tabs {
-   display: flex;
-   flex-wrap: wrap;
-   gap: 8px;
-   margin: 12px 0 10px;
+   margin-bottom: 20px;
 }
 
-.mt-tabs button {
-   display: grid;
-   gap: 2px;
-   border: 1px solid var(--t-e3edf5);
-   border-radius: 6px;
-   background: #fff;
-   padding: 8px 14px;
-   color: var(--t-334e68);
-   font-size: 14px;
-   font-weight: 600;
-   text-align: left;
-   cursor: pointer;
+.mt-body {
+   max-width: 880px;
 }
 
-.mt-tabs button small {
-   color: var(--t-7d95ac);
-   font-size: 12px;
-   font-weight: 400;
+.mt-page.is-prompts .mt-body {
+   max-width: none;
 }
 
-.mt-tabs button:hover {
-   border-color: var(--t-c7d9f2);
-}
-
-.mt-tabs button.is-active {
-   border-color: var(--t-2563eb);
-   background: var(--t-eaf1ff);
-   color: var(--t-1d4ed8);
+.mt-page.is-security .mt-body {
+   max-width: 1080px;
 }

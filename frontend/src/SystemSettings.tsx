@@ -4,7 +4,7 @@ import { applyTheme } from "./theme";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./SystemSettings.css";
 
-// 设置页「RAG 配置」（检索、回答流程、对话记忆、知识巡检、模型服务）和「系统配置」（通用）共用这个组件，按 page 只显示对应的组。
+// 「系统维护」页的「RAG 配置」（检索、回答流程、对话记忆、知识巡检、模型服务）和「系统配置」（通用）共用这个组件，按 page 只显示对应的组。
 // 每一项写明作用、默认值为什么是这个值、改了会怎样、什么时候生效；后端定义在 app/runtime_config.py。
 type ShowToast = (kind: "success" | "error", message: string) => void;
 // now：之后的问答即时生效；new_docs：只影响之后上传的文档；judgement：会改变评测分数或巡检结论，改前改后不能直接比较。

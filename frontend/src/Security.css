@@ -8,7 +8,7 @@
 }
 
 .sec-subtitle {
-   margin-top: 8px;
+   margin: 0 0 16px;
    color: var(--t-5e7a95);
    font-size: 13px;
    line-height: 1.7;

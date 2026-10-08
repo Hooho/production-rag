@@ -88,7 +88,7 @@ export default function Overview() {
               </tr>)}</tbody>
             </table>
             {data.intent.fallback_causes.length > 0 && <p className="ov-codes">走到规则兜底的原因：{data.intent.fallback_causes.map((item) => `${item.label} ${item.count} 次`).join("，")}</p>}
-            {data.intent.stages.find((stage) => stage.stage === "small_model")?.reached === 0 && <p className="ov-codes">本地小模型没有到达过：设置页里没有开启本地小模型，规则认不出的问题直接交给大模型。</p>}
+            {data.intent.stages.find((stage) => stage.stage === "small_model")?.reached === 0 && <p className="ov-codes">本地小模型没有到达过：「系统维护 › RAG 配置」里没有开启本地小模型，规则认不出的问题直接交给大模型。</p>}
           </>}
         </Panel>
         <Panel title="检索" note="只统计走了知识检索的问答（含拒答）。">

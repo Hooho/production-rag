@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { addInjectionSample, checkFalsePositives, checkInjection, confirmInjectionSample, deleteInjectionSample, getInjectionSamples, type InjectionCheck, type InjectionFalsePositives, type InjectionSample, type InjectionView } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
-import { MaintenanceHeader } from "./Maintenance";
 import "./Security.css";
 
 // 安全样本（只有管理员）：输入安全检查第二层的向量样本库。
@@ -43,9 +42,7 @@ export default function Security({ onNavigate, onToast }: { onNavigate: (path: s
   };
   const settings = data?.settings;
   return <div className="sec-page">
-    <MaintenanceHeader active="security" onNavigate={onNavigate}>
-        <p className="sec-subtitle">输入安全检查分两层：先用规则匹配固定写法，没命中再和这里的攻击样本比语义相似度，换了说法的攻击也能认出来。新出现的攻击加一条样本就能防，不用改代码。</p>
-    </MaintenanceHeader>
+    <p className="sec-subtitle">输入安全检查分两层：先用规则匹配固定写法，没命中再和这里的攻击样本比语义相似度，换了说法的攻击也能认出来。新出现的攻击加一条样本就能防，不用改代码。</p>
     {error && <div className="field-error">{error}</div>}
     {!data && !error && <LoadingSkeleton label="正在加载安全样本"><SkeletonBlock className="sec-skeleton" /></LoadingSkeleton>}
     {data && settings && <>
@@ -56,7 +53,7 @@ export default function Security({ onNavigate, onToast }: { onNavigate: (path: s
           <div><dt>相似度阈值</dt><dd>{settings.threshold.toFixed(2)}</dd></div>
           <div><dt>样本</dt><dd>{data.items.length} 条{data.candidates.length > 0 && `，待确认 ${data.candidates.length} 条`}</dd></div>
         </dl>
-        <p>{settings.action === "log" ? "当前只记录不拦截：超过阈值的问题照常回答，处理过程和运行概览里能看到。先用下面的「误拦检查」确认阈值合适，再到设置里改成拦截。" : "超过阈值的问题会直接拒绝处理，和规则拦截一样。"} <button type="button" className="link-text" onClick={() => onNavigate("/settings")}>去设置</button></p>
+        <p>{settings.action === "log" ? "当前只记录不拦截：超过阈值的问题照常回答，处理过程和运行概览里能看到。先用下面的「误拦检查」确认阈值合适，再到「RAG 配置 › 安全检查」里改成拦截。" : "超过阈值的问题会直接拒绝处理，和规则拦截一样。"} <button type="button" className="link-text" onClick={() => onNavigate("/maintenance/rag")}>去设置</button></p>
       </section>
 
       <TryIt />

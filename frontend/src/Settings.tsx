@@ -2,13 +2,13 @@ import { useEffect, useState } from "react";
 import { createGroup, createUser, deleteGroup, getDataPermissions, getLLMSettings, saveDataPermission, listGroups, listUsers, saveLLMSettings, testLLMSettings, updateGroup, updateUser, type AuthUser, type Group, type DataPermissionRow, type LLMSettings, type LLMSettingsInput } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import { formatDuration } from "./format";
-import SystemSettings from "./SystemSettings";
 import "./Settings.css";
 
 type ShowToast = (kind: "success" | "error", message: string) => void;
-// 设置页按 Tab 分组；用户、部门和数据权限只有管理员能看到。
-type SettingsTab = "model" | "rag" | "system" | "users" | "groups" | "data";
-const TAB_LABELS: Record<SettingsTab, string> = { model: "模型配置", rag: "RAG 配置", system: "系统配置", users: "用户", groups: "部门", data: "数据权限" };
+// 设置页按 Tab 分组。模型配置、RAG 配置、系统配置挪到了「系统维护」页（只有管理员）；
+// 这里管理员管理用户、部门和数据权限，普通用户只能查看当前的模型配置。
+type SettingsTab = "model" | "users" | "groups" | "data";
+const TAB_LABELS: Record<SettingsTab, string> = { model: "模型配置", users: "用户", groups: "部门", data: "数据权限" };
 type Provider = { key: string; name: string; note: string; baseUrl: string; models: string[]; keyUrl?: string; defaultKey?: string };
 
 // 各厂商都提供 OpenAI 兼容接口，选中后自动填好地址和推荐模型，只需粘贴密钥。
@@ -57,16 +57,14 @@ function SettingsLoadingSkeleton({ kind }: { kind: "model" | "list" | "permissio
 
 // 设置页外壳：标题和 Tab 切换。
 export default function Settings({ user, onToast }: { user: AuthUser; onToast: ShowToast }) {
-  const [tab, setTab] = useState<SettingsTab>("model");
-  const tabs: SettingsTab[] = user.is_admin ? ["model", "rag", "system", "users", "groups", "data"] : ["model"];
+  const [tab, setTab] = useState<SettingsTab>(user.is_admin ? "users" : "model");
+  const tabs: SettingsTab[] = user.is_admin ? ["users", "groups", "data"] : ["model"];
   return <div className="settings-page">
     <header className="topbar"><div><h1>设置</h1></div></header>
     <div className="document-detail-tabs settings-tabs" role="tablist">
       {tabs.map((key) => <button key={key} role="tab" aria-selected={tab === key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{TAB_LABELS[key]}</button>)}
     </div>
     {tab === "model" && <ModelSettings isAdmin={user.is_admin} onToast={onToast} />}
-    {tab === "rag" && user.is_admin && <SystemSettings key="rag" page="rag" onToast={onToast} />}
-    {tab === "system" && user.is_admin && <SystemSettings key="system" page="system" onToast={onToast} />}
     {tab === "users" && user.is_admin && <UserSettings currentUser={user.username} onToast={onToast} />}
     {tab === "groups" && user.is_admin && <GroupSettings onToast={onToast} />}
     {tab === "data" && user.is_admin && <DataPermissionSettings onToast={onToast} />}
@@ -75,7 +73,7 @@ export default function Settings({ user, onToast }: { user: AuthUser; onToast: S
 
 // 模型配置 Tab：选择厂商快速填充配置，测试连接后保存，后端立即切换聊天模型。
 // 模型配置对所有用户生效，只有管理员可以测试和保存，其他用户只能查看当前配置。
-function ModelSettings({ isAdmin, onToast }: { isAdmin: boolean; onToast: ShowToast }) {
+export function ModelSettings({ isAdmin, onToast }: { isAdmin: boolean; onToast: ShowToast }) {
   const [current, setCurrent] = useState<LLMSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [provider, setProvider] = useState("custom");
@@ -148,7 +146,7 @@ function ModelSettings({ isAdmin, onToast }: { isAdmin: boolean; onToast: ShowTo
       <div><span>当前模型</span><strong>{findProvider(current.provider).name} · {current.model}</strong></div>
       <div><span>服务地址</span><code>{current.base_url}</code></div>
       <div><span>API Key</span><code>{current.api_key_masked || "未设置"}</code></div>
-      <div><span>配置来源</span><strong>{current.source === "settings" ? "设置页" : ".env 文件"}</strong></div>
+      <div><span>配置来源</span><strong>{current.source === "settings" ? "页面上保存的配置" : ".env 文件"}</strong></div>
     </section>}
     {current?.model_mode === "demo" && <div className="settings-warning">当前为演示模式（MODEL_MODE=demo），问答不会调用大模型。配置可以先保存和测试；要真正启用，请把 .env 中的 MODEL_MODE 改为 openai 并重启服务。</div>}
 

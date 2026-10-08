@@ -539,7 +539,7 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
               </li>)}</ul>}
             {specialSuites?.some((suite) => suite.method === "dialogue" && pickedSuites.includes(suite.id)) && <div className="sp-switch-line">
               <button type="button" role="switch" aria-checked={compareMemory} className={`sp-switch ${compareMemory ? "is-on" : ""}`} onClick={() => setCompareMemory(!compareMemory)}><span /></button>
-              <span>对比记忆参数：多轮对话专项除了当前设置，再把压缩阈值、保留条数各调大调小跑一遍（共 5 组），给设置页「对话记忆」提供依据。调用大模型次数是 5 倍。</span>
+              <span>对比记忆参数：多轮对话专项除了当前设置，再把压缩阈值、保留条数各调大调小跑一遍（共 5 组），给「系统维护 › RAG 配置」的「对话记忆」提供依据。调用大模型次数是 5 倍。</span>
             </div>}
           </div> : <>
           <div className="ev-launch-option">
@@ -1109,7 +1109,7 @@ function FilterChips({ value, options, onChange }: { value: string; options: [st
 // 阈值扫描：同一批重排概率在不同阈值下的误杀率、漏放率和过滤后召回率。
 function SweepPanel({ run }: { run: EvalRun }) {
   const sweep = run.sweep ?? [];
-  if (sweep.length === 0) return <div className="ev-empty"><h3>这次评测没有阈值扫描</h3><p>阈值只作用在重排概率上；本次没有启用重排（EMBEDDING_MODE 不是 local，或设置页关闭了重排），所以无法扫描。</p></div>;
+  if (sweep.length === 0) return <div className="ev-empty"><h3>这次评测没有阈值扫描</h3><p>阈值只作用在重排概率上；本次没有启用重排（EMBEDDING_MODE 不是 local，或「系统维护 › RAG 配置」里关闭了重排），所以无法扫描。</p></div>;
   const current = run.config.min_score ?? null;
   let best: EvalSweepPoint | null = null;
   for (const point of sweep) {
