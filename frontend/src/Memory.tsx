@@ -303,7 +303,7 @@ function LongMemory({ onNavigate }: { onNavigate: (path: string) => void }) {
           <span><strong>{data.enabled ? "已开启长期记忆" : "已关闭长期记忆"}</strong>
             <small>{data.enabled ? `每轮回答后自动整理，最多记 ${data.max_items} 条。` : "关闭后不再记新的内容，已有的记忆也不会发给模型；可以随时重新打开。"}</small></span>
         </label>
-        {!data.global_enabled && <p className="long-notice">管理员在「系统维护 › RAG 配置」里关闭了长期记忆，目前所有用户都不会记录和使用长期记忆。</p>}
+        {!data.global_enabled && <p className="long-notice">管理员在「系统管理 › RAG 配置」里关闭了长期记忆，目前所有用户都不会记录和使用长期记忆。</p>}
       </section>
       <section className="mem-card">
         <div className="long-tabs" role="tablist">

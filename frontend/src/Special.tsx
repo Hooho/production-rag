@@ -261,7 +261,7 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
       </div>
       {data.method === "dialogue" && <div className="sp-switch-line">
         <button type="button" role="switch" aria-checked={compareMemory} className={`sp-switch ${compareMemory ? "is-on" : ""}`} onClick={() => setCompareMemory(!compareMemory)}><span /></button>
-        <span>对比记忆参数：除了当前设置，再把压缩阈值、保留条数各调大调小跑一遍（共 5 组），给「系统维护 › RAG 配置」的「对话记忆」提供依据。调用大模型次数是 5 倍。</span>
+        <span>对比记忆参数：除了当前设置，再把压缩阈值、保留条数各调大调小跑一遍（共 5 组），给「系统管理 › RAG 配置」的「对话记忆」提供依据。调用大模型次数是 5 倍。</span>
       </div>}
       {running && <div className="rg-progress">正在运行…</div>}
     </div>

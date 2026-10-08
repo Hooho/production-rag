@@ -428,7 +428,7 @@ class Agent:
             state["queries"], rerank_query, {"sources": state["sources"]})
         if not result["checked"]:
             reason = "没有检索来源，回答阶段直接拒答" if not state["sources"] else \
-                "未启用（需要 MODEL_MODE=openai，且「系统维护 › RAG 配置」里「检索充分性判断」是打开的）"
+                "未启用（需要 MODEL_MODE=openai，且「系统管理 › RAG 配置」里「检索充分性判断」是打开的）"
             self.add_step(state, "sufficiency", "tool", "检索充分性判断", reason, {
                 "checked": False, **self.no_model_info("未调用模型", "判断检索资料能否回答问题"),
             }, started_at=started)

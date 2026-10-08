@@ -58,7 +58,7 @@ function readRoute(pathname = window.location.pathname): Route {
   if (path === "/memory") return { page: "memory" };
   if (path === "/memory/long") return { page: "memory", tab: "long" };
   if (path.startsWith("/memory/")) return { page: "memory", sessionId: decodeURIComponent(path.slice("/memory/".length)) };
-  // 系统维护：模型配置、RAG 配置、系统配置、提示词、安全样本五个标签。旧地址 /prompts、/security 仍然能打开。
+  // 系统管理：模型配置、RAG 配置、提示词、安全样本四个标签。旧地址 /prompts、/security 仍然能打开。
   if (path === "/maintenance") return { page: "maintenance", tab: "model" };
   if (path.startsWith("/maintenance/prompts/")) return { page: "maintenance", tab: "prompts", promptId: decodeURIComponent(path.slice("/maintenance/prompts/".length)) };
   const maintenanceTab = MAINTENANCE_TABS.find((item) => path === `/maintenance/${item.id}`);
@@ -274,7 +274,7 @@ function App() {
           {user.is_admin && <button className={route.page === "eval" ? "nav-item active" : "nav-item"} onClick={() => navigate("/eval/runs")} title="评测"><span className="nav-icon"><NavIcon name="target" /></span><span className="nav-label">评测</span></button>}
           {user.is_admin && <button className={route.page === "inspection" ? "nav-item active" : "nav-item"} onClick={() => navigate("/inspection")} title="知识巡检"><span className="nav-icon"><NavIcon name="pulse" /></span><span className="nav-label">知识巡检</span></button>}
           {user.is_admin && <button className={route.page === "overview" ? "nav-item active" : "nav-item"} onClick={() => navigate("/overview")} title="运行概览"><span className="nav-icon"><NavIcon name="chart" /></span><span className="nav-label">运行概览</span></button>}
-          {user.is_admin && <button className={route.page === "maintenance" ? "nav-item active" : "nav-item"} onClick={() => navigate("/maintenance")} title="系统维护：模型、RAG、系统配置，提示词，安全样本"><span className="nav-icon"><NavIcon name="wrench" /></span><span className="nav-label">系统维护</span></button>}
+          {user.is_admin && <button className={route.page === "maintenance" ? "nav-item active" : "nav-item"} onClick={() => navigate("/maintenance")} title="系统管理：模型配置、RAG 配置、提示词、安全样本"><span className="nav-icon"><NavIcon name="wrench" /></span><span className="nav-label">系统管理</span></button>}
           <button className={route.page === "settings" ? "nav-item active" : "nav-item"} onClick={() => navigate("/settings")} title="设置"><span className="nav-icon"><NavIcon name="sliders" /></span><span className="nav-label">设置</span></button>
           <div className="sidebar-bottom"><div className="status-dot" /><span className="sidebar-status-label">{user.username}{user.is_admin ? "（管理员）" : ""}</span><button className="logout-button" type="button" onClick={() => void handleLogout()}>退出登录</button></div>
         </aside>
@@ -2292,7 +2292,7 @@ function ContextMissingBanner({ document, onRetry }: { document: DocumentStatus;
   const running = document.steps?.some((step) => step.step_id === "context" && step.status === "running");
   return <div className="context-missing-banner">
     <span>有 {missing} 个分片缺少上下文说明（没有生成、生成失败，或早期把模型的思考过程当成了说明），这些分片检索时少了补充的背景信息。</span>
-    {document.contextual_enabled === false ? <small>当前没有启用 Contextual Retrieval（需要 MODEL_MODE=openai，且「系统维护 › RAG 配置」里「Contextual Retrieval」是打开的），启用后才能补全</small>
+    {document.contextual_enabled === false ? <small>当前没有启用 Contextual Retrieval（需要 MODEL_MODE=openai，且「系统管理 › RAG 配置」里「Contextual Retrieval」是打开的），启用后才能补全</small>
       : running ? <small>正在补全中…</small>
         : document.can_edit !== false ? <button className="secondary-button" onClick={onRetry}>补全 {missing} 个</button>
           : <small>只有上传者可以补全</small>}
