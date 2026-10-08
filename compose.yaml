@@ -268,6 +268,9 @@ services:
       # 新版 huggingface_hub 默认从 Xet 存储（xethub.hf.co）下载大文件，这个域名镜像不代理，换了 HF_ENDPOINT 也会卡住；
       # 关掉后走普通下载，直连和镜像都能用。
       HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
+      # huggingface_hub 默认读超时只有 10 秒，经代理访问 CDN 慢一点就会 Read timed out，调到 60 秒。
+      HF_HUB_DOWNLOAD_TIMEOUT: ${HF_HUB_DOWNLOAD_TIMEOUT:-60}
+      HF_HUB_ETAG_TIMEOUT: ${HF_HUB_ETAG_TIMEOUT:-30}
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-mysql,redis,milvus,embedding,intent,guard,localhost,127.0.0.1}
