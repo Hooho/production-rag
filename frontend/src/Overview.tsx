@@ -103,12 +103,13 @@ export default function Overview() {
           <Breakdown items={data.refusals.reasons.map((item) => ({ key: item.reason, label: item.label, count: item.count }))} emptyText="这段时间没有拒答" />
           {data.refusals.partial > 0 && <p className="ov-codes">另有 {count(data.refusals.partial)} 次没有拒答，但充分性判断认为资料只能回答一部分，也是知识缺口。</p>}
         </Panel>
-        <Panel title="安全检查" note="问题进模型前、来源交给模型前、回答返回前各检查一次。">
+        <Panel title="安全检查" note="问题进模型前（规则 → 攻击样本 → 注入检测模型）、来源交给模型前、回答返回前各检查一次。">
           <dl className="ov-facts">
             <div><dt>问题被拦截</dt><dd>{count(data.security.blocked)} 次（{percent(data.security.blocked_rate)}）</dd></div>
             <div><dt>来源里清理掉注入句子</dt><dd>{count(data.security.redacted_runs)} 次问答，共 {count(data.security.redacted)} 句</dd></div>
             <div><dt>回答里处理了不安全内容</dt><dd>{count(data.security.output_runs)} 次</dd></div>
             <div><dt>和攻击样本相似</dt><dd>{data.security.vector.checked === 0 ? "没有比对过" : `拦截 ${count(data.security.vector.blocked)} 次，只记录 ${count(data.security.vector.logged)} 次（比对 ${count(data.security.vector.checked)} 次）`}</dd></div>
+            <div><dt>注入检测模型判断为攻击</dt><dd>{data.security.model.checked === 0 ? "没有判断过" : `拦截 ${count(data.security.model.blocked)} 次，只记录 ${count(data.security.model.logged)} 次（判断 ${count(data.security.model.checked)} 次）`}</dd></div>
           </dl>
           {data.security.rules.length > 0 && <><h3 className="ov-sub">拦截命中的规则</h3><Breakdown items={data.security.rules} /></>}
           {data.security.issues.length > 0 && <><h3 className="ov-sub">回答检查处理的问题</h3><Breakdown items={data.security.issues} /></>}

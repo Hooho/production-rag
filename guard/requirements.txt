@@ -1,0 +1,5 @@
+fastapi>=0.115,<1
+uvicorn>=0.34,<1
+transformers>=4.46,<5
+sentencepiece>=0.2,<1
+protobuf>=4,<7

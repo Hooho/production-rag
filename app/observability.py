@@ -69,8 +69,13 @@ def summarize_run(result):
     # 向量样本比对的结果写在输入检查清单的 vector_similar 一项里：相似度和处置（拦截 / 只记录 / 放行）。
     vector = next((item.get("vector") for item in input_guard.get("checked_rules") or []
         if isinstance(item, dict) and item.get("rule") == "vector_similar"), None) or {}
+    # 第三层注入检测模型的结果写在 model_judged 一项里：攻击概率和处置。
+    judged = next((item.get("model_check") for item in input_guard.get("checked_rules") or []
+        if isinstance(item, dict) and item.get("rule") == "model_judged"), None) or {}
     summary["security"] = {"blocked": bool(input_guard.get("blocked")), "rules": input_guard.get("rules", []),
         "vector": {"score": vector.get("score"), "action": vector.get("action"), "error": bool(vector.get("error"))} if vector else None,
+        "model": {"score": judged.get("score"), "action": judged.get("action"),
+            "error": bool(judged.get("error") or judged.get("skipped"))} if judged else None,
         "redacted_sources": (retrieval.get("stats") or {}).get("injection_redacted", 0),
         "output_issues": output_guard.get("issues", [])}
     response = steps.get("response", {}).get("result", {})

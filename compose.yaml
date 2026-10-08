@@ -51,9 +51,11 @@ services:
       EMBEDDING_URL: http://embedding:8090/v1
       RERANK_URL: http://embedding:8090/v1
       INTENT_URL: http://intent:8091/v1
+      # 注入检测模型服务（输入安全检查第三层）；去掉这一行就不调用，这一层跳过。
+      GUARD_URL: http://guard:8092
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-mysql,redis,milvus,embedding,intent,localhost,127.0.0.1}
+      NO_PROXY: ${NO_PROXY:-mysql,redis,milvus,embedding,intent,guard,localhost,127.0.0.1}
       # 评测结果文件名里的提交号；容器里没有 .git，启动时用 GIT_COMMIT=$(git rev-parse --short HEAD) 传入。
       GIT_COMMIT: ${GIT_COMMIT:-}
     ports:
@@ -107,7 +109,7 @@ services:
       INTENT_URL: http://intent:8091/v1
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-mysql,redis,milvus,embedding,intent,localhost,127.0.0.1}
+      NO_PROXY: ${NO_PROXY:-mysql,redis,milvus,embedding,intent,guard,localhost,127.0.0.1}
       HF_HOME: /home/app/.cache/huggingface
       TRANSFORMERS_CACHE: /home/app/.cache/huggingface/transformers
       MPLCONFIGDIR: /home/app/.cache/matplotlib
@@ -230,7 +232,7 @@ services:
       RERANKER_MODEL: ${RERANKER_MODEL:-BAAI/bge-reranker-base}
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-mysql,redis,milvus,embedding,intent,localhost,127.0.0.1}
+      NO_PROXY: ${NO_PROXY:-mysql,redis,milvus,embedding,intent,guard,localhost,127.0.0.1}
     volumes:
       - embedding_cache:/home/embed/.cache
     expose:
@@ -253,7 +255,31 @@ services:
       retries: 10
       start_period: 10s
     restart: unless-stopped
+  # 注入检测模型（输入安全检查第三层，app/security_model.py 调用）。默认 Llama Prompt Guard 2 86M：
+  # 需要先在 Hugging Face 同意模型许可，并在 .env 里填 HF_TOKEN；第一次启动时下载到 guard_cache 卷。
+  # api 不等它：模型没下载好、加载失败时这一层自动跳过，问答照常。
+  guard:
+    build: ./guard
+    environment:
+      PROMPT_GUARD_MODEL: ${PROMPT_GUARD_MODEL:-meta-llama/Llama-Prompt-Guard-2-86M}
+      HF_TOKEN: ${HF_TOKEN:-}
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://huggingface.co}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-mysql,redis,milvus,embedding,intent,guard,localhost,127.0.0.1}
+    volumes:
+      - guard_cache:/home/guard/.cache
+    expose:
+      - "8092"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8092/health', timeout=5)"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
 volumes:
+  guard_cache:
   mysql_data:
   langgraph_postgres_data:
   redis_data:

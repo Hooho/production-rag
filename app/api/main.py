@@ -48,6 +48,7 @@ from ..mysql.store import (data_permissions, document_heads, document_shares, do
 from ..observability import FEEDBACK_REASONS, run_columns, summarize_run
 from ..overview import RANGES as OVERVIEW_RANGES, overview as build_overview
 from ..security import detect_injection
+from ..security_model import InjectionModel
 from ..security_samples import CATEGORIES as INJECTION_CATEGORIES, NORMAL_QUESTIONS, SOURCES as INJECTION_SOURCES, InjectionSamples
 from ..storage import Storage
 
@@ -449,6 +450,8 @@ def create_app(store=None, models=None, jwt_secret=None):
             app.state.agent.injection_samples.seed()
         except Exception:
             logger.exception("injection_samples_seed_failed")
+        # 注入检测模型（guard 服务）：输入安全检查的第三层，没有设置 GUARD_URL 时跳过。
+        app.state.agent.injection_model = InjectionModel()
         app.state.memory = Memory()
         # 同一时间只允许一次界面发起的评测：评测会连续调用重排模型，并发跑多次既慢又会互相拖慢耗时统计。
         app.state.eval_lock = Lock()
@@ -1740,6 +1743,10 @@ def create_app(store=None, models=None, jwt_secret=None):
             "settings": {"enabled": runtime_config.value("injection_vector_enabled"),
                 "threshold": runtime_config.value("injection_vector_threshold"),
                 "action": runtime_config.value("injection_vector_action")},
+            "model": {"enabled": runtime_config.value("injection_model_enabled"),
+                "threshold": runtime_config.value("injection_model_threshold"),
+                "action": runtime_config.value("injection_model_action"),
+                "health": app.state.agent.injection_model.health()},
             "items": [item for item in items if item.get("status") == "active"],
             "candidates": [item for item in items if item.get("status") == "candidate"]}
 
@@ -1772,9 +1779,19 @@ def create_app(store=None, models=None, jwt_secret=None):
             matches = injection_samples().match(app.state.models, body.text, limit=5)
         except Exception as error:
             raise HTTPException(503, f"向量服务不可用：{type(error).__name__}") from error
+        guard = app.state.agent.injection_model
+        model = None
+        if guard.deployed():
+            try:
+                score, name = guard.score(body.text)
+                model = {"score": round(score, 4), "model": name}
+            except Exception as error:
+                model = {"error": f"{type(error).__name__}: {str(error)[:200]}"}
         return {"rules": detect_injection(body.text), "matches": matches,
             "threshold": runtime_config.value("injection_vector_threshold"),
-            "action": runtime_config.value("injection_vector_action")}
+            "action": runtime_config.value("injection_vector_action"),
+            "model": model, "model_threshold": runtime_config.value("injection_model_threshold"),
+            "model_action": runtime_config.value("injection_model_action")}
 
     # 误拦检查：内置的正常问题，加上最近线上没被拦截的问题，逐条和样本比对，列出相似度最高的。
     # 超过阈值的就是换成「拦截」模式后会被误拦的问题；接近阈值的也列出来，供调阈值参考。

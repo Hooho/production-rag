@@ -68,8 +68,8 @@ def test_chat_guard(setup, runtime):
     body = client.post("/chat", headers=headers(), json=question(session_id, VARIANT)).json()
     guard = next(step for step in body["steps"] if step["id"] == "input_guard")
     assert body["route"] == "blocked" and guard["result"]["rules"][0]["rule"] == "vector_similar"
-    entry = guard["result"]["checked_rules"][-1]
-    assert entry["rule"] == "vector_similar" and entry["vector"]["action"] == "block"
+    entry = next(item for item in guard["result"]["checked_rules"] if item["rule"] == "vector_similar")
+    assert entry["vector"]["action"] == "block"
     runtime(injection_vector_action="log")
     body = client.post("/chat", headers=headers(), json=question(session_id, VARIANT)).json()
     assert body["route"] != "blocked"

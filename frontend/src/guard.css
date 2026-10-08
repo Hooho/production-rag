@@ -1,4 +1,4 @@
-/* 输入安全检查的两层：第一层规则匹配、第二层攻击样本向量匹配，各自一个小标题，组之间用细线分开。 */
+/* 输入安全检查的三层：规则匹配、攻击样本向量匹配、注入检测模型，各自一个小标题，组之间用细线分开。 */
 .guard-layers {
    display: grid;
    gap: 14px;
@@ -43,7 +43,7 @@
    font-size: 12px;
 }
 
-/* 每层下面的规则缩进到标题文字下面，看得出是这一层的子项。 */
+/* 每层下面的子项缩进到标题文字下面，看得出是这一层的。 */
 .guard-layers .intent-trace,
 .guard-layers p.guard-layer-note {
    padding-left: 16px;

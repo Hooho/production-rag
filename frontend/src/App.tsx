@@ -1234,21 +1234,25 @@ function outputGuardConclusion(result: Record<string, unknown>) {
   return `已处理 ${hits.length} 处：${names.map((name) => `「${name}」`).join("")}`;
 }
 
-// 输入安全检查分两层：先规则匹配（写死的正则），没命中再和攻击样本比语义相似度。结论按两层分别写。
+// 输入安全检查分三层：规则匹配（写死的正则）→ 攻击样本向量匹配 → 注入检测模型。结论按层写。
 function guardConclusion(result: Record<string, unknown>) {
   const hits = (Array.isArray(result.rules) ? result.rules : []) as GuardHit[];
   const catalog = (Array.isArray(result.checked_rules) ? result.checked_rules : []) as GuardRule[];
-  const rules = catalog.filter((item) => item.rule !== VECTOR_RULE);
+  const rules = catalog.filter((item) => item.rule !== VECTOR_RULE && item.rule !== MODEL_RULE);
   const vector = vectorCheck(catalog);
+  const judged = modelCheck(catalog);
   if (hits.some((hit) => hit.rule === VECTOR_RULE)) return `已拦截：和已知攻击样本意思相近（相似度 ${formatScore(vector?.score)}），不检索也不回答`;
+  if (hits.some((hit) => hit.rule === MODEL_RULE)) return `已拦截：注入检测模型判断为攻击（攻击概率 ${formatScore(judged?.score)}），不检索也不回答`;
   if (hits.length > 0) {
     const names = [...new Set(hits.map((hit) => catalog.find((item) => item.rule === hit.rule)?.label ?? String(hit.rule)))];
     return `已拦截：规则命中「${names.join("」「")}」，不检索也不回答`;
   }
-  const ruleText = rules.length > 0 ? `规则 ${rules.length} 类都没命中` : "没有命中注入规则";
-  if (!vector || vector.error || vector.score === null || vector.score === undefined) return `通过：${ruleText}`;
-  if (vector.action === "log") return `通过：${ruleText}；和攻击样本相似度 ${formatScore(vector.score)} 超过阈值 ${formatScore(vector.threshold)}，当前只记录、不拦截`;
-  return `通过：${ruleText}，和攻击样本最高相似度 ${formatScore(vector.score)}，低于阈值 ${formatScore(vector.threshold)}`;
+  const parts = [rules.length > 0 ? `规则 ${rules.length} 类都没命中` : "没有命中注入规则"];
+  if (vector && typeof vector.score === "number") parts.push(vector.action === "log"
+    ? `和攻击样本相似度 ${formatScore(vector.score)} 超过阈值（只记录）` : `和攻击样本最高相似度 ${formatScore(vector.score)}`);
+  if (judged && typeof judged.score === "number") parts.push(judged.action === "log"
+    ? `模型判断攻击概率 ${formatScore(judged.score)} 超过阈值（只记录）` : `模型判断攻击概率 ${formatScore(judged.score)}`);
+  return `通过：${parts.join("，")}`;
 }
 
 // 向量样本比对的结果写在清单里 rule 为 vector_similar 的一项（app/security_samples.py 的 catalog_entry）。
@@ -1259,20 +1263,29 @@ function vectorCheck(catalog: GuardRule[]) {
   return (catalog.find((item) => item.rule === VECTOR_RULE) as (GuardRule & { vector?: VectorCheck }) | undefined)?.vector;
 }
 
+// 第三层注入检测模型的结果写在清单里 rule 为 model_judged 的一项（app/security_model.py 的 catalog_entry）。
+const MODEL_RULE = "model_judged";
+type ModelCheck = { score?: number | null; threshold?: number; action?: "block" | "log" | null; model?: string; error?: string; skipped?: string };
+
+function modelCheck(catalog: GuardRule[]) {
+  return (catalog.find((item) => item.rule === MODEL_RULE) as (GuardRule & { model_check?: ModelCheck }) | undefined)?.model_check;
+}
+
 function formatScore(value: number | null | undefined) {
   return typeof value === "number" ? value.toFixed(2) : "—";
 }
 
 // 安全检查的规则清单（输入、输出共用）：每类写明中文名称、检查什么、示例或处理方式，命中的标红并附上命中的原文。
-// 输入安全检查（记录里有 blocked）分两组显示：第一层规则匹配、第二层攻击样本向量匹配；输出安全检查只有一组。
+// 输入安全检查（记录里有 blocked）分三组显示：第一层规则匹配、第二层攻击样本向量匹配、第三层注入检测模型；输出安全检查只有一组。
 function GuardRules({ result }: { result: Record<string, unknown> }) {
   const hits = (Array.isArray(result.rules) ? result.rules : []) as GuardHit[];
   const catalog = (Array.isArray(result.checked_rules) ? result.checked_rules : []) as GuardRule[];
   if (catalog.length === 0) return <span>此条记录未保存规则清单</span>;
   if (!Object.hasOwn(result, "blocked")) return <GuardRuleList catalog={catalog} hits={hits} />;
-  const rules = catalog.filter((item) => item.rule !== VECTOR_RULE);
+  const rules = catalog.filter((item) => item.rule !== VECTOR_RULE && item.rule !== MODEL_RULE);
   const entry = catalog.find((item) => item.rule === VECTOR_RULE) as (GuardRule & { vector?: VectorCheck }) | undefined;
-  const ruleHit = hits.some((hit) => hit.rule !== VECTOR_RULE);
+  const modelEntry = catalog.find((item) => item.rule === MODEL_RULE) as (GuardRule & { model_check?: ModelCheck }) | undefined;
+  const ruleHit = hits.some((hit) => hit.rule !== VECTOR_RULE && hit.rule !== MODEL_RULE);
   return <div className="guard-layers">
     <section>
       <h5><b>第一层</b>规则匹配<small>固定写法的正则，命中直接拦截</small></h5>
@@ -1283,19 +1296,29 @@ function GuardRules({ result }: { result: Record<string, unknown> }) {
       {entry ? <VectorRule entry={entry} blocked={hits.some((hit) => hit.rule === VECTOR_RULE)} />
         : <p className="guard-layer-note">{ruleHit ? "规则已经命中，没有再做向量比对。" : "没有做向量比对（未开启，或是更早的记录）。"}</p>}
     </section>
+    <section>
+      <h5><b>第三层</b>注入检测模型<small>前两层都没拦下时，交给模型判断攻击概率</small></h5>
+      {modelEntry ? <LayerRule label={modelEntry.label ?? "注入检测模型判断"} description={modelEntry.description}
+          check={modelEntry.model_check ?? {}} blocked={hits.some((hit) => hit.rule === MODEL_RULE)} />
+        : <p className="guard-layer-note">没有交给模型判断（未开启，或是更早的记录）。</p>}
+    </section>
   </div>;
 }
 
 function VectorRule({ entry, blocked }: { entry: GuardRule & { vector?: VectorCheck }; blocked: boolean }) {
-  const vector = entry.vector ?? {};
-  const skipped = Boolean(vector.error) || vector.score === null || vector.score === undefined;
-  const [tag, color] = blocked ? ["命中，已拦截", "red"] : vector.action === "log" ? ["超过阈值，只记录", "orange"] : skipped ? ["跳过", "gray"] : ["未命中", "green"];
+  return <LayerRule label={entry.label ?? "和已知攻击样本相似"} description={entry.description} check={entry.vector ?? {}} blocked={blocked} />;
+}
+
+// 第二、三层各只有一项：写明分数、阈值和处置（命中拦截 / 超过阈值只记录 / 未命中 / 跳过）。
+function LayerRule({ label, description, check, blocked }: { label: string; description?: string; check: { score?: number | null; action?: string | null; error?: string; skipped?: string }; blocked: boolean }) {
+  const skipped = Boolean(check.error || check.skipped) || check.score === null || check.score === undefined;
+  const [tag, color] = blocked ? ["命中，已拦截", "red"] : check.action === "log" ? ["超过阈值，只记录", "orange"] : skipped ? ["跳过", "gray"] : ["未命中", "green"];
   return <ol className="intent-trace guard-rules">
     <li className={blocked ? "is-accepted" : ""}>
       <span className="intent-trace-mark"><b>1</b></span>
-      <div><strong>{entry.label ?? "和已知攻击样本相似"}</strong>
+      <div><strong>{label}</strong>
         <em className={`status-tag is-${color}`}>{tag}</em>
-        {entry.description && <small>{entry.description}</small>}</div>
+        {description && <small>{description}</small>}</div>
     </li>
   </ol>;
 }

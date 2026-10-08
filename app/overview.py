@@ -101,7 +101,8 @@ def overview(engine, days=7, now=None):
     refusals = {}
     partial = 0
     security = {"blocked": 0, "rules": {}, "redacted_runs": 0, "redacted": 0, "output_runs": 0, "issues": {},
-        "vector_checked": 0, "vector_blocked": 0, "vector_logged": 0}
+        "vector_checked": 0, "vector_blocked": 0, "vector_logged": 0,
+        "model_checked": 0, "model_blocked": 0, "model_logged": 0}
     for row in run_rows:
         day = daily.get(local_day(row["created"], zone))
         if day is None:
@@ -261,6 +262,13 @@ def count_security(security, route, item):
             security["vector_blocked"] += 1
         elif vector.get("action") == "log":
             security["vector_logged"] += 1
+    judged = item.get("model") or {}
+    if judged.get("score") is not None:
+        security["model_checked"] += 1
+        if judged.get("action") == "block":
+            security["model_blocked"] += 1
+        elif judged.get("action") == "log":
+            security["model_logged"] += 1
     redacted = item.get("redacted_sources") or 0
     if redacted:
         security["redacted_runs"] += 1
@@ -282,4 +290,7 @@ def security_view(security, total):
         "output_runs": security["output_runs"], "issues": ranked(security["issues"], OUTPUT_LABELS),
         # 向量样本比对：比对了多少次、拦了多少、只记录模式下超过阈值（换成拦截模式就会被拦）的有多少。
         "vector": {"checked": security["vector_checked"], "blocked": security["vector_blocked"],
-            "logged": security["vector_logged"]}}
+            "logged": security["vector_logged"]},
+        # 注入检测模型：判断了多少次、拦了多少、只记录的有多少。
+        "model": {"checked": security["model_checked"], "blocked": security["model_blocked"],
+            "logged": security["model_logged"]}}

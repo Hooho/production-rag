@@ -74,6 +74,12 @@ SPECS = [
         "min": 0.5, "max": 0.99},
     {"key": "injection_vector_action", "group": "security", "type": "choice", "default": "log",
         "choices": ["log", "block"]},
+    # 第三层：注入检测模型（guard 服务，app/security_model.py）。模型给出攻击概率，超过阈值时按设置处理。
+    {"key": "injection_model_enabled", "group": "security", "type": "bool", "default": True},
+    {"key": "injection_model_threshold", "group": "security", "type": "float", "default": 0.9,
+        "min": 0.5, "max": 0.99},
+    {"key": "injection_model_action", "group": "security", "type": "choice", "default": "block",
+        "choices": ["log", "block"]},
     {"key": "gap_similarity", "group": "inspection", "type": "float", "default": 0.75,
         "min": 0.5, "max": 0.95},
     {"key": "content_min_negative", "group": "inspection", "type": "int",

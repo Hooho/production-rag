@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { addInjectionSample, checkFalsePositives, checkInjection, confirmInjectionSample, deleteInjectionSample, getInjectionSamples, type InjectionCheck, type InjectionFalsePositives, type InjectionSample, type InjectionView } from "./api";
+import { addInjectionSample, checkFalsePositives, checkInjection, confirmInjectionSample, deleteInjectionSample, getInjectionSamples, type GuardHealth, type InjectionCheck, type InjectionFalsePositives, type InjectionSample, type InjectionView } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./Security.css";
 
@@ -11,6 +11,10 @@ type ShowToast = (kind: "success" | "error", message: string) => void;
 type Tab = "items" | "candidates" | "false-positives";
 
 const ACTION_LABELS = { log: "只记录", block: "拦截" };
+// 第三层 guard 服务的状态。
+const HEALTH_LABELS: Record<GuardHealth["status"], string> = { ready: "已就绪", loading: "正在下载或加载模型", failed: "模型加载失败", unreachable: "连不上 guard 服务", missing: "没有部署" };
+// 待确认里「命中的规则」：除了四类正则，还可能是第三层模型判断的。
+const CANDIDATE_RULES: Record<string, string> = { model_judged: "注入检测模型判断为攻击" };
 
 function formatTime(value: string | null | undefined) {
   if (!value) return "";
@@ -42,11 +46,12 @@ export default function Security({ onNavigate, onToast }: { onNavigate: (path: s
   };
   const settings = data?.settings;
   return <div className="sec-page">
-    <p className="sec-subtitle">输入安全检查分两层：先用规则匹配固定写法，没命中再和这里的攻击样本比语义相似度，换了说法的攻击也能认出来。新出现的攻击加一条样本就能防，不用改代码。</p>
+    <p className="sec-subtitle">输入安全检查分三层，前一层拦下就不再往后查：先用规则匹配固定写法；没命中再和这里的攻击样本比语义相似度，换了说法的已知攻击也能认出来；还没拦下再交给注入检测模型判断，兜住没见过的新写法。模型判断为攻击的问题会进「待确认」，确认后加入样本库，下次在第二层就能拦下。</p>
     {error && <div className="field-error">{error}</div>}
     {!data && !error && <LoadingSkeleton label="正在加载安全样本"><SkeletonBlock className="sec-skeleton" /></LoadingSkeleton>}
     {data && settings && <>
       <section className="sec-card sec-status">
+        <h2>第二层 · 攻击样本向量匹配</h2>
         <dl>
           <div><dt>向量比对</dt><dd>{settings.enabled ? "已开启" : "已关闭"}</dd></div>
           <div><dt>超过阈值时</dt><dd>{ACTION_LABELS[settings.action]}</dd></div>
@@ -54,6 +59,17 @@ export default function Security({ onNavigate, onToast }: { onNavigate: (path: s
           <div><dt>样本</dt><dd>{data.items.length} 条{data.candidates.length > 0 && `，待确认 ${data.candidates.length} 条`}</dd></div>
         </dl>
         <p>{settings.action === "log" ? "当前只记录不拦截：超过阈值的问题照常回答，处理过程和运行概览里能看到。先用下面的「误拦检查」确认阈值合适，再到「RAG 配置 › 安全检查」里改成拦截。" : "超过阈值的问题会直接拒绝处理，和规则拦截一样。"} <button type="button" className="link-text" onClick={() => onNavigate("/maintenance/rag")}>去设置</button></p>
+      </section>
+
+      <section className="sec-card sec-status">
+        <h2>第三层 · 注入检测模型</h2>
+        <dl>
+          <div><dt>模型判断</dt><dd>{data.model.enabled ? "已开启" : "已关闭"}</dd></div>
+          <div><dt>判断为攻击时</dt><dd>{ACTION_LABELS[data.model.action]}</dd></div>
+          <div><dt>攻击概率阈值</dt><dd>{data.model.threshold.toFixed(2)}</dd></div>
+          <div><dt>guard 服务</dt><dd className={`sec-health is-${data.model.health.status}`}>{HEALTH_LABELS[data.model.health.status] ?? data.model.health.status}</dd></div>
+        </dl>
+        <p>{data.model.health.model && <>模型：{data.model.health.model}。</>}{data.model.health.status === "missing" ? "没有设置 GUARD_URL，这一层会跳过。" : data.model.health.status === "failed" ? `${data.model.health.error ?? ""}。这一层会跳过，不影响问答。` : data.model.health.status === "loading" ? "第一次启动要下载模型，好了之后自动生效；在这之前这一层跳过。" : data.model.health.status === "unreachable" ? "guard 容器没启动或网络不通，这一层会跳过。" : "前两层没拦下的问题会交给它判断。"} <button type="button" className="link-text" onClick={() => onNavigate("/maintenance/rag")}>去设置</button></p>
       </section>
 
       <TryIt />
@@ -95,13 +111,19 @@ function TryIt() {
     }
   };
   const top = result?.matches[0];
+  const modelScore = result?.model?.score;
   let verdict = "";
+  let blocked = false;
   if (result) {
-    if (result.rules.length > 0) verdict = "规则命中，直接拦截（不会再做向量比对）";
-    else if (top && top.score >= result.threshold) verdict = result.action === "block" ? "超过阈值，会被拦截" : "超过阈值，当前只记录、不拦截";
-    else verdict = "低于阈值，放行";
+    const vectorOver = Boolean(top && top.score >= result.threshold);
+    const modelOver = typeof modelScore === "number" && modelScore >= result.model_threshold;
+    if (result.rules.length > 0) verdict = "第一层规则命中，直接拦截（不会再往后查）";
+    else if (vectorOver && result.action === "block") verdict = "第二层：和攻击样本相似度超过阈值，会被拦截";
+    else if (modelOver && result.model_action === "block") verdict = `第三层：模型判断为攻击，会被拦截${vectorOver ? "（第二层超过阈值但只记录）" : ""}`;
+    else if (vectorOver || modelOver) verdict = "超过阈值，但当前设置是只记录、不拦截";
+    else verdict = "三层都没拦下，放行";
+    blocked = result.rules.length > 0 || vectorOver || modelOver;
   }
-  const blocked = Boolean(result && (result.rules.length > 0 || (top && top.score >= result.threshold)));
   return <section className="sec-card">
     <h2>试一试</h2>
     <p className="sec-note">输入一句话，看它和哪些样本最相似。可以用来验证新加的样本，或者看某个正常问题会不会被误拦。</p>
@@ -114,6 +136,8 @@ function TryIt() {
     {result && <div className="sec-result">
       <p className={`sec-verdict ${blocked ? "is-hit" : "is-pass"}`}>{verdict}</p>
       {result.rules.length > 0 && <p className="sec-note">命中规则：{result.rules.map((hit) => `${hit.rule}「${hit.text}」`).join("，")}</p>}
+      <p className="sec-note">第三层模型：{!result.model ? "没有部署，跳过" : result.model.error ? `调用失败（${result.model.error}）` : `攻击概率 ${result.model.score?.toFixed(2)}，阈值 ${result.model_threshold.toFixed(2)}`}</p>
+      <h3 className="sec-sub">第二层：最相似的攻击样本</h3>
       {result.matches.length === 0 ? <div className="sec-empty">样本库是空的。</div> : <ol className="sec-matches">
         {result.matches.map((match) => <li key={match.id}>
           <ScoreBar score={match.score} threshold={result.threshold} />
@@ -164,10 +188,10 @@ function SampleRow({ item, sources, busy, onDelete }: { item: InjectionSample; s
   </li>;
 }
 
-// 待确认：被规则拦下的问题。确认后加入样本库，同类的换个说法也能认出来；不是攻击（规则误拦）就忽略。
+// 待确认：被规则拦下、或被注入检测模型判断为攻击的问题。确认后加入样本库，同类的换个说法也能认出来；不是攻击（规则误拦）就忽略。
 function Candidates({ data, busy, onConfirm, onIgnore }: { data: InjectionView; busy: boolean; onConfirm: (item: InjectionSample, category: string) => void; onIgnore: (item: InjectionSample) => void }) {
   return <>
-    <p className="sec-note">线上被规则拦下的问题会自动出现在这里。是真的攻击就加入样本库，以后同一个意思换了说法也能拦住；如果是规则误拦的正常问题，忽略即可。</p>
+    <p className="sec-note">线上被规则拦下、或被注入检测模型判断为攻击的问题，会自动出现在这里。是真的攻击就加入样本库，以后同一个意思换了说法在第二层就能拦住；如果是误判的正常问题，忽略即可。</p>
     {data.candidates.length === 0 ? <div className="sec-empty">没有待确认的问题。</div>
       : <ul className="sec-candidates">{data.candidates.map((item) => <CandidateRow key={item.id} item={item} categories={data.categories} busy={busy} onConfirm={(category) => onConfirm(item, category)} onIgnore={() => onIgnore(item)} />)}</ul>}
   </>;
@@ -177,7 +201,7 @@ function CandidateRow({ item, categories, busy, onConfirm, onIgnore }: { item: I
   const [category, setCategory] = useState(item.category);
   return <li>
     <span className="sec-text">{item.text}</span>
-    <span className="sec-meta">{formatTime(item.created)} · 命中规则：{(item.rules ?? []).map((rule) => categories[rule] ?? rule).join("、") || "—"}</span>
+    <span className="sec-meta">{formatTime(item.created)} · 来源：{(item.rules ?? []).map((rule) => CANDIDATE_RULES[rule] ?? categories[rule] ?? rule).join("、") || "—"}</span>
     <span className="sec-actions">
       <select value={category} onChange={(event) => setCategory(event.target.value)}>
         {Object.entries(categories).map(([key, label]) => <option key={key} value={key}>{label}</option>)}

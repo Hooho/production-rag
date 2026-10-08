@@ -407,3 +407,31 @@
 .sec-page .link-text.is-muted {
    color: var(--t-7d95ac);
 }
+
+.sec-status h2 {
+   margin-bottom: 10px;
+}
+
+.sec-health.is-ready {
+   color: #166534;
+}
+
+.sec-health.is-loading {
+   color: #92400e;
+}
+
+.sec-health.is-failed,
+.sec-health.is-unreachable {
+   color: #991b1b;
+}
+
+.sec-health.is-missing {
+   color: var(--t-7d95ac);
+}
+
+.sec-sub {
+   margin: 10px 0 4px;
+   color: var(--t-5e7a95);
+   font-size: 12px;
+   font-weight: 600;
+}

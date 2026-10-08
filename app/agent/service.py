@@ -53,6 +53,8 @@ class Agent:
         self.search_tool = DocumentSearchTool()
         # 注入攻击的向量样本库（app/security_samples.py），api 启动时设置；没有设置时输入检查只用规则。
         self.injection_samples = None
+        # 注入检测模型（app/security_model.py），api 启动时设置；没有设置时不做第三层。
+        self.injection_model = None
         # 主 Agent 创建自己的 LangGraph 图
         self.graph = self.build_graph()
 
@@ -193,29 +195,47 @@ class Agent:
         })
         return {"steps": state["steps"]}
 
-    # 用规则检查问题中的直接注入（要求忽略指令、索取系统说明、越狱、伪造角色标记）。
-    # 命中时路由设为 blocked 并给出固定回答；这条记录仍写入 runs 便于审计，但不会作为后续轮次的历史交给模型。
-    # 第二层的向量样本比对见 app/security_samples.py。
+    # 输入安全检查分三层，前一层拦下就不再往后查：
+    # 1. 规则：写死的正则，认固定写法（app/security.py）；
+    # 2. 攻击样本向量：和样本库里的攻击说法比语义相似度（app/security_samples.py）；
+    # 3. 注入检测模型：guard 服务给出攻击概率（app/security_model.py）。
+    # 拦下时路由设为 blocked 并给出固定回答；这条记录仍写入 runs 便于审计，但不会作为后续轮次的历史交给模型。
+    # 每一层的结果都作为「检查的规则」清单里的一项写进记录，前端按层显示。
     def guard_input(self, state):
-        from ..security_samples import catalog_entry
-        hits = detect_injection(state["question"])
+        from ..runtime_config import value as runtime_value
+        from ..security_model import catalog_entry as model_entry
+        from ..security_samples import catalog_entry as vector_entry
+        question = state["question"]
+        hits = detect_injection(question)
         detail = "未发现注入特征" if not hits else "命中注入规则，已拒绝处理"
         checked = injection_rule_catalog()
-        # 第二层：规则没命中时，和已知攻击样本比语义相似度；比对结果作为清单里的一项写进记录。
-        # 规则命中的问题进样本库的「待确认」，管理员确认后，同类的换个说法也能认出来。
-        samples = self.injection_samples
-        if samples is not None and hits:
-            samples.add_candidate(state["question"], hits)
-        elif samples is not None:
-            vector = samples.check(state["models"], state["question"])
+        samples, guard = self.injection_samples, self.injection_model
+        # 规则命中的问题进样本库的「待确认」，管理员确认后，同类的换个说法在第二层也能认出来。
+        if hits and samples is not None:
+            samples.add_candidate(question, hits)
+        if not hits and samples is not None:
+            vector = samples.check(state["models"], question)
             if vector is not None:
-                checked = checked + [catalog_entry(vector)]
+                checked = checked + [vector_entry(vector)]
                 if vector.get("action") == "block":
                     hits = [{"rule": "vector_similar", "text": vector["sample"]}]
                     detail = "和已知攻击样本意思相近，已拒绝处理"
+        if guard is not None and hits:
+            if runtime_value("injection_model_enabled"):
+                checked = checked + [model_entry(skipped="前面的检查已经拦下，没有再交给模型判断。")]
+        elif guard is not None:
+            judged = guard.check(question)
+            if judged is not None:
+                checked = checked + [model_entry(judged)]
+                # 模型判断为攻击的（不论拦没拦）进待确认：确认后加入样本库，下次在第二层就能拦下。
+                if judged.get("action") and samples is not None:
+                    samples.add_candidate(question, [{"rule": "model_judged"}])
+                if judged.get("action") == "block":
+                    hits = [{"rule": "model_judged", "text": f"攻击概率 {judged['score']:.2f}"}]
+                    detail = "注入检测模型判断为攻击，已拒绝处理"
         self.add_step(state, "input_guard", "guard", "输入安全检查", detail, {
             "blocked": bool(hits), "rules": hits, "checked_rules": checked,
-            **self.no_model_info("程序内规则匹配", "识别问题中的直接提示注入"),
+            **self.no_model_info("规则匹配 + 攻击样本向量匹配 + 注入检测模型", "识别问题中的直接提示注入"),
         })
         update = {"steps": state["steps"]}
         if hits:
