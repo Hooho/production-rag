@@ -100,7 +100,8 @@ def overview(engine, days=7, now=None):
     intent = {"runs": 0, "reached": {}, "accepted": {}, "causes": {}}
     refusals = {}
     partial = 0
-    security = {"blocked": 0, "rules": {}, "redacted_runs": 0, "redacted": 0, "output_runs": 0, "issues": {}}
+    security = {"blocked": 0, "rules": {}, "redacted_runs": 0, "redacted": 0, "output_runs": 0, "issues": {},
+        "vector_checked": 0, "vector_blocked": 0, "vector_logged": 0}
     for row in run_rows:
         day = daily.get(local_day(row["created"], zone))
         if day is None:
@@ -253,6 +254,13 @@ def count_security(security, route, item):
         security["blocked"] += 1
         for rule in {hit.get("rule") for hit in item.get("rules") or [] if isinstance(hit, dict)}:
             security["rules"][rule] = security["rules"].get(rule, 0) + 1
+    vector = item.get("vector") or {}
+    if vector.get("score") is not None:
+        security["vector_checked"] += 1
+        if vector.get("action") == "block":
+            security["vector_blocked"] += 1
+        elif vector.get("action") == "log":
+            security["vector_logged"] += 1
     redacted = item.get("redacted_sources") or 0
     if redacted:
         security["redacted_runs"] += 1
@@ -271,4 +279,7 @@ def security_view(security, total):
     return {"runs": total, "blocked": security["blocked"], "blocked_rate": rate(security["blocked"], total),
         "rules": ranked(security["rules"], {key: value["label"] for key, value in RULE_INFO.items()}),
         "redacted_runs": security["redacted_runs"], "redacted": security["redacted"],
-        "output_runs": security["output_runs"], "issues": ranked(security["issues"], OUTPUT_LABELS)}
+        "output_runs": security["output_runs"], "issues": ranked(security["issues"], OUTPUT_LABELS),
+        # 向量样本比对：比对了多少次、拦了多少、只记录模式下超过阈值（换成拦截模式就会被拦）的有多少。
+        "vector": {"checked": security["vector_checked"], "blocked": security["vector_blocked"],
+            "logged": security["vector_logged"]}}

@@ -1259,7 +1259,7 @@ export type Overview = {
   retrieval: { runs: number; returned_zero: number; returned_zero_rate: number | null; top_score_p50: number | null; below_threshold: number; min_score: number };
   intent: { runs: number; stages: { stage: string; label: string; reached: number; accepted: number; hit_rate: number | null; share: number | null }[]; fallback_causes: { cause: string; label: string; count: number }[] };
   refusals: { total: number; partial: number; reasons: { reason: string; label: string; count: number }[] };
-  security: { runs: number; blocked: number; blocked_rate: number | null; rules: { key: string; label: string; count: number }[]; redacted_runs: number; redacted: number; output_runs: number; issues: { key: string; label: string; count: number }[] };
+  security: { runs: number; blocked: number; blocked_rate: number | null; rules: { key: string; label: string; count: number }[]; redacted_runs: number; redacted: number; output_runs: number; issues: { key: string; label: string; count: number }[]; vector: { checked: number; blocked: number; logged: number } };
   errors: { stages: { stage: string; label: string; count: number }[]; codes: { code: string; count: number }[] };
   feedback_reasons: { reason: string; label: string; count: number }[];
 };
@@ -1342,4 +1342,35 @@ export function deleteLongMemory(id: string) {
 
 export function clearLongMemory() {
   return request<LongMemoryView>("/memory/long/items", { method: "DELETE" });
+}
+
+// 安全样本（只有管理员）：输入安全检查第二层的向量样本库。
+export type InjectionSample = { id: string; text: string; category: string; source: string; status: "active" | "candidate"; created: string; created_by?: string | null; rules?: string[] };
+export type InjectionView = { categories: Record<string, string>; sources: Record<string, string>; settings: { enabled: boolean; threshold: number; action: "log" | "block" }; items: InjectionSample[]; candidates: InjectionSample[] };
+export type InjectionMatch = { id: string; text: string; category: string; score: number };
+export type InjectionCheck = { rules: { rule: string; text: string }[]; matches: InjectionMatch[]; threshold: number; action: "log" | "block" };
+export type InjectionFalsePositives = { threshold: number; checked: number; builtin: number; recent: number; over: number; items: { question: string; source: "builtin" | "recent"; score: number; sample: string; category: string; rules: string[] }[] };
+
+export function getInjectionSamples() {
+  return request<InjectionView>("/security/samples");
+}
+
+export function addInjectionSample(text: string, category: string) {
+  return request<InjectionView>("/security/samples", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, category }) });
+}
+
+export function deleteInjectionSample(id: string) {
+  return request<InjectionView>(`/security/samples/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export function confirmInjectionSample(id: string, category: string) {
+  return request<InjectionView>(`/security/samples/${encodeURIComponent(id)}/confirm`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ category }) });
+}
+
+export function checkInjection(text: string) {
+  return request<InjectionCheck>("/security/check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+}
+
+export function checkFalsePositives() {
+  return request<InjectionFalsePositives>("/security/false-positives", { method: "POST" });
 }

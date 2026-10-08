@@ -108,6 +108,7 @@ export default function Overview() {
             <div><dt>问题被拦截</dt><dd>{count(data.security.blocked)} 次（{percent(data.security.blocked_rate)}）</dd></div>
             <div><dt>来源里清理掉注入句子</dt><dd>{count(data.security.redacted_runs)} 次问答，共 {count(data.security.redacted)} 句</dd></div>
             <div><dt>回答里处理了不安全内容</dt><dd>{count(data.security.output_runs)} 次</dd></div>
+            <div><dt>和攻击样本相似</dt><dd>{data.security.vector.checked === 0 ? "没有比对过" : `拦截 ${count(data.security.vector.blocked)} 次，只记录 ${count(data.security.vector.logged)} 次（比对 ${count(data.security.vector.checked)} 次）`}</dd></div>
           </dl>
           {data.security.rules.length > 0 && <><h3 className="ov-sub">拦截命中的规则</h3><Breakdown items={data.security.rules} /></>}
           {data.security.issues.length > 0 && <><h3 className="ov-sub">回答检查处理的问题</h3><Breakdown items={data.security.issues} /></>}

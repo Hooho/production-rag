@@ -47,6 +47,8 @@ from ..mysql.store import (data_permissions, document_heads, document_shares, do
     run_errors, runs, sessions, user_group_members, user_groups, users)
 from ..observability import FEEDBACK_REASONS, run_columns, summarize_run
 from ..overview import RANGES as OVERVIEW_RANGES, overview as build_overview
+from ..security import detect_injection
+from ..security_samples import CATEGORIES as INJECTION_CATEGORIES, NORMAL_QUESTIONS, SOURCES as INJECTION_SOURCES, InjectionSamples
 from ..storage import Storage
 
 
@@ -122,6 +124,22 @@ class PromptVersionInput(BaseModel):
 class LongMemorySettingsInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool
+
+
+class InjectionSampleInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(min_length=1, max_length=500)
+    category: Literal["override", "prompt_leak", "role_play", "other"] = "other"
+
+
+class InjectionConfirmInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    category: Literal["override", "prompt_leak", "role_play", "other"] | None = None
+
+
+class InjectionCheckInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(min_length=1, max_length=2000)
 
 
 class PromptActivateInput(BaseModel):
@@ -425,6 +443,12 @@ def create_app(store=None, models=None, jwt_secret=None):
         if saved_llm:
             app.state.models.apply_llm(saved_llm)
         app.state.agent = Agent(app.state.models)
+        # 注入攻击的向量样本库，和长期记忆共用 LangGraph Store；第一次启动时写入内置样本。
+        app.state.agent.injection_samples = InjectionSamples(app.state.agent.response_agent.memory.store)
+        try:
+            app.state.agent.injection_samples.seed()
+        except Exception:
+            logger.exception("injection_samples_seed_failed")
         app.state.memory = Memory()
         # 同一时间只允许一次界面发起的评测：评测会连续调用重排模型，并发跑多次既慢又会互相拖慢耗时统计。
         app.state.eval_lock = Lock()
@@ -1705,6 +1729,79 @@ def create_app(store=None, models=None, jwt_secret=None):
         result = runtime_config.view(app.state.store.engine)
         result["changed"] = changed
         return result
+
+    # 安全样本（只有管理员）：输入安全检查第二层的向量样本库，查看、添加、删除、确认候选，试一试和误拦检查。
+    def injection_samples():
+        return app.state.agent.injection_samples
+
+    def injection_view():
+        items = injection_samples().items()
+        return {"categories": INJECTION_CATEGORIES, "sources": INJECTION_SOURCES,
+            "settings": {"enabled": runtime_config.value("injection_vector_enabled"),
+                "threshold": runtime_config.value("injection_vector_threshold"),
+                "action": runtime_config.value("injection_vector_action")},
+            "items": [item for item in items if item.get("status") == "active"],
+            "candidates": [item for item in items if item.get("status") == "candidate"]}
+
+    @app.get("/security/samples", dependencies=[Depends(require_admin)])
+    def list_injection_samples():
+        return injection_view()
+
+    @app.post("/security/samples")
+    def add_injection_sample(body: InjectionSampleInput, admin=Depends(require_admin)):
+        if injection_samples().add(body.text, body.category, user=admin["username"]) is None:
+            raise HTTPException(409, "样本库里已经有这条")
+        return injection_view()
+
+    @app.delete("/security/samples/{key}", dependencies=[Depends(require_admin)])
+    def delete_injection_sample(key: str):
+        if not injection_samples().delete(key):
+            raise HTTPException(404, "这条样本不存在")
+        return injection_view()
+
+    @app.post("/security/samples/{key}/confirm")
+    def confirm_injection_sample(key: str, body: InjectionConfirmInput, admin=Depends(require_admin)):
+        if injection_samples().confirm(key, body.category, admin["username"]) is None:
+            raise HTTPException(404, "这条样本不存在")
+        return injection_view()
+
+    # 试一试：一句话先过规则，再列出最相似的几条样本，和线上判断的结果一致。
+    @app.post("/security/check", dependencies=[Depends(require_admin)])
+    def check_injection(body: InjectionCheckInput):
+        try:
+            matches = injection_samples().match(app.state.models, body.text, limit=5)
+        except Exception as error:
+            raise HTTPException(503, f"向量服务不可用：{type(error).__name__}") from error
+        return {"rules": detect_injection(body.text), "matches": matches,
+            "threshold": runtime_config.value("injection_vector_threshold"),
+            "action": runtime_config.value("injection_vector_action")}
+
+    # 误拦检查：内置的正常问题，加上最近线上没被拦截的问题，逐条和样本比对，列出相似度最高的。
+    # 超过阈值的就是换成「拦截」模式后会被误拦的问题；接近阈值的也列出来，供调阈值参考。
+    @app.post("/security/false-positives", dependencies=[Depends(require_admin)])
+    def injection_false_positives():
+        with app.state.store.engine.connect() as connection:
+            rows = connection.execute(select(runs.c.question, runs.c.route).order_by(runs.c.created.desc()).limit(500)).mappings().all()
+        recent = []
+        for row in rows:
+            if row["route"] != "blocked" and row["question"] not in recent:
+                recent.append(row["question"])
+        questions = [("builtin", text) for text in NORMAL_QUESTIONS] + [("recent", text) for text in recent[:200]
+            if text not in NORMAL_QUESTIONS]
+        threshold = runtime_config.value("injection_vector_threshold")
+        results = []
+        try:
+            for source, text in questions:
+                top = (injection_samples().match(app.state.models, text, limit=1) or [None])[0]
+                if top:
+                    results.append({"question": text, "source": source, "score": top["score"], "sample": top["text"],
+                        "category": top["category"], "rules": [hit["rule"] for hit in detect_injection(text)]})
+        except Exception as error:
+            raise HTTPException(503, f"向量服务不可用：{type(error).__name__}") from error
+        results.sort(key=lambda item: -item["score"])
+        return {"threshold": threshold, "checked": len(results), "builtin": len(NORMAL_QUESTIONS),
+            "recent": len(questions) - len(NORMAL_QUESTIONS),
+            "over": sum(1 for item in results if item["score"] >= threshold), "items": results[:30]}
 
     # 提示词管理（只有管理员）：查看线上问答和文档导入用到的提示词，保存新版本、回滚到旧版本。
     @app.get("/prompts", dependencies=[Depends(require_admin)])

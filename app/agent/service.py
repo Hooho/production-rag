@@ -51,6 +51,8 @@ class Agent:
         self.order_tool = OrderTool()
         self.data_tool = DataQueryTool()
         self.search_tool = DocumentSearchTool()
+        # 注入攻击的向量样本库（app/security_samples.py），api 启动时设置；没有设置时输入检查只用规则。
+        self.injection_samples = None
         # 主 Agent 创建自己的 LangGraph 图
         self.graph = self.build_graph()
 
@@ -193,11 +195,26 @@ class Agent:
 
     # 用规则检查问题中的直接注入（要求忽略指令、索取系统说明、越狱、伪造角色标记）。
     # 命中时路由设为 blocked 并给出固定回答；这条记录仍写入 runs 便于审计，但不会作为后续轮次的历史交给模型。
+    # 第二层的向量样本比对见 app/security_samples.py。
     def guard_input(self, state):
+        from ..security_samples import catalog_entry
         hits = detect_injection(state["question"])
         detail = "未发现注入特征" if not hits else "命中注入规则，已拒绝处理"
+        checked = injection_rule_catalog()
+        # 第二层：规则没命中时，和已知攻击样本比语义相似度；比对结果作为清单里的一项写进记录。
+        # 规则命中的问题进样本库的「待确认」，管理员确认后，同类的换个说法也能认出来。
+        samples = self.injection_samples
+        if samples is not None and hits:
+            samples.add_candidate(state["question"], hits)
+        elif samples is not None:
+            vector = samples.check(state["models"], state["question"])
+            if vector is not None:
+                checked = checked + [catalog_entry(vector)]
+                if vector.get("action") == "block":
+                    hits = [{"rule": "vector_similar", "text": vector["sample"]}]
+                    detail = "和已知攻击样本意思相近，已拒绝处理"
         self.add_step(state, "input_guard", "guard", "输入安全检查", detail, {
-            "blocked": bool(hits), "rules": hits, "checked_rules": injection_rule_catalog(),
+            "blocked": bool(hits), "rules": hits, "checked_rules": checked,
             **self.no_model_info("程序内规则匹配", "识别问题中的直接提示注入"),
         })
         update = {"steps": state["steps"]}

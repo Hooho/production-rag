@@ -1,0 +1,409 @@
+/* 安全样本页：沿用主样式的配色变量（--t-xxxxxx），蓝调、绿调切换时一起变。 */
+.sec-page {
+   max-width: 1080px;
+}
+
+.sec-topbar {
+   margin-bottom: 20px;
+}
+
+.sec-subtitle {
+   margin-top: 8px;
+   color: var(--t-5e7a95);
+   font-size: 13px;
+   line-height: 1.7;
+}
+
+.sec-skeleton {
+   display: block;
+   height: 280px;
+}
+
+.sec-card {
+   margin-bottom: 16px;
+   border: 1px solid var(--t-e3edf5);
+   border-radius: 6px;
+   background: #fff;
+   padding: 16px 18px;
+}
+
+.sec-card h2 {
+   margin: 0 0 6px;
+   color: var(--t-1d3550);
+   font-size: 15px;
+}
+
+.sec-note {
+   margin: 0 0 10px;
+   color: var(--t-7d95ac);
+   font-size: 12px;
+   line-height: 1.7;
+}
+
+.sec-empty {
+   padding: 8px 0;
+   color: var(--t-7d95ac);
+   font-size: 13px;
+}
+
+.sec-page .primary-button {
+   height: 32px;
+   border-radius: 4px;
+   padding: 0 14px;
+   font-size: 13px;
+   line-height: 30px;
+   white-space: nowrap;
+}
+
+/* 当前设置一行 */
+.sec-status dl {
+   display: flex;
+   flex-wrap: wrap;
+   gap: 8px 28px;
+   margin: 0 0 8px;
+}
+
+.sec-status dt {
+   color: var(--t-7d95ac);
+   font-size: 12px;
+}
+
+.sec-status dd {
+   margin: 2px 0 0;
+   color: var(--t-1d3550);
+   font-size: 15px;
+   font-weight: 600;
+}
+
+.sec-status p {
+   margin: 0;
+   color: var(--t-5e7a95);
+   font-size: 12px;
+   line-height: 1.7;
+}
+
+/* 试一试 */
+.sec-try {
+   display: flex;
+   gap: 8px;
+   align-items: flex-start;
+}
+
+.sec-try textarea {
+   flex: 1;
+   min-width: 0;
+   resize: vertical;
+   border: 1px solid var(--t-cedfec);
+   border-radius: 4px;
+   padding: 8px 10px;
+   font: inherit;
+   font-size: 13px;
+   line-height: 1.6;
+}
+
+.sec-try textarea:focus,
+.sec-add input:focus {
+   outline: 2px solid var(--t-93c5fd);
+   border-color: var(--t-2563eb);
+}
+
+.sec-result {
+   margin-top: 12px;
+}
+
+.sec-verdict {
+   margin: 0 0 8px;
+   border-left: 3px solid;
+   padding: 6px 10px;
+   font-size: 13px;
+}
+
+.sec-verdict.is-hit {
+   border-color: #dc2626;
+   background: #fef2f2;
+   color: #991b1b;
+}
+
+.sec-verdict.is-pass {
+   border-color: #16a34a;
+   background: #f0fdf4;
+   color: #166534;
+}
+
+.sec-matches {
+   margin: 0;
+   padding: 0;
+   list-style: none;
+}
+
+.sec-matches li {
+   display: flex;
+   align-items: center;
+   gap: 12px;
+   border-top: 1px solid var(--t-f1f3f6);
+   padding: 7px 0;
+   font-size: 13px;
+}
+
+.sec-match-text {
+   min-width: 0;
+   color: var(--t-334e68);
+}
+
+/* 相似度条：竖线是阈值，超过阈值标红。 */
+.sec-score {
+   display: inline-flex;
+   flex: 0 0 auto;
+   align-items: center;
+   gap: 6px;
+}
+
+.sec-score-track {
+   position: relative;
+   display: inline-block;
+   width: 80px;
+   height: 6px;
+   border-radius: 3px;
+   background: var(--t-eef2f7, #eef2f7);
+}
+
+.sec-score-track span {
+   position: absolute;
+   top: 0;
+   left: 0;
+   height: 100%;
+   border-radius: 3px;
+   background: var(--t-93c5fd);
+}
+
+.sec-score-track i {
+   position: absolute;
+   top: -3px;
+   width: 2px;
+   height: 12px;
+   background: var(--t-334e68);
+}
+
+.sec-score.is-over .sec-score-track span {
+   background: #dc2626;
+}
+
+.sec-score b {
+   width: 32px;
+   color: var(--t-334e68);
+   font-size: 12px;
+   font-weight: 600;
+   font-variant-numeric: tabular-nums;
+}
+
+.sec-score.is-over b {
+   color: #991b1b;
+}
+
+/* 标签页 */
+.sec-tabs {
+   display: flex;
+   gap: 4px;
+   margin: -4px 0 12px;
+   border-bottom: 1px solid var(--t-e3edf5);
+}
+
+.sec-tabs button {
+   margin-bottom: -1px;
+   border: 0;
+   border-bottom: 2px solid transparent;
+   background: none;
+   padding: 6px 12px 8px;
+   color: var(--t-5e7a95);
+   font-size: 14px;
+   font-weight: 600;
+   cursor: pointer;
+}
+
+.sec-tabs button small {
+   margin-left: 4px;
+   color: var(--t-7d95ac);
+   font-size: 12px;
+   font-weight: 400;
+}
+
+.sec-tabs button.is-active {
+   border-bottom-color: var(--t-2563eb);
+   color: var(--t-1d4ed8);
+}
+
+/* 样本库 */
+.sec-add {
+   display: flex;
+   gap: 8px;
+   margin-bottom: 8px;
+}
+
+.sec-add input {
+   flex: 1;
+   min-width: 0;
+   height: 32px;
+   border: 1px solid var(--t-cedfec);
+   border-radius: 4px;
+   padding: 0 10px;
+   font-size: 13px;
+}
+
+.sec-add select,
+.sec-actions select {
+   height: 32px;
+   border: 1px solid var(--t-cedfec);
+   border-radius: 4px;
+   background: #fff;
+   padding: 0 6px;
+   font-size: 13px;
+}
+
+.sec-actions select {
+   height: 26px;
+   font-size: 12px;
+}
+
+.sec-group h3 {
+   margin: 14px 0 4px;
+   color: var(--t-5e7a95);
+   font-size: 12px;
+   font-weight: 600;
+}
+
+.sec-group h3 small {
+   margin-left: 4px;
+   color: var(--t-7d95ac);
+   font-weight: 400;
+}
+
+.sec-group ul,
+.sec-candidates {
+   margin: 0;
+   padding: 0;
+   list-style: none;
+}
+
+.sec-group li,
+.sec-candidates li {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: 6px 12px;
+   border-top: 1px solid var(--t-f1f3f6);
+   padding: 8px 0;
+   font-size: 13px;
+}
+
+.sec-text {
+   flex: 1 1 320px;
+   min-width: 0;
+   color: var(--t-173b5b);
+   word-break: break-word;
+}
+
+.sec-source {
+   border: 1px solid var(--t-cedfec);
+   border-radius: 3px;
+   padding: 0 6px;
+   color: var(--t-7d95ac);
+   font-size: 12px;
+}
+
+.sec-source.is-rule {
+   border-color: #f59e0b;
+   color: #92400e;
+}
+
+.sec-source.is-manual {
+   border-color: var(--t-2563eb);
+   color: var(--t-1d4ed8);
+}
+
+.sec-meta {
+   color: var(--t-7d95ac);
+   font-size: 12px;
+}
+
+.sec-actions {
+   display: inline-flex;
+   align-items: center;
+   gap: 10px;
+}
+
+.sec-actions .is-muted {
+   color: var(--t-7d95ac);
+}
+
+/* 误拦检查 */
+.sec-table {
+   width: 100%;
+   border-collapse: collapse;
+   font-size: 13px;
+}
+
+.sec-table th,
+.sec-table td {
+   border-bottom: 1px solid var(--t-f1f3f6);
+   padding: 7px 8px;
+   text-align: left;
+   vertical-align: top;
+}
+
+.sec-table th {
+   color: var(--t-7d95ac);
+   font-size: 12px;
+   font-weight: 500;
+}
+
+.sec-table td small {
+   display: block;
+   color: var(--t-7d95ac);
+   font-size: 12px;
+}
+
+.sec-table .num {
+   width: 130px;
+   text-align: right;
+}
+
+.sec-table tr.is-over td {
+   background: #fef2f2;
+}
+
+@media (max-width: 640px) {
+   .sec-try,
+   .sec-add {
+      flex-wrap: wrap;
+   }
+
+   .sec-try .primary-button,
+   .sec-add .primary-button {
+      width: 100%;
+   }
+}
+
+.sec-page .link-text,
+.sec-page .danger-text {
+   border: 0;
+   background: none;
+   padding: 0;
+   color: var(--t-2563eb);
+   font-size: 12px;
+   cursor: pointer;
+}
+
+.sec-page .danger-text {
+   color: #dc2626;
+   font-weight: 600;
+}
+
+.sec-page .link-text:disabled,
+.sec-page .danger-text:disabled {
+   opacity: .5;
+   cursor: not-allowed;
+}
+
+.sec-page .link-text.is-muted {
+   color: var(--t-7d95ac);
+}

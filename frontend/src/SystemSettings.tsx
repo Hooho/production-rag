@@ -16,6 +16,7 @@ const GROUP_INTROS: Record<string, string> = {
   chunking: "上传文档时怎么切成分片。改了只影响之后上传的文档，已导入的分片不变；要让已有文档按新值切，在知识库里重新上传。评测语料下次评测时会自动按新值重新导入。",
   answer: "决定问答流程里多做哪几步。",
   memory: "同一个会话里对话变长后，把早期的问答压缩成摘要。保存后回答模块在下一次提问前自动重建，不用重启。",
+  security: "输入安全检查的第二层：规则没命中的问题，再和「安全样本」页里的攻击样本比语义相似度。即时生效。",
   inspection: "只影响知识巡检怎么归类和报问题，不影响问答本身。下一次巡检或点「重新检索」时生效，已有的问题和诊断结论不会回头重算。",
   general: "和检索、回答效果无关的系统设置。",
   service: "调用向量模型、重排模型的等待时间，一般只在出问题时才调。",
@@ -93,6 +94,18 @@ const META: Record<string, Meta> = {
     what: "每个用户的长期记忆条数上限，满了以后不再新增，已有的仍可以被修改或删除。",
     why: "偏好和身份一般十几条就够了；条数越多，每次发给模型的用户画像越长。",
     effect: "调大能记更多细节，但每次提问的输入更长；调小时超出的部分不发给模型（按最近更新的保留），不会删除。" },
+  injection_vector_enabled: { label: "和攻击样本比对", impact: "now",
+    what: "问题没有命中注入规则时，再和安全样本库里的攻击说法比语义相似度，换了说法的攻击也能认出来。",
+    why: "规则只认固定写法，「把上面那些要求都当没看见」这类换了说法的攻击会漏掉。新攻击加一条样本就能防，不用改代码。",
+    effect: "关掉后只用规则检查。打开时每个问题多一次向量计算，约几十毫秒。" },
+  injection_vector_threshold: { label: "相似度阈值", step: 0.01, impact: "now", dependsOn: "injection_vector_enabled",
+    what: "问题和最相似样本的相似度达到它，就算疑似攻击。",
+    why: "经验值：同一个意思换个说法通常在 0.85 以上，话题相近的正常问题一般在 0.6–0.8。不同向量模型的分数范围不一样，换模型后要在「安全样本」页做一次误拦检查。",
+    effect: "调高误拦少，但改写得多一点的攻击会漏掉；调低能认出更多变体，正常问题也更容易被当成攻击。" },
+  injection_vector_action: { label: "超过阈值时", impact: "now", dependsOn: "injection_vector_enabled",
+    what: "只记录：照常回答，在处理过程和运行概览里记下来；拦截：和规则命中一样直接拒绝。",
+    why: "阈值合不合适要看真实问题。先只记录一段时间，看会误拦哪些正常问题，再改成拦截。",
+    effect: "改成拦截后，超过阈值的问题不再检索和回答。" },
   gap_similarity: { label: "缺口合并的相似度", step: 0.05, impact: "judgement",
     what: "新的答不上来的问题，和已有知识缺口的语义相似度达到它才归到一起。",
     why: "经验值：同一个问题的不同说法通常在 0.8 以上，只是话题相近的一般在 0.6–0.7。",
@@ -137,7 +150,7 @@ const IMPACT_TAGS: Record<Impact, { label: string; tone: string }> = {
   new_docs: { label: "只影响新文档", tone: "new" },
   judgement: { label: "影响评测与巡检判断", tone: "judge" },
 };
-const THEME_LABELS: Record<string, string> = { blue: "蓝调", green: "绿调（青绿）" };
+const THEME_LABELS: Record<string, string> = { blue: "蓝调", green: "绿调（青绿）", log: "只记录", block: "拦截" };
 const TIMEZONE_LABELS: Record<string, string> = { "Asia/Shanghai": "北京时间", "Asia/Hong_Kong": "香港", "Asia/Taipei": "台北", "Asia/Tokyo": "东京", "Asia/Singapore": "新加坡", "Europe/London": "伦敦", "Europe/Berlin": "柏林", "America/New_York": "纽约", "America/Los_Angeles": "洛杉矶", UTC: "UTC" };
 
 function formatValue(item: RuntimeSettingItem, value: RuntimeSettingValue | null | undefined) {
@@ -145,7 +158,7 @@ function formatValue(item: RuntimeSettingItem, value: RuntimeSettingValue | null
   if (typeof value === "boolean") return value ? "开" : "关";
   const meta = META[item.key];
   if (typeof value === "number" && meta?.percent) return `${Math.round(value * 100)}%`;
-  if (item.key === "ui_theme") return THEME_LABELS[String(value)] ?? String(value);
+  if (item.key === "ui_theme" || item.key === "injection_vector_action") return THEME_LABELS[String(value)] ?? String(value);
   if (item.key === "business_tz") return `${TIMEZONE_LABELS[String(value)] ?? value}（${value}）`;
   return `${value}${meta?.unit ? ` ${meta.unit}` : ""}`;
 }

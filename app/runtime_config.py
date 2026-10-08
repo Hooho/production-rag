@@ -24,10 +24,11 @@ HISTORY_LIMIT = 50
 CACHE_SECONDS = 5
 TIMEZONES = ["Asia/Shanghai", "Asia/Hong_Kong", "Asia/Taipei", "Asia/Tokyo", "Asia/Singapore", "Europe/London",
     "Europe/Berlin", "America/New_York", "America/Los_Angeles", "UTC"]
-GROUPS = {"retrieval": "检索", "chunking": "分片", "answer": "回答流程", "memory": "对话记忆", "inspection": "知识巡检", "general": "通用",
-    "service": "模型服务"}
+GROUPS = {"retrieval": "检索", "chunking": "分片", "answer": "回答流程", "memory": "对话记忆", "security": "安全检查",
+    "inspection": "知识巡检", "general": "通用", "service": "模型服务"}
 # 每组放在设置页的哪个页签：rag 是检索、回答和模型调用相关的参数，system 是和 RAG 无关的系统设置。
-PAGES = {"retrieval": "rag", "chunking": "rag", "answer": "rag", "memory": "rag", "inspection": "rag", "service": "rag", "general": "system"}
+PAGES = {"retrieval": "rag", "chunking": "rag", "answer": "rag", "memory": "rag", "inspection": "rag", "service": "rag", "security": "rag",
+    "general": "system"}
 
 
 # 默认值的来由（页面上的说明在 frontend/src/SystemSettings.tsx）：
@@ -66,6 +67,13 @@ SPECS = [
     # 长期记忆（app/memory/long_term.py）：跨会话记住用户的偏好、身份和长期关注的主题。
     {"key": "long_memory_enabled", "group": "memory", "type": "bool", "default": True},
     {"key": "long_memory_max_items", "group": "memory", "type": "int", "default": 30, "min": 5, "max": 100},
+    # 输入安全检查的第二层：和已知攻击样本比语义相似度（app/security_samples.py）。
+    # 默认只记录不拦截：阈值要先在「安全样本」页的误拦检查里确认，再改成拦截。
+    {"key": "injection_vector_enabled", "group": "security", "type": "bool", "default": True},
+    {"key": "injection_vector_threshold", "group": "security", "type": "float", "default": 0.85,
+        "min": 0.5, "max": 0.99},
+    {"key": "injection_vector_action", "group": "security", "type": "choice", "default": "log",
+        "choices": ["log", "block"]},
     {"key": "gap_similarity", "group": "inspection", "type": "float", "default": 0.75,
         "min": 0.5, "max": 0.95},
     {"key": "content_min_negative", "group": "inspection", "type": "int",

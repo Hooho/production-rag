@@ -66,7 +66,11 @@ def summarize_run(result):
     # 注入防护的结果：问题是否被拦截、来源清理了几条、回答处理了哪些问题，便于统计攻击和误拦。
     input_guard = steps.get("input_guard", {}).get("result", {})
     output_guard = steps.get("output_guard", {}).get("result", {})
+    # 向量样本比对的结果写在输入检查清单的 vector_similar 一项里：相似度和处置（拦截 / 只记录 / 放行）。
+    vector = next((item.get("vector") for item in input_guard.get("checked_rules") or []
+        if isinstance(item, dict) and item.get("rule") == "vector_similar"), None) or {}
     summary["security"] = {"blocked": bool(input_guard.get("blocked")), "rules": input_guard.get("rules", []),
+        "vector": {"score": vector.get("score"), "action": vector.get("action"), "error": bool(vector.get("error"))} if vector else None,
         "redacted_sources": (retrieval.get("stats") or {}).get("injection_redacted", 0),
         "output_issues": output_guard.get("issues", [])}
     response = steps.get("response", {}).get("result", {})
