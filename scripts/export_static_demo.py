@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import json
 import os
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -190,9 +191,9 @@ def chunk_view(row, document, position):
 
 
 
-# ---- 通过运行中的 API 录下新页面（专项、复测集、知识巡检、运行概览、RAG / 系统配置、证据分片）用到的只读接口响应 ----
+# ---- 通过运行中的 API 录下新页面（专项、复测集、知识巡检、运行概览、文档审核、提示词、安全样本、会话 / 长期记忆、RAG / 系统配置、证据分片）用到的只读接口响应 ----
 # 这些页面的数据由多个服务函数拼出来，直接请求本容器里的 API 最省事，也保证和页面看到的完全一致。
-# 只发 GET 和只读的证据查询（POST /eval/evidence），不改任何数据。
+# 只发 GET 和两个只读的 POST（证据查询 /eval/evidence、误拦检查 /security/false-positives），不改任何数据。
 API_URL = os.getenv("DEMO_API_URL", "http://127.0.0.1:8000")
 
 
@@ -278,6 +279,50 @@ def capture_live(engine, dataset):
 
     # 运行概览：近 7、30、90 天各录一份（按导出时的日期算）。
     live["overview"] = {str(days): get(f"/overview?days={days}") for days in (7, 30, 90)}
+
+    # 知识库：文档列表用 API 的结果（带审核、上架状态），以及每份文档的安全扫描问题。
+    live["documents"] = get("/documents")
+    live["document_problems"] = {}
+    for document in live["documents"]["documents"]:
+        document_id = urllib.parse.quote(document["document_id"])
+        try:
+            live["document_problems"][document["document_id"]] = get(f"/documents/{document_id}/problems")
+        except urllib.error.HTTPError:
+            pass
+
+    # 系统管理 → 文档审核：待审核和已处理两个列表，每条审核的详情（分片最多录前 5 页）。
+    live["document_reviews"] = {status: get(f"/admin/document-reviews?status={status}") for status in ("pending", "done")}
+    live["document_review_details"] = {}
+    for status in ("pending", "done"):
+        for review in live["document_reviews"][status]["items"]:
+            review_id = urllib.parse.quote(review["id"])
+            pages = {}
+            page, total_pages = 1, 1
+            while page <= min(total_pages, 5):
+                detail = get(f"/admin/document-reviews/{review_id}?page={page}")
+                pages[str(page)] = detail
+                total_pages = (detail.get("chunks") or {}).get("total_pages") or 1
+                page += 1
+            live["document_review_details"][review["id"]] = pages
+
+    # 系统管理 → 提示词：列表和每段提示词的详情（含历史版本）。
+    live["prompts"] = get("/prompts")
+    live["prompt_details"] = {item["id"]: get(f"/prompts/{urllib.parse.quote(item['id'])}") for item in live["prompts"]["items"]}
+
+    # 系统管理 → 安全样本：样本库，以及误拦检查（只读：拿内置正常问题和最近的提问比对样本库）。
+    live["security_samples"] = get("/security/samples")
+    try:
+        live["security_false_positives"] = api_post(token, "/security/false-positives", {})
+    except urllib.error.HTTPError:
+        live["security_false_positives"] = None
+
+    # 会话记忆和长期记忆：快照用户（admin）自己的。
+    live["memory_sessions"] = get("/memory/sessions")
+    live["memory_session_details"] = {}
+    for item in live["memory_sessions"]["items"]:
+        session_id = item.get("session_id") or item.get("id")
+        live["memory_session_details"][session_id] = get(f"/memory/sessions/{urllib.parse.quote(session_id)}")
+    live["memory_long"] = get("/memory/long")
 
     # 评测题目里「看证据所在的分片」：把调参评测集和专项评测集里出现过的证据都查一遍。
     texts = []
