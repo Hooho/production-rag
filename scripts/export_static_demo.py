@@ -522,6 +522,15 @@ def main():
         # 新页面（专项、复测集、知识巡检、RAG / 系统配置、证据分片）的只读接口响应。
         "live": capture_live(engine, dataset),
     }
+    # 快照会公开部署：文档原文、分片里的 Cookie、Token、签名等凭证换成 ***（规则见 scripts/demo_scrub.py）。
+    try:
+        from scripts.demo_scrub import scrub
+    except ImportError:
+        print("警告：容器里没有 scripts/demo_scrub.py（api 镜像需要重新构建），这次导出没有脱敏，"
+              "请用 python3 scripts/demo_scrub.py 再处理一遍", file=sys.stderr)
+    else:
+        snapshot = json.loads(json.dumps(snapshot, default=str))
+        snapshot = scrub(snapshot)
     print(json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"), default=str))
 
 
