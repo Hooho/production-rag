@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
-from .mysql.tables import feedback, run_errors, runs
+from .mysql.tables import document_steps, documents, feedback, run_errors, runs
 from .observability import FEEDBACK_REASONS, intent_path, refusal_reason
 from .security import OUTPUT_CHECKS, RULE_INFO
 from .runtime_config import value as runtime_value
@@ -40,6 +40,79 @@ REFUSAL_REASONS = [
 ]
 OUTPUT_LABELS = {item["rule"]: item["label"] for item in OUTPUT_CHECKS}
 STEP_LABELS = {**STAGE_LABELS, "request": "收到请求", "router": "分流", "context": "整理资料", "complete": "完成"}
+
+
+# 文档导入的各步骤，按处理顺序（和 scripts/worker.py 的 STAGE_ORDER 一致）。
+IMPORT_STEPS = [("parsing", "解析文档"), ("chunking", "切分文本"), ("context", "生成分片上下文"), ("embedding", "生成向量"),
+    ("indexing", "写入检索索引"), ("verify", "写入校验"), ("scan", "安全扫描")]
+# 版本状态归成几类结果；superseded 是处理成功后又被更新的版本取代，也算成功。
+IMPORT_RESULTS = [("listed", "成功"), ("flagged", "扫描有问题"), ("review", "待管理员审核"), ("staged", "待上架"),
+    ("failed", "处理失败"), ("rejected", "审核未通过"), ("processing", "处理中")]
+# 评测用户导入的评测语料不算：它们由评测自动导入，不是线上的文档。
+IMPORT_EXCLUDED_OWNERS = ("eval",)
+
+
+def import_result(status):
+    status = status or ""
+    if status.startswith("ready") or status == "superseded":
+        return "listed"
+    for prefix in ("flagged", "review", "staged"):
+        if status.startswith(prefix + ":"):
+            return prefix
+    if status in ("failed", "rejected"):
+        return status
+    return "processing"
+
+
+# 文档导入统计：这段时间上传的版本，各步骤耗时、结果，以及增量复用、缓存、跨用户复制省下了多少计算。
+# 数据来自 documents（状态、处理元数据）和 document_steps（每一步的耗时）；同一用户上传完全相同的文件不会建版本，不在这里。
+def imports_view(connection, start):
+    rows = connection.execute(select(documents.c.id, documents.c.title, documents.c.status, documents.c.document_metadata)
+        .where(documents.c.created >= start, documents.c.owner.notin_(IMPORT_EXCLUDED_OWNERS))).mappings().all()
+    ids = [row["id"] for row in rows]
+    steps = []
+    for index in range(0, len(ids), 500):
+        steps.extend(connection.execute(select(document_steps.c.document_id, document_steps.c.step_id,
+            document_steps.c.duration_ms, document_steps.c.detail).where(
+                document_steps.c.document_id.in_(ids[index:index + 500]))).mappings().all())
+    results = {}
+    savings = {"reused_vectors": 0, "embedded_vectors": 0, "context_generated": 0, "context_cached": 0, "copied": 0}
+    for row in rows:
+        key = import_result(row["status"])
+        results[key] = results.get(key, 0) + 1
+        metadata = row["document_metadata"] or {}
+        for field in ("reused_vectors", "embedded_vectors", "context_generated", "context_cached"):
+            savings[field] += int(metadata.get(field) or 0)
+        if metadata.get("copied_from"):
+            savings["copied"] += 1
+    durations = {}
+    per_version = {}
+    retried = set()
+    for step in steps:
+        if step["detail"] and step["step_id"] == "parsing" and step["detail"].startswith("第 ") and "次尝试" in step["detail"]:
+            retried.add(step["document_id"])
+        if step["duration_ms"] is None or step["step_id"] not in dict(IMPORT_STEPS):
+            continue
+        durations.setdefault(step["step_id"], []).append(step["duration_ms"])
+        per_version.setdefault(step["document_id"], {})[step["step_id"]] = step["duration_ms"]
+    total_ms = sum(sum(values) for values in durations.values())
+    labels = dict(IMPORT_STEPS)
+    titles = {row["id"]: row["title"] for row in rows}
+    slowest = []
+    for document_id, values in per_version.items():
+        step_id = max(values, key=values.get)
+        slowest.append({"document_id": document_id, "title": titles.get(document_id), "total_ms": sum(values.values()),
+            "slowest_step": labels[step_id], "slowest_ms": values[step_id]})
+    slowest.sort(key=lambda item: -item["total_ms"])
+    vectors = savings["reused_vectors"] + savings["embedded_vectors"]
+    return {"versions": len(rows), "retried": len(retried),
+        "results": [{"key": key, "label": label, "count": results[key]} for key, label in IMPORT_RESULTS if results.get(key)],
+        "steps": [{"step": step, "label": label, "count": len(durations[step]), "avg_ms": round(sum(durations[step]) / len(durations[step])),
+            "p50_ms": percentile(durations[step], 0.5), "p95_ms": percentile(durations[step], 0.95),
+            "share": rate(sum(durations[step]), total_ms)} for step, label in IMPORT_STEPS if durations.get(step)],
+        "slowest": slowest[:5],
+        "savings": {**savings, "vector_reuse_rate": rate(savings["reused_vectors"], vectors),
+            "context_cache_rate": rate(savings["context_cached"], savings["context_generated"])}}
 
 
 def percentile(values, ratio):
@@ -87,6 +160,7 @@ def overview(engine, days=7, now=None):
             run_errors.c.status_code, run_errors.c.error).where(run_errors.c.created >= start)).mappings().all()
         feedback_rows = connection.execute(select(feedback.c.updated, feedback.c.rating, feedback.c.reason).where(
             feedback.c.updated >= start)).mappings().all()
+        imports = imports_view(connection, start)
 
     day_keys = [(first_day + timedelta(days=offset)).isoformat() for offset in range(days)]
     daily = {key: {"date": key, "runs": 0, "errors": 0, "refused": 0, "knowledge": 0, "durations": [],
@@ -210,6 +284,7 @@ def overview(engine, days=7, now=None):
             for key, count in error_stages.items()], key=lambda item: -item["count"]),
             "codes": sorted([{"code": key, "count": count} for key, count in error_codes.items()],
                 key=lambda item: -item["count"])},
+        "imports": imports,
         "feedback_reasons": sorted([{"reason": key, "label": FEEDBACK_REASONS.get(key, key), "count": count}
             for key, count in reasons.items()], key=lambda item: -item["count"]),
     }

@@ -189,13 +189,15 @@
    color: var(--t-5e7a95);
 }
 
+/* 瀑布流：网格同一行按最高的面板对齐，矮的面板下面会空一大块；改成多列，面板按列往下排，各自多高占多高。 */
 .ov-panels {
-   display: grid;
-   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-   gap: 12px;
+   columns: 340px;
+   column-gap: 12px;
 }
 
 .ov-panel {
+   break-inside: avoid;
+   margin-bottom: 12px;
    border: 1px solid var(--t-e3edf5);
    border-radius: 6px;
    background: #fff;
@@ -320,7 +322,7 @@
 }
 
 .ov-footnote {
-   margin: 16px 0 0;
+   margin: 4px 0 0;
    color: var(--t-7d95ac);
    font-size: 12px;
 }
@@ -340,4 +342,51 @@
    color: var(--t-5e7a95);
    font-size: 12px;
    font-weight: 600;
+}
+
+/* 文档导入：最慢的版本 */
+.ov-slowest {
+   margin: 0;
+   padding: 0;
+   list-style: none;
+   font-size: 12px;
+}
+
+.ov-slowest li {
+   display: flex;
+   justify-content: space-between;
+   gap: 12px;
+   padding: 6px 0;
+   border-top: 1px solid var(--t-e6edf3, #e6edf3);
+}
+
+.ov-slowest a {
+   overflow: hidden;
+   white-space: nowrap;
+   text-overflow: ellipsis;
+}
+
+.ov-slowest span {
+   flex: none;
+   color: #7d95ac;
+}
+
+/* 面板按主题分组，组内仍是瀑布流 */
+.ov-group {
+   margin-top: 18px;
+}
+
+.ov-group-title {
+   display: flex;
+   align-items: baseline;
+   gap: 10px;
+   margin: 0 0 10px;
+   color: var(--t-1d3550);
+   font-size: 15px;
+}
+
+.ov-group-title small {
+   color: var(--t-7d95ac);
+   font-size: 12px;
+   font-weight: 400;
 }

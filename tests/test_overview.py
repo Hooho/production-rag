@@ -115,3 +115,36 @@ def test_overview_refusals_and_security(setup):
         {"id": "response", "result": {"citation_check": {"passed": False, "reason": "no_citation", "raw_answer": "资料中没有提及这一点。"}}}]})
     assert summary["refusal_reason"] == "self_refusal"
     assert refusal_reason({"citation": {"passed": False, "reason": "no_citation"}}) == "no_citation"
+
+
+# 文档导入：结果分布、各步骤耗时、最慢的版本，以及向量复用、上下文缓存、跨用户复制省下的计算；评测账号上传的不算。
+def test_overview_imports(setup):
+    from app.mysql.tables import document_steps, documents
+    client, store = setup
+    created = "2026-10-04T02:00:00+00:00"
+
+    def add_doc(connection, doc_id, status, owner="alice", metadata=None, steps=()):
+        connection.execute(documents.insert().values(id=doc_id, owner=owner, title=f"doc-{doc_id}", filename="a.md",
+            path="x", status=status, document_metadata=metadata or {}, created=created, updated=created,
+            doc_key=doc_id, version=1))
+        for order, (step_id, duration, detail) in enumerate(steps):
+            connection.execute(document_steps.insert().values(document_id=doc_id, step_id=step_id, step_order=order,
+                stage=step_id, title=step_id, status="completed", detail=detail, duration_ms=duration, updated=created))
+
+    with store.engine.begin() as connection:
+        add_doc(connection, "d1", "ready:3", metadata={"reused_vectors": 2, "embedded_vectors": 1,
+            "context_generated": 3, "context_cached": 2},
+            steps=[("parsing", 100, "第 2 次尝试（上次写入校验不一致），开始解析"), ("embedding", 900, "ok"), ("scan", 200, "ok")])
+        add_doc(connection, "d2", "flagged:2", metadata={"copied_from": "d1", "reused_vectors": 2, "embedded_vectors": 0},
+            steps=[("indexing", 50, "ok"), ("scan", 100, "ok")])
+        add_doc(connection, "d3", "failed")
+        add_doc(connection, "e1", "ready:1", owner="eval", steps=[("embedding", 99999, "ok")])
+    imports = overview(store.engine, 7, now=datetime(2026, 10, 4, 8, 0, tzinfo=timezone.utc))["imports"]
+    assert imports["versions"] == 3 and imports["retried"] == 1
+    assert {item["key"]: item["count"] for item in imports["results"]} == {"listed": 1, "flagged": 1, "failed": 1}
+    steps = {item["step"]: item for item in imports["steps"]}
+    assert steps["embedding"]["avg_ms"] == 900 and steps["scan"]["count"] == 2 and steps["scan"]["avg_ms"] == 150
+    assert steps["embedding"]["share"] == round(900 / 1350, 4)
+    assert imports["slowest"][0]["document_id"] == "d1" and imports["slowest"][0]["slowest_step"] == "生成向量"
+    savings = imports["savings"]
+    assert savings["copied"] == 1 and savings["vector_reuse_rate"] == 0.8 and savings["context_cache_rate"] == round(2 / 3, 4)

@@ -1262,6 +1262,14 @@ export type Overview = {
   security: { runs: number; blocked: number; blocked_rate: number | null; rules: { key: string; label: string; count: number }[]; redacted_runs: number; redacted: number; output_runs: number; issues: { key: string; label: string; count: number }[]; vector: { checked: number; blocked: number; logged: number }; model: { checked: number; blocked: number; logged: number } };
   errors: { stages: { stage: string; label: string; count: number }[]; codes: { code: string; count: number }[] };
   feedback_reasons: { reason: string; label: string; count: number }[];
+  // 文档导入：这段时间上传的版本（不含评测账号）。
+  imports: {
+    versions: number; retried: number;
+    results: { key: string; label: string; count: number }[];
+    steps: { step: string; label: string; count: number; avg_ms: number; p50_ms: number | null; p95_ms: number | null; share: number | null }[];
+    slowest: { document_id: string; title: string | null; total_ms: number; slowest_step: string; slowest_ms: number }[];
+    savings: { reused_vectors: number; embedded_vectors: number; context_generated: number; context_cached: number; copied: number; vector_reuse_rate: number | null; context_cache_rate: number | null };
+  };
 };
 
 export function getOverview(days: number) {

@@ -63,66 +63,107 @@ export default function Overview() {
         <DailyChart title="每天点踩数" days={data.daily} kind="bar" value={(day) => day.down} format={count} detail={(day) => `点赞 ${day.up}`} />
       </section>
 
-      <section className="ov-panels">
-        <Panel title="各阶段耗时" note="一次问答经过的各个步骤，按处理顺序。P95 最长的那一步通常就是要优化的地方。">
-          {data.stages.length === 0 ? <Empty /> : <table className="ov-table">
-            <thead><tr><th>阶段</th><th className="num">次数</th><th className="num">P50</th><th className="num">P95</th><th aria-hidden="true" /></tr></thead>
-            <tbody>{data.stages.map((stage) => {
-              const max = Math.max(...data.stages.map((item) => item.p95_ms ?? 0)) || 1;
-              return <tr key={stage.stage}><td>{stage.label}</td><td className="num">{count(stage.count)}</td><td className="num">{formatDuration(stage.p50_ms)}</td><td className="num">{formatDuration(stage.p95_ms)}</td>
-                <td className="ov-bar-cell"><span className="ov-inline-bar" style={{ width: `${((stage.p95_ms ?? 0) / max) * 100}%` }} /></td></tr>;
-            })}</tbody>
-          </table>}
-        </Panel>
-        <Panel title="问题分流" note="每个问题被分到哪条处理路线。">
-          <Breakdown items={data.routes.map((item) => ({ key: item.route, label: item.label, count: item.count }))} />
-        </Panel>
-        <Panel title="意图识别" note="每个问题依次尝试：规则 → 本地小模型 → 大模型，前一环认不出才交给下一环；大模型出错或没启用时由规则兜底。命中率 = 这一环命中 / 到达这一环的次数；占比 = 这一环命中 / 全部识别次数。">
-          {data.intent.runs === 0 ? <Empty /> : <>
-            <table className="ov-table">
-              <thead><tr><th>环节</th><th className="num">到达</th><th className="num">命中</th><th className="num">命中率</th><th className="num">占比</th><th aria-hidden="true" /></tr></thead>
-              <tbody>{data.intent.stages.map((stage) => <tr key={stage.stage}>
-                <td>{stage.label}</td><td className="num">{count(stage.reached)}</td><td className="num">{count(stage.accepted)}</td>
-                <td className="num">{stage.stage === "fallback" ? "—" : percent(stage.hit_rate)}</td><td className="num">{percent(stage.share)}</td>
-                <td className="ov-bar-cell"><span className="ov-inline-bar" style={{ width: `${(stage.share ?? 0) * 100}%` }} /></td>
-              </tr>)}</tbody>
-            </table>
-            {data.intent.fallback_causes.length > 0 && <p className="ov-codes">走到规则兜底的原因：{data.intent.fallback_causes.map((item) => `${item.label} ${item.count} 次`).join("，")}</p>}
-            {data.intent.stages.find((stage) => stage.stage === "small_model")?.reached === 0 && <p className="ov-codes">本地小模型没有到达过：「系统管理 › RAG 配置」里没有开启本地小模型，规则认不出的问题直接交给大模型。</p>}
-          </>}
-        </Panel>
-        <Panel title="检索" note="只统计走了知识检索的问答（含拒答）。">
-          {data.retrieval.runs === 0 ? <Empty /> : <dl className="ov-facts">
-            <div><dt>检索次数</dt><dd>{count(data.retrieval.runs)}</dd></div>
-            <div><dt>一段资料都没交给模型</dt><dd>{count(data.retrieval.returned_zero)} 次（{percent(data.retrieval.returned_zero_rate)}）</dd></div>
-            <div><dt>最相关资料得分（中位数）</dt><dd>{data.retrieval.top_score_p50 === null ? "—" : data.retrieval.top_score_p50.toFixed(2)}</dd></div>
-            <div><dt>最高分低于相关度阈值 {data.retrieval.min_score.toFixed(2)}</dt><dd>{count(data.retrieval.below_threshold)} 次</dd></div>
-          </dl>}
-        </Panel>
-        <Panel title="拒答原因" note="知识问答里回答「资料不足」或被引用检查拦截的原因，按处理顺序。没检索到资料、充分性判断资料不足是知识缺口，该补文档；相关度都低于阈值，看阈值是否太严；后三类是回答被引用检查拦截，看模型和回答提示词。">
-          <Breakdown items={data.refusals.reasons.map((item) => ({ key: item.reason, label: item.label, count: item.count }))} emptyText="这段时间没有拒答" />
-          {data.refusals.partial > 0 && <p className="ov-codes">另有 {count(data.refusals.partial)} 次没有拒答，但充分性判断认为资料只能回答一部分，也是知识缺口。</p>}
-        </Panel>
-        <Panel title="安全检查" note="问题进模型前（规则 → 攻击样本 → 注入检测模型）、来源交给模型前、回答返回前各检查一次。">
-          <dl className="ov-facts">
-            <div><dt>问题被拦截</dt><dd>{count(data.security.blocked)} 次（{percent(data.security.blocked_rate)}）</dd></div>
-            <div><dt>来源里清理掉注入句子</dt><dd>{count(data.security.redacted_runs)} 次问答，共 {count(data.security.redacted)} 句</dd></div>
-            <div><dt>回答里处理了不安全内容</dt><dd>{count(data.security.output_runs)} 次</dd></div>
-            <div><dt>和攻击样本相似</dt><dd>{data.security.vector.checked === 0 ? "没有比对过" : `拦截 ${count(data.security.vector.blocked)} 次，只记录 ${count(data.security.vector.logged)} 次（比对 ${count(data.security.vector.checked)} 次）`}</dd></div>
-            <div><dt>注入检测模型判断为攻击</dt><dd>{data.security.model.checked === 0 ? "没有判断过" : `拦截 ${count(data.security.model.blocked)} 次，只记录 ${count(data.security.model.logged)} 次（判断 ${count(data.security.model.checked)} 次）`}</dd></div>
-          </dl>
-          {data.security.rules.length > 0 && <><h3 className="ov-sub">拦截命中的规则</h3><Breakdown items={data.security.rules} /></>}
-          {data.security.issues.length > 0 && <><h3 className="ov-sub">回答检查处理的问题</h3><Breakdown items={data.security.issues} /></>}
-        </Panel>
-        <Panel title="失败发生在" note="失败前最后完成的一步，失败出在它之后的那一步；具体错误到知识巡检的「系统问题」里看。">
-          {data.errors.stages.length === 0 ? <Empty text="这段时间没有失败" /> : <>
-            <Breakdown items={data.errors.stages.map((item) => ({ key: item.stage, label: `${item.label}之后`, count: item.count }))} />
-            <p className="ov-codes">状态码：{data.errors.codes.map((item) => `${item.code} × ${item.count}`).join("，")}</p>
-          </>}
-        </Panel>
-        <Panel title="点踩原因" note="用户点踩时选的原因。">
-          <Breakdown items={data.feedback_reasons.map((item) => ({ key: item.reason, label: item.label, count: item.count }))} emptyText="这段时间没有点踩" />
-        </Panel>
+      <section className="ov-group">
+        <h2 className="ov-group-title">问答链路<small>一次问答从分流、意图识别、检索到失败的情况。</small></h2>
+        <div className="ov-panels">
+          <Panel title="各阶段耗时" note="一次问答经过的各个步骤，按处理顺序。P95 最长的那一步通常就是要优化的地方。">
+            {data.stages.length === 0 ? <Empty /> : <table className="ov-table">
+              <thead><tr><th>阶段</th><th className="num">次数</th><th className="num">P50</th><th className="num">P95</th><th aria-hidden="true" /></tr></thead>
+              <tbody>{data.stages.map((stage) => {
+                const max = Math.max(...data.stages.map((item) => item.p95_ms ?? 0)) || 1;
+                return <tr key={stage.stage}><td>{stage.label}</td><td className="num">{count(stage.count)}</td><td className="num">{formatDuration(stage.p50_ms)}</td><td className="num">{formatDuration(stage.p95_ms)}</td>
+                  <td className="ov-bar-cell"><span className="ov-inline-bar" style={{ width: `${((stage.p95_ms ?? 0) / max) * 100}%` }} /></td></tr>;
+              })}</tbody>
+            </table>}
+          </Panel>
+          <Panel title="问题分流" note="每个问题被分到哪条处理路线。">
+            <Breakdown items={data.routes.map((item) => ({ key: item.route, label: item.label, count: item.count }))} />
+          </Panel>
+          <Panel title="意图识别" note="每个问题依次尝试：规则 → 本地小模型 → 大模型，前一环认不出才交给下一环；大模型出错或没启用时由规则兜底。命中率 = 这一环命中 / 到达这一环的次数；占比 = 这一环命中 / 全部识别次数。">
+            {data.intent.runs === 0 ? <Empty /> : <>
+              <table className="ov-table">
+                <thead><tr><th>环节</th><th className="num">到达</th><th className="num">命中</th><th className="num">命中率</th><th className="num">占比</th><th aria-hidden="true" /></tr></thead>
+                <tbody>{data.intent.stages.map((stage) => <tr key={stage.stage}>
+                  <td>{stage.label}</td><td className="num">{count(stage.reached)}</td><td className="num">{count(stage.accepted)}</td>
+                  <td className="num">{stage.stage === "fallback" ? "—" : percent(stage.hit_rate)}</td><td className="num">{percent(stage.share)}</td>
+                  <td className="ov-bar-cell"><span className="ov-inline-bar" style={{ width: `${(stage.share ?? 0) * 100}%` }} /></td>
+                </tr>)}</tbody>
+              </table>
+              {data.intent.fallback_causes.length > 0 && <p className="ov-codes">走到规则兜底的原因：{data.intent.fallback_causes.map((item) => `${item.label} ${item.count} 次`).join("，")}</p>}
+              {data.intent.stages.find((stage) => stage.stage === "small_model")?.reached === 0 && <p className="ov-codes">本地小模型没有到达过：「系统管理 › RAG 配置」里没有开启本地小模型，规则认不出的问题直接交给大模型。</p>}
+            </>}
+          </Panel>
+          <Panel title="检索" note="只统计走了知识检索的问答（含拒答）。">
+            {data.retrieval.runs === 0 ? <Empty /> : <dl className="ov-facts">
+              <div><dt>检索次数</dt><dd>{count(data.retrieval.runs)}</dd></div>
+              <div><dt>一段资料都没交给模型</dt><dd>{count(data.retrieval.returned_zero)} 次（{percent(data.retrieval.returned_zero_rate)}）</dd></div>
+              <div><dt>最相关资料得分（中位数）</dt><dd>{data.retrieval.top_score_p50 === null ? "—" : data.retrieval.top_score_p50.toFixed(2)}</dd></div>
+              <div><dt>最高分低于相关度阈值 {data.retrieval.min_score.toFixed(2)}</dt><dd>{count(data.retrieval.below_threshold)} 次</dd></div>
+            </dl>}
+          </Panel>
+          <Panel title="失败发生在" note="失败前最后完成的一步，失败出在它之后的那一步；具体错误到知识巡检的「系统问题」里看。">
+            {data.errors.stages.length === 0 ? <Empty text="这段时间没有失败" /> : <>
+              <Breakdown items={data.errors.stages.map((item) => ({ key: item.stage, label: `${item.label}之后`, count: item.count }))} />
+              <p className="ov-codes">状态码：{data.errors.codes.map((item) => `${item.code} × ${item.count}`).join("，")}</p>
+            </>}
+          </Panel>
+        </div>
+      </section>
+      <section className="ov-group">
+        <h2 className="ov-group-title">回答质量<small>哪些问题没答上来、用户不满意在哪。</small></h2>
+        <div className="ov-panels">
+          <Panel title="拒答原因" note="知识问答里回答「资料不足」或被引用检查拦截的原因，按处理顺序。没检索到资料、充分性判断资料不足是知识缺口，该补文档；相关度都低于阈值，看阈值是否太严；后三类是回答被引用检查拦截，看模型和回答提示词。">
+            <Breakdown items={data.refusals.reasons.map((item) => ({ key: item.reason, label: item.label, count: item.count }))} emptyText="这段时间没有拒答" />
+            {data.refusals.partial > 0 && <p className="ov-codes">另有 {count(data.refusals.partial)} 次没有拒答，但充分性判断认为资料只能回答一部分，也是知识缺口。</p>}
+          </Panel>
+          <Panel title="点踩原因" note="用户点踩时选的原因。">
+            <Breakdown items={data.feedback_reasons.map((item) => ({ key: item.reason, label: item.label, count: item.count }))} emptyText="这段时间没有点踩" />
+          </Panel>
+        </div>
+      </section>
+      <section className="ov-group">
+        <h2 className="ov-group-title">安全</h2>
+        <div className="ov-panels">
+          <Panel title="安全检查" note="问题进模型前（规则 → 攻击样本 → 注入检测模型）、来源交给模型前、回答返回前各检查一次。">
+            <dl className="ov-facts">
+              <div><dt>问题被拦截</dt><dd>{count(data.security.blocked)} 次（{percent(data.security.blocked_rate)}）</dd></div>
+              <div><dt>来源里清理掉注入句子</dt><dd>{count(data.security.redacted_runs)} 次问答，共 {count(data.security.redacted)} 句</dd></div>
+              <div><dt>回答里处理了不安全内容</dt><dd>{count(data.security.output_runs)} 次</dd></div>
+              <div><dt>和攻击样本相似</dt><dd>{data.security.vector.checked === 0 ? "没有比对过" : `拦截 ${count(data.security.vector.blocked)} 次，只记录 ${count(data.security.vector.logged)} 次（比对 ${count(data.security.vector.checked)} 次）`}</dd></div>
+              <div><dt>注入检测模型判断为攻击</dt><dd>{data.security.model.checked === 0 ? "没有判断过" : `拦截 ${count(data.security.model.blocked)} 次，只记录 ${count(data.security.model.logged)} 次（判断 ${count(data.security.model.checked)} 次）`}</dd></div>
+            </dl>
+            {data.security.rules.length > 0 && <><h3 className="ov-sub">拦截命中的规则</h3><Breakdown items={data.security.rules} /></>}
+            {data.security.issues.length > 0 && <><h3 className="ov-sub">回答检查处理的问题</h3><Breakdown items={data.security.issues} /></>}
+          </Panel>
+        </div>
+      </section>
+      <section className="ov-group">
+        <h2 className="ov-group-title">文档导入<small>这段时间上传的文档版本：耗时、结果和省下的计算。</small></h2>
+        <div className="ov-panels">
+          <Panel title="文档导入耗时" note={`这段时间上传的 ${count(data.imports.versions)} 个版本，各步骤按处理顺序；占比 = 这一步总耗时 / 全部步骤总耗时，占比最高的就是导入最该优化的地方。`}>
+            {data.imports.steps.length === 0 ? <Empty text="这段时间没有导入文档" /> : <>
+              <table className="ov-table">
+                <thead><tr><th>步骤</th><th className="num">次数</th><th className="num">平均</th><th className="num">P95</th><th className="num">占比</th><th aria-hidden="true" /></tr></thead>
+                <tbody>{data.imports.steps.map((step) => <tr key={step.step}>
+                  <td>{step.label}</td><td className="num">{count(step.count)}</td><td className="num">{formatDuration(step.avg_ms)}</td>
+                  <td className="num">{formatDuration(step.p95_ms)}</td><td className="num">{percent(step.share)}</td>
+                  <td className="ov-bar-cell"><span className="ov-inline-bar" style={{ width: `${(step.share ?? 0) * 100}%` }} /></td>
+                </tr>)}</tbody>
+              </table>
+              {data.imports.slowest.length > 0 && <><h3 className="ov-sub">最慢的版本</h3><ul className="ov-slowest">{data.imports.slowest.map((item) =>
+                <li key={item.document_id}><a href={`/knowledge/${item.document_id}`}>{item.title ?? item.document_id}</a><span>{formatDuration(item.total_ms)}，最慢的是{item.slowest_step} {formatDuration(item.slowest_ms)}</span></li>)}</ul></>}
+            </>}
+          </Panel>
+          <Panel title="文档导入结果" note="成功 = 已上架（含之后被新版本取代的）。扫描有问题、待审核、待上架的版本还没有生效。">
+            <Breakdown items={data.imports.results} emptyText="这段时间没有导入文档" />
+            {data.imports.versions > 0 && <dl className="ov-facts">
+              <div><dt>写入出错后自动重试成功或仍在重试</dt><dd>{count(data.imports.retried)} 个版本</dd></div>
+              <div><dt>向量复用（增量更新 + 跨用户复制）</dt><dd>{percent(data.imports.savings.vector_reuse_rate)}（复用 {count(data.imports.savings.reused_vectors)}，新算 {count(data.imports.savings.embedded_vectors)}）</dd></div>
+              <div><dt>分片上下文命中缓存</dt><dd>{percent(data.imports.savings.context_cache_rate)}（{count(data.imports.savings.context_cached)} / {count(data.imports.savings.context_generated)}）</dd></div>
+              <div><dt>直接复制别人已处理好的结果</dt><dd>{count(data.imports.savings.copied)} 次</dd></div>
+            </dl>}
+          </Panel>
+        </div>
       </section>
       <p className="ov-footnote">Token 只统计生成回答这一步（意图识别、问题改写、充分性判断、分片说明用的大模型调用没有算进来）。提问次数 = 成功的问答 + 失败的问答。</p>
     </>}
