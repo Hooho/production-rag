@@ -8,3 +8,6 @@ frontend/dist/
 
 # 本地开发专用的 compose 覆盖文件（端口映射等）
 compose.override.yaml
+
+# 文章配图和临时脚本，不进仓库
+Claude outputs/
