@@ -48,3 +48,9 @@
 .guard-layers p.guard-layer-note {
    padding-left: 16px;
 }
+
+/* 层标题里的标签：标签字号跟着所在文字走（.9em），放在标题里会跟着标题变大，这里按正文字号算，和其他步骤的标签一样大。 */
+.guard-layers h5 .step-tags {
+   font-size: 12px;
+   font-weight: 400;
+}
