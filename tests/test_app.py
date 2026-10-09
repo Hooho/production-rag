@@ -1292,6 +1292,14 @@ def test_sources_expand_to_parent_section(setup):
         if candidate["status"] == "returned":
             assert candidate["source_id"] in source_ids
     assert result["stats"]["parent_context"] == "on"
+    # 回答步骤记下组成父块的分片：顺序和 parent_chunk_ids 一致，命中的那片标出来，不存全文。
+    from app.agent.response import source_layout
+    layout = source_layout(first)
+    assert [part["chunk_id"] for part in layout["parts"]] == first["parent_chunk_ids"]
+    hits = [part for part in layout["parts"] if part["hit"]]
+    assert len(hits) == 1 and hits[0]["chunk_id"] == first["chunk_id"]
+    assert all(part["chars"] > 0 for part in layout["parts"])
+    assert "text" not in layout and layout["chars"] == len(first["text"])
 
 
 # 关闭父子分块时来源就是命中的子块本身。

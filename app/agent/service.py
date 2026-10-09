@@ -12,7 +12,7 @@ from ..security import BLOCKED_ANSWER, OUTPUT_CHECKS, check_answer, detect_injec
 from ..tools.data_query import DataQueryTool
 from ..tools.orders import OrderTool
 from ..tools.search import DocumentSearchTool
-from .response import ResponseAgent, prompt_markers, prompt_version
+from .response import ResponseAgent, coverage_note, prompt_markers, prompt_version, source_layout
 
 
 class AgentState(TypedDict, total=False):
@@ -496,6 +496,8 @@ class Agent:
                 "keep_tokens": self.response_agent.memory.keep_tokens,
                 "source_count": len(state["sources"]),
                 "source_characters": source_characters,
+                # 每段来源由哪几片拼成、命中哪一片、每片的上下文说明（不存全文），前端在"检索来源"下面展开查看。
+                "source_layout": [source_layout(source) for source in state["sources"]],
                 "memory_managed_by": "SummarizationMiddleware",
                 **self.no_model_info("程序内拼接记忆和检索来源", "按预算组装回答模型的输入上下文"),
             })
@@ -535,6 +537,12 @@ class Agent:
             "memory_trigger_tokens": self.response_agent.memory.trigger_tokens,
             "current_question": state["question"],
         }
+        # 回答模型收到的资料：系统说明后面依次拼上缺失提示、检索来源和用户画像，这里按同样的顺序记下来。
+        if state["sources"]:
+            profile = (state.get("memory_context") or {}).get("profile") or []
+            result["answer_context"] = {"note": coverage_note(state.get("coverage")),
+                "sources": [source_layout(source) for source in state["sources"]],
+                "profile": [{"category": item.get("category"), "content": item.get("content")} for item in profile]}
         if citation is not None:
             result["citation_check"] = citation
         sent = state["ai_memories"][sent_before:]

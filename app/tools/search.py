@@ -139,10 +139,13 @@ class DocumentSearchTool:
             item["source_id"] = f"S{len(sources) + 1}"
             text = item["text"]
             chunk_ids = [item["id"]]
+            # 父块由哪几片组成、每片多长：回答步骤据此显示"命中第几片、拼接了哪几片"，并在全文里高亮命中的那片。
+            parts = [{"chunk_id": item["id"], "position": item.get("position"), "chars": len(text),
+                "context": item.get("context")}]
             if use_parent:
                 expanded = self.parent_context(store, item, covered, config["parent_radius"], config["parent_max_chars"])
                 if expanded:
-                    text, chunk_ids = expanded
+                    text, chunk_ids, parts = expanded
             for chunk_id in chunk_ids:
                 covered[chunk_id] = item["source_id"]
             # 来源在交给充分性判断和回答模型之前先清理注入：命中规则的整句替换掉，伪造的 <source> 标签失效。
@@ -157,7 +160,8 @@ class DocumentSearchTool:
                 "score": round(item["final_score"], 6),
                 "retrieval_methods": item["retrieval_methods"], "version": item.get("version"),
                 "page_start": item.get("page_start"), "heading": item.get("heading"),
-                "chunk_id": item["id"], "parent_chunk_ids": chunk_ids, "injection": injection_hits})
+                "chunk_id": item["id"], "position": item.get("position"), "parent_chunk_ids": chunk_ids,
+                "parent_parts": parts, "injection": injection_hits})
         stats = {"queries": len(queries), "dense_hits": dense_hits,
             "keyword_hits": keyword_hits, "fused_candidates": len(candidates),
             "rerank_query": rerank_query, "reranked": rerank_count,
@@ -245,7 +249,7 @@ class DocumentSearchTool:
         result["sources"] = [] if result["refused"] else result["retrieval"]["sources"]
         return result
 
-    # 把命中的子块扩展为父块，返回 (父块文字, 组成父块的分片 id 列表)；找不到分片记录时返回 None，沿用子块。
+    # 把命中的子块扩展为父块，返回 (父块文字, 组成父块的分片 id 列表, 每片的 id/序号/字数/上下文说明)；找不到分片记录时返回 None，沿用子块。
     # 父块只在同一小节（标题路径相同）内扩展：跨小节拼接会把无关话题塞给模型。
     # 从命中分片开始交替向前、向后各加一个相邻分片，直到超出长度上限、离开小节或碰到已被其他父块包含的分片。
     @staticmethod
@@ -285,6 +289,7 @@ class DocumentSearchTool:
                 grew = True
         parts = []
         chunk_ids = []
+        layout = []
         for index in range(start, end + 1):
             row = rows[index]
             content = row["content"] or row["text"] or ""
@@ -294,10 +299,13 @@ class DocumentSearchTool:
                 content = content[overlap:].lstrip("\n")
             parts.append(content)
             chunk_ids.append(row["id"])
+            # 上下文说明（Contextual Retrieval 导入时为分片写的一两句话）：回答步骤里用它说明每一片讲的是什么，不用存全文。
+            layout.append({"chunk_id": row["id"], "position": row.get("position"), "chars": len(content),
+                "context": (row["chunk_metadata"] or {}).get("context")})
         body = "\n".join(parts)
         heading = " / ".join(path)
         text = f"标题路径：{heading}\n{body}" if heading else body
-        return text, chunk_ids
+        return text, chunk_ids, layout
 
     # "取最好名次"：同一路召回（向量或 BM25）在多个检索词下命中同一片段时，只保留名次最好的那次贡献，再把各路相加。
     # 默认的"全部累加"会让被多个检索词同时命中的片段得分翻倍；如果改写出的检索词彼此相近，

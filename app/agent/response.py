@@ -40,6 +40,30 @@ def format_source(source):
     return f'<source id="{source["id"]}" title="{title}">\n{neutralize_tags(source["text"])}\n</source>'
 
 
+# 充分性判断认为资料只能回答一部分时，拼在系统说明后面的提示；回答步骤也用它显示模型实际收到了什么。
+def coverage_note(coverage):
+    if coverage and coverage.get("verdict") == "partial":
+        return ("检索资料只能回答问题的一部分（缺少：" + (coverage.get("missing") or "部分信息") +
+            "）。只回答资料能支持的部分，并明确告诉用户哪些内容资料中没有。")
+    return ""
+
+
+# 回答模型收到的资料：每段来源的位置，以及组成父块的分片（命中的那片标出来）和每片的上下文说明。
+# 不存全文：全文在回答的来源里已经有一份，问答记录再存一份会让 runs 表的行变得很大。
+def source_layout(source):
+    hit = source.get("chunk_id")
+    parts = []
+    for part in source.get("parent_parts") or []:
+        context = part.get("context") or ""
+        parts.append({"chunk_id": part.get("chunk_id"), "position": part.get("position"),
+            "chars": part.get("chars"), "hit": part.get("chunk_id") == hit,
+            "context": None if not context or "<think" in context else context})
+    return {"id": source.get("id"), "title": source.get("title"), "heading": source.get("heading"),
+        "version": source.get("version"), "page_start": source.get("page_start"),
+        "chars": len(source.get("text") or ""), "chunk_id": hit, "position": source.get("position"),
+        "parts": parts, "injection": source.get("injection") or 0}
+
+
 class ResponseContext(TypedDict, total=False):
     sources: list[dict[str, Any]]
     # 检索充分性判断的结论；partial 时提示模型只回答资料支持的部分。
@@ -79,10 +103,7 @@ class ResponseAgent:
                 source_lines.append(format_source(source))
             # 充分性判断认为资料只能回答一部分时，明确告诉模型缺什么：
             # 原来只有一句"资料不足时明确拒答"，模型要么整体拒答，要么用常识把缺的部分补上。
-            partial_note = ""
-            if coverage and coverage.get("verdict") == "partial":
-                partial_note = ("检索资料只能回答问题的一部分（缺少：" + (coverage.get("missing") or "部分信息") +
-                    "）。只回答资料能支持的部分，并明确告诉用户哪些内容资料中没有。")
+            partial_note = coverage_note(coverage)
             return prompts.compose("answer") + partial_note + "\n\n本次检索来源：\n" + "\n".join(source_lines) + profile_block(profile)
 
         return create_agent(model=self.models.chat_model, tools=[], context_schema=ResponseContext,

@@ -6452,6 +6452,116 @@ input:focus {
    margin-top: 6px;
 }
 
+/* 回答模型收到的资料：每段来源一张卡片，写明命中和拼接的分片；全文里命中的分片高亮。 */
+.answer-source-list {
+   display: grid;
+   gap: 8px;
+   margin-top: 6px;
+}
+
+.answer-source {
+   padding: 8px 10px;
+   border: 1px solid var(--t-cedfec);
+   border-radius: 6px;
+   background: rgb(var(--t-eff6fc-rgb) / .98);
+}
+
+.answer-source-head {
+   display: flex;
+   gap: 8px;
+   align-items: baseline;
+}
+
+.answer-source-head>b {
+   color: var(--t-2563eb);
+}
+
+.answer-source-head>strong {
+   flex: 1;
+   min-width: 0;
+   overflow-wrap: anywhere;
+}
+
+.answer-source-head>strong .source-location {
+   margin-left: 6px;
+}
+
+.answer-source-head>span {
+   color: var(--t-6c8198);
+   white-space: nowrap;
+}
+
+.answer-source-parts {
+   display: block;
+   margin-top: 2px;
+   color: var(--t-536d86);
+}
+
+.context-source-layout {
+   margin-top: 4px;
+}
+
+.answer-part-list {
+   display: grid;
+   gap: 4px;
+   margin: 6px 0 0;
+   padding: 0;
+   list-style: none;
+}
+
+.answer-part-list>li {
+   padding: 4px 8px;
+   border-left: 3px solid var(--t-cedfec);
+   color: var(--t-536d86);
+}
+
+.answer-part-list>li.is-hit {
+   border-left-color: #f59e0b;
+   background: rgba(245, 158, 11, .12);
+   color: var(--t-173b5b);
+}
+
+.answer-part-list summary {
+   display: flex;
+   gap: 8px;
+   align-items: baseline;
+   cursor: pointer;
+   list-style: none;
+}
+
+.answer-part-list summary::-webkit-details-marker {
+   display: none;
+}
+
+.answer-part-list em {
+   font-style: normal;
+   color: var(--t-7793ad);
+}
+
+.answer-part-list>li.is-hit em {
+   color: var(--t-536d86);
+}
+
+/* 展开 / 收起按钮：跟在这一行信息后面，展开后文字变成"收起"。 */
+.answer-part-toggle::after {
+   content: "展开说明 ⌄";
+   color: var(--t-2563eb);
+}
+
+.answer-part-list details[open] .answer-part-toggle::after {
+   content: "收起 ⌃";
+}
+
+.answer-part-list details>p {
+   margin: 4px 0 0;
+   overflow-wrap: anywhere;
+}
+
+.answer-profile {
+   margin: 4px 0 0;
+   padding-left: 16px;
+}
+
 /* 输入安全检查的规则清单：命中的原文标红。 */
 .guard-rules small.guard-hit {
    color: #c2410c;

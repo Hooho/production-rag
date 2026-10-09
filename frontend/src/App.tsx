@@ -1065,7 +1065,7 @@ function formatResult(raw?: Record<string, unknown>, detail?: string, order?: st
   // 现在写成"上下文组成"（摘要 → 最近问答 → 检索来源）和"记忆用量"（已用 / 上限 + 进度条）两行，原始字段照常保存。
   const assembled = Object.hasOwn(result, "memory_token_budget") && Object.hasOwn(result, "source_count");
   const assembledHidden = new Set(["memory_token_budget", "estimated_memory_tokens", "recent_turns", "summary_characters",
-    "keep_messages", "keep_tokens", "source_count", "source_characters", "memory_managed_by", "process_method", "recent_characters"]);
+    "keep_messages", "keep_tokens", "source_count", "source_characters", "memory_managed_by", "process_method", "recent_characters", "source_layout"]);
   // 读取 Memory：以前 MySQL 历史、滚动摘要、Checkpoint 存储、Checkpoint 消息数各占一行，看不出哪些是完整记录、
   // 哪些是发给模型的记忆。现在分成"审计历史"（MySQL，完整记录，不发给模型）和"模型记忆"（Checkpoint，发给模型）两块。
   const memoryRead = Array.isArray(result.mysql_history) && Object.hasOwn(result, "checkpoint_messages");
@@ -1073,7 +1073,7 @@ function formatResult(raw?: Record<string, unknown>, detail?: string, order?: st
     "checkpoint_messages", "process_method", "redis_short_term", "memory_trigger_tokens", "memory_keep_messages", "memory_keep_tokens", "summary_model", "long_term_memory"]);
   const answered = Object.hasOwn(result, "summary_updated");
   const answeredHidden = new Set(["ai_memory_sent", "summary_updated", "checkpoint_messages_before",
-    "checkpoint_messages_sent", "memory_trigger_tokens", "current_question"]);
+    "checkpoint_messages_sent", "memory_trigger_tokens", "current_question", "answer_context"]);
   const filtered = sortFields(Object.entries(result), order).filter(([key]) =>
     key !== "total_duration_ms" && !(key === "stats" && Object.hasOwn(result, "diagnostics"))
     && !(traced && tracedHidden.has(key)) && !(judged && judgedHidden.has(key))
@@ -1102,10 +1102,13 @@ function formatResult(raw?: Record<string, unknown>, detail?: string, order?: st
     const mapped = { rules: hits, checked_rules: result.checked_rules ?? DEFAULT_OUTPUT_CHECKS };
     entries = [["guard_conclusion", outputGuardConclusion(mapped)], ["guard_rules", mapped], ...entries];
   }
-  if (answered && Array.isArray(result.ai_memory_sent) && result.ai_memory_sent.length > 0) {
+  // 回答模型收到的资料放在对话历史前面：系统说明后面先拼资料，对话历史作为历史消息发送。
+  const answerRows: Array<[string, unknown]> = [];
+  if (answered && result.answer_context && typeof result.answer_context === "object") answerRows.push(["answer_sources", result.answer_context]);
+  if (answered && Array.isArray(result.ai_memory_sent) && result.ai_memory_sent.length > 0) answerRows.push(["answer_history", result]);
+  if (answerRows.length > 0) {
     const index = entries.findIndex(([key]) => key === "prompt_version");
-    const row: [string, unknown] = ["answer_history", result];
-    entries = index < 0 ? [...entries, row] : [...entries.slice(0, index), row, ...entries.slice(index)];
+    entries = index < 0 ? [...entries, ...answerRows] : [...entries.slice(0, index), ...answerRows, ...entries.slice(index)];
   }
   return <div className="result-grid">{entries.map(([key, value]) => {
     const rendered = key === "sources" && Array.isArray(value) ? <RetrievalSources items={value} />
@@ -1123,6 +1126,7 @@ function formatResult(raw?: Record<string, unknown>, detail?: string, order?: st
                         : key === "context_parts" ? <ContextParts result={value as Record<string, unknown>} />
                           : key === "memory_usage" ? <MemoryUsage result={value as Record<string, unknown>} />
                             : key === "answer_history" ? <AnswerHistory result={value as Record<string, unknown>} />
+                            : key === "answer_sources" ? <AnswerSources context={value as AnswerContext} />
                               // 发给模型的上下文是次要信息，默认折叠；这一步的重点是上面的识别过程和结果。
                               // 不写调用次数：小模型和大模型两次调用会合并成一段，按段数计次会误导。
                               : key === "ai_memory_sent" && Array.isArray(value) ? <details className="ai-memory-collapse"><summary>展开查看</summary><AIMemorySent items={value} /></details>
@@ -1440,8 +1444,12 @@ function ContextParts({ result }: { result: Record<string, unknown> }) {
     ["最近问答", turns > 0 ? `${turns} 轮原文（${turns * 2} 条消息）${typeof result.recent_characters === "number" ? `，共 ${result.recent_characters} 字` : ""}` : "没有之前的对话"],
     ["检索来源", sources > 0 ? `${sources} 条，共 ${sourceCharacters} 字` : "没有来源，回答阶段直接拒答"],
   ];
+  // 检索来源可以展开看每段由哪几片拼成；旧记录没有 source_layout 时只显示条数和字数。
+  const layout = Array.isArray(result.source_layout) ? result.source_layout as AnswerSource[] : [];
   return <ol className="intent-trace">{parts.map(([title, text], index) =>
-    <li key={title}><span className="intent-trace-mark"><b>{index + 1}</b></span><div><strong>{title}</strong>：{text}</div></li>)}</ol>;
+    <li key={title}><span className="intent-trace-mark"><b>{index + 1}</b></span><div><strong>{title}</strong>：{text}
+      {title === "检索来源" && layout.length > 0 && <details className="ai-memory-collapse context-source-layout"><summary>展开查看每段由哪几片组成</summary><SourceLayoutList sources={layout} /></details>}
+    </div></li>)}</ol>;
 }
 
 // 压缩后保留原文的规则。现在按 Token 保留（整轮问答）；改版前的记录只有保留条数。
@@ -1494,6 +1502,68 @@ function AnswerHistory({ result }: { result: Record<string, unknown> }) {
       <ol className="intent-trace answer-history-list">{sections.map(([title, body], index) =>
         <li key={title}><span className="intent-trace-mark"><b>{index + 1}</b></span><div><strong>{title}</strong>{body}</div></li>)}</ol>
     </details>}
+  </div>;
+}
+
+type AnswerPart = { chunk_id?: string; position?: number | null; chars?: number | null; hit?: boolean; context?: string | null };
+type AnswerSource = { id: string; title?: string; heading?: string | null; version?: number | null; page_start?: number | null;
+  chars?: number; chunk_id?: string; position?: number | null; parts?: AnswerPart[]; injection?: number };
+type AnswerContext = { note?: string; sources?: AnswerSource[]; profile?: Array<{ category?: string; content?: string }> };
+
+// 分片序号从 0 开始存，页面上从第 1 片开始数。
+function piecePosition(position?: number | null) {
+  return typeof position === "number" ? `第 ${position + 1} 片` : "未知分片";
+}
+
+// 父子分块：命中第几片、拼接了哪几片。只有一片时写明没有拼接。
+function parentSummary(source: AnswerSource) {
+  const parts = source.parts ?? [];
+  const hit = piecePosition(source.position);
+  if (parts.length <= 1) return `命中：${hit} · 未拼接（只用命中的这一片）`;
+  return `命中：${hit} · 拼接：${parts.map((part) => typeof part.position === "number" ? part.position + 1 : "?").join("、")} 片（同一小节）`;
+}
+
+// 每段来源的组成：命中第几片、拼接了哪几片，每片列出上下文说明（全文在回答的来源里），命中的那片高亮。
+// "组装模型上下文"的检索来源和"回答模型收到的资料"共用。
+function SourceLayoutList({ sources }: { sources: AnswerSource[] }) {
+  return <div className="answer-source-list">{sources.map((source) =>
+    <article className="answer-source" key={source.id}>
+      <div className="answer-source-head"><b>{source.id}</b><strong>{source.title}<small className="source-location">{sourceLocation(source.version, source.page_start, source.heading)}</small></strong><span>{source.chars ?? 0} 字</span></div>
+      <small className="answer-source-parts">{parentSummary(source)}{source.injection ? " · 含注入内容，已清理" : ""}</small>
+      {(source.parts?.length ?? 0) > 0 && <ul className="answer-part-list">{source.parts!.map((part, index) =>
+        <li className={part.hit ? "is-hit" : ""} key={part.chunk_id ?? index}>
+          {/* 默认只显示"第几片 · 命中/拼接 · 字数"一行，上下文说明点开再看，分片多时不会铺满整屏。 */}
+          <details><summary><em>{piecePosition(part.position)} · {part.hit ? "命中" : "拼接"}{typeof part.chars === "number" ? ` · ${part.chars} 字` : ""}</em><span className="answer-part-toggle" aria-hidden="true" /></summary>
+            <p>{part.context || "（这一片没有上下文说明）"}</p>
+          </details>
+        </li>)}</ul>}
+    </article>)}</div>;
+}
+
+// 回答模型收到的资料：和发给模型的顺序一致——缺失提示、检索来源、用户画像。
+// 每段来源写明命中的子块和拼成父块的分片，每片只列上下文说明（全文在回答的来源里），命中的那片高亮。
+function AnswerSources({ context }: { context: AnswerContext }) {
+  const sources = context.sources ?? [];
+  const profile = context.profile ?? [];
+  const note = context.note ?? "";
+  const total = sources.reduce((sum, source) => sum + (source.chars ?? 0), 0);
+  const parts = [`${sources.length} 段资料（共 ${total} 字）`];
+  if (note) parts.push("缺失提示");
+  if (profile.length > 0) parts.push("用户画像");
+  const expanded = sources.filter((source) => (source.parts?.length ?? 0) > 1).length;
+  const help = note ? "资料只能回答一部分，已提示模型只回答有依据的部分"
+    : expanded > 0 ? `${expanded} 段由命中的分片和同一小节的相邻分片拼成` : "每段都是命中的分片本身，没有拼接";
+  const sections: Array<[string, ReactNode]> = [];
+  if (note) sections.push(["缺失提示", <p>{note}</p>]);
+  sections.push([`检索资料（${sources.length} 段）`, <SourceLayoutList sources={sources} />]);
+  if (profile.length > 0) sections.push([`用户画像（长期记忆 ${profile.length} 条）`, <ul className="answer-profile">{profile.map((item, index) => <li key={index}>[{item.category ?? "其他"}] {item.content}</li>)}</ul>]);
+  return <div className="answer-history">
+    <strong>{parts.join(" + ")}</strong>
+    <small className="result-help">{help}</small>
+    <details className="ai-memory-collapse"><summary>展开查看</summary>
+      <ol className="intent-trace answer-history-list">{sections.map(([title, body], index) =>
+        <li key={title}><span className="intent-trace-mark"><b>{index + 1}</b></span><div><strong>{title}</strong>{body}</div></li>)}</ol>
+    </details>
   </div>;
 }
 
@@ -1748,6 +1818,7 @@ function formatResultLabel(key: string) {
     answer_type: "回答类型",
     ai_memory_sent: "各次模型调用收到的上下文",
     answer_history: "回答模型收到的对话历史",
+    answer_sources: "回答模型收到的资料",
     context_parts: "上下文组成",
     audit_history: "审计历史",
     model_memory: "模型记忆",
