@@ -245,8 +245,11 @@ class InjectionSamples:
             matches = self.match(models, question, limit=1)
         except Exception as error:
             logger.warning("injection_vector_failed", exc_info=True)
-            return {"error": f"{type(error).__name__}: {str(error)[:200]}", "threshold": threshold, "mode": mode}
-        result = {"threshold": threshold, "mode": mode, "duration_ms": round((time.monotonic() - started) * 1000)}
+            return {"error": f"{type(error).__name__}: {str(error)[:200]}", "threshold": threshold, "mode": mode,
+                "embedding_model": models.embedding_model}
+        # 向量模型名写进记录，处理过程里第二层显示成模型标签。
+        result = {"threshold": threshold, "mode": mode, "duration_ms": round((time.monotonic() - started) * 1000),
+            "embedding_model": models.embedding_model}
         if not matches:
             return {**result, "score": None, "action": None}
         top = matches[0]

@@ -724,6 +724,29 @@ function modelTags(value: unknown): StackTagItem[] {
   });
 }
 
+// 输入安全检查三层用到的组件：第一层正则；第二层向量模型 + LangGraph Store（样本库）+ 余弦相似度；第三层注入检测模型。
+// 跳过的层（关闭、出错、前面已拦下）标签变淡。旧记录只有第一层，只显示正则。
+function guardLayerTags(result: Record<string, unknown>) {
+  const catalog = (Array.isArray(result.checked_rules) ? result.checked_rules : []) as Array<Record<string, unknown>>;
+  const rulesOff = catalog.some((item) => item.rule === "rule_layer_off");
+  const vector = catalog.find((item) => item.rule === "vector_similar")?.vector as Record<string, unknown> | undefined;
+  const judged = catalog.find((item) => item.rule === "model_judged")?.model_check as Record<string, unknown> | undefined;
+  const mute = (tag: StackTagItem, reason: string | null): StackTagItem => reason ? { ...tag, muted: reason } : tag;
+  const rules = [mute(ALGO("正则规则"), rulesOff ? "规则匹配已关闭" : null)];
+  const vectorSkipped = !vector ? null : vector.error ? `跳过：${String(vector.error)}` : vector.score === null || vector.score === undefined ? "跳过：样本库为空" : null;
+  const vectors = vector ? [
+    mute({ kind: "model", variant: "embedding", label: String(vector.embedding_model || "向量模型") }, vectorSkipped),
+    mute(LANGGRAPH("Store"), vectorSkipped), mute(ALGO("余弦相似度"), vectorSkipped)] : [];
+  const modelSkipped = !judged ? null : judged.skipped ? String(judged.skipped) : judged.error ? `跳过：${String(judged.error)}` : null;
+  const model = judged ? [mute({ kind: "model", variant: "small", label: String(judged.model || "Llama-Prompt-Guard-2-86M").split("/").pop() ?? "注入检测模型" }, modelSkipped)] : [];
+  return { rules, vectors, model };
+}
+
+function guardTags(result: Record<string, unknown>): StackTagItem[] {
+  const layers = guardLayerTags(result);
+  return [...layers.rules, ...layers.vectors, ...layers.model];
+}
+
 const LANGGRAPH = (name: string): StackTagItem => ({ kind: "framework", variant: "langgraph", label: `LangGraph · ${name}` });
 const LANGCHAIN = (name: string): StackTagItem => ({ kind: "framework", variant: "langchain", label: `LangChain · ${name}` });
 const STORE = (name: string): StackTagItem => ({ kind: "store", label: name });
@@ -736,7 +759,7 @@ function stepTags(step: TraceStep): StackTagItem[] {
   const method = String(result.process_method ?? "");
   switch (step.id) {
     case "request": return [LANGGRAPH("StateGraph")];
-    case "input_guard": return [ALGO("注入检查")];
+    case "input_guard": return guardTags(result);
     case "memory": return [STORE("MySQL"), LANGGRAPH("Checkpointer"),
       ...(Array.isArray(result.long_term_memory) ? [LANGGRAPH("Store")] : []),
       ...(result.redis_short_term ? [STORE("Redis")] : [])];
@@ -802,7 +825,8 @@ function StackField({ field, value, step }: { field: string; value: unknown; ste
     return tags.length ? <TagList tags={tags} /> : <ResultFieldValue value={value} field={field} />;
   }
   const all = step ? stepTags(step) : [];
-  const tags = all.filter((tag) => tag.kind !== "model");
+  // 模型一般在「调用的模型」一行显示，这里只列组件；输入安全检查没有那一行，模型也在这里列出。
+  const tags = step?.id === "input_guard" ? all : all.filter((tag) => tag.kind !== "model");
   if (tags.length === 0) {
     // 只用到模型的步骤（比如问题改写「通过 MiniMax-M3 模型改写问题」）：把文字里的模型名原地换成标签。
     const models = all.filter((tag) => tag.kind === "model");
@@ -1290,19 +1314,20 @@ function GuardRules({ result }: { result: Record<string, unknown> }) {
   const entry = catalog.find((item) => item.rule === VECTOR_RULE) as (GuardRule & { vector?: VectorCheck }) | undefined;
   const modelEntry = catalog.find((item) => item.rule === MODEL_RULE) as (GuardRule & { model_check?: ModelCheck }) | undefined;
   const ruleHit = hits.some((hit) => hit.rule !== VECTOR_RULE && hit.rule !== MODEL_RULE);
+  const layers = guardLayerTags(result);
   const rulesOff = catalog.some((item) => item.rule === RULES_OFF);
   return <div className="guard-layers">
     <section>
-      <h5><b>第一层</b>规则匹配<small>固定写法的正则，命中直接拦截</small></h5>
+      <h5><b>第一层</b>规则匹配<small>固定写法的正则，命中直接拦截</small><TagList tags={layers.rules} /></h5>
       {rulesOff ? <p className="guard-layer-note">规则匹配已在设置里关闭，这一层跳过。</p> : <GuardRuleList catalog={rules} hits={hits} />}
     </section>
     <section>
-      <h5><b>第二层</b>攻击样本向量匹配<small>规则没命中时，和攻击样本比语义相似度</small></h5>
+      <h5><b>第二层</b>攻击样本向量匹配<small>规则没命中时，和攻击样本比语义相似度</small>{layers.vectors.length > 0 && <TagList tags={layers.vectors} />}</h5>
       {entry ? <VectorRule entry={entry} blocked={hits.some((hit) => hit.rule === VECTOR_RULE)} />
         : <p className="guard-layer-note">{ruleHit ? "规则已经命中，没有再做向量比对。" : "没有做向量比对（未开启，或是更早的记录）。"}</p>}
     </section>
     <section>
-      <h5><b>第三层</b>注入检测模型<small>前两层都没拦下时，交给模型判断攻击概率</small></h5>
+      <h5><b>第三层</b>注入检测模型<small>前两层都没拦下时，交给模型判断攻击概率</small>{layers.model.length > 0 && <TagList tags={layers.model} />}</h5>
       {modelEntry ? <LayerRule label={modelEntry.label ?? "注入检测模型判断"} description={modelEntry.description}
           check={modelEntry.model_check ?? {}} blocked={hits.some((hit) => hit.rule === MODEL_RULE)} />
         : <p className="guard-layer-note">没有交给模型判断（未开启，或是更早的记录）。</p>}
@@ -1379,7 +1404,7 @@ function ModelMemory({ result }: { result: Record<string, unknown> }) {
     <div className="mem-parts">
       <div><i className="is-summary" />滚动摘要<b>{summaryCount} 条</b>{summary ? <details className="mem-fold"><summary>{summary.length} 字，展开</summary><p>{summary}</p></details> : <small>对话还没超过上限，没有摘要</small>}
         {/* 生成规则：旧记录没有这几个字段时按当时的默认配置（2400 Token、保留 6 条）写，模型名写成"大模型"。 */}
-        <small className="mem-rule">记忆超过 {Number(result.memory_trigger_tokens ?? 2400)} Token 时，由 {String(result.summary_model ?? "大模型")} 把较早的对话连同旧摘要压缩成一段，{keepRule(result.memory_keep_tokens, result.memory_keep_messages)}</small></div>
+        <small className="mem-rule">记忆超过 {Number(result.memory_trigger_tokens ?? 2400)} Token 时，由 <StackTag kind="model" variant="llm">{String(result.summary_model ?? "大模型")}</StackTag> 把较早的对话连同旧摘要压缩成一段，{keepRule(result.memory_keep_tokens, result.memory_keep_messages)}</small></div>
       <div><i className="is-turns" />最近问答<b>{turns} 轮 · {turnMessages} 条</b><small>问题和回答原文</small></div>
     </div>
     <small className="result-help">回答时发给模型的就是这份记忆；较早的对话超过上限后被压缩成摘要，所以比审计历史少{inMemory ? "。当前存在内存里，服务重启后记忆会丢失" : ""}</small>
