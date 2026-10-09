@@ -11,3 +11,7 @@ compose.override.yaml
 
 # 文章配图和临时脚本，不进仓库
 Claude outputs/
+
+# macOS 目录元数据、本地 guard 日志
+.DS_Store
+*.log
