@@ -4,12 +4,14 @@ import hashlib
 import json
 import logging
 import math
+import os
 
 from sqlalchemy import and_, delete, func, or_, select, text
 
 from . import runtime_config
 from .milvus.store import MilvusStore
-from .mysql.store import (MySQLStore, chunks, document_chunks, document_heads, document_permissions, document_shares,
+from .mysql.store import (MySQLStore, chunks, document_chunks, document_heads, document_permissions, document_reviews,
+    document_shares,
     document_steps, documents, metadata, orders, runs, sessions, settings, user_group_members, user_groups, users)
 from .redis.store import RedisStore
 from . import prompts
@@ -175,6 +177,12 @@ class Storage:
         vector_rows = []
         for row in rows:
             vector_rows.append(self.vector_row(row, document_id, row["chunk_metadata"]))
+        # 故障注入，只用于测试：设置 INGEST_FAULT_DROP_MILVUS=N 时，每次写 Milvus 故意少写 N 行且不报错，
+        # 用来在真实环境里复现「写进去了但少了几行」，验证写入校验、自动重试和手动重试。默认不设置，不生效。
+        drop = int(os.getenv("INGEST_FAULT_DROP_MILVUS") or 0)
+        if drop > 0:
+            logger.warning("ingest_fault_drop_milvus document_id=%s drop=%s", document_id, drop)
+            vector_rows = vector_rows[drop:]
         if vector_rows:
             self.milvus.upsert(vector_rows)
         with self.engine.begin() as connection:
@@ -188,6 +196,13 @@ class Storage:
             on_stage("indexing", "completed", "向量、全文索引和分片均已写入", {
                 "milvus_count": len(rows), "keyword_count": len(rows)})
         return len(rows)
+
+    # 写入校验：这一版在 MySQL、Milvus 里各有多少个分片。
+    def version_counts(self, document_id):
+        with self.engine.connect() as connection:
+            mysql = connection.execute(select(func.count()).select_from(document_chunks).where(
+                document_chunks.c.document_id == document_id)).scalar_one()
+        return {"mysql": mysql, "milvus": self.milvus.count_document(document_id)}
 
     # 为需要新计算的分片生成上下文说明，返回 {分片序号: 说明}。
     # 单个分片生成失败只跳过这一片（沿用不带说明的文字），不让整份文档导入失败；失败数量记录到文档元数据。
@@ -406,17 +421,108 @@ class Storage:
         # 重新算向量（评测语料也靠这个在下次评测时自动按新设置重新导入）。没记分片参数的老文档按 800 / 120 算。
         # PDF 的 OCR 语言和当前不同（以前没设置，按英文认）也不算重复，重新上传同一份扫描件就会按中文重新识别；
         # Excel、CSV 的切分方式变了（以前几行一片，现在一行一片）也一样。
-        chunk_size, chunk_overlap = chunk_settings()
         for document_id, document_metadata in rows:
             if doc_key is None or contextual is None:
                 return document_id
-            metadata = document_metadata or {}
-            if (bool(metadata.get("contextual_retrieval")) == contextual
-                    and metadata.get("chunk_size", 800) == chunk_size and metadata.get("overlap", 120) == chunk_overlap
-                    and (metadata.get("parse_strategy") != "hi_res" or metadata.get("ocr_languages") == OCR_LANGUAGES)
-                    and (metadata.get("parser") != "spreadsheet" or metadata.get("table_chunking") == TABLE_CHUNKING)):
+            if self.same_settings(document_metadata, contextual):
                 return document_id
         return None
+
+    # 一个已处理版本的处理设置和现在是否一致：上下文说明开关、分片大小和重叠、OCR 语言、表格切分方式。
+    # 不一致时它的结果不能直接拿来用（重复判断、跨用户复制都要先过这一关）。没记分片参数的老文档按 800 / 120 算。
+    @staticmethod
+    def same_settings(document_metadata, contextual):
+        chunk_size, chunk_overlap = chunk_settings()
+        metadata = document_metadata or {}
+        return (bool(metadata.get("contextual_retrieval")) == bool(contextual)
+            and metadata.get("chunk_size", 800) == chunk_size and metadata.get("overlap", 120) == chunk_overlap
+            and (metadata.get("parse_strategy") != "hi_res" or metadata.get("ocr_languages") == OCR_LANGUAGES)
+            and (metadata.get("parser") != "spreadsheet" or metadata.get("table_chunking") == TABLE_CHUNKING))
+
+    # 上传前查内容是否已经存在（上传弹窗里提示用）。按文件内容的 sha256 找：
+    # own 是自己文档里内容相同的当前版本；readable 是别人上传、自己本来就能看到（公开的、共享给我部门的）且已上架的。
+    # 别人私有的文档不出现在结果里，不会因此知道别人有哪些文件。
+    def content_matches(self, owner, content_sha256):
+        with self.engine.connect() as connection:
+            condition = self.readable_condition(connection, owner, document_heads.c.doc_key, document_heads.c.owner)
+            rows = connection.execute(select(document_heads.c.doc_key, document_heads.c.owner, document_heads.c.listed,
+                documents.c.id, documents.c.title, documents.c.version).select_from(
+                    document_heads.join(documents, documents.c.id == document_heads.c.current_document_id)).where(
+                    condition, documents.c.content_sha256 == content_sha256)).mappings().all()
+            my_groups = select(user_group_members.c.group_id).where(user_group_members.c.username == owner)
+            own, readable = [], []
+            for row in rows:
+                item = {"document_id": row["id"], "doc_key": row["doc_key"], "title": row["title"],
+                    "version": row["version"] or 1, "owner": row["owner"]}
+                if row["owner"] == owner:
+                    own.append({**item, "listing": "listed" if row["listed"] else "unlisted"})
+                    continue
+                if not row["listed"]:
+                    continue
+                visibility = connection.execute(select(document_permissions.c.visibility).where(
+                    document_permissions.c.doc_key == row["doc_key"])).scalar_one_or_none() or "private"
+                groups = connection.execute(select(user_groups.c.name).select_from(document_shares.join(
+                    user_groups, user_groups.c.id == document_shares.c.group_id)).where(
+                        document_shares.c.doc_key == row["doc_key"], document_shares.c.group_id.in_(my_groups))).scalars().all()
+                readable.append({**item, "visibility": visibility, "groups": list(groups)})
+        return {"own": own, "readable": readable}
+
+    # 跨用户复制的来源：别人上传、内容（sha256）完全相同、并且当前用户本来就能看到的文档（公开的、共享给我部门的），
+    # 取它已上架的当前版本。别人私有的文档不复制：处理得特别快会让上传者推断出「系统里有人传过这份文件」。
+    # 处理设置和向量模型都要和现在一致，否则复制过来的是按旧设置处理的结果。没有合适的来源返回 None。
+    def find_copy_source(self, owner, content_sha256, models):
+        with self.engine.connect() as connection:
+            condition = self.readable_condition(connection, owner, document_heads.c.doc_key, document_heads.c.owner)
+            rows = connection.execute(select(documents.c.id, documents.c.document_metadata).select_from(
+                document_heads.join(documents, documents.c.id == document_heads.c.current_document_id)).where(
+                    condition, document_heads.c.owner != owner, document_heads.c.listed.is_(True),
+                    documents.c.content_sha256 == content_sha256, documents.c.status.like("ready:%"))).all()
+        for document_id, metadata in rows:
+            metadata = metadata or {}
+            if metadata.get("embedding_model") != models.embedding_model or \
+                    metadata.get("embedding_dimension") != models.dimension:
+                continue
+            if self.same_settings(metadata, getattr(models, "contextual", False)):
+                return document_id
+        return None
+
+    # 把来源版本的分片原样复制成这个版本自己的一份：正文、带上下文说明的检索文字、元数据从 MySQL 取，向量从 Milvus 取。
+    # 复制出来的数据完全独立（新的分片 id「版本 id:序号」、新的 chunk_key），来源之后被删、被改都不影响它。
+    # 来源数据不完整（向量缺了）时抛出 ValueError，调用方退回正常处理。返回分片数。
+    def copy_version(self, source_id, document_id, doc_key, owner, title):
+        with self.engine.connect() as connection:
+            rows = connection.execute(select(chunks.c.id, chunks.c.text, chunks.c.content, chunks.c.chunk_key,
+                document_chunks.c.position, document_chunks.c.chunk_metadata).select_from(
+                    document_chunks.join(chunks, chunks.c.id == document_chunks.c.chunk_id)).where(
+                        document_chunks.c.document_id == source_id).order_by(
+                        document_chunks.c.position, chunks.c.id)).mappings().all()
+        if not rows:
+            raise ValueError("复制来源没有分片")
+        vectors = {}
+        for row in self.milvus.query_chunks(source_id, [row["chunk_key"] for row in rows]):
+            vectors[row["id"]] = [float(value) for value in row["vector"]]
+        if any(row["id"] not in vectors for row in rows):
+            raise ValueError("复制来源的向量不完整")
+        copied = []
+        for index, row in enumerate(rows):
+            metadata = dict(row["chunk_metadata"] or {})
+            # chunk_key 按「文档 + 分片原文（不含上下文说明）」计算，换了文档要重新算，以后上传新版本时才能增量复用。
+            text = row["text"] or ""
+            context = metadata.get("context")
+            piece = text[len(context) + 1:] if context and text.startswith(context + "\n") else text
+            metadata.update({"vector_source": "copied", "reused_from": row["id"],
+                "context_source": "copied" if context else metadata.get("context_source")})
+            copied.append({"id": f"{document_id}:{index}", "chunk_key": hashlib.sha256(f"{doc_key}\n{piece}".encode()).hexdigest(),
+                "owner": owner, "title": title, "text": text, "content": row["content"], "position": row["position"],
+                "vector": vectors[row["id"]], "chunk_metadata": metadata})
+        self.milvus.upsert([self.vector_row(row, document_id, row["chunk_metadata"]) for row in copied])
+        with self.engine.begin() as connection:
+            for row in copied:
+                connection.execute(chunks.insert().values(id=row["id"], owner=owner, title=title, text=row["text"],
+                    content=row["content"], chunk_key=row["chunk_key"]))
+                connection.execute(document_chunks.insert().values(document_id=document_id, chunk_id=row["id"],
+                    position=row["position"], chunk_metadata=row["chunk_metadata"]))
+        return len(copied)
 
     # 把处理成功的版本设为当前版本并清理被取代的旧版本，返回 (是否成为当前版本, 被取代的版本 id)。
     # 只在新版本号更大时切换：连续上传 v2、v3 时若 v3 先完成，稍后完成的 v2 不会把指针切回旧内容。
@@ -490,17 +596,25 @@ class Storage:
         registered = connection.execute(select(users.c.username).where(users.c.username == username)).first()
         if registered is None:
             return owner_column == username
-        public_keys = select(document_permissions.c.doc_key).where(document_permissions.c.visibility == "public")
+        # 别人的文档只有上架了才看得到：下架或还没上架过（没有当前版本）的只有上传者能看。
+        listed_keys = select(document_heads.c.doc_key).where(document_heads.c.listed.is_(True))
+        public_keys = select(document_permissions.c.doc_key).where(document_permissions.c.visibility == "public",
+            document_permissions.c.doc_key.in_(listed_keys))
         my_groups = select(user_group_members.c.group_id).where(user_group_members.c.username == username)
         shared_keys = select(document_shares.c.doc_key).join(document_permissions,
             document_permissions.c.doc_key == document_shares.c.doc_key).where(
-                document_permissions.c.visibility == "shared", document_shares.c.group_id.in_(my_groups))
+                document_permissions.c.visibility == "shared", document_shares.c.group_id.in_(my_groups),
+                document_shares.c.doc_key.in_(listed_keys))
         return or_(owner_column == username, doc_key_column.in_(public_keys), doc_key_column.in_(shared_keys))
 
     # 返回这个用户可读的某个文档版本；没有权限或不存在都返回 None，接口统一回 404，不暴露别人文档是否存在。
     def readable_document(self, username, document_id):
         with self.engine.connect() as connection:
             condition = self.readable_condition(connection, username, documents.c.doc_key, documents.c.owner)
+            # 待上架、有问题、等审核和没通过审核的版本只有上传者能看。
+            unreviewed = or_(documents.c.status.like("review:%"), documents.c.status.like("staged:%"),
+                documents.c.status.like("flagged:%"), documents.c.status == "rejected")
+            condition = and_(condition, or_(documents.c.owner == username, ~unreviewed))
             return connection.execute(select(documents).where(
                 documents.c.id == document_id, condition)).mappings().first()
 
@@ -530,8 +644,9 @@ class Storage:
     def current_versions(self, owner):
         with self.engine.connect() as connection:
             condition = self.readable_condition(connection, owner, document_heads.c.doc_key, document_heads.c.owner)
+            # 只检索上架的文档，下架的连上传者自己也检索不到。
             rows = connection.execute(select(document_heads.c.current_document_id,
-                document_heads.c.current_version).where(condition)).all()
+                document_heads.c.current_version).where(condition, document_heads.c.listed.is_(True))).all()
         versions = {}
         for document_id, version in rows:
             versions[document_id] = version
@@ -544,7 +659,8 @@ class Storage:
         with self.engine.connect() as connection:
             condition = self.readable_condition(connection, owner, document_heads.c.doc_key, document_heads.c.owner)
             rows = connection.execute(select(document_heads.c.doc_key, document_heads.c.owner, document_heads.c.title,
-                document_heads.c.current_document_id, document_heads.c.current_version).where(condition).order_by(
+                document_heads.c.current_document_id, document_heads.c.current_version).where(
+                    condition, document_heads.c.listed.is_(True)).order_by(
                     document_heads.c.title)).mappings().all()
             others = [row["doc_key"] for row in rows if row["owner"] != owner]
             public = set()
@@ -678,6 +794,7 @@ class Storage:
             connection.execute(delete(document_heads).where(document_heads.c.doc_key == doc_key))
             connection.execute(delete(document_permissions).where(document_permissions.c.doc_key == doc_key))
             connection.execute(delete(document_shares).where(document_shares.c.doc_key == doc_key))
+            connection.execute(delete(document_reviews).where(document_reviews.c.doc_key == doc_key))
             for version_id, _ in versions:
                 connection.execute(delete(document_steps).where(document_steps.c.document_id == version_id))
                 connection.execute(delete(documents).where(documents.c.id == version_id))

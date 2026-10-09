@@ -2004,6 +2004,27 @@ input:focus {
    color: #d45160;
 }
 
+/* 步骤跑完了但结果有问题（安全扫描发现疑似注入）：整行标红。 */
+.document-step.warning {
+   margin: 4px -10px;
+   border: 1px solid #f1a7b0;
+   border-radius: 6px;
+   background: #fff1f2;
+   padding: 10px;
+}
+
+.document-step.warning .document-step-icon {
+   border-color: #d45160;
+   background: #d45160;
+   color: #fff;
+   font-weight: 700;
+}
+
+.document-step.warning .document-step-copy strong,
+.document-step.warning .document-step-copy small {
+   color: #b4323f;
+}
+
 .document-step-copy {
    min-width: 0;
    flex: 1;
@@ -6074,6 +6095,57 @@ input:focus {
    color: var(--t-7793ad);
 }
 
+/* 上传者看到的公开审核状态：审核中（可撤回）、没通过及原因、公开文档的新版本要审核。 */
+.permission-review {
+   margin: 0 0 12px;
+   padding: 8px 12px;
+   border-radius: 6px;
+   background: var(--t-eef3f8);
+   color: var(--t-536d86);
+   font-size: 12px;
+   line-height: 1.7;
+}
+
+.permission-review.is-pending {
+   background: #f3edff;
+   color: #5b3bb5;
+}
+
+.permission-review.is-rejected {
+   background: #fdecee;
+   color: #b4323f;
+}
+
+.permission-review .link-text {
+   margin-left: 6px;
+   border: 0;
+   background: none;
+   padding: 0;
+   color: var(--t-2563eb);
+   font-size: 12px;
+   cursor: pointer;
+}
+
+.permission-review .link-text:disabled {
+   opacity: .5;
+   cursor: not-allowed;
+}
+
+.visibility-tag.is-review.is-pending {
+   background: #f3edff;
+   color: #7045d6;
+}
+
+.visibility-tag.is-unlisted {
+   background: #f1f3f5;
+   color: #6b7280;
+}
+
+.visibility-tag.is-review.is-rejected {
+   background: #fdecee;
+   color: #c93a4b;
+}
+
 @media (max-width: 640px) {
    .permission-options {
       grid-template-columns: 1fr;
@@ -7256,4 +7328,49 @@ input:focus {
 
 .table-report .is-warn {
    color: #b1771b;
+}
+
+/* 上传弹窗：内容已经存在的提示 */
+.upload-match {
+   margin: 12px 0 0;
+   border-radius: 6px;
+   padding: 10px 12px;
+   font-size: 12px;
+   line-height: 1.7;
+}
+
+.upload-match strong {
+   display: block;
+   margin-bottom: 2px;
+   font-size: 13px;
+}
+
+.upload-match p,
+.upload-match ul {
+   margin: 0;
+}
+
+.upload-match ul {
+   padding-left: 18px;
+}
+
+.upload-match .link-button {
+   margin-left: 8px;
+}
+
+.upload-match.is-checking {
+   padding: 0;
+   color: var(--t-7d95ac);
+}
+
+.upload-match.is-own {
+   border: 1px solid #b7e1c8;
+   background: #eefaf3;
+   color: #1f6b43;
+}
+
+.upload-match.is-readable {
+   border: 1px solid #f6d9a8;
+   background: #fff8ec;
+   color: #8a5a0b;
 }

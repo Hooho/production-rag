@@ -8,6 +8,8 @@ from sqlalchemy import or_, select
 
 from app.inspection.schedule import ScheduleRunner
 from app.models import Models
+from app.document_reviews import ReviewError, finish_version, list_version, scan_version
+from app.security_model import InjectionModel
 from app.mysql.store import document_steps, documents
 from app.storage import Storage
 from app.ingestion.parser import extract_sections_cached, parse_metadata
@@ -18,9 +20,16 @@ logger = logging.getLogger("production-rag-worker")
 QUEUE = "ingest:jobs"
 MAX_ATTEMPTS = 3
 # context 是 Contextual Retrieval 新增的阶段（为分片生成上下文说明），排在切分之后、生成向量之前。
-STAGE_ORDER = {"parsing": 2, "chunking": 3, "context": 4, "embedding": 5, "indexing": 6, "complete": 7}
+# scan：写完索引、切换当前版本之前扫描注入（规则 + 注入检测模型），结果决定直接生效还是先交给管理员审核。
+# verify：写完索引后核对 MySQL、Milvus 两边的分片数和应写的一致，对不上就当场按暂时性错误重试这一版。
+STAGE_ORDER = {"parsing": 2, "chunking": 3, "context": 4, "embedding": 5, "indexing": 6, "verify": 7, "scan": 8, "complete": 9}
 STAGE_TITLES = {"parsing": "解析文档", "chunking": "切分文本", "context": "生成分片上下文", "embedding": "生成向量",
-    "indexing": "写入检索索引", "complete": "完成导入"}
+    "indexing": "写入检索索引", "verify": "写入校验", "scan": "安全扫描", "complete": "完成导入"}
+# 写入校验发现两个库的分片数对不上。属于暂时性错误：清掉这一版重写一遍通常就好了。
+class WriteMismatch(RuntimeError):
+    pass
+
+
 # 文档本身的问题（没有文字、格式不支持、文件不存在、向量维度配置错误），重试多少次结果都一样，直接标记失败。
 PERMANENT_ERRORS = (ValueError, FileNotFoundError)
 
@@ -196,6 +205,40 @@ def handle_job(store, models, payload):
             time.sleep(wait)
 
 
+# 跨用户复制：上传的文件和当前用户能看到的某份已处理文档（别人公开的、共享给我部门的）内容完全相同时，
+# 直接复制它的解析结果、分片、上下文说明和向量，跳过解析、切分、上下文和向量计算；之后照常写入校验、安全扫描。
+# 来源在排队期间被删、被改，或者数据不完整，返回 None，调用方按正常流程处理。
+def copy_from_source(store, models, payload, update_stage):
+    source_id = payload.get("copy_from")
+    if not source_id:
+        return None
+    document_id = payload["document_id"]
+    if store.find_copy_source(payload["owner"], payload.get("content_sha256"), models) != source_id:
+        return None
+    with store.engine.connect() as connection:
+        source = connection.execute(select(documents.c.title, documents.c.document_metadata).where(
+            documents.c.id == source_id)).first()
+    if source is None:
+        return None
+    update_stage("parsing", "running", "内容和一份你能看到的已处理文档完全相同，正在复制它的处理结果")
+    try:
+        chunks = store.copy_version(source_id, document_id, payload.get("doc_key") or document_id,
+            payload["owner"], payload["title"])
+    except ValueError as error:
+        logger.warning("document_copy_failed id=%s source=%s error=%s", document_id, source_id, error)
+        store.remove_version_data(document_id)
+        return None
+    # 解析结果（解析器、页数、表格识别等）和处理设置一起带过来；文件大小、哈希用这次上传自己的。
+    skipped = {"mime_type", "file_size_bytes", "sha256", "injection_scan", "processing_duration_ms"}
+    metadata = {key: value for key, value in (source[1] or {}).items() if key not in skipped}
+    metadata.update({"copied_from": source_id, "reused_vectors": chunks, "embedded_vectors": 0})
+    store.mysql.update_document_metadata(document_id, metadata)
+    update_stage("parsing", "completed", f"内容和《{source[0]}》完全相同，复制它已处理好的 {chunks} 个分片，"
+        "跳过解析、切分、生成上下文和生成向量", {"copied_from": source[0], "chunks": chunks})
+    update_stage("indexing", "completed", "向量、全文索引和分片均已写入（复制）", {"milvus_count": chunks, "keyword_count": chunks})
+    return chunks
+
+
 # 解析、切分、向量化并写入一个文档版本，全部完成后切换为当前版本。
 # stage["current"] 记录正在执行的阶段，失败时用来标记是哪一步出错。
 def process_document(store, models, payload, stage):
@@ -207,7 +250,7 @@ def process_document(store, models, payload, stage):
         if status == "running":
             stage_started[name] = time.monotonic()
         duration_ms = None
-        if status == "completed" and name in stage_started:
+        if status in ("completed", "warning") and name in stage_started:
             duration_ms = round((time.monotonic() - stage_started[name]) * 1000)
         store.mysql.update_document_step(document_id, name, STAGE_ORDER[name], name, STAGE_TITLES[name],
             status, detail, result, duration_ms)
@@ -215,48 +258,89 @@ def process_document(store, models, payload, stage):
             store.mysql.update_document(document_id, f"processing:{name}")
 
     processing_started = time.monotonic()
-    parse_started = time.monotonic()
-    detail = "正在根据文件格式提取文本"
-    if stage.get("last_error"):
-        detail = f"第 {stage['attempt']} 次尝试（上次{stage['last_error']}），{detail}"
-    update_stage("parsing", "running", detail)
-    # 解析结果缓存在上传目录下（api 和 worker 共用的卷），重试或重启后同一文件不再重新解析。
-    cache_dir = os.path.join(os.getenv("UPLOAD_DIR", "./uploads"), ".parse_cache")
-    sections, stats, parse_cached = extract_sections_cached(payload["path"], cache_dir)
-    content = "\n\n".join(section["text"] for section in sections)
-    if not content.strip():
-        raise ValueError("文档没有可提取的文本")
-    parse_result = parse_metadata(payload["path"], sections, stats=stats)
-    parse_result["parse_duration_ms"] = round((time.monotonic() - parse_started) * 1000)
-    parse_result["parse_cached"] = parse_cached
-    store.mysql.update_document_metadata(document_id, parse_result)
-    update_stage("parsing", "completed", "文本提取完成（使用缓存的解析结果）" if parse_cached else "文本提取完成", {
-        "parse_cached": parse_cached,
-        "characters": len(content), "sections": len(sections),
-        "extension": os.path.splitext(payload["path"])[1].lower(),
-        "parser": parse_result["parser"], "parser_version": parse_result["parser_version"],
-        "parse_strategy": parse_result["parse_strategy"],
-        "page_count": parse_result["page_count"],
-        "empty_pages": len(parse_result["empty_pages"] or []),
-        "heading_detected": parse_result["heading_detected"],
-        "parse_duration_ms": parse_result["parse_duration_ms"]})
-    update_stage("chunking", "running", "正在切分文本并生成重叠片段")
-    # 旧任务可能没有 doc_key，此时版本本身就是一份新文档。
     doc_key = payload.get("doc_key") or document_id
-    chunks = store.ingest(payload["owner"], payload["title"], content, models,
-        document_id, doc_key, on_stage=update_stage, sections=sections,
-        source_format=os.path.splitext(payload["path"])[1].lower())
-    store.mysql.update_document_metadata(document_id, {
-        "processing_duration_ms": round((time.monotonic() - processing_started) * 1000)})
-    # 全部写完才切换当前版本；切换之前新版本对检索不可见，旧版本一直在服务。
-    activated, previous = store.activate_version(document_id, chunks)
+    chunks = copy_from_source(store, models, payload, update_stage)
+    if chunks is None:
+        parse_started = time.monotonic()
+        detail = "正在根据文件格式提取文本"
+        if stage.get("last_error"):
+            detail = f"第 {stage['attempt']} 次尝试（上次{stage['last_error']}），{detail}"
+        update_stage("parsing", "running", detail)
+        # 解析结果缓存在上传目录下（api 和 worker 共用的卷），重试或重启后同一文件不再重新解析。
+        cache_dir = os.path.join(os.getenv("UPLOAD_DIR", "./uploads"), ".parse_cache")
+        sections, stats, parse_cached = extract_sections_cached(payload["path"], cache_dir)
+        content = "\n\n".join(section["text"] for section in sections)
+        if not content.strip():
+            raise ValueError("文档没有可提取的文本")
+        parse_result = parse_metadata(payload["path"], sections, stats=stats)
+        parse_result["parse_duration_ms"] = round((time.monotonic() - parse_started) * 1000)
+        parse_result["parse_cached"] = parse_cached
+        store.mysql.update_document_metadata(document_id, parse_result)
+        update_stage("parsing", "completed", "文本提取完成（使用缓存的解析结果）" if parse_cached else "文本提取完成", {
+            "parse_cached": parse_cached,
+            "characters": len(content), "sections": len(sections),
+            "extension": os.path.splitext(payload["path"])[1].lower(),
+            "parser": parse_result["parser"], "parser_version": parse_result["parser_version"],
+            "parse_strategy": parse_result["parse_strategy"],
+            "page_count": parse_result["page_count"],
+            "empty_pages": len(parse_result["empty_pages"] or []),
+            "heading_detected": parse_result["heading_detected"],
+            "parse_duration_ms": parse_result["parse_duration_ms"]})
+        update_stage("chunking", "running", "正在切分文本并生成重叠片段")
+        # 旧任务可能没有 doc_key，此时版本本身就是一份新文档。
+        doc_key = payload.get("doc_key") or document_id
+        chunks = store.ingest(payload["owner"], payload["title"], content, models,
+            document_id, doc_key, on_stage=update_stage, sections=sections,
+            source_format=os.path.splitext(payload["path"])[1].lower())
+        store.mysql.update_document_metadata(document_id, {
+            "processing_duration_ms": round((time.monotonic() - processing_started) * 1000)})
+    # 写入校验：两个库没法放进同一个事务，写完逐个核对分片数。对不上时先等一下再查一次（排除刚写完还没可见），
+    # 仍然对不上就抛出 WriteMismatch：外层按暂时性错误处理，清掉这一版写了一半的数据，从头重试，最多 MAX_ATTEMPTS 次。
+    update_stage("verify", "running", "正在核对 MySQL 和 Milvus 里的分片数")
+    counts = store.version_counts(document_id)
+    if counts["mysql"] != chunks or counts["milvus"] != chunks:
+        time.sleep(1)
+        counts = store.version_counts(document_id)
+    result = {"expected": chunks, "mysql_count": counts["mysql"], "milvus_rows": counts["milvus"]}
+    if counts["mysql"] != chunks or counts["milvus"] != chunks:
+        missing = [f"{name} 少了 {chunks - counts[key]} 个" for key, name in (("mysql", "MySQL"), ("milvus", "Milvus"))
+            if counts[key] != chunks]
+        raise WriteMismatch(f"写入不完整：应写 {chunks} 个分片，{'，'.join(missing)}")
+    update_stage("verify", "completed", f"MySQL {chunks} / {chunks}，Milvus {chunks} / {chunks}，两边都已保存", result)
+    # 安全扫描：规则逐片检查，注入检测模型逐片打分。模型不可用时只用规则，原因写在这一步的结果里。
+    update_stage("scan", "running", "正在用规则和注入检测模型检查每个分片")
+    scan = scan_version(store, document_id, InjectionModel())
+    hits = scan["rule_hits"] + scan["model_hits"]
+    model_note = f"模型没参与：{scan['model_error']}" if scan.get("model_error") else \
+        scan["model"] if scan.get("model") else "没有部署注入检测模型，只用规则"
+    positions = "、".join(f"第 {position} 片" for position in sorted({hit["position"] for hit in scan["hits"]})[:5])
+    # 有命中时这一步记为 warning（页面上标红）：步骤本身跑完了，但结果有问题；不用 failed，failed 表示处理出错、会出现重试按钮。
+    update_stage("scan", "warning" if hits else "completed",
+        f"检测到疑似注入指令，在{positions}，这一版不能上架" if hits else "没有发现疑似注入指令", {
+        "checked": scan["checked"], "rule_hits": scan["rule_hits"], "model_hits": scan["model_hits"],
+        "scan_model": model_note})
+    # 处理完不直接生效：没问题的停在「待上架」，上传者确认后上架；有问题的不能上架，提醒上传者处理。
+    # 旧版本在这期间继续服务。见 app/document_reviews.py。
+    finished = finish_version(store, document_id, chunks, scan=scan)
+    # 之后再出错也不能按失败清理数据：这一版已经处理完。
     stage["activated"] = True
-    detail = "文档已完成解析、向量化和索引，并设为当前版本" if activated else \
-        "文档已处理完成，但已有更新的版本在服务，本版本不再生效"
-    update_stage("complete", "completed", detail, {
-        "chunks": chunks, "collection": store.collection,
-        "activated": activated, "superseded_document_id": previous})
-    logger.info("document_ready id=%s chunks=%s activated=%s", document_id, chunks, activated)
+    # 扫描没问题的默认直接上架（公开文档的新版本，上传者不是管理员时会交给管理员审核）；有问题的停下来等上传者处理。
+    status = finished["status"]
+    if status == "staged":
+        try:
+            status = {"listed": "listed", "review": "review"}[list_version(store, document_id, payload["owner"])["state"]]
+        except ReviewError as error:
+            logger.warning("document_auto_list_failed id=%s error=%s", document_id, error.message)
+    details = {"staged": "处理完成，等待上架：在文档详情里确认后点「上架」，上架后才会被检索到",
+        "listed": "文档已完成解析、向量化和索引，安全扫描没有问题，已上架",
+        "review": "安全扫描没有问题。这是公开文档的新版本，已交给管理员审核，通过后替换当前版本",
+        "flagged": "安全扫描发现疑似注入指令，不能上架。请在文档详情里查看有问题的分片，改好后重新上传，或者写明情况提交管理员审核",
+        "superseded": "处理完成，但已经有更新的版本，本版本不再生效",
+        "current": "当前版本已重建完成"}
+    update_stage("complete", "completed", details[status], {"chunks": chunks,
+        "collection": store.collection, "listing": {"staged": "待上架", "listed": "已上架", "review": "待管理员审核",
+            "flagged": "有问题，不能上架", "superseded": "已被更新的版本取代", "current": "当前版本"}[status]})
+    logger.info("document_processed id=%s chunks=%s status=%s", document_id, chunks, status)
 
 
 if __name__ == "__main__":

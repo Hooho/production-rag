@@ -4,18 +4,19 @@ import AnswerFeedback from "./Feedback";
 import Inspection from "./Inspection";
 import Overview from "./Overview";
 import Maintenance, { MAINTENANCE_TABS, type MaintenanceTab } from "./Maintenance";
+import { ListingPanel } from "./Listing";
 import Memory from "./Memory";
 import "./guard.css";
 import Settings from "./Settings";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
-import { durationTitle, formatDuration, isDurationField } from "./format";
+import { durationTitle, formatDuration, formatShortTime, isDurationField } from "./format";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
-import { LOGOUT_EVENT, listDataTypes, createSession, deleteDocument, retryDocument, retryDocumentContexts, listGroups, login, logout, storedUser, updateDocumentPermission, type AuthUser, type TableReport, type DocumentVisibility, type Group, getDocument, getSessionHistory, listDocumentChunks, listDocuments, listHistory, sendChatStream, uploadDocument, type ChatResult, type DocumentChunk, type ChunkSource, type DocumentChunkPage, type DocumentStatus, type DocumentStep, type FeedbackRecord, type HistoryRun, type RetrievalCandidate, type RetrievalDiagnosticsData, type Source, type TraceStep } from "./api";
+import { getContentMatches, fileSha256, type ContentMatches, LOGOUT_EVENT, listDataTypes, createSession, deleteDocument, retryDocument, retryDocumentContexts, listGroups, login, logout, storedUser, updateDocumentPermission, type AuthUser, type TableReport, type DocumentVisibility, type Group, getDocument, getSessionHistory, listDocumentChunks, listDocuments, listHistory, sendChatStream, uploadDocument, type ChatResult, type DocumentChunk, type ChunkSource, type DocumentChunkPage, type DocumentStatus, type DocumentStep, type FeedbackRecord, type HistoryRun, type RetrievalCandidate, type RetrievalDiagnosticsData, type Source, type TraceStep } from "./api";
 
 // 评测页面放在 /eval，与知识问答、知识库并列；历史记录和评测集分别使用独立子路由。
 // 业务数据页放在 /data：录入和维护商品、订单等业务数据，也是聊天里数据查询工具的数据来源。
 // 知识巡检页放在 /inspection，只对管理员显示。
-type Route = { page: "chat" } | { page: "knowledge"; documentId?: string } | { page: "data" } | { page: "eval"; section: EvaluationSection; setId?: string; suiteId?: string } | { page: "inspection" } | { page: "overview" } | { page: "memory"; sessionId?: string; tab?: "long" } | { page: "maintenance"; tab: MaintenanceTab; promptId?: string } | { page: "settings" };
+type Route = { page: "chat" } | { page: "knowledge"; documentId?: string } | { page: "data" } | { page: "eval"; section: EvaluationSection; setId?: string; suiteId?: string } | { page: "inspection" } | { page: "overview" } | { page: "memory"; sessionId?: string; tab?: "long" } | { page: "maintenance"; tab: MaintenanceTab; promptId?: string; reviewId?: string } | { page: "settings" };
 type ToastKind = "success" | "error";
 type ToastMessage = { id: number; kind: ToastKind; message: string };
 type ShowToast = (kind: ToastKind, message: string) => void;
@@ -61,6 +62,7 @@ function readRoute(pathname = window.location.pathname): Route {
   if (path.startsWith("/memory/")) return { page: "memory", sessionId: decodeURIComponent(path.slice("/memory/".length)) };
   // 系统管理：模型配置、RAG 配置、提示词、安全样本四个标签。旧地址 /prompts、/security 仍然能打开。
   if (path === "/maintenance") return { page: "maintenance", tab: "model" };
+  if (path.startsWith("/maintenance/reviews/")) return { page: "maintenance", tab: "reviews", reviewId: decodeURIComponent(path.slice("/maintenance/reviews/".length)) };
   if (path.startsWith("/maintenance/prompts/")) return { page: "maintenance", tab: "prompts", promptId: decodeURIComponent(path.slice("/maintenance/prompts/".length)) };
   const maintenanceTab = MAINTENANCE_TABS.find((item) => path === `/maintenance/${item.id}`);
   if (maintenanceTab) return { page: "maintenance", tab: maintenanceTab.id };
@@ -275,13 +277,13 @@ function App() {
           {user.is_admin && <button className={route.page === "eval" ? "nav-item active" : "nav-item"} onClick={() => navigate("/eval/runs")} title="评测"><span className="nav-icon"><NavIcon name="target" /></span><span className="nav-label">评测</span></button>}
           {user.is_admin && <button className={route.page === "inspection" ? "nav-item active" : "nav-item"} onClick={() => navigate("/inspection")} title="知识巡检"><span className="nav-icon"><NavIcon name="pulse" /></span><span className="nav-label">知识巡检</span></button>}
           {user.is_admin && <button className={route.page === "overview" ? "nav-item active" : "nav-item"} onClick={() => navigate("/overview")} title="运行概览"><span className="nav-icon"><NavIcon name="chart" /></span><span className="nav-label">运行概览</span></button>}
-          {user.is_admin && <button className={route.page === "maintenance" ? "nav-item active" : "nav-item"} onClick={() => navigate("/maintenance")} title="系统管理：模型配置、RAG 配置、提示词、安全样本"><span className="nav-icon"><NavIcon name="wrench" /></span><span className="nav-label">系统管理</span></button>}
+          {user.is_admin && <button className={route.page === "maintenance" ? "nav-item active" : "nav-item"} onClick={() => navigate("/maintenance")} title="系统管理：模型配置、RAG 配置、提示词、安全样本、文档审核"><span className="nav-icon"><NavIcon name="wrench" /></span><span className="nav-label">系统管理</span></button>}
           <button className={route.page === "settings" ? "nav-item active" : "nav-item"} onClick={() => navigate("/settings")} title="设置"><span className="nav-icon"><NavIcon name="sliders" /></span><span className="nav-label">设置</span></button>
           <div className="sidebar-bottom"><div className="status-dot" /><span className="sidebar-status-label">{user.username}{user.is_admin ? "（管理员）" : ""}</span><button className="logout-button" type="button" onClick={() => void handleLogout()}>退出登录</button></div>
         </aside>
         <main className={`main-panel ${route.page === "chat" ? "main-panel-chat" : ""}`}>
           {error && <div className="error-banner">{error}</div>}
-          {route.page === "settings" ? <Settings user={user} onToast={showToast} /> : route.page === "data" && dataAllowed ? <DataManagement onToast={showToast} /> : route.page === "eval" && user.is_admin ? <Evaluation section={route.section} setId={route.setId} suiteId={route.suiteId} onNavigate={navigate} onToast={showToast} Diagnostics={RetrievalDiagnostics} /> : route.page === "inspection" && user.is_admin ? <Inspection onToast={showToast} /> : route.page === "overview" && user.is_admin ? <Overview /> : route.page === "maintenance" && user.is_admin ? <Maintenance tab={route.tab} promptId={route.promptId ?? null} onNavigate={navigate} onToast={showToast} /> : route.page === "memory" ? <Memory sessionId={route.sessionId ?? null} tab={route.tab} onNavigate={navigate} /> : route.page === "chat" ? sessionLoading ? <ChatLoading /> : <Chat sessionId={sessionId} initialMessages={savedMessages} historyRuns={historyRuns} onNewChat={() => void startNewChat()} onOpenHistory={openHistory} onMessageSaved={recordHistory} onFeedbackSaved={recordFeedback} /> : <Knowledge user={user} documentId={route.page === "knowledge" ? route.documentId ?? null : null} onToast={showToast} onNavigate={(documentId) => navigate(documentId ? `/knowledge/${encodeURIComponent(documentId)}` : "/knowledge")} />}
+          {route.page === "settings" ? <Settings user={user} onToast={showToast} /> : route.page === "data" && dataAllowed ? <DataManagement onToast={showToast} /> : route.page === "eval" && user.is_admin ? <Evaluation section={route.section} setId={route.setId} suiteId={route.suiteId} onNavigate={navigate} onToast={showToast} Diagnostics={RetrievalDiagnostics} /> : route.page === "inspection" && user.is_admin ? <Inspection onToast={showToast} /> : route.page === "overview" && user.is_admin ? <Overview /> : route.page === "maintenance" && user.is_admin ? <Maintenance tab={route.tab} promptId={route.promptId ?? null} reviewId={route.reviewId ?? null} onNavigate={navigate} onToast={showToast} /> : route.page === "memory" ? <Memory sessionId={route.sessionId ?? null} tab={route.tab} onNavigate={navigate} /> : route.page === "chat" ? sessionLoading ? <ChatLoading /> : <Chat sessionId={sessionId} initialMessages={savedMessages} historyRuns={historyRuns} onNewChat={() => void startNewChat()} onOpenHistory={openHistory} onMessageSaved={recordHistory} onFeedbackSaved={recordFeedback} /> : <Knowledge user={user} documentId={route.page === "knowledge" ? route.documentId ?? null : null} onToast={showToast} onNavigate={(documentId) => navigate(documentId ? `/knowledge/${encodeURIComponent(documentId)}` : "/knowledge")} />}
         </main>
       </div>
     </>
@@ -1926,7 +1928,9 @@ function formatResultLabel(key: string) {
     document_blocks: "原文分段数", error: "错误", filename: "文件名", input_count: "输入数量",
     reused_count: "复用向量", embedded_count: "新计算向量", vector_count: "向量数",
     milvus_count: "向量写入数", keyword_count: "全文索引写入数", activated: "已设为当前版本",
-    superseded_document_id: "被替换的版本",
+    superseded_document_id: "被替换的版本", review: "审核", injection_scan: "注入检查", listing: "上架状态",
+    copied_from: "复制自", expected: "应写分片数", mysql_count: "MySQL 分片数", milvus_rows: "Milvus 分片数",
+    checked: "检查分片数", rule_hits: "规则命中", model_hits: "模型命中", scan_model: "注入检测模型",
   };
   return labels[key] ?? key.replaceAll("_", " ");
 }
@@ -1940,6 +1944,16 @@ function Knowledge({ user, documentId, onToast, onNavigate }: { user: AuthUser; 
   const [allGroups, setAllGroups] = useState<Group[]>([]);
   const [versionNote, setVersionNote] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  // 选好文件后在浏览器里算 sha256，查自己和自己能看到的文档里有没有内容完全相同的，在上传弹窗里提示。
+  const [contentMatches, setContentMatches] = useState<ContentMatches | "checking" | null>(null);
+  useEffect(() => {
+    setContentMatches(null);
+    if (!file) return;
+    let cancelled = false;
+    setContentMatches("checking");
+    fileSha256(file).then((hash) => hash ? getContentMatches(hash) : null).then((result) => { if (!cancelled) setContentMatches(result); }).catch(() => { if (!cancelled) setContentMatches(null); });
+    return () => { cancelled = true; };
+  }, [file]);
   const [documents, setDocuments] = useState<DocumentStatus[]>([]);
   const [documentsLoading, setDocumentsLoading] = useState(true);
   const [detail, setDetail] = useState<DocumentStatus | null>(null);
@@ -2086,7 +2100,10 @@ function Knowledge({ user, documentId, onToast, onNavigate }: { user: AuthUser; 
         onToast("success", "内容与已有版本完全相同，未重新解析，已打开已有文档。");
         setDetailTab("chunks");
       } else {
-        onToast("success", target ? `已上传为《${target.title}》的第 ${result.version ?? "?"} 版，处理完成后自动切换为当前版本。` : "文档已上传，已进入解析队列。");
+        // 公开文档的新版本、普通用户申请公开，都要管理员审核后才对所有人生效。
+        // 处理完不直接生效：没问题的等上架，有问题的要处理；公开申请要管理员审核。
+        const publishNote = result.review_pending === "publish" ? "已提交公开申请，管理员审核通过前只有你能看到。" : "";
+        onToast("success", target ? `已上传为《${target.title}》的第 ${result.version ?? "?"} 版。安全扫描没问题会自动替换当前版本（公开文档要管理员审核），有问题需要你在详情里处理。` : `文档已上传，已进入解析队列。安全扫描没问题会自动上架，有问题需要你在详情里处理。${publishNote}`);
         setDetailTab("trace");
       }
       onNavigate(result.document_id);
@@ -2137,15 +2154,16 @@ function Knowledge({ user, documentId, onToast, onNavigate }: { user: AuthUser; 
   }
 
   return <section className={`knowledge-layout ${selectedId ? "knowledge-detail-layout" : "knowledge-list-layout"}`}>
-    {selectedId ? (selected ? <DocumentDetail document={selected} tab={detailTab} chunkData={chunkData} chunkLoading={chunkLoading} expandedChunks={expandedChunks} onTabChange={setDetailTab} onPageChange={(page) => { setChunkPage(page); setExpandedChunks({}); }} chunkSource={chunkSource} onSourceChange={(source) => { setChunkSource(source); setChunkPage(1); setExpandedChunks({}); }} onToggleChunk={(chunkId) => setExpandedChunks((items) => ({ ...items, [chunkId]: !items[chunkId] }))} onBack={backToList} onDelete={() => void remove(selected)} onRetry={() => void retry(selected)} onRetryContexts={() => void retryContexts(selected)} onUploadVersion={() => openUpload(selected)} onSelectVersion={selectDocument} permission={<PermissionPanel document={selected} allGroups={allGroups} onToast={onToast} onSaved={async () => { setDetail(await getDocument(selected.document_id)); setDocuments((await listDocuments()).documents); }} />} /> : <DocumentDetailSkeleton />) : documentsLoading ? <DocumentListSkeleton /> : <DocumentList documents={documents} username={user.username} allGroups={allGroups} onSelect={selectDocument} onUpload={() => openUpload(null)} />}
-    {upload && <UploadModal file={file} title={title} versionNote={versionNote} busy={busy} replaceTarget={upload.replaceTarget} sameTitle={sameTitle} mode={uploadMode} onModeChange={setUploadMode} onFileChange={setFile} onTitleChange={setTitle} onVersionNoteChange={setVersionNote} onClose={() => setUpload(null)} onSubmit={() => void submitUpload()} permission={<PermissionPicker visibility={visibility} groups={shareGroups} allGroups={allGroups} onChange={(nextVisibility, nextGroups) => { setVisibility(nextVisibility); setShareGroups(nextGroups); }} />} />}
+    {selectedId ? (selected ? <DocumentDetail document={selected} tab={detailTab} chunkData={chunkData} chunkLoading={chunkLoading} expandedChunks={expandedChunks} onTabChange={setDetailTab} onPageChange={(page) => { setChunkPage(page); setExpandedChunks({}); }} chunkSource={chunkSource} onSourceChange={(source) => { setChunkSource(source); setChunkPage(1); setExpandedChunks({}); }} onToggleChunk={(chunkId) => setExpandedChunks((items) => ({ ...items, [chunkId]: !items[chunkId] }))} onBack={backToList} onDelete={() => void remove(selected)} onRetry={() => void retry(selected)} onRetryContexts={() => void retryContexts(selected)} onUploadVersion={() => openUpload(selected)} onSelectVersion={selectDocument} permission={<><ListingPanel document={selected} isAdmin={user.is_admin} onToast={onToast} onUploadVersion={() => openUpload(selected)} onSelectVersion={selectDocument} onChanged={async () => { setDetail(await getDocument(selected.document_id)); setDocuments((await listDocuments()).documents); }} /><PermissionPanel document={selected} allGroups={allGroups} isAdmin={user.is_admin} onToast={onToast} onSaved={async () => { setDetail(await getDocument(selected.document_id)); setDocuments((await listDocuments()).documents); }} /></>} /> : <DocumentDetailSkeleton />) : documentsLoading ? <DocumentListSkeleton /> : <DocumentList documents={documents} username={user.username} allGroups={allGroups} onSelect={selectDocument} onUpload={() => openUpload(null)} />}
+    {upload && <UploadModal file={file} title={title} versionNote={versionNote} busy={busy} replaceTarget={upload.replaceTarget} sameTitle={sameTitle} mode={uploadMode} onModeChange={setUploadMode} onFileChange={setFile} onTitleChange={setTitle} onVersionNoteChange={setVersionNote} onClose={() => setUpload(null)} onSubmit={() => void submitUpload()} matches={contentMatches} onOpenExisting={(documentId) => { setUpload(null); selectDocument(documentId); }} permission={<PermissionPicker visibility={visibility} groups={shareGroups} allGroups={allGroups} isAdmin={user.is_admin} onChange={(nextVisibility, nextGroups) => { setVisibility(nextVisibility); setShareGroups(nextGroups); }} />} />}
     {!upload && error && <div className="field-error knowledge-error">{error}</div>}
   </section>;
 }
 
 type DetailTab = "chunks" | "trace" | "versions";
 // 后端 STAGE_ORDER 固定为接收、解析、切分、上下文、向量、索引、完成 7 个阶段；不能用当前已返回的步骤条数当分母。
-const DOCUMENT_PROCESS_STEP_TOTAL = 7;
+// 上传、解析、切分、上下文、向量、索引、写入校验、安全扫描、完成，共 9 步。
+const DOCUMENT_PROCESS_STEP_TOTAL = 9;
 
 // 处理进度标签。以前显示"已完成步数 / 7"，第 2 步正在跑时仍显示 1 / 7，容易被读成"还在第 1 步"；
 // 现在处理中显示当前步骤序号（第 4 步进行中显示 4 / 7），失败时指出失败在哪一步，完成后显示 7 / 7。
@@ -2159,7 +2177,7 @@ function documentProcessLabel(document: { status: string; steps: DocumentStep[] 
   if (running) return `${running.step_order} / ${total}`;
   // worker 遇到暂时性错误会先把当前步骤记为失败、等几秒再重试，这时文档本身还在处理中，不能显示成失败。
   if (failed) return `第 ${failed.step_order} 步重试中`;
-  if (document.status.startsWith("ready") || document.status === "superseded") return `${total} / ${total}`;
+  if (document.status.startsWith("ready") || document.status === "superseded" || document.status.startsWith("review:") || document.status.startsWith("staged:") || document.status.startsWith("flagged:") || document.status === "rejected") return `${total} / ${total}`;
   if (document.status === "queued") return "排队中";
   const completed = document.steps.filter((step) => step.status === "completed").length;
   return `${completed} / ${total}`;
@@ -2192,7 +2210,21 @@ function documentStatusLabel(document: { status: string; steps?: DocumentStep[] 
   if (document.status.startsWith("ready:")) return `已完成 · ${document.status.split(":")[1]} 段`;
   if (document.status === "failed") return "处理失败";
   if (document.status === "superseded") return "已被取代";
+  // 公开文档的新版本处理完以后等管理员审核，没通过的数据已清理。
+  if (document.status.startsWith("staged:")) return `待上架 · ${document.status.split(":")[1]} 段`;
+  if (document.status.startsWith("flagged:")) return "扫描有问题，不能上架";
+  if (document.status.startsWith("review:")) return `待管理员审核 · ${document.status.split(":")[1]} 段`;
+  if (document.status === "rejected") return "审核未通过";
   return document.status;
+}
+
+// 列表里「v2 ……」那行新版本后面的说明。
+function pendingVersionHint(status: string) {
+  if (status === "failed" || status === "rejected") return "，当前版本不受影响";
+  if (status.startsWith("review:")) return "，管理员审核通过后替换当前版本";
+  if (status.startsWith("staged:")) return "，上架后替换当前版本";
+  if (status.startsWith("flagged:")) return "，需要处理，当前版本不受影响";
+  return "，完成后自动替换";
 }
 
 // 文档处理状态对应的标签颜色；以前只是彩色粗体字，排队和处理中都是同一种黄色，扫一眼分不清。
@@ -2200,7 +2232,10 @@ function documentStatusTone(status: string) {
   if (status.startsWith("ready")) return "green";
   if (status.startsWith("processing")) return "blue";
   if (status === "queued") return "orange";
-  if (status === "failed") return "red";
+  if (status === "failed" || status === "rejected") return "red";
+  if (status.startsWith("review:")) return "purple";
+  if (status.startsWith("staged:")) return "orange";
+  if (status.startsWith("flagged:")) return "red";
   return "gray";
 }
 
@@ -2210,6 +2245,10 @@ function versionBadge(document: DocumentStatus) {
   if (document.is_current) return `${version} · 当前版本`;
   if (document.status === "superseded") return `${version} · 已被取代`;
   if (document.status === "failed") return `${version} · 未生效`;
+  if (document.status.startsWith("review:")) return `${version} · 待审核`;
+  if (document.status.startsWith("staged:")) return `${version} · 待上架`;
+  if (document.status.startsWith("flagged:")) return `${version} · 扫描有问题`;
+  if (document.status === "rejected") return `${version} · 审核未通过`;
   return `${version} · 尚未生效`;
 }
 
@@ -2278,9 +2317,9 @@ function DocumentList({ documents, username, allGroups, onSelect, onUpload }: { 
     {documents.length === 0 ? <div className="empty-docs">还没有导入文档</div> : <div className="document-list-items">{documents.map((document) => <button className="document-list-item" key={document.document_id} onClick={() => onSelect(document.document_id)}>
       <span className="document-file-icon">▤</span>
       <span className="document-list-copy">
-        <strong>{document.title}<em className="version-tag">v{document.version ?? 1}</em><em className={`visibility-tag is-${document.visibility ?? "private"}`}>{visibilityLabel(document.visibility, document.groups, allGroups)}</em></strong>
+        <strong>{document.title}<em className="version-tag">v{document.version ?? 1}</em><em className={`visibility-tag is-${document.visibility ?? "private"}`}>{visibilityLabel(document.visibility, document.groups, allGroups)}</em>{document.publish_review && <em className={`visibility-tag is-review is-${document.publish_review.status}`}>{document.publish_review.status === "pending" ? "公开审核中" : "公开未通过"}</em>}{document.listing === "unlisted" && <em className="visibility-tag is-unlisted">已下架</em>}</strong>
         <small>{document.owner && document.owner !== username ? `${document.owner} 共享 · ` : ""}{document.filename}{document.error ? ` · ${document.error}` : ""}</small>
-        {document.pending && <small className={`version-pending ${document.pending.status === "failed" ? "is-failed" : ""}`}>v{document.pending.version} {documentStatusLabel(document.pending)}{document.pending.status === "failed" ? "，当前版本不受影响" : "，完成后自动替换"}</small>}
+        {document.pending && <small className={`version-pending ${document.pending.status === "failed" || document.pending.status === "rejected" || document.pending.status.startsWith("flagged:") ? "is-failed" : ""}`}>v{document.pending.version} {documentStatusLabel(document.pending)}{pendingVersionHint(document.pending.status)}</small>}
       </span>
       <span className="document-list-info"><span className={`status-tag is-${documentStatusTone(document.status)}`}>{documentStatusLabel(document)}</span><small>{documentChunkCount(document) > 0 ? `${documentChunkCount(document)} 段` : "等待处理"}{(document.version_count ?? 1) > 1 ? ` · 共 ${document.version_count} 个版本` : ""}</small></span>
       <span className="document-list-arrow">›</span>
@@ -2500,23 +2539,31 @@ function DocumentDetail({ document, tab, chunkData, chunkLoading, expandedChunks
     {permission}
     <div className="document-detail-body"><DocumentMetadataPanel document={document} />
       <div className="document-detail-tabs"><button className={tab === "chunks" ? "active" : ""} onClick={() => onTabChange("chunks")}>分块 <span>{totalChunks}</span></button><button className={tab === "trace" ? "active" : ""} onClick={() => onTabChange("trace")}>处理流程 <span>{processLabel}</span></button><button className={tab === "versions" ? "active" : ""} onClick={() => onTabChange("versions")}>版本历史 <span>{versions.length}</span></button></div>
-      {tab === "chunks" ? <div className="document-chunks-panel"><div className="document-panel-heading"><strong>全部分块</strong>{showSourceFilter && counts && <div className="chunk-source-filter">{([[null, "全部", counts.reused + counts.computed], ["reused", "复用上一版本", counts.reused], ["computed", "新计算", counts.computed]] as Array<[ChunkSource | null, string, number]>).map(([value, label, count]) => <button key={label} className={chunkSource === value ? "active" : ""} onClick={() => onSourceChange(value)}>{label} <span>{count}</span></button>)}</div>}<span>{totalPages > 0 ? `第 ${page} 页 / 共 ${totalPages} 页` : document.status === "superseded" ? "该版本分块已清理" : document.status === "failed" ? "处理失败" : "等待解析完成"}</span></div><ContextMissingBanner document={document} onRetry={onRetryContexts} />{chunkLoading ? <DocumentChunkSkeleton /> : chunkData && chunkData.chunks.length > 0 ? <><div className="document-chunks-list">{chunkData.chunks.map((chunk) => <DocumentChunkCard key={chunk.chunk_id} chunk={chunk} expanded={Boolean(expandedChunks[chunk.chunk_id])} onToggle={() => onToggleChunk(chunk.chunk_id)} />)}</div><div className="document-pagination"><small>每页 10 段，可浏览全部分块</small><div className="document-page-buttons"><button disabled={!hasPrevious} onClick={() => onPageChange(page - 1)}>‹</button>{chunkPages.map((item, index) => item === "ellipsis" ? <span key={`ellipsis-${index}`}>…</span> : <button className={item === page ? "active" : ""} key={item} onClick={() => onPageChange(item)}>{item}</button>)}<button disabled={!hasNext} onClick={() => onPageChange(page + 1)}>›</button></div></div></> : <div className="document-panel-empty">{document.status.startsWith("ready") ? "文档没有可展示的分块" : document.status === "superseded" ? "该版本已被新版本取代，分块已清理，版本记录和原文件仍保留" : "分块将在解析完成后显示"}</div>}</div> : tab === "versions" ? <div className="document-chunks-panel"><div className="document-panel-heading"><strong>版本历史</strong><span>检索只使用当前版本</span></div><VersionHistory document={document} onSelect={onSelectVersion} /></div> : <div className="document-trace-panel"><DocumentTrace steps={document.steps} missingContexts={document.context_missing ?? 0} onRetry={document.status === "failed" && document.can_edit !== false ? onRetry : undefined} onRetryContexts={document.status.startsWith("ready") && document.can_edit !== false ? onRetryContexts : undefined} /></div>}
+      {tab === "chunks" ? <div className="document-chunks-panel"><div className="document-panel-heading"><strong>全部分块</strong>{showSourceFilter && counts && <div className="chunk-source-filter">{([[null, "全部", counts.reused + counts.computed], ["reused", "复用上一版本", counts.reused], ["computed", "新计算", counts.computed]] as Array<[ChunkSource | null, string, number]>).map(([value, label, count]) => <button key={label} className={chunkSource === value ? "active" : ""} onClick={() => onSourceChange(value)}>{label} <span>{count}</span></button>)}</div>}<span>{totalPages > 0 ? `第 ${page} 页 / 共 ${totalPages} 页` : document.status === "superseded" ? "该版本分块已清理" : document.status === "rejected" ? "审核未通过，分块已清理" : document.status === "failed" ? "处理失败" : "等待解析完成"}</span></div><ContextMissingBanner document={document} onRetry={onRetryContexts} />{chunkLoading ? <DocumentChunkSkeleton /> : chunkData && chunkData.chunks.length > 0 ? <><div className="document-chunks-list">{chunkData.chunks.map((chunk) => <DocumentChunkCard key={chunk.chunk_id} chunk={chunk} expanded={Boolean(expandedChunks[chunk.chunk_id])} onToggle={() => onToggleChunk(chunk.chunk_id)} />)}</div><div className="document-pagination"><small>每页 10 段，可浏览全部分块</small><div className="document-page-buttons"><button disabled={!hasPrevious} onClick={() => onPageChange(page - 1)}>‹</button>{chunkPages.map((item, index) => item === "ellipsis" ? <span key={`ellipsis-${index}`}>…</span> : <button className={item === page ? "active" : ""} key={item} onClick={() => onPageChange(item)}>{item}</button>)}<button disabled={!hasNext} onClick={() => onPageChange(page + 1)}>›</button></div></div></> : <div className="document-panel-empty">{document.status.startsWith("ready") ? "文档没有可展示的分块" : document.status === "superseded" ? "该版本已被新版本取代，分块已清理，版本记录和原文件仍保留" : document.status === "rejected" ? `这一版没有通过公开审核，分块已清理，当前版本不受影响。${document.error ?? ""}` : "分块将在解析完成后显示"}</div>}</div> : tab === "versions" ? <div className="document-chunks-panel"><div className="document-panel-heading"><strong>版本历史</strong><span>检索只使用当前版本</span></div><VersionHistory document={document} onSelect={onSelectVersion} /></div> : <div className="document-trace-panel"><DocumentTrace steps={document.steps} missingContexts={document.context_missing ?? 0} onRetry={document.status === "failed" && document.can_edit !== false ? onRetry : undefined} onRetryContexts={document.status.startsWith("ready") && document.can_edit !== false ? onRetryContexts : undefined} /></div>}
     </div>
   </section>;
 }
 
 // 上传弹窗：从详情页进入时固定为"上传新版本"；从列表进入且与已有文档同名时，必须选择作为新版本还是新文档。
-function UploadModal({ file, title, versionNote, busy, replaceTarget, sameTitle, mode, onModeChange, onFileChange, onTitleChange, onVersionNoteChange, onClose, onSubmit, permission }: { permission: ReactNode; file: File | null; title: string; versionNote: string; busy: boolean; replaceTarget: DocumentStatus | null; sameTitle: DocumentStatus | null; mode: "version" | "new" | null; onModeChange: (mode: "version" | "new") => void; onFileChange: (file: File | null) => void; onTitleChange: (title: string) => void; onVersionNoteChange: (note: string) => void; onClose: () => void; onSubmit: () => void }) {
+function UploadModal({ file, title, versionNote, busy, replaceTarget, sameTitle, mode, onModeChange, onFileChange, onTitleChange, onVersionNoteChange, onClose, onSubmit, permission, matches, onOpenExisting }: { permission: ReactNode; file: File | null; title: string; versionNote: string; busy: boolean; replaceTarget: DocumentStatus | null; sameTitle: DocumentStatus | null; mode: "version" | "new" | null; onModeChange: (mode: "version" | "new") => void; onFileChange: (file: File | null) => void; onTitleChange: (title: string) => void; onVersionNoteChange: (note: string) => void; onClose: () => void; onSubmit: () => void; matches: ContentMatches | "checking" | null; onOpenExisting: (documentId: string) => void }) {
+  // 按内容判断：自己已经上传过内容完全相同的文档（上传新版本时只看被替换的那份），再传一次服务端也只会打开已有的，直接给「打开」。
+  const found = matches && matches !== "checking" ? matches : null;
+  const ownSame = found?.own.find((item) => !replaceTarget || item.doc_key === (replaceTarget.doc_key ?? replaceTarget.document_id)) ?? null;
+  const readable = found && !ownSame ? found.readable : [];
   const asVersion = replaceTarget !== null || (sameTitle !== null && mode === "version");
-  const needsChoice = replaceTarget === null && sameTitle !== null && mode === null;
+  // 内容和自己已有的完全相同时，不用再选「新版本还是新文档」。
+  const needsChoice = !ownSame && replaceTarget === null && sameTitle !== null && mode === null;
   return <div className="upload-modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="upload-modal">
     <div className="upload-modal-heading"><div><h2>{replaceTarget ? "上传新版本" : "上传文档"}</h2><p>{replaceTarget ? `将作为《${replaceTarget.title}》的新版本，处理完成后自动替换当前的 v${replaceTarget.version ?? 1}。` : "上传后会进入解析队列，过程逐步展示。"}</p></div><button className="upload-modal-close" onClick={onClose}>×</button></div>
     <label className="upload-dropzone"><input type="file" accept=".txt,.md,.pdf,.docx,.xlsx,.csv" onChange={(event) => onFileChange(event.target.files?.[0] ?? null)} />{file ? <><span className="upload-file-icon">▤</span><strong>{file.name}</strong><small>{Math.ceil(file.size / 1024)} KB · 可解析</small></> : <><span className="upload-icon">＋</span><strong>选择或拖入文档</strong><small>支持 PDF、DOCX、Excel（.xlsx）、CSV、Markdown、TXT · 最大 20 MB</small></>}</label>
     <label className="upload-title-field">文档标题<input value={title} onChange={(event) => onTitleChange(event.target.value)} placeholder="例如：2025 售后服务政策" /></label>
-    {replaceTarget === null && sameTitle && <div className="same-title-choice"><p>已存在同名文档《{sameTitle.title}》（当前 v{sameTitle.version ?? 1}）。请选择：</p><label><input type="radio" checked={mode === "version"} onChange={() => onModeChange("version")} />作为它的新版本（旧版本不再参与检索）</label><label><input type="radio" checked={mode === "new"} onChange={() => onModeChange("new")} />作为一份新文档（两份同时参与检索）</label></div>}
-    {!asVersion && !needsChoice && permission}
+    {matches === "checking" && <p className="upload-match is-checking">正在检查内容是否已经存在…</p>}
+    {ownSame && <div className="upload-match is-own"><strong>你已经上传过内容完全相同的文档</strong><p>《{ownSame.title}》v{ownSame.version}{ownSame.listing === "unlisted" ? "（已下架）" : ""}。内容一样，不需要再上传，直接打开它就行。</p></div>}
+    {readable.length > 0 && <div className="upload-match is-readable"><strong>知识库里已经有内容完全相同的文档，你现在就能检索到</strong><ul>{readable.map((item) => <li key={item.document_id}>《{item.title}》 · {item.owner} 上传 · {item.visibility === "public" ? "所有人可见" : `共享给${(item.groups ?? []).join("、") || "你所在的部门"}`}<button type="button" className="link-button" onClick={() => onOpenExisting(item.document_id)}>查看</button></li>)}</ul><p>确定还要上传吗？上传后会保存一份你自己的（直接复制已处理好的结果，不重新计算），之后由你自己管理。</p></div>}
+    {!ownSame && replaceTarget === null && sameTitle && <div className="same-title-choice"><p>已存在同名文档《{sameTitle.title}》（当前 v{sameTitle.version ?? 1}）。请选择：</p><label><input type="radio" checked={mode === "version"} onChange={() => onModeChange("version")} />作为它的新版本（旧版本不再参与检索）</label><label><input type="radio" checked={mode === "new"} onChange={() => onModeChange("new")} />作为一份新文档（两份同时参与检索）</label></div>}
+    {!ownSame && !asVersion && !needsChoice && permission}
     {asVersion && <label className="upload-title-field">版本说明（可选）<input value={versionNote} onChange={(event) => onVersionNoteChange(event.target.value)} placeholder="例如：退货期限改为 15 天" /></label>}
-    <div className="upload-modal-actions"><button className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" disabled={!file || busy || needsChoice} onClick={onSubmit}>{busy ? "提交中…" : asVersion ? "上传新版本 →" : "开始解析 →"}</button></div>
+    <div className="upload-modal-actions"><button className="secondary-button" onClick={onClose}>取消</button>{ownSame ? <button className="primary-button" onClick={() => onOpenExisting(ownSame.document_id)}>打开已有文档 →</button> : <button className="primary-button" disabled={!file || busy || needsChoice || matches === "checking"} onClick={onSubmit}>{busy ? "提交中…" : readable.length > 0 ? "仍然上传 →" : asVersion ? "上传新版本 →" : "开始解析 →"}</button>}</div>
   </div></div>;
 }
 
@@ -2538,20 +2585,22 @@ function visibilityLabel(visibility: DocumentVisibility | undefined, groups: str
 }
 
 // 选择可见范围：三选一，选"指定部门"时再勾选部门。上传新文档和修改权限共用。
-function PermissionPicker({ visibility, groups, allGroups, onChange }: { visibility: DocumentVisibility; groups: string[]; allGroups: Group[]; onChange: (visibility: DocumentVisibility, groups: string[]) => void }) {
+// 普通用户选「所有人」要管理员审核：公开文档会进入所有人的检索结果，里面的注入指令会影响所有人。
+function PermissionPicker({ visibility, groups, allGroups, isAdmin, onChange }: { visibility: DocumentVisibility; groups: string[]; allGroups: Group[]; isAdmin: boolean; onChange: (visibility: DocumentVisibility, groups: string[]) => void }) {
+  const options = VISIBILITY_OPTIONS.map((option) => option.value === "public" && !isAdmin ? { ...option, label: "所有人（需审核）", hint: "提交公开申请，管理员审核通过后所有登录用户都可以检索和查看" } : option);
   function toggleGroup(groupId: string) {
     const next = groups.includes(groupId) ? groups.filter((item) => item !== groupId) : [...groups, groupId];
     onChange(visibility, next);
   }
   return <fieldset className="permission-picker">
     <legend>可见范围</legend>
-    <div className="permission-options">{VISIBILITY_OPTIONS.map((option) => <label className={visibility === option.value ? "is-active" : ""} key={option.value}><input type="radio" checked={visibility === option.value} onChange={() => onChange(option.value, groups)} /><strong>{option.label}</strong><small>{option.hint}</small></label>)}</div>
+    <div className="permission-options">{options.map((option) => <label className={visibility === option.value ? "is-active" : ""} key={option.value}><input type="radio" checked={visibility === option.value} onChange={() => onChange(option.value, groups)} /><strong>{option.label}</strong><small>{option.hint}</small></label>)}</div>
     {visibility === "shared" && (allGroups.length === 0 ? <p className="permission-empty">还没有部门，请管理员在"设置 → 部门"中创建。</p> : <div className="permission-groups">{allGroups.map((group) => <label key={group.id}><input type="checkbox" checked={groups.includes(group.id)} onChange={() => toggleGroup(group.id)} />{group.name}</label>)}</div>)}
   </fieldset>;
 }
 
 // 文档详情里的可见范围：上传者可以修改并保存，其他人只能查看。
-function PermissionPanel({ document, allGroups, onToast, onSaved }: { document: DocumentStatus; allGroups: Group[]; onToast: ShowToast; onSaved: () => Promise<void> }) {
+function PermissionPanel({ document, allGroups, isAdmin, onToast, onSaved }: { document: DocumentStatus; allGroups: Group[]; isAdmin: boolean; onToast: ShowToast; onSaved: () => Promise<void> }) {
   const [visibility, setVisibility] = useState<DocumentVisibility>(document.visibility ?? "private");
   const [groups, setGroups] = useState<string[]>(document.groups ?? []);
   const [saving, setSaving] = useState(false);
@@ -2560,14 +2609,17 @@ function PermissionPanel({ document, allGroups, onToast, onSaved }: { document: 
   useEffect(() => {
     setVisibility(document.visibility ?? "private");
     setGroups(document.groups ?? []);
-  }, [document.document_id, document.visibility, (document.groups ?? []).join(",")]);
+    // 提交公开申请后可见范围没变，申请状态变了也要把选项恢复成实际的范围。
+  }, [document.document_id, document.visibility, (document.groups ?? []).join(","), document.publish_review?.status]);
 
-  async function save() {
+  async function save(nextVisibility = visibility, nextGroups = groups, withdraw = false) {
     setSaving(true);
     try {
-      await updateDocumentPermission(document.document_id, visibility, groups);
+      const result = await updateDocumentPermission(document.document_id, nextVisibility, nextGroups);
       await onSaved();
-      onToast("success", "可见范围已更新，下一次检索立即生效。");
+      if (withdraw) onToast("success", "已撤回公开申请。");
+      else if (nextVisibility === "public" && result.visibility !== "public") onToast("success", "已提交公开申请，管理员审核通过后所有人可见；在这之前保持原来的可见范围。");
+      else onToast("success", "可见范围已更新，下一次检索立即生效。");
     } catch (reason) {
       onToast("error", (reason as Error).message);
     } finally {
@@ -2579,9 +2631,41 @@ function PermissionPanel({ document, allGroups, onToast, onSaved }: { document: 
     return <div className="permission-panel is-readonly"><span>可见范围</span><strong>{visibilityLabel(document.visibility, document.groups, allGroups)}</strong><small>由 {document.owner} 上传，只有上传者可以修改</small></div>;
   }
   return <div className="permission-panel">
-    <PermissionPicker visibility={visibility} groups={groups} allGroups={allGroups} onChange={(nextVisibility, nextGroups) => { setVisibility(nextVisibility); setGroups(nextGroups); }} />
+    <PublishReviewNote document={document} isAdmin={isAdmin} allGroups={allGroups} busy={saving} onWithdraw={() => void save(document.visibility ?? "private", document.groups ?? [], true)} />
+    <PermissionPicker visibility={visibility} groups={groups} allGroups={allGroups} isAdmin={isAdmin} onChange={(nextVisibility, nextGroups) => { setVisibility(nextVisibility); setGroups(nextGroups); }} />
     <div className="permission-actions"><button className="primary-button" disabled={!changed || saving || (visibility === "shared" && groups.length === 0)} onClick={() => void save()}>{saving ? "保存中…" : "保存可见范围"}</button></div>
   </div>;
+}
+
+// 上传者看到的公开审核状态：申请审核中（可以撤回）、没通过及原因；公开文档提示新版本也要审核。
+function PublishReviewNote({ document, isAdmin, allGroups, busy, onWithdraw }: { document: DocumentStatus; isAdmin: boolean; allGroups: Group[]; busy: boolean; onWithdraw: () => void }) {
+  return <>
+    <InjectionScanNote document={document} isAdmin={isAdmin} />
+    <PublishReviewState document={document} isAdmin={isAdmin} allGroups={allGroups} busy={busy} onWithdraw={onWithdraw} />
+  </>;
+}
+
+// 导入时注入扫描发现可疑内容：提醒上传者。仅自己可见只提示；共享给部门或公开时要管理员审核。
+function InjectionScanNote({ document, isAdmin }: { document: DocumentStatus; isAdmin: boolean }) {
+  const scan = document.document_metadata?.injection_scan;
+  if (!scan || scan.rule_hits + scan.model_hits === 0) return null;
+  const where = [...new Set(scan.hits.map((hit) => hit.position))].slice(0, 5).map((position) => `第 ${position} 片`).join("、");
+  const effect = isAdmin ? "" : document.visibility === "private" ? "现在只有你能看到，不影响别人；有这些内容时不能共享给部门，申请公开时管理员会看到。" : "共享或公开前需要管理员审核。";
+  return <p className="permission-review is-rejected">导入时检测到疑似注入指令（规则命中 {scan.rule_hits} 处，模型命中 {scan.model_hits} 处，在{where}）。{effect}</p>;
+}
+
+function PublishReviewState({ document, isAdmin, allGroups, busy, onWithdraw }: { document: DocumentStatus; isAdmin: boolean; allGroups: Group[]; busy: boolean; onWithdraw: () => void }) {
+  const review = document.publish_review;
+  if (review?.status === "pending") {
+    return <p className="permission-review is-pending">已申请公开，等待管理员审核（{formatShortTime(review.created)} 提交）。审核通过前保持「{visibilityLabel(document.visibility, document.groups, allGroups)}」。<button type="button" className="link-text" disabled={busy} onClick={onWithdraw}>撤回申请</button></p>;
+  }
+  if (review?.status === "rejected") {
+    return <p className="permission-review is-rejected">公开申请没有通过：{review.note || "没有填写原因"}（{review.reviewed_by ?? "管理员"} · {formatShortTime(review.reviewed)}）。修改内容后可以重新申请。</p>;
+  }
+  if (document.visibility === "public" && !isAdmin) {
+    return <p className="permission-review">这是公开文档，上传新版本后要管理员审核通过才会替换当前版本。</p>;
+  }
+  return null;
 }
 
 // 展示 Worker 持久化的文档处理阶段和每一步结果。
@@ -2604,7 +2688,7 @@ function stepResultText(result: Record<string, unknown>) {
 // 文档已完成但有分片的上下文说明生成失败时，在"生成分片上下文"这一步放"补全"按钮，只重做失败的分片。
 function DocumentTrace({ steps, onRetry, onRetryContexts, missingContexts = 0 }: { steps: DocumentStep[]; onRetry?: () => void; onRetryContexts?: () => void; missingContexts?: number }) {
   if (steps.length === 0) return <LoadingSkeleton className="document-trace-empty document-trace-skeleton" label="正在加载处理阶段"><SkeletonBlock className="skeleton-line-short" /><SkeletonBlock className="document-trace-skeleton-row" /><SkeletonBlock className="document-trace-skeleton-row" /><SkeletonBlock className="document-trace-skeleton-row" /></LoadingSkeleton>;
-  return <div className="document-trace">{steps.map((step) => <div className={`document-step ${step.status}`} key={step.step_id}><span className="document-step-icon">{step.status === "completed" ? "✓" : step.status === "running" ? "·" : "!"}</span><div className="document-step-copy"><strong>{step.title}</strong><Clamp text={step.detail}><small>{step.detail}</small></Clamp>{/* 以前把 <strong> 拼进字符串，React 当普通文字输出，页面上直接显示出尖括号；现在用真正的元素渲染字段名。 */}{step.result && <Clamp text={stepResultText(step.result)}><span>{Object.entries(step.result).map(([key, value], index) => <Fragment key={key}>{index > 0 && " · "}<strong>{formatResultLabel(key)}</strong>：{stepResultValue(key, value)}</Fragment>)}</span></Clamp>}</div>{step.duration_ms !== null && step.duration_ms !== undefined && <time title={durationTitle(step.duration_ms)}>{formatDuration(step.duration_ms)}</time>}{step.status === "failed" && onRetry && <button className="secondary-button document-step-retry" onClick={onRetry}>重试</button>}{step.step_id === "context" && step.status === "completed" && missingContexts > 0 && onRetryContexts && <button className="secondary-button document-step-retry" onClick={onRetryContexts}>补全 {missingContexts} 个</button>}</div>)}</div>;
+  return <div className="document-trace">{steps.map((step) => <div className={`document-step ${step.status}`} key={step.step_id}><span className="document-step-icon">{step.status === "completed" ? "✓" : step.status === "running" ? "·" : "!"}</span>{/* warning：步骤跑完了但结果有问题（安全扫描发现疑似注入），整行标红。 */}<div className="document-step-copy"><strong>{step.title}</strong><Clamp text={step.detail}><small>{step.detail}</small></Clamp>{/* 以前把 <strong> 拼进字符串，React 当普通文字输出，页面上直接显示出尖括号；现在用真正的元素渲染字段名。 */}{step.result && <Clamp text={stepResultText(step.result)}><span>{Object.entries(step.result).map(([key, value], index) => <Fragment key={key}>{index > 0 && " · "}<strong>{formatResultLabel(key)}</strong>：{stepResultValue(key, value)}</Fragment>)}</span></Clamp>}</div>{step.duration_ms !== null && step.duration_ms !== undefined && <time title={durationTitle(step.duration_ms)}>{formatDuration(step.duration_ms)}</time>}{step.status === "failed" && onRetry && <button className="secondary-button document-step-retry" onClick={onRetry}>重试</button>}{step.step_id === "context" && step.status === "completed" && missingContexts > 0 && onRetryContexts && <button className="secondary-button document-step-retry" onClick={onRetryContexts}>补全 {missingContexts} 个</button>}</div>)}</div>;
 }
 
 export default App;

@@ -2,7 +2,7 @@ from sqlalchemy import func, select
 
 from app.models import Models
 from app.mysql.store import runs
-from test_app import headers, setup  # noqa: F401  复用 API 测试的内存存储夹具
+from test_app import headers, publish, setup  # noqa: F401  复用 API 测试的内存存储夹具
 from test_inspection import ask, inspect, issues, keyword_rerank, upload
 
 
@@ -65,8 +65,7 @@ def test_regression_set_from_inspection_issue(setup, monkeypatch):
     assert first["summary"]["passed"] == 1 and first["summary"]["previous"] is None
 
     # 共享给 bob 之后再跑：变成通过，并标出"新通过"。
-    assert client.put(f"/documents/{document_id}/permission", headers=headers(),
-        json={"visibility": "public", "groups": []}).status_code == 200
+    publish(client, document_id)
     second = run_set(client, eval_set["id"], "retrieval")
     results = {result["question"]: result for result in second["results"]}
     assert results["退货期限是多久"]["passed"] is True and results["退货期限是多久"]["change"] == "fixed"
@@ -130,8 +129,7 @@ def test_replay_event(setup, monkeypatch):
     before = run_count(store)
     first = client.post(url, headers=admin()).json()
     assert first["owner"] == "bob" and first["refused"] is True and first["by"] == "admin"
-    assert client.put(f"/documents/{document_id}/permission", headers=headers(),
-        json={"visibility": "public", "groups": []}).status_code == 200
+    publish(client, document_id)
     second = client.post(url, headers=admin()).json()
     assert second["refused"] is False and second["sources"][0]["title"] == "售后"
     assert run_count(store) == before
@@ -155,8 +153,7 @@ def test_permission_close_is_rechecked(setup, monkeypatch):
     assert summary["diagnosed"] == 1 and not summary.get("recheck_resolved") and not summary.get("recheck_reopened")
     assert client.get(url, headers=admin()).json()["status"] == "ignored"
     # 权限放开：自动解决。
-    assert client.put(f"/documents/{document_id}/permission", headers=headers(),
-        json={"visibility": "public", "groups": []}).status_code == 200
+    publish(client, document_id)
     summary = inspect(client, store)
     resolved = client.get(url, headers=admin()).json()
     assert summary["recheck_resolved"] == 1

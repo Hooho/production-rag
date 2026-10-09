@@ -48,6 +48,22 @@ class InjectionModel:
             body = response.json()
             return float(body["data"][0]["score"]), body.get("model")
 
+    # 一次判断多段文字（导入文档时扫描分片用），返回每段的攻击概率。guard 服务每次最多收 16 段，这里分批发。
+    def score_many(self, texts, timeout=30.0):
+        scores = []
+        model = None
+        with httpx.Client(timeout=httpx.Timeout(timeout, connect=1.0)) as client:
+            for start in range(0, len(texts), 16):
+                response = client.post(self.url + "/v1/classify", json={"input": texts[start:start + 16]})
+                if response.status_code == 503:
+                    raise RuntimeError(response.json().get("detail") or "模型还没加载好")
+                response.raise_for_status()
+                body = response.json()
+                model = body.get("model")
+                for item in sorted(body["data"], key=lambda item: item["index"]):
+                    scores.append(float(item["score"]))
+        return scores, model
+
     # 输入安全检查调用：返回攻击概率、阈值和处置（block 拦截 / log 只记录 / None 低于阈值）。
     # 关闭时返回 None；没部署、调用失败时返回 skipped 或 error，这一层跳过。
     def check(self, question):

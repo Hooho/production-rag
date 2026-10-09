@@ -79,6 +79,12 @@ class MilvusStore:
                 output_fields=["id", "chunk_key", "vector", "text"], timeout=10))
         return rows
 
+    # 一个版本在 Milvus 里实际有多少行，导入时「写入校验」用它确认分片都写进去了。集合是 Strong 一致性，写完马上能查到。
+    def count_document(self, document_id):
+        result = self.client.query(collection_name=self.collection,
+            filter="document_id == " + filter_literal(document_id), output_fields=["count(*)"], timeout=10)
+        return int(result[0]["count(*)"]) if result else 0
+
     def document_counts(self):
         counts = {}
         iterator = self.client.query_iterator(collection_name=self.collection, batch_size=1000,

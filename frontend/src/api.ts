@@ -113,7 +113,14 @@ export type DocumentStatus = {
   visibility?: DocumentVisibility;
   groups?: string[];
   can_edit?: boolean;
+  // 上传者自己文档的公开申请：审核中或没通过（带原因）；通过、撤回或没申请过为空。
+  publish_review?: DocumentReview | null;
+  // 上架状态：listed 已上架、unlisted 已下架、never 还没上架过。
+  listing?: DocumentListing;
+  // 这一版最近一次版本类审核（提交说明、没通过的原因），只有上传者能看到。
+  version_review?: DocumentReview | null;
 };
+export type DocumentListing = "listed" | "unlisted" | "never";
 // Excel、CSV 的表格识别结果：每个工作表识别到几张表、表头在哪几行、是否认出了表头。
 export type TableReport = {
   sheets: { sheet: string | null; tables: { title: string | null; first_row: number; last_row: number; columns: number; rows: number; header_rows: number[]; header_depth: number; confidence: "high" | "low" | null; single_column: boolean; column_names: string[] }[]; text_only: boolean; empty: boolean }[];
@@ -134,6 +141,9 @@ export type DocumentMetadata = {
   author_source?: string | null;
   parse_duration_ms?: number | null;
   processing_duration_ms?: number | null;
+  // 导入时的注入扫描：规则逐片检查，注入检测模型逐片打分；模型没参与时 model 为空、model_error 写原因。
+  injection_scan?: InjectionScan | null;
+
   chunking_strategy?: string | null;
   chunk_size?: number | null;
   overlap?: number | null;
@@ -145,7 +155,8 @@ export type DocumentStep = {
   step_order: number;
   stage: string;
   title: string;
-  status: "running" | "completed" | "failed";
+  // warning：步骤跑完了但结果有问题（安全扫描发现疑似注入）。
+  status: "running" | "completed" | "failed" | "warning";
   detail: string;
   result?: Record<string, unknown> | null;
   duration_ms?: number | null;
@@ -371,7 +382,8 @@ export function deleteGroup(id: string) {
 
 // 修改文档可见范围，只有上传者可以调用。
 export function updateDocumentPermission(documentId: string, visibility: DocumentVisibility, groups: string[]) {
-  return request<{ document_id: string; visibility: DocumentVisibility; groups: string[] }>(`/documents/${documentId}/permission`, {
+  // 普通用户改成「所有人」时可见范围不变，publish_review 是提交的公开申请（status=pending）。
+  return request<{ document_id: string; visibility: DocumentVisibility; groups: string[]; publish_review: DocumentReview | null }>(`/documents/${documentId}/permission`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ visibility, groups }),
@@ -470,7 +482,8 @@ export function uploadDocument(file: File, title: string, replaceDocumentId?: st
   if (title.trim()) form.append("title", title.trim());
   if (replaceDocumentId) form.append("replace_document_id", replaceDocumentId);
   if (versionNote?.trim()) form.append("version_note", versionNote.trim());
-  return request<{ document_id: string; status: string; filename: string; version?: number }>("/documents/upload", {
+  // review_pending：publish 表示提交了公开申请（普通用户选了所有人），version 表示这是公开文档的新版本，处理完要等审核。
+  return request<{ document_id: string; status: string; filename: string; version?: number; review_pending?: "publish" | "version" | null }>("/documents/upload", {
     method: "POST",
     body: form,
   });
@@ -1382,4 +1395,99 @@ export function checkInjection(text: string) {
 
 export function checkFalsePositives() {
   return request<InjectionFalsePositives>("/security/false-positives", { method: "POST" });
+}
+
+// 公开审核（只有管理员）：普通用户申请公开、公开文档的新版本，通过后才对所有人生效。
+export type DocumentReviewKind = "publish" | "version" | "flagged" | "share";
+export type DocumentReviewStatus = "pending" | "approved" | "rejected" | "cancelled" | "superseded";
+export type DocumentReview = {
+  id: string;
+  doc_key: string;
+  kind: DocumentReviewKind;
+  kind_label: string;
+  document_id: string;
+  version: number | null;
+  chunk_count: number | null;
+  status: DocumentReviewStatus;
+  status_label: string;
+  requested_by: string;
+  created: string;
+  reviewed_by: string | null;
+  reviewed: string | null;
+  note: string | null;
+  // 上传者提交时写的说明（扫描有问题的版本说明为什么没问题）。
+  request_note?: string | null;
+};
+export type DocumentReviewItem = DocumentReview & { title: string; owner: string; filename: string; visibility: DocumentVisibility };
+export type DocumentReviewList = { items: DocumentReviewItem[]; pending: number; kinds: Record<string, string>; statuses: Record<string, string> };
+export type DocumentReviewDetail = {
+  review: DocumentReview;
+  document: { document_id: string; title: string; owner: string; filename: string; version: number; status: string; created: string; version_note: string | null; metadata: DocumentMetadata } | null;
+  visibility: DocumentVisibility;
+  current_version: number | null;
+  chunks: DocumentChunkPage | null;
+  // 安全扫描有问题的分片（原文和命中位置）。
+  problems: DocumentProblems | null;
+  can_decide: boolean;
+  blocked_reason: string | null;
+};
+
+export function getDocumentReviews(status: "pending" | "done") {
+  return request<DocumentReviewList>(`/admin/document-reviews?status=${status}`);
+}
+
+export function getDocumentReview(id: string, page = 1) {
+  return request<DocumentReviewDetail>(`/admin/document-reviews/${encodeURIComponent(id)}?page=${page}`);
+}
+
+// documentId 是审核时看到的版本：上传者在这期间更新了文档，接口会拒绝，要重新看过再通过。
+export function approveDocumentReview(id: string, documentId?: string) {
+  return request<DocumentReviewDetail>(`/admin/document-reviews/${encodeURIComponent(id)}/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(documentId ? { document_id: documentId } : {}) });
+}
+
+export function rejectDocumentReview(id: string, note: string) {
+  return request<DocumentReviewDetail>(`/admin/document-reviews/${encodeURIComponent(id)}/reject`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note }) });
+}
+
+// 导入时的注入扫描结果。
+export type InjectionScanHit = { position: number; source: "rule" | "model"; rule: string; text: string; score?: number };
+export type InjectionScan = { checked: number; rule_hits: number; model_hits: number; model: string | null; model_error: string | null; threshold: number | null; scanned: string; hits: InjectionScanHit[] };
+
+// 安全扫描有问题的分片：spans 是规则命中的位置（分片正文里的字符下标），model_score 是注入检测模型判断的攻击概率。
+export type ProblemChunk = { position: number; chunk_id: string; content: string; spans: { start: number; end: number; rule: string; label: string }[]; model_score: number | null; heading_path: string[]; page_start: number | null; page_end: number | null };
+export type DocumentProblems = { document_id: string; status: string; scan: InjectionScan | null; chunks: ProblemChunk[] };
+
+// 上架：documentId 是要上架的版本。返回 state=review 表示公开文档的新版本交给了管理员审核。
+// note：管理员直接上架扫描有问题的版本时必填，说明为什么没问题。
+export function listDocument(documentId: string, note?: string) {
+  return request<{ document_id: string; state: "listed" | "review"; review: DocumentReview | null }>(`/documents/${documentId}/list`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(note ? { note } : {}) });
+}
+
+export function unlistDocument(documentId: string) {
+  return request<{ document_id: string; listing: DocumentListing }>(`/documents/${documentId}/unlist`, { method: "POST" });
+}
+
+// 扫描有问题的版本：写明情况后提交管理员审核。
+export function submitDocumentReview(documentId: string, note: string) {
+  return request<DocumentReview>(`/documents/${documentId}/submit-review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note }) });
+}
+
+export function getDocumentProblems(documentId: string) {
+  return request<DocumentProblems>(`/documents/${documentId}/problems`);
+}
+
+// 上传前查内容是否已经存在：own 是自己文档里内容完全相同的当前版本，readable 是别人上传、自己本来就能看到的。
+export type ContentMatch = { document_id: string; doc_key: string; title: string; version: number; owner: string; listing?: DocumentListing; visibility?: DocumentVisibility; groups?: string[] };
+export type ContentMatches = { own: ContentMatch[]; readable: ContentMatch[] };
+
+export function getContentMatches(sha256: string) {
+  return request<ContentMatches>(`/documents/content-matches?sha256=${sha256}`);
+}
+
+// 在浏览器里算文件的 sha256（和服务端判断重复用的一致），文件不用先上传。
+// 只有 https 或 localhost 才有 crypto.subtle；拿不到时返回 null，上传后服务端照样会判断重复。
+export async function fileSha256(file: File) {
+  if (!globalThis.crypto?.subtle) return null;
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest)).map((value) => value.toString(16).padStart(2, "0")).join("");
 }

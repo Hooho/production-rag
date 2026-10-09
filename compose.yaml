@@ -107,6 +107,10 @@ services:
       EMBEDDING_URL: http://embedding:8090/v1
       RERANK_URL: http://embedding:8090/v1
       INTENT_URL: http://intent:8091/v1
+      # 导入文档时用注入检测模型扫描分片；guard 没启动时只用规则，不影响导入。
+      GUARD_URL: http://guard:8092
+      # 故障注入，只用于测试写入校验：设为 1 时每次写 Milvus 故意少写 1 行。平时留空。
+      INGEST_FAULT_DROP_MILVUS: ${INGEST_FAULT_DROP_MILVUS:-}
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-mysql,redis,milvus,embedding,intent,guard,localhost,127.0.0.1}

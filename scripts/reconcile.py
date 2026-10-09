@@ -80,6 +80,9 @@ def check(store):
         # 还没处理完的版本归 worker 负责（中断的会在 worker 启动时恢复），这里不插手。
         if status == "queued" or status.startswith("processing"):
             continue
+        # 待上架（staged:N）、有问题（flagged:N）、等审核（review:N）的版本还不是当前版本，但数据要保留，不算残留。
+        if status.startswith(("review:", "staged:", "flagged:")):
+            continue
         milvus_count = in_milvus.get(document_id, 0)
         mysql_count = in_mysql.get(document_id, 0)
         problem = {"document_id": document_id, "title": row["title"], "path": row["path"],
@@ -97,7 +100,7 @@ def check(store):
                 problem.update(kind="current_milvus_incomplete",
                     detail=f"应有 {expected} 个分片，Milvus 中有 {milvus_count} 个")
                 problems.append(problem)
-        elif status in ("superseded", "failed"):
+        elif status in ("superseded", "failed", "rejected"):
             if milvus_count or mysql_count:
                 problem.update(kind="stale_data",
                     detail=f"状态 {status}，Milvus 仍有 {milvus_count} 行，MySQL 仍有 {mysql_count} 个分片")

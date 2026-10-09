@@ -4,7 +4,7 @@ from app.inspection.service import LOCK_KEY, run_inspection
 from app.models import Models
 from app.mysql.store import inspection_issue_events, inspection_issues, inspection_runs
 from app.tools.search import DocumentSearchTool
-from test_app import headers, question, session, setup  # noqa: F401  复用 API 测试的内存存储夹具
+from test_app import headers, publish, question, session, setup  # noqa: F401  复用 API 测试的内存存储夹具
 
 
 def ask(client, text, owner="alice"):
@@ -351,8 +351,7 @@ def test_permission_gap_and_verification(setup, monkeypatch):
     reopened = issues(store, "knowledge_gap")[0]
     assert reopened["status"] == "open" and "还有 1 个没解决" in reopened["detail"]["verification"]["message"]
     # 改成公开后验证通过。
-    assert client.put(f"/documents/{document_id}/permission", headers=headers(),
-        json={"visibility": "public", "groups": []}).status_code == 200
+    publish(client, document_id)
     assert client.patch(f"/inspection/issues/{gap['id']}", headers=headers("admin"), json={"status": "handled", "fix_type": "add_content"}).status_code == 200
     summary = inspect(client, store)
     assert summary["verified"] == 1
@@ -420,8 +419,7 @@ def test_manual_verify(setup, monkeypatch):
     assert "退货期限" in chunk["text"] and chunk["score"] == 0.95
     assert verified["status"] == "open"
     # 改成公开后再验证：现在能答，自动关闭。
-    assert client.put(f"/documents/{document_id}/permission", headers=headers(),
-        json={"visibility": "public", "groups": []}).status_code == 200
+    publish(client, document_id)
     verified = client.post(f"/inspection/issues/{gap['id']}/verify", headers=headers("admin")).json()
     assert verified["status"] == "resolved" and verified["verify_result"]["auto_resolved"] == 1
     assert verified["detail"]["diagnosis"]["questions"][0]["chunks"][0]["visible"] is True

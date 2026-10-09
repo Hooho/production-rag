@@ -43,7 +43,7 @@ from ..agent.response import ResponseAgent
 from ..models import Models
 from ..memory.service import Memory
 from ..memory.view import list_sessions as list_memory, session_detail as memory_detail
-from ..mysql.store import (data_permissions, document_heads, document_shares, document_steps, documents, feedback,
+from ..mysql.store import (data_permissions, document_heads, document_reviews, document_shares, document_steps, documents, feedback,
     run_errors, runs, sessions, user_group_members, user_groups, users)
 from ..observability import FEEDBACK_REASONS, run_columns, summarize_run
 from ..overview import RANGES as OVERVIEW_RANGES, overview as build_overview
@@ -51,6 +51,7 @@ from ..security import detect_injection
 from ..security_model import InjectionModel
 from ..security_samples import CATEGORIES as INJECTION_CATEGORIES, NORMAL_QUESTIONS, SOURCES as INJECTION_SOURCES, InjectionSamples
 from ..storage import Storage
+from .. import document_reviews as reviews
 
 
 logging.basicConfig(level=logging.INFO)
@@ -246,6 +247,20 @@ class DocumentInput(BaseModel):
     # 新文档的可见范围；替换已有文档时沿用原来的设置，这两个字段不生效。
     visibility: Literal["private", "shared", "public"] = "private"
     groups: list[str] = Field(default_factory=list, max_length=20)
+    # 接口直接导入的文本，扫描没问题时是否马上上架（页面上传的文件不走这里，处理完都要手动上架）。
+    publish_now: bool = True
+
+
+# 扫描有问题的版本提交管理员审核：上传者说明为什么没问题。
+class ListInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    # 管理员直接上架扫描有问题的版本时必填：说明为什么没问题。
+    note: str | None = Field(None, max_length=300)
+
+
+class SubmitReviewInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    note: str = Field(min_length=1, max_length=300)
 
 
 # 修改文档可见范围；shared 时 groups 是共享给的部门。
@@ -253,6 +268,18 @@ class PermissionInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     visibility: Literal["private", "shared", "public"]
     groups: list[str] = Field(default_factory=list, max_length=20)
+
+
+# 公开审核通过：document_id 是管理员审核时看到的版本，通过前确认上传者没有在这期间换掉内容。
+class ReviewApproveInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    document_id: str | None = Field(None, max_length=36)
+
+
+# 公开审核不通过：原因会显示给上传者。
+class ReviewRejectInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    note: str = Field(min_length=1, max_length=300)
 
 
 class LoginInput(BaseModel):
@@ -835,18 +862,42 @@ def create_app(store=None, models=None, jwt_secret=None):
             # 直接提交的文本不经过解析器，以前只记 sha256，和上传文件的元数据对不上；补上解析方式和字符数。
             {"sha256": content_sha256, "parser": "raw_text", "char_count": len(body.content)},
             doc_key, version, body.version_note, content_sha256)
-        if doc_key is None:
-            store.set_document_permission(document_id, body.visibility, groups)
+        review_pending = None
+        if doc_key is None and save_new_permission(document_id, body.visibility, groups, owner):
+            review_pending = "publish"
         try:
             count = store.ingest(owner, body.title, body.content, app.state.models,
                 document_id, doc_key or document_id)
-            activated, _ = store.activate_version(document_id, count)
+            # 写入校验：两个库的分片数都要和应写的一致，对不上按导入失败处理（清掉这一版，旧版本不受影响）。
+            counts = store.version_counts(document_id)
+            if counts["mysql"] != count or counts["milvus"] != count:
+                raise RuntimeError(f"写入不完整：应写 {count} 个分片，MySQL {counts['mysql']} 个，Milvus {counts['milvus']} 个")
+            # 扫描后停在待上架或有问题；publish_now 时没问题就马上上架（公开文档的新版本会交给管理员审核）。
+            finished = reviews.finish_version(store, document_id, count, app.state.agent.injection_model)
         except Exception:
             store.mysql.update_document(document_id, "failed", "导入失败")
             store.remove_version_data(document_id)
             raise
+        listing = finished["status"]
+        # 只有扫描没问题的才马上上架；有问题的谁导入都停下来，管理员要在页面上看过、写备注再直接上架。
+        if body.publish_now and finished["status"] == "staged":
+            listed = reviews.list_version(store, document_id, owner)
+            listing = listed["state"]
+            if listed["state"] == "review":
+                review_pending = "version"
         return {"document_id": document_id, "chunks": count, "version": version,
-            "activated": activated, "duplicate": False}
+            "activated": listing == "listed", "duplicate": False, "review_pending": review_pending,
+            "listing": listing, "scan": finished["scan"]}
+
+    # 新文档的可见范围。普通用户选「所有人」时先按「仅自己」保存，同时提交公开申请，管理员通过后才公开：
+    # 公开文档会进入所有人的检索结果，里面藏的注入指令会影响所有人。返回公开申请，不需要审核时返回 None。
+    def save_new_permission(document_id, visibility, groups, owner):
+        store = app.state.store
+        if visibility == "public" and not reviews.user_is_admin(store, owner):
+            store.set_document_permission(document_id, "private", [])
+            return reviews.request_publish(store, document_id, document_id, owner)
+        store.set_document_permission(document_id, visibility, groups)
+        return None
 
     # 校验可见范围：shared 必须选至少一个部门，部门必须存在；返回去重后的部门列表。
     def check_permission(visibility, groups):
@@ -903,6 +954,7 @@ def create_app(store=None, models=None, jwt_secret=None):
                 order.append(doc_key)
             groups[doc_key].append(row)
         result = []
+        owned = {}
         for doc_key in order[:50]:
             versions = sorted(groups[doc_key], key=version_of)
             current_id = current_ids.get(doc_key)
@@ -919,8 +971,22 @@ def create_app(store=None, models=None, jwt_secret=None):
             if latest["id"] != display["id"] and latest["status"] != "superseded":
                 item["pending"] = {"document_id": latest["id"], "version": version_of(latest),
                     "status": latest["status"], "error": latest["error"]}
+            item["publish_review"] = None
+            item["listing"] = "listed"
+            if item["can_edit"]:
+                owned[doc_key] = item
             result.append(item)
+        for doc_key, state in reviews.publish_states(store, list(owned)).items():
+            owned[doc_key]["publish_review"] = state
+        for doc_key, state in reviews.listing_states(store, list(owned)).items():
+            owned[doc_key]["listing"] = state
         return {"documents": result}
+
+    # 上传前在弹窗里提示内容是否已经存在：前端在浏览器里算好文件的 sha256 传过来，文件本身不用先上传。
+    # 只返回自己的文档和自己本来就能看到的别人的文档（公开的、共享给我部门的）。
+    @app.get("/documents/content-matches")
+    def document_content_matches(sha256: str = Query(..., pattern="^[0-9a-f]{64}$"), owner=Depends(identity)):
+        return app.state.store.content_matches(owner, sha256)
 
     # 保存上传文件并投递到 Redis 队列，由独立 Worker 解析和向量化。
     @app.post("/documents/upload", status_code=202)
@@ -965,13 +1031,18 @@ def create_app(store=None, models=None, jwt_secret=None):
         except HTTPException:
             target.unlink(missing_ok=True)
             raise
+        review_pending = None
         if doc_key is None:
-            app.state.store.set_document_permission(document_id, visibility, group_ids)
+            if save_new_permission(document_id, visibility, group_ids, owner):
+                review_pending = "publish"
+        # 内容和当前用户能看到的某份已处理文档（别人公开的、共享给我部门的）完全相同时，worker 直接复制它的处理结果。
+        copy_from = app.state.store.find_copy_source(owner, content_sha256, app.state.models)
         app.state.store.cache.rpush("ingest:jobs", json.dumps({
             "document_id": document_id, "owner": owner, "title": document_title, "path": str(target),
-            "doc_key": doc_key or document_id
+            "doc_key": doc_key or document_id, "copy_from": copy_from, "content_sha256": content_sha256
         }))
-        return {"document_id": document_id, "status": "queued", "filename": filename, "version": version}
+        return {"document_id": document_id, "status": "queued", "filename": filename, "version": version,
+            "review_pending": review_pending}
 
     # 分页返回当前用户文档的全部分块详情，处理流程由独立接口字段继续提供。
     @app.get("/documents/{document_id}/chunks")
@@ -1004,6 +1075,10 @@ def create_app(store=None, models=None, jwt_secret=None):
         result = version_view(app.state.store, row, current_id)
         history = []
         for sibling in sorted(siblings, key=version_of, reverse=True):
+            # 等待公开审核、没通过审核的版本只有上传者能看到。
+            unreviewed = reviews.is_held(sibling["status"]) or sibling["status"] == reviews.REJECTED
+            if unreviewed and row["owner"] != owner:
+                continue
             history.append({"document_id": sibling["id"], "version": version_of(sibling),
                 "status": sibling["status"], "error": sibling["error"], "filename": sibling["filename"],
                 "created": sibling["created"], "version_note": sibling["version_note"],
@@ -1011,6 +1086,12 @@ def create_app(store=None, models=None, jwt_secret=None):
         result["versions"] = history
         result.update(app.state.store.document_permission(doc_key))
         result["can_edit"] = row["owner"] == owner
+        result["publish_review"] = reviews.publish_states(app.state.store, [doc_key]).get(doc_key) \
+            if row["owner"] == owner else None
+        # 上架状态：listed 已上架、unlisted 已下架、never 还没上架过。
+        result["listing"] = reviews.listing_states(app.state.store, [doc_key])[doc_key]
+        # 这一版提交审核时上传者写的说明、管理员没通过的原因。
+        result["version_review"] = version_review(row["id"]) if row["owner"] == owner else None
         # 缺少上下文说明的分片数和是否启用了 Contextual Retrieval，页面据此显示"补全"按钮或说明为什么没有。
         result["contextual_enabled"] = bool(app.state.models.contextual)
         result["context_missing"] = app.state.store.missing_context_count(row["id"]) \
@@ -1027,8 +1108,65 @@ def create_app(store=None, models=None, jwt_secret=None):
             raise HTTPException(403, "只有上传者可以修改可见范围")
         groups = check_permission(body.visibility, body.groups)
         doc_key = row["doc_key"] or row["id"]
-        app.state.store.set_document_permission(doc_key, body.visibility, groups)
-        return {"document_id": row["id"], **app.state.store.document_permission(doc_key)}
+        store = app.state.store
+        current = store.document_permission(doc_key)["visibility"]
+        if body.visibility == "public" and current != "public" and not reviews.user_is_admin(store, owner):
+            # 普通用户不能直接公开：提交申请，可见范围保持不变，管理员通过后才改成所有人可见。
+            reviews.request_publish(store, doc_key, row["id"], owner)
+        else:
+            store.set_document_permission(doc_key, body.visibility, groups)
+            if body.visibility != "public":
+                # 改成别的范围就是撤回公开申请；改成仅自己可见时，「公开文档的新版本」不用再审，退回待上架。
+                reviews.cancel_publish(store, doc_key, owner)
+                if body.visibility == "private":
+                    reviews.release_versions(store, doc_key, owner)
+        return {"document_id": row["id"], **store.document_permission(doc_key),
+            "publish_review": reviews.publish_states(store, [doc_key]).get(doc_key)}
+
+    # 某个版本最近一次版本类审核（提交说明、审核结果）。
+    def version_review(document_id):
+        with app.state.store.engine.connect() as connection:
+            row = connection.execute(select(document_reviews).where(document_reviews.c.document_id == document_id,
+                document_reviews.c.kind.in_(reviews.VERSION_KINDS)).order_by(
+                    document_reviews.c.created.desc())).mappings().first()
+        return reviews.review_view(row)
+
+    # 上架、下架、提交审核、查看有问题的分片：只有上传者能操作自己的文档。
+    def own_version(document_id, owner):
+        row = app.state.store.readable_document(owner, str(document_id))
+        if not row:
+            raise HTTPException(404, "文档不存在")
+        if row["owner"] != owner:
+            raise HTTPException(403, "只有上传者可以操作")
+        return row
+
+    # 上架：document_id 是要上架的版本。待上架的切换为当前版本（公开文档的新版本先交给管理员审核）；
+    # 有问题的不能上架；已经是当前版本、文档下架了，就重新上架。
+    @app.post("/documents/{document_id}/list")
+    def list_document(document_id: UUID, body: ListInput | None = None, owner=Depends(identity)):
+        row = own_version(document_id, owner)
+        note = body.note if body else None
+        result = review_call(lambda: reviews.list_version(app.state.store, row["id"], owner, note))
+        return {"document_id": row["id"], "state": result["state"], "review": result["review"]}
+
+    # 下架：当前版本保留，谁都检索不到，包括上传者自己。
+    @app.post("/documents/{document_id}/unlist")
+    def unlist_document(document_id: UUID, owner=Depends(identity)):
+        row = own_version(document_id, owner)
+        review_call(lambda: reviews.unlist(app.state.store, row["doc_key"] or row["id"]))
+        return {"document_id": row["id"], "listing": "unlisted"}
+
+    # 扫描有问题的版本：上传者写明情况后提交管理员审核，通过后上架。
+    @app.post("/documents/{document_id}/submit-review")
+    def submit_document_review(document_id: UUID, body: SubmitReviewInput, owner=Depends(identity)):
+        row = own_version(document_id, owner)
+        return review_call(lambda: reviews.submit_flagged(app.state.store, row["id"], owner, body.note))
+
+    # 安全扫描有问题的分片：原文和命中位置，页面上标出来。
+    @app.get("/documents/{document_id}/problems")
+    def document_problems(document_id: UUID, owner=Depends(identity)):
+        row = own_version(document_id, owner)
+        return reviews.problem_chunks(app.state.store, row["id"])
 
     # 重新处理一个失败的文档版本：改回排队状态并重新投递任务。
     # 以前失败后只能重新上传同一个文件，或者手动改数据库再重启 worker；现在上传者可以在详情页直接重试。
@@ -1732,6 +1870,30 @@ def create_app(store=None, models=None, jwt_secret=None):
         result = runtime_config.view(app.state.store.engine)
         result["changed"] = changed
         return result
+
+    # 公开审核（只有管理员）：普通用户申请公开、公开文档的新版本都在这里审核，通过后才对所有人生效。
+    # 详情里带分片正文和注入规则的检查结果，管理员可以直接看内容，不需要文档对自己可见。
+    def review_call(action):
+        try:
+            return action()
+        except reviews.ReviewError as error:
+            raise HTTPException(error.status, error.message) from error
+
+    @app.get("/admin/document-reviews", dependencies=[Depends(require_admin)])
+    def list_document_reviews(status: str = Query("pending", pattern="^(pending|done)$")):
+        return reviews.list_reviews(app.state.store, status)
+
+    @app.get("/admin/document-reviews/{review_id}", dependencies=[Depends(require_admin)])
+    def document_review_detail(review_id: UUID, page: int = Query(1, ge=1), page_size: int = Query(10, ge=1, le=50)):
+        return review_call(lambda: reviews.review_detail(app.state.store, str(review_id), page, page_size))
+
+    @app.post("/admin/document-reviews/{review_id}/approve")
+    def approve_document_review(review_id: UUID, body: ReviewApproveInput, admin=Depends(require_admin)):
+        return review_call(lambda: reviews.approve(app.state.store, str(review_id), admin["username"], body.document_id))
+
+    @app.post("/admin/document-reviews/{review_id}/reject")
+    def reject_document_review(review_id: UUID, body: ReviewRejectInput, admin=Depends(require_admin)):
+        return review_call(lambda: reviews.reject(app.state.store, str(review_id), admin["username"], body.note))
 
     # 安全样本（只有管理员）：输入安全检查第二层的向量样本库，查看、添加、删除、确认候选，试一试和误拦检查。
     def injection_samples():

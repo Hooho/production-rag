@@ -1,5 +1,13 @@
 // 耗时按量级换成时分秒。以前各页面直接显示毫秒（819029 ms），有的连单位都没有，要自己换算才知道多久；
 // 现在所有耗时统一用这里的格式：不到 1 秒保留毫秒；不到 1 分钟保留一位小数，方便比较相近的两次结果；更长时拆成时、分、秒。
+// 显示成「10/09 14:30」这样的月日时分；解析不了时原样返回。
+export function formatShortTime(value: string | null | undefined) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
+}
+
 export function formatDuration(value: number | null | undefined) {
   if (value === null || value === undefined || Number.isNaN(value)) return "—";
   const ms = Math.round(Math.abs(value));

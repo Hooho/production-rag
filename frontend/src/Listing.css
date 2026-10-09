@@ -1,0 +1,211 @@
+/* 文档上架面板和有问题的分片：沿用主样式的配色变量（--t-xxxxxx）。 */
+.lt-panel {
+   margin-bottom: 16px;
+   border: 1px solid var(--t-cedfec);
+   border-radius: 7px;
+   background: rgba(255, 255, 255, .9);
+   padding: 14px 16px;
+   color: var(--t-536d86);
+   font-size: 13px;
+   line-height: 1.7;
+}
+
+.lt-panel.is-danger {
+   border-color: #f5c4ca;
+   background: #fffafa;
+}
+
+.lt-panel.is-waiting {
+   border-color: #f6d9a8;
+   background: #fffcf6;
+}
+
+.lt-panel header {
+   display: flex;
+   gap: 10px;
+   align-items: center;
+   margin-bottom: 6px;
+   color: var(--t-173b5b);
+}
+
+.lt-panel p {
+   margin: 0 0 8px;
+}
+
+.lt-badge {
+   border-radius: 999px;
+   padding: 1px 9px;
+   font-size: 11px;
+}
+
+.lt-badge.is-listed {
+   background: #e7f6ee;
+   color: #217a4b;
+}
+
+.lt-badge.is-unlisted,
+.lt-badge.is-never {
+   background: var(--t-eef3f8);
+   color: var(--t-5e7a95);
+}
+
+.lt-badge.is-version {
+   background: #fff4e5;
+   color: #a86208;
+}
+
+.lt-badge.is-version.is-danger {
+   background: #fdecee;
+   color: #c93a4b;
+}
+
+.lt-actions {
+   display: flex;
+   gap: 8px;
+   justify-content: flex-end;
+}
+
+.lt-panel .primary-button,
+.lt-panel .secondary-button {
+   height: 32px;
+   border-radius: 4px;
+   padding: 0 14px;
+   font-size: 13px;
+   white-space: nowrap;
+}
+
+.lt-panel button:disabled {
+   opacity: .5;
+   cursor: not-allowed;
+}
+
+.lt-panel .link-text {
+   margin-left: 6px;
+   border: 0;
+   background: none;
+   padding: 0;
+   color: var(--t-2563eb);
+   font-size: 13px;
+   cursor: pointer;
+}
+
+.lt-alert {
+   color: #b4323f;
+}
+
+.lt-waiting {
+   margin-top: 8px !important;
+   border-top: 1px dashed var(--t-cedfec);
+   padding-top: 8px;
+}
+
+.lt-empty {
+   color: var(--t-7d95ac);
+}
+
+/* 有问题的分片 */
+.lt-problems {
+   display: grid;
+   gap: 8px;
+   margin: 4px 0 12px;
+}
+
+.lt-chunk {
+   border: 1px solid #f5c4ca;
+   border-radius: 6px;
+   background: #fff;
+   padding: 8px 12px;
+}
+
+.lt-chunk.is-whole {
+   background: #fff6f7;
+}
+
+.lt-chunk header {
+   display: flex;
+   flex-wrap: wrap;
+   justify-content: space-between;
+   gap: 4px 10px;
+   margin-bottom: 4px;
+   color: var(--t-7d95ac);
+   font-size: 11px;
+}
+
+.lt-tags {
+   display: flex;
+   flex-wrap: wrap;
+   gap: 4px;
+}
+
+.lt-tags em {
+   border-radius: 999px;
+   background: #fdecee;
+   padding: 0 8px;
+   color: #c93a4b;
+   font-style: normal;
+}
+
+.lt-tags em.is-model {
+   background: #f3edff;
+   color: #7045d6;
+}
+
+.lt-chunk p {
+   margin: 0;
+   color: var(--t-1d3550);
+   font-size: 13px;
+   line-height: 1.8;
+   white-space: pre-wrap;
+   word-break: break-word;
+}
+
+.lt-chunk mark {
+   border-bottom: 2px solid #e5484d;
+   border-radius: 2px;
+   background: #ffe1e3;
+   padding: 0 1px;
+   color: #a1222f;
+}
+
+/* 两种处理方式 */
+.lt-resolve {
+   display: grid;
+   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+   gap: 10px;
+}
+
+.lt-option {
+   display: flex;
+   flex-direction: column;
+   gap: 6px;
+   border: 1px solid var(--t-e3edf5);
+   border-radius: 6px;
+   background: #fff;
+   padding: 10px 12px;
+}
+
+.lt-option strong {
+   color: var(--t-173b5b);
+   font-size: 13px;
+}
+
+.lt-option small {
+   flex: 1;
+   color: var(--t-7d95ac);
+   font-size: 12px;
+}
+
+.lt-option textarea {
+   width: 100%;
+   box-sizing: border-box;
+   border: 1px solid var(--t-cedfec);
+   border-radius: 4px;
+   padding: 6px 8px;
+   font: inherit;
+   font-size: 12px;
+   resize: vertical;
+}
+
+.lt-option button {
+   align-self: flex-end;
+}

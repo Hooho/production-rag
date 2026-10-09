@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 import jwt
 
 from app.auth import create_user, seed_users
-from test_app import JWT_SECRET, headers, question, session, setup  # noqa: F401  复用 API 测试的内存存储夹具
+from test_app import JWT_SECRET, headers, publish, question, session, setup  # noqa: F401  复用 API 测试的内存存储夹具
 
 
 # 登录并返回令牌。
@@ -12,10 +12,14 @@ def login(client, username, password):
 
 
 # 以 alice 身份导入一份文档，返回文档 id。
+# 普通用户选「所有人」时先按仅自己保存并提交公开申请；这里的测试关注权限过滤，直接用管理员通过申请。
 def ingest(client, content, owner="alice", **permission):
     response = client.post("/documents", headers=headers(owner), json={"title": "售后", "content": content, **permission})
     assert response.status_code == 200, response.text
-    return response.json()["document_id"]
+    document_id = response.json()["document_id"]
+    if response.json().get("review_pending") == "publish":
+        publish(client, document_id, owner)
+    return document_id
 
 
 # 返回某个用户在知识库列表里看到的文档 id。
@@ -232,5 +236,13 @@ def test_upload_form_sets_permission(setup, tmp_path, monkeypatch):
         files={"file": ("a.txt", "退货期限 7 天。".encode(), "text/plain")})
     assert response.status_code == 202
     document_id = response.json()["document_id"]
+    # 普通用户选「所有人」：先按仅自己保存，公开申请等管理员审核。
+    assert response.json()["review_pending"] == "publish"
     detail = client.get(f"/documents/{document_id}", headers=headers()).json()
-    assert detail["visibility"] == "public"
+    assert detail["visibility"] == "private" and detail["publish_review"]["status"] == "pending"
+    # 管理员上传的直接公开。
+    response = client.post("/documents/upload", headers=headers("admin"), data={"visibility": "public"},
+        files={"file": ("b.txt", "换货期限 15 天。".encode(), "text/plain")})
+    assert response.json()["review_pending"] is None
+    detail = client.get(f"/documents/{response.json()['document_id']}", headers=headers("admin")).json()
+    assert detail["visibility"] == "public" and detail["publish_review"] is None

@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Float, JSON, Integer, MetaData, String, Table, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, Float, Index, JSON, Integer, MetaData, String, Table, Text, UniqueConstraint, text
 
 
 metadata = MetaData()
@@ -205,6 +205,8 @@ document_heads = Table("document_heads", metadata,
     Column("title", String(200), nullable=False),
     Column("current_document_id", String(36), nullable=False),
     Column("current_version", Integer, nullable=False),
+    # 上架状态：false 是下架，当前版本保留但谁都检索不到。新版本上架时设为 true；升级前的文档都算已上架。
+    Column("listed", Boolean, nullable=False, default=True, server_default=text("1")),
     Column("updated", String(32), nullable=False),
 )
 chunks = Table("chunks", metadata,
@@ -285,6 +287,29 @@ document_permissions = Table("document_permissions", metadata,
 document_shares = Table("document_shares", metadata,
     Column("doc_key", String(36), primary_key=True),
     Column("group_id", String(32), primary_key=True, index=True),
+)
+# 公开审核：普通用户把文档设为「所有人可见」，或给已公开的文档上传新版本，都要管理员审核通过后才生效。
+# 公开文档会进入所有人的检索结果，里面藏的注入指令会影响所有人，所以不能由上传者自己决定。管理员上传的不需要审核。
+# kind：publish 申请公开（通过后可见范围改成所有人，没通过之前保持原来的范围）；
+#       version 公开文档的新版本（解析完先不切换，通过后才替换当前版本，没通过之前旧版本继续服务）。
+# status：pending 待审核、approved 已通过、rejected 未通过、cancelled 已撤回（上传者改了可见范围）、
+#         superseded 被同一文档更新的版本取代（只审最新的一版）。
+document_reviews = Table("document_reviews", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("doc_key", String(36), nullable=False, index=True),
+    Column("kind", String(16), nullable=False),
+    # 申请时对应的版本：version 审核的就是这一版；publish 审核的是通过时的当前版本，这里只记录申请时是哪一版。
+    Column("document_id", String(36), nullable=False),
+    Column("version", Integer),
+    Column("chunk_count", Integer),
+    Column("status", String(16), nullable=False, index=True),
+    Column("requested_by", String(32), nullable=False),
+    Column("created", String(32), nullable=False),
+    Column("reviewed_by", String(32)),
+    Column("reviewed", String(32)),
+    Column("note", String(500)),
+    # 上传者提交时写的说明（扫描有问题的版本，说明为什么没问题）。
+    Column("request_note", String(500)),
 )
 
 # 知识巡检：定期从问答日志里收集问题（拒答、资料不足、差评、处理失败），合并成待处理清单，只有管理员可见。

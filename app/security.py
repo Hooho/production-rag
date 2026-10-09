@@ -105,6 +105,17 @@ def detect_injection(text):
     return hits
 
 
+# 文本里所有命中注入规则的位置（字符下标），文档安全扫描用它在原文上标出命中的地方。
+def injection_spans(text):
+    spans = []
+    for name, pattern in INJECTION_RULES:
+        for match in pattern.finditer(text or ""):
+            if match.end() > match.start():
+                spans.append({"start": match.start(), "end": match.end(), "rule": name,
+                    "label": RULE_INFO.get(name, {}).get("label", name)})
+    return sorted(spans, key=lambda span: (span["start"], span["end"]))
+
+
 # 把来源里的伪造标签改成全角尖括号，让它不再被模型当作标签边界。
 def neutralize_tags(text):
     return SOURCE_TAG.sub(lambda match: "＜" + match.group(1) + match.group(2), text or "")
