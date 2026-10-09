@@ -20,6 +20,10 @@ runs = Table("runs", metadata,
     Column("duration_ms", Integer),
     Column("top_score", Float),
     Column("trace", JSON),
+    # 历史记录按用户、会话取最近几条（ORDER BY created）。没有这两个索引时 MySQL 要把整行（含很大的 response JSON）
+    # 放进排序缓冲区排序，记录一多就报 1038 Out of sort memory；有了索引直接按索引顺序读，不再排序。
+    Index("ix_runs_owner_created", "owner", "created"),
+    Index("ix_runs_session_owner_created", "session_id", "owner", "created"),
 )
 # 处理失败的问答。runs 只保存成功结果（同一 request_id 重放会直接返回它），
 # 失败以前只写日志，统计不出错误率，也看不到失败在哪个阶段；这里单独记录。
