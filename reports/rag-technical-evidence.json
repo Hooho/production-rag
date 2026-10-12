@@ -35778,6 +35778,30 @@
       "url": "https://github.com/microsoft/graphrag/blob/5faaaf4f5685fa2056fa8c3bf9342cb089f2942f/packages/graphrag/graphrag/query/structured_search/global_search/search.py#L37"
     },
     {
+      "project": "WeKnora",
+      "path": "internal/application/service/chat_pipeline/search.go",
+      "line": 162,
+      "url": "https://github.com/Tencent/WeKnora/blob/602d0c388bf17d894f467fe0cd65d1d62c73d303/internal/application/service/chat_pipeline/search.go#L162"
+    },
+    {
+      "project": "WeKnora",
+      "path": "internal/application/service/session_knowledge_qa.go",
+      "line": 1039,
+      "url": "https://github.com/Tencent/WeKnora/blob/602d0c388bf17d894f467fe0cd65d1d62c73d303/internal/application/service/session_knowledge_qa.go#L1039"
+    },
+    {
+      "project": "WeKnora",
+      "path": "internal/types/custom_agent.go",
+      "line": 587,
+      "url": "https://github.com/Tencent/WeKnora/blob/602d0c388bf17d894f467fe0cd65d1d62c73d303/internal/types/custom_agent.go#L587"
+    },
+    {
+      "project": "WeKnora",
+      "path": "config/prompt_templates/fallback.yaml",
+      "line": 111,
+      "url": "https://github.com/Tencent/WeKnora/blob/602d0c388bf17d894f467fe0cd65d1d62c73d303/config/prompt_templates/fallback.yaml#L111"
+    },
+    {
       "project": "FastGPT",
       "path": "packages/service/worker/readFile/utils/LiteParse/index.ts",
       "line": 56,
