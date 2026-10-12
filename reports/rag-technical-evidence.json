@@ -35803,6 +35803,114 @@
     },
     {
       "project": "FastGPT",
+      "path": "projects/app/src/service/core/dataset/data/data.ts",
+      "line": 156,
+      "url": "https://github.com/labring/FastGPT/blob/95c6a2b58cf29b6b511e86a155d3a4efc0ac13a5/projects/app/src/service/core/dataset/data/data.ts#L156"
+    },
+    {
+      "project": "FastGPT",
+      "path": "packages/service/core/dataset/collection/controller.ts",
+      "line": 551,
+      "url": "https://github.com/labring/FastGPT/blob/95c6a2b58cf29b6b511e86a155d3a4efc0ac13a5/packages/service/core/dataset/collection/controller.ts#L551"
+    },
+    {
+      "project": "FastGPT",
+      "path": "packages/service/core/dataset/datasetSync/index.ts",
+      "line": 47,
+      "url": "https://github.com/labring/FastGPT/blob/95c6a2b58cf29b6b511e86a155d3a4efc0ac13a5/packages/service/core/dataset/datasetSync/index.ts#L47"
+    },
+    {
+      "project": "WeKnora",
+      "path": "internal/application/service/knowledge_replace.go",
+      "line": 41,
+      "url": "https://github.com/Tencent/WeKnora/blob/602d0c388bf17d894f467fe0cd65d1d62c73d303/internal/application/service/knowledge_replace.go#L41"
+    },
+    {
+      "project": "WeKnora",
+      "path": "internal/application/service/knowledge_process.go",
+      "line": 2805,
+      "url": "https://github.com/Tencent/WeKnora/blob/602d0c388bf17d894f467fe0cd65d1d62c73d303/internal/application/service/knowledge_process.go#L2805"
+    },
+    {
+      "project": "WeKnora",
+      "path": "internal/application/service/wiki_page.go",
+      "line": 271,
+      "url": "https://github.com/Tencent/WeKnora/blob/602d0c388bf17d894f467fe0cd65d1d62c73d303/internal/application/service/wiki_page.go#L271"
+    },
+    {
+      "project": "WeKnora",
+      "path": "internal/application/service/wiki_page.go",
+      "line": 407,
+      "url": "https://github.com/Tencent/WeKnora/blob/602d0c388bf17d894f467fe0cd65d1d62c73d303/internal/application/service/wiki_page.go#L407"
+    },
+    {
+      "project": "QAnything",
+      "path": "qanything_kernel/qanything_server/handler.py",
+      "line": 1427,
+      "url": "https://github.com/netease-youdao/QAnything/blob/0698b62913e7ba71e167dadc139cbc782dd4ff97/qanything_kernel/qanything_server/handler.py#L1427"
+    },
+    {
+      "project": "QAnything",
+      "path": "qanything_kernel/qanything_server/handler.py",
+      "line": 535,
+      "url": "https://github.com/netease-youdao/QAnything/blob/0698b62913e7ba71e167dadc139cbc782dd4ff97/qanything_kernel/qanything_server/handler.py#L535"
+    },
+    {
+      "project": "QAnything",
+      "path": "qanything_kernel/qanything_server/handler.py",
+      "line": 155,
+      "url": "https://github.com/netease-youdao/QAnything/blob/0698b62913e7ba71e167dadc139cbc782dd4ff97/qanything_kernel/qanything_server/handler.py#L155"
+    },
+    {
+      "project": "QAnything",
+      "path": "qanything_kernel/connector/database/mysql/mysql_client.py",
+      "line": 573,
+      "url": "https://github.com/netease-youdao/QAnything/blob/0698b62913e7ba71e167dadc139cbc782dd4ff97/qanything_kernel/connector/database/mysql/mysql_client.py#L573"
+    },
+    {
+      "project": "MaxKB",
+      "path": "apps/knowledge/serializers/document.py",
+      "line": 577,
+      "url": "https://github.com/1Panel-dev/MaxKB/blob/deef31ba3f585c8f37e6b59a7c14f9f102666265/apps/knowledge/serializers/document.py#L577"
+    },
+    {
+      "project": "MaxKB",
+      "path": "apps/knowledge/serializers/document.py",
+      "line": 625,
+      "url": "https://github.com/1Panel-dev/MaxKB/blob/deef31ba3f585c8f37e6b59a7c14f9f102666265/apps/knowledge/serializers/document.py#L625"
+    },
+    {
+      "project": "MaxKB",
+      "path": "apps/knowledge/serializers/knowledge_version.py",
+      "line": 30,
+      "url": "https://github.com/1Panel-dev/MaxKB/blob/deef31ba3f585c8f37e6b59a7c14f9f102666265/apps/knowledge/serializers/knowledge_version.py#L30"
+    },
+    {
+      "project": "Dify",
+      "path": "api/tasks/document_indexing_update_task.py",
+      "line": 69,
+      "url": "https://github.com/langgenius/dify/blob/1e3fe6ba9396cdeb348a1f5e428e71c6fb3d2389/api/tasks/document_indexing_update_task.py#L69"
+    },
+    {
+      "project": "Dify",
+      "path": "api/services/knowledge_fs_operations.py",
+      "line": 417,
+      "url": "https://github.com/langgenius/dify/blob/1e3fe6ba9396cdeb348a1f5e428e71c6fb3d2389/api/services/knowledge_fs_operations.py#L417"
+    },
+    {
+      "project": "Dify",
+      "path": "api/configs/extra/knowledge_fs_config.py",
+      "line": 13,
+      "url": "https://github.com/langgenius/dify/blob/1e3fe6ba9396cdeb348a1f5e428e71c6fb3d2389/api/configs/extra/knowledge_fs_config.py#L13"
+    },
+    {
+      "project": "Dify",
+      "path": "packages/contracts/generated/knowledge-fs/types.gen.ts",
+      "line": 258,
+      "url": "https://github.com/langgenius/dify/blob/1e3fe6ba9396cdeb348a1f5e428e71c6fb3d2389/packages/contracts/generated/knowledge-fs/types.gen.ts#L258"
+    },
+    {
+      "project": "FastGPT",
       "path": "packages/service/worker/readFile/utils/LiteParse/index.ts",
       "line": 56,
       "url": "https://github.com/labring/FastGPT/blob/95c6a2b58cf29b6b511e86a155d3a4efc0ac13a5/packages/service/worker/readFile/utils/LiteParse/index.ts#L56"
