@@ -35910,6 +35910,126 @@
       "url": "https://github.com/langgenius/dify/blob/1e3fe6ba9396cdeb348a1f5e428e71c6fb3d2389/packages/contracts/generated/knowledge-fs/types.gen.ts#L258"
     },
     {
+      "project": "PROD-RAG",
+      "path": "app/memory/long_term.py",
+      "line": 1,
+      "url": "/Users/Projects/AI-Projects/PROD-RAG/app/memory/long_term.py"
+    },
+    {
+      "project": "PROD-RAG",
+      "path": "app/memory/service.py",
+      "line": 1,
+      "url": "/Users/Projects/AI-Projects/PROD-RAG/app/memory/service.py"
+    },
+    {
+      "project": "PROD-RAG",
+      "path": "app/memory/framework.py",
+      "line": 1,
+      "url": "/Users/Projects/AI-Projects/PROD-RAG/app/memory/framework.py"
+    },
+    {
+      "project": "FastGPT",
+      "path": "packages/service/core/chat/controller.ts",
+      "line": 1,
+      "url": "https://github.com/labring/FastGPT/blob/95c6a2b58cf29b6b511e86a155d3a4efc0ac13a5/packages/service/core/chat/controller.ts#L1"
+    },
+    {
+      "project": "FastGPT",
+      "path": "packages/service/core/workflow/dispatch/ai/agentLoopCore/adapter/memory/index.ts",
+      "line": 1,
+      "url": "https://github.com/labring/FastGPT/blob/95c6a2b58cf29b6b511e86a155d3a4efc0ac13a5/packages/service/core/workflow/dispatch/ai/agentLoopCore/adapter/memory/index.ts#L1"
+    },
+    {
+      "project": "WeKnora",
+      "path": "internal/application/service/memory/extract.go",
+      "line": 39,
+      "url": "https://github.com/Tencent/WeKnora/blob/602d0c388bf17d894f467fe0cd65d1d62c73d303/internal/application/service/memory/extract.go#L39"
+    },
+    {
+      "project": "WeKnora",
+      "path": "internal/application/service/memory/vector.go",
+      "line": 136,
+      "url": "https://github.com/Tencent/WeKnora/blob/602d0c388bf17d894f467fe0cd65d1d62c73d303/internal/application/service/memory/vector.go#L136"
+    },
+    {
+      "project": "WeKnora",
+      "path": "internal/application/service/memory/service.go",
+      "line": 1,
+      "url": "https://github.com/Tencent/WeKnora/blob/602d0c388bf17d894f467fe0cd65d1d62c73d303/internal/application/service/memory/service.go#L1"
+    },
+    {
+      "project": "WeKnora",
+      "path": "internal/application/repository/memory.go",
+      "line": 1,
+      "url": "https://github.com/Tencent/WeKnora/blob/602d0c388bf17d894f467fe0cd65d1d62c73d303/internal/application/repository/memory.go#L1"
+    },
+    {
+      "project": "QAnything",
+      "path": "qanything_kernel/core/local_doc_qa.py",
+      "line": 1,
+      "url": "https://github.com/netease-youdao/QAnything/blob/0698b62913e7ba71e167dadc139cbc782dd4ff97/qanything_kernel/core/local_doc_qa.py#L1"
+    },
+    {
+      "project": "QAnything",
+      "path": "qanything_kernel/connector/database/mysql/mysql_client.py",
+      "line": 1,
+      "url": "https://github.com/netease-youdao/QAnything/blob/0698b62913e7ba71e167dadc139cbc782dd4ff97/qanything_kernel/connector/database/mysql/mysql_client.py#L1"
+    },
+    {
+      "project": "MaxKB",
+      "path": "apps/application/long_term_memory/__init__.py",
+      "line": 15,
+      "url": "https://github.com/1Panel-dev/MaxKB/blob/deef31ba3f585c8f37e6b59a7c14f9f102666265/apps/application/long_term_memory/__init__.py#L15"
+    },
+    {
+      "project": "MaxKB",
+      "path": "apps/application/models/application_chat.py",
+      "line": 1,
+      "url": "https://github.com/1Panel-dev/MaxKB/blob/deef31ba3f585c8f37e6b59a7c14f9f102666265/apps/application/models/application_chat.py#L1"
+    },
+    {
+      "project": "MaxKB",
+      "path": "apps/application/chat_pipeline/step/chat_step/impl/base_chat_step.py",
+      "line": 520,
+      "url": "https://github.com/1Panel-dev/MaxKB/blob/deef31ba3f585c8f37e6b59a7c14f9f102666265/apps/application/chat_pipeline/step/chat_step/impl/base_chat_step.py#L520"
+    },
+    {
+      "project": "Dify",
+      "path": "api/core/memory/token_buffer_memory.py",
+      "line": 1,
+      "url": "https://github.com/langgenius/dify/blob/1e3fe6ba9396cdeb348a1f5e428e71c6fb3d2389/api/core/memory/token_buffer_memory.py#L1"
+    },
+    {
+      "project": "Dify",
+      "path": "api/models/model.py",
+      "line": 1,
+      "url": "https://github.com/langgenius/dify/blob/1e3fe6ba9396cdeb348a1f5e428e71c6fb3d2389/api/models/model.py#L1"
+    },
+    {
+      "project": "RAGFlow",
+      "path": "internal/service/memory_extractor.go",
+      "line": 1,
+      "url": "https://github.com/infiniflow/ragflow/blob/ebb71552a2653d5c9719d1348037e15efe853b80/internal/service/memory_extractor.go#L1"
+    },
+    {
+      "project": "RAGFlow",
+      "path": "internal/service/memory_message_service.go",
+      "line": 1,
+      "url": "https://github.com/infiniflow/ragflow/blob/ebb71552a2653d5c9719d1348037e15efe853b80/internal/service/memory_message_service.go#L1"
+    },
+    {
+      "project": "RAGFlow",
+      "path": "internal/agent/retrievalbridge/memory.go",
+      "line": 1,
+      "url": "https://github.com/infiniflow/ragflow/blob/ebb71552a2653d5c9719d1348037e15efe853b80/internal/agent/retrievalbridge/memory.go#L1"
+    },
+    {
+      "project": "RAGFlow",
+      "path": "docs/guides/memory/configure_memory.md",
+      "line": 1,
+      "url": "https://github.com/infiniflow/ragflow/blob/ebb71552a2653d5c9719d1348037e15efe853b80/docs/guides/memory/configure_memory.md#L1"
+    },
+    {
       "project": "FastGPT",
       "path": "packages/service/worker/readFile/utils/LiteParse/index.ts",
       "line": 56,
