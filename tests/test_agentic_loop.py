@@ -243,3 +243,14 @@ def test_chat_client_params():
     Settings.llm_base_url = "https://api.deepseek.com"
     ChatClient.__call__(type("C", (), {"models": Settings(), "client": client.client})(), [], [{"type": "function"}])
     assert "extra_body" not in sent[1] and sent[1]["tools"] == [{"type": "function"}]
+
+
+# 方括号里不是资料编号的标记（[无资料]）算不通过，交给模型重写；Markdown 链接和任务列表不算。
+def test_citation_flags_invented_markers():
+    from app.agentic.citations import check_citations, fix_prompt
+    check = check_citations("待付款 [O1]。退货规则 [无资料]，也 [检索未命中]。", ["O1", "D1"])
+    assert check["reason"] == "invented_marker" and check["markers"] == ["[无资料]", "[检索未命中]"]
+    assert "[无资料]、[检索未命中]" in fix_prompt(check) and "资料中没有找到" in fix_prompt(check)
+    assert check_citations("见 [说明](https://a.cn) 和 [O1][D1]。\n- [ ] 待办\n- [x] 完成", ["O1", "D1"])["passed"]
+    both = check_citations("退货 [S9]，另外 [无资料]。", ["O1"])
+    assert both["reason"] == "unknown_source" and "不存在的资料编号：S9" in fix_prompt(both) and "[无资料]" in fix_prompt(both)
