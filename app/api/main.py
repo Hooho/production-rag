@@ -21,6 +21,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from ..agent.service import Agent
+from ..agentic.records import load_run as load_agent_run, save_run as save_agent_run, summary as agent_summary
+from ..agentic.service import AgentFailed, AgentMode
 from ..business.sample_data import MAX_COUNT, generate_preview
 from ..business.definitions import ACTIONS, DATA_TYPES, public_schema
 from ..business.service import (DataError, can_pick, create_batch, create_record, delete_batch, delete_record, list_records,
@@ -479,6 +481,8 @@ def create_app(store=None, models=None, jwt_secret=None):
             logger.exception("injection_samples_seed_failed")
         # 注入检测模型（guard 服务）：输入安全检查的第三层，没有设置 GUARD_URL 时跳过。
         app.state.agent.injection_model = InjectionModel()
+        # Agent 模式（app/agentic）：借用固定流程 Agent 的输入检查、读取记忆和步骤记录，中间换成 Agent 循环。
+        app.state.agent_mode = AgentMode(app.state.agent)
         app.state.memory = Memory()
         # 同一时间只允许一次界面发起的评测：评测会连续调用重排模型，并发跑多次既慢又会互相拖慢耗时统计。
         app.state.eval_lock = Lock()
@@ -1362,7 +1366,9 @@ def create_app(store=None, models=None, jwt_secret=None):
         return {"group_id": body.group_id, "data_type": body.data_type, **values}
 
     # 同一会话串行处理；成功请求持久化后，同一 request_id 重放直接返回原结果。
-    def process_chat(body, request, owner, on_step=None, on_token=None):
+    # mode="agent" 时走 Agent 模式（/agent/chat）：会话、限流、加锁、重放、写 runs 和长期记忆都和固定流程共用，
+    # 另外把每一轮的记录写进 agent_runs / agent_rounds；on_round 在每轮结束时调用，流式接口据此推送。
+    def process_chat(body, request, owner, on_step=None, on_token=None, mode="fixed", on_round=None):
         store = app.state.store
         session_id, request_id = str(body.session_id), str(body.request_id)
         check_session(store, session_id, owner)
@@ -1405,19 +1411,36 @@ def create_app(store=None, models=None, jwt_secret=None):
                     on_step(step)
 
             try:
-                result = app.state.agent.run(store, app.state.models, owner, session_id, body.question,
-                    previous, last_order, on_step=track_step, on_token=on_token)
+                if mode == "agent":
+                    result = app.state.agent_mode.run(store, app.state.models, owner, session_id, body.question,
+                        previous, last_order, on_step=track_step, on_round=on_round)
+                else:
+                    result = app.state.agent.run(store, app.state.models, owner, session_id, body.question,
+                        previous, last_order, on_step=track_step, on_token=on_token)
             except Exception as error:
                 record_run_error(request, owner, session_id, request_id, body.question, error,
                     completed_steps, round((time.monotonic() - started) * 1000))
+                if isinstance(error, AgentFailed):
+                    # 模型调用失败时 runs 里没有记录，已经跑完的轮次照样存进 agent_runs，执行链上可以查看失败前做了什么。
+                    try:
+                        with store.engine.begin() as connection:
+                            save_agent_run(connection, request_id, session_id, owner, error.outcome)
+                    except Exception:
+                        logger.exception("agent_run_record_failed trace_id=%s", request.state.trace_id)
+                    raise HTTPException(503, "模型调用失败，请稍后重试") from error
                 raise
             result.update({"request_id": request_id, "trace_id": request.state.trace_id})
             if not lock.owned():
                 raise HTTPException(409, "处理时间过长，请重试")
+            agent_outcome = result.get("agent")
+            if agent_outcome is not None:
+                result["agent"] = agent_summary(agent_outcome)
             with store.engine.begin() as connection:
                 connection.execute(runs.insert().values(id=request_id, session_id=session_id,
                     owner=owner, question=body.question, response=result,
                     created=datetime.now(timezone.utc).isoformat(), **run_columns(summarize_run(result))))
+                if agent_outcome is not None:
+                    save_agent_run(connection, request_id, session_id, owner, agent_outcome)
             # 长期记忆在后台提取，不增加这次回答的等待时间；提取失败只记日志。
             try:
                 app.state.agent.response_agent.memory.long_term.schedule(owner, session_id, request_id, body.question, result)
@@ -1452,13 +1475,36 @@ def create_app(store=None, models=None, jwt_secret=None):
     # 通过 SSE 推送后端真实阶段和回答的逐段文字，前端可以在模型调用期间展示实际进度和已生成的内容。
     @app.post("/chat/stream")
     def chat_stream(body: ChatInput, request: Request, owner=Depends(identity)):
+        return stream_chat(body, request, owner, "fixed")
+
+    # Agent 模式：和 /chat 用同一个会话和请求格式，处理流程换成 Agent 循环。
+    @app.post("/agent/chat")
+    def agent_chat(body: ChatInput, request: Request, owner=Depends(identity)):
+        return process_chat(body, request, owner, mode="agent")
+
+    # Agent 模式的流式接口：除了 step（处理阶段），每一轮结束时推送 round（这一轮的完整记录），前端逐轮显示执行链。
+    # Agent 每轮等模型完整返回后才处理工具调用，不推送 token。
+    @app.post("/agent/chat/stream")
+    def agent_chat_stream(body: ChatInput, request: Request, owner=Depends(identity)):
+        return stream_chat(body, request, owner, "agent")
+
+    # 读取一次 Agent 问答的每一轮（会话历史里只存了摘要），只能读自己的。
+    @app.get("/agent/runs/{run_id}")
+    def agent_run(run_id: UUID, owner=Depends(identity)):
+        detail = load_agent_run(app.state.store.engine, str(run_id), owner)
+        if detail is None:
+            raise HTTPException(404, "执行记录不存在")
+        return detail
+
+    def stream_chat(body, request, owner, mode):
         events = Queue()
 
         def run():
             try:
                 # 原来只推送阶段，回答要等 complete 才整段出现；现在额外推送 token 事件，前端可以逐字显示。
                 result = process_chat(body, request, owner, on_step=lambda step: events.put(("step", step)),
-                    on_token=lambda text: events.put(("token", {"text": text})))
+                    on_token=lambda text: events.put(("token", {"text": text})), mode=mode,
+                    on_round=lambda record: events.put(("round", record)))
                 events.put(("complete", result))
             except Exception as error:
                 if not isinstance(error, HTTPException):

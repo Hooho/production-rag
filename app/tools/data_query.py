@@ -81,12 +81,7 @@ class DataQueryTool:
 
     # 回答一个数据查询问题，返回回答和执行过程（供执行链展示）。
     def execute(self, store, models, owner, question):
-        user = load_user(store.engine, owner)
-        permissions = user_permissions(store.engine, user)
-        readable = []
-        for data_type in DATA_TYPES:
-            if "read" in permissions[data_type]:
-                readable.append(data_type)
+        readable, permissions = self.load_access(store, owner)
         mentioned = []
         for data_type in TYPE_PRIORITY:
             if mentions(question, data_type):
@@ -129,8 +124,22 @@ class DataQueryTool:
     def result(answer, refused=False, **details):
         return {"answer": answer, "refused": refused, **details}
 
-    # 让模型把问题转成 JSON 查询计划。只把用户有权限查看的数据类型告诉模型，敏感字段不提供给它用来筛选。
-    def llm_plan(self, models, question, readable):
+    # 当前用户的数据权限：返回 (能查看的数据类型列表, 每种数据类型的权限集合)。
+    # 固定流程的 execute 和 Agent 模式的 execute_plan 共用，权限只在服务端按登录身份查出。
+    @staticmethod
+    def load_access(store, owner):
+        user = load_user(store.engine, owner)
+        permissions = user_permissions(store.engine, user)
+        readable = []
+        for data_type in DATA_TYPES:
+            if "read" in permissions[data_type]:
+                readable.append(data_type)
+        return readable, permissions
+
+    # 数据字典：每种可查看数据的类型名、说明和字段（名称、中文名、类型、可选值、别名、引用），敏感字段不出现。
+    # 固定流程把它发给 llm_plan 那次调用；Agent 模式把它写进 query_data 的工具描述，由 Agent 自己写查询条件。
+    @staticmethod
+    def build_schemas(readable):
         schemas = []
         for data_type in readable:
             config = DATA_TYPES[data_type]
@@ -145,6 +154,27 @@ class DataQueryTool:
                 fields.append(item)
             schemas.append({"data_type": data_type, "label": config["label"], "description": config["description"],
                 "fields": fields})
+        return schemas
+
+    # 执行一份已经写好的查询计划（Agent 模式用）：不再调用模型翻译问题，直接校验、执行、整理结果。
+    # 计划不合法（数据类型不存在或没有权限、字段不存在、敏感字段、不支持的操作符）时抛出 DataError，
+    # 由调用方把原因返回给 Agent 修正；校验规则和固定流程完全相同，都经过 check_plan。
+    def execute_plan(self, store, owner, plan):
+        readable, permissions = self.load_access(store, owner)
+        if not readable:
+            raise DataError("你还没有任何业务数据的查看权限，请联系管理员开通。")
+        data_type = plan.get("data_type") if isinstance(plan, dict) else None
+        if data_type in DATA_TYPES and data_type not in readable:
+            raise DataError(f"你没有查看{DATA_TYPES[data_type]['label']}的权限，请联系管理员在设置页开通。")
+        checked = self.check_plan(plan, readable, permissions)
+        if checked is None:
+            raise DataError("缺少 data_type，要说明查询哪种数据")
+        outcome = self.run(store, checked, permissions)
+        return self.result(self.format_answer(checked, outcome), plan=checked, planner="agent", **outcome)
+
+    # 让模型把问题转成 JSON 查询计划。只把用户有权限查看的数据类型告诉模型，敏感字段不提供给它用来筛选。
+    def llm_plan(self, models, question, readable):
+        schemas = self.build_schemas(readable)
         current = today()
         # 提示词在「提示词」页管理（app/prompts.py）：指令可以修改，查询计划的格式固定。
         prompt = ChatPromptTemplate.from_messages([("system", prompts.compose("data_query", template=True)),

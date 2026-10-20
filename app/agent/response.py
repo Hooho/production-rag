@@ -4,6 +4,7 @@ from typing import Any, TypedDict
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import ModelRequest, dynamic_prompt
+from langchain_core.messages import AIMessage, HumanMessage
 
 from .. import prompts
 from ..memory.framework import FrameworkMemory
@@ -182,6 +183,28 @@ class ResponseAgent:
             return None
         return {"input": usage.get("input_tokens"), "output": usage.get("output_tokens"),
             "total": usage.get("total_tokens")}
+
+    # 把一轮问答追加进会话记忆（Checkpointer），超过阈值时压缩；不生成回答（Agent 模式用：答案已经由 Agent 生成）。
+    # 压缩规则不另写：直接调用回答 Agent 身上同一个摘要中间件（同样的阈值、Token 估算、切点对齐、去掉 <think>、
+    # 同一个 memory_summary 提示词），结果按回答模型节点写回同一个会话，固定流程下一次回答时读到的是同一份记忆。
+    # 固定流程的知识问答仍在 answer() 里由中间件在调用模型前处理，两边用的是同一套规则、同一份数据。
+    def remember_turn(self, owner, session_id, question, answer):
+        if self.agent is None or self.memory.middleware is None:
+            return None
+        self.sync_memory_settings()
+        config = {"configurable": {"thread_id": self.memory.thread_id(owner, session_id)}}
+        before = self.memory.inspect(owner, session_id)
+        state = self.agent.get_state(config)
+        added = [HumanMessage(question), AIMessage(answer)]
+        messages = list(state.values.get("messages", [])) + added
+        # 中间件判断要不要压缩：要压缩时返回“删除全部 + 新摘要 + 保留的原文”，不压缩时返回 None，只追加本轮。
+        update = self.memory.middleware.before_model({"messages": messages}, None)
+        self.agent.update_state(config, update or {"messages": added}, as_node="model")
+        after = self.memory.inspect(owner, session_id)
+        return {"compressed": update is not None, "summary_updated": after["summary"] != before["summary"],
+            "message_count_before": before["message_count"], "message_count": after["message_count"],
+            "summary": after["summary"], "memory_trigger_tokens": self.memory.trigger_tokens,
+            "memory_keep_tokens": self.memory.keep_tokens}
 
     def close(self):
         self.memory.close()

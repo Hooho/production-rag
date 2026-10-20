@@ -160,7 +160,8 @@ class DocumentSearchTool:
                 "score": round(item["final_score"], 6),
                 "retrieval_methods": item["retrieval_methods"], "version": item.get("version"),
                 "page_start": item.get("page_start"), "heading": item.get("heading"),
-                "chunk_id": item["id"], "position": item.get("position"), "parent_chunk_ids": chunk_ids,
+                "chunk_id": item["id"], "position": item.get("position"), "document_id": item.get("document_id"),
+                "parent_chunk_ids": chunk_ids,
                 "parent_parts": parts, "injection": injection_hits})
         stats = {"queries": len(queries), "dense_hits": dense_hits,
             "keyword_hits": keyword_hits, "fused_candidates": len(candidates),

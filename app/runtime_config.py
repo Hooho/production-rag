@@ -60,6 +60,9 @@ SPECS = [
     {"key": "sufficiency_check", "group": "answer", "type": "bool", "default": True},
     {"key": "intent_local", "group": "answer", "type": "bool", "default": True},
     {"key": "contextual_retrieval", "group": "answer", "type": "bool", "default": True},
+    # Agent 模式（app/agentic）：一次问答最多调用几次工具、整次最多跑多久；超过后不再调用工具，直接让模型回答。
+    {"key": "agent_tool_budget", "group": "answer", "type": "int", "default": 6, "min": 1, "max": 20},
+    {"key": "agent_timeout", "group": "answer", "type": "int", "default": 90, "min": 20, "max": 600},
     {"key": "memory_trigger_tokens", "group": "memory", "type": "int", "default": 6000,
         "min": 800, "max": 16000},
     {"key": "memory_keep_tokens", "group": "memory", "type": "int", "default": 3000,

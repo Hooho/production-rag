@@ -471,3 +471,39 @@ prompt_versions = Table("prompt_versions", metadata,
     Column("created_by", String(32), nullable=False),
     Column("created", String(40), nullable=False),
 )
+
+# Agent 模式的执行记录（见 app/agentic）。一次问答在 runs 里照样有一行（会话历史、记忆、反馈都靠它），
+# 这里另外记 Agent 自己的统计和每一轮的细节：runs.response 只放答案和步骤摘要，每轮的原始响应、工具结果很大，
+# 放进 response 会让读会话历史变慢，所以拆到 agent_rounds，执行链展开时再按 run_id 读取。
+agent_runs = Table("agent_runs", metadata,
+    # 和 runs.id 相同（request_id）；失败的问答在 runs 里没有记录，这里仍然有，已经跑完的轮次可以查看。
+    Column("id", String(36), primary_key=True),
+    Column("session_id", String(36), nullable=False),
+    Column("owner", String(32), nullable=False),
+    # completed：正常回答；failed：模型调用失败；blocked：输入检查拦下，没有进入循环。
+    Column("status", String(16), nullable=False),
+    # answered：模型自己结束；budget / timeout：强制回答；model_error：模型调用失败。
+    Column("stop_reason", String(16)),
+    Column("rounds", Integer, nullable=False),
+    Column("tool_calls", Integer, nullable=False),
+    Column("tool_budget", Integer, nullable=False),
+    Column("citation_retried", Boolean, nullable=False),
+    Column("citation_passed", Boolean),
+    Column("prompt_tokens", Integer, nullable=False),
+    Column("completion_tokens", Integer, nullable=False),
+    Column("cached_tokens", Integer, nullable=False),
+    Column("duration_ms", Integer),
+    Column("model", String(100)),
+    Column("prompt_version", String(40)),
+    Column("error", String(500)),
+    Column("created", String(32), nullable=False),
+    Index("ix_agent_runs_owner_created", "owner", "created"),
+)
+# 每一轮一行：record 是 app/agentic/loop.py 整理的整轮记录（本轮新增消息、原始响应、推理过程、工具调用和返回、引用检查）。
+agent_rounds = Table("agent_rounds", metadata,
+    Column("run_id", String(36), primary_key=True),
+    Column("round", Integer, primary_key=True, autoincrement=False),
+    Column("kind", String(16), nullable=False),
+    Column("record", JSON, nullable=False),
+    Column("duration_ms", Integer),
+)
