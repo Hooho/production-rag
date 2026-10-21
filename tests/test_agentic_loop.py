@@ -187,9 +187,9 @@ def test_tool_error_and_model_failure():
 
 # 第一轮消息的摆放：system 在前，历史问答在中间，会变的记忆和本轮问题在最后一条。
 def test_initial_messages_layout():
-    previous = [{"question": "退货政策是什么", "response": {"answer": "签收后七天内可以退货 [S1]。"}},
-        {"question": "被拦截的问题", "response": {}}]
-    messages = initial_messages("那 A1001 能退吗", previous, profile=[{"content": "用户偏好先给结论"}],
+    turns = [{"question": "退货政策是什么", "answer": "签收后七天内可以退货 [S1]。"},
+        {"question": "没有回答的问题", "answer": ""}]
+    messages = initial_messages("那 A1001 能退吗", turns, profile=[{"content": "用户偏好先给结论"}],
         summary="尚未生成", last_order="A1001")
     assert [message["role"] for message in messages] == ["system", "user", "assistant", "user"]
     assert "今天是 " in messages[0]["content"] and "[O1]" in messages[0]["content"]
@@ -254,3 +254,17 @@ def test_citation_flags_invented_markers():
     assert check_citations("见 [说明](https://a.cn) 和 [O1][D1]。\n- [ ] 待办\n- [x] 完成", ["O1", "D1"])["passed"]
     both = check_citations("退货 [S9]，另外 [无资料]。", ["O1"])
     assert both["reason"] == "unknown_source" and "不存在的资料编号：S9" in fix_prompt(both) and "[无资料]" in fix_prompt(both)
+
+
+# 没调用工具却抄了历史回答里的 [S1]：资料池为空也要检查；下一轮带着工具让模型先去查，查到后用新编号回答。
+def test_history_citations_force_lookup(runtime):
+    runtime(parent_context=False)
+    model = ScriptedModel(reply("段永平很厉害 [S1][S2]。"),
+        reply(calls=[tool_call("c1", "search_knowledge", query="退货需要什么条件？", mode="vector")]),
+        reply("签收后可以退货 [S1]。"))
+    result = run_agent(context(), start("段永平厉害吗"), model, CONFIG)
+    first = result["rounds"][0]
+    assert first["citation_check"]["reason"] == "unknown_source" and first["citation_check"]["unknown"] == ["S1", "S2"]
+    assert "来自历史消息" in first["citation_fix_prompt"]
+    assert result["rounds"][1]["kind"] == "normal" and model.calls[1]["tools"]
+    assert result["answer"] == "签收后可以退货 [S1]。" and result["stop_reason"] == "answered" and result["citation"]["passed"]

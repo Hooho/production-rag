@@ -54,9 +54,61 @@ export type ChatResult = {
   trace_id: string;
   request_id: string;
   model_mode?: string;
+  // Agent 模式（/agent/chat）的回答才有：mode = "agent"，agent 是统计摘要，每一轮的细节用 getAgentRun 读取。
+  mode?: "agent";
+  agent?: AgentSummary;
   // 用户对这次回答的反馈，来自 /history；新回答没有反馈。
   feedback?: FeedbackRecord | null;
 };
+// Agent 模式（后端 app/agentic）：一次问答的统计摘要，存在 runs.response.agent 里。
+export type AgentCitation = { passed: boolean; reason: string | null; allowed: string[]; cited: string[]; unknown: string[]; markers?: string[]; raw_answer?: string };
+export type AgentUsage = { prompt_tokens: number; completion_tokens: number; cached_tokens: number };
+export type AgentSummary = {
+  status: "completed" | "failed" | "blocked";
+  stop_reason: "answered" | "budget" | "timeout" | "model_error" | "demo" | null;
+  tool_calls_used: number;
+  tool_budget: number;
+  citation: AgentCitation | null;
+  citation_retried?: boolean;
+  usage: AgentUsage | Record<string, never>;
+  duration_ms?: number;
+  model?: string;
+  prompt_version?: string;
+};
+// 模型请求里的一条消息：原样记录，assistant 可能带 reasoning_content 和 tool_calls，tool 带 tool_call_id。
+export type AgentMessage = { role: "system" | "user" | "assistant" | "tool"; content?: string | null; reasoning_content?: string;
+  tool_calls?: AgentToolCall[]; tool_call_id?: string };
+export type AgentToolCall = { id: string; type?: string; function: { name: string; arguments: string } };
+// 程序执行一次工具调用的记录：content 是放回消息给模型看的文字，trace 是完整结果（检索诊断、查询计划等）。
+export type AgentToolResult = { id: string; name: string; arguments: string; status: "ok" | "error" | "duplicate" | "skipped";
+  ok: boolean; content: string; trace?: Record<string, unknown>; budget_left?: number; duration_ms?: number };
+// 一轮的完整记录（后端 app/agentic/loop.py）：本轮新增的消息、原始响应、推理过程、工具调用和返回、引用检查。
+export type AgentRound = {
+  round: number;
+  kind: "normal" | "forced" | "citation_retry";
+  message_count: number;
+  new_messages: AgentMessage[];
+  tools_sent: string[];
+  raw_response?: string;
+  reasoning?: string;
+  content?: string;
+  tool_calls?: AgentToolCall[];
+  finish_reason?: string | null;
+  usage?: Record<string, unknown>;
+  cached_tokens?: number;
+  model_ms?: number;
+  tool_results?: AgentToolResult[];
+  citation_check?: AgentCitation;
+  citation_fix_prompt?: string;
+  answer?: string;
+  error?: string;
+  duration_ms?: number;
+};
+export type AgentRun = { id: string; status: string; stop_reason: string | null; round_count: number; tool_calls: number;
+  tool_budget: number; prompt_tokens: number; completion_tokens: number; cached_tokens: number; duration_ms: number | null;
+  model: string | null; prompt_version: string | null; error: string | null; created: string; rounds: AgentRound[] };
+export type ChatMode = "fixed" | "agent";
+
 export type HistoryRun = {
   id: string;
   session_id: string;
@@ -414,12 +466,15 @@ export function sendChat(payload: { session_id: string; request_id: string; ques
 }
 
 // 读取后端 SSE 阶段事件和回答文字片段，返回最终的完整问答结果。
+// mode = "agent" 时走 Agent 模式（/agent/chat/stream）：多一种 round 事件，每轮结束时推送这一轮的完整记录。
 export async function sendChatStream(
   payload: { session_id: string; request_id: string; question: string },
   onStep: (step: TraceStep) => void,
   onToken: (text: string) => void,
+  mode: ChatMode = "fixed",
+  onRound?: (round: AgentRound) => void,
 ): Promise<ChatResult> {
-  const response = await authorizedFetch("/chat/stream", {
+  const response = await authorizedFetch(mode === "agent" ? "/agent/chat/stream" : "/chat/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -441,6 +496,7 @@ export async function sendChatStream(
     if (event === "step") onStep(value as TraceStep);
     // 后端逐段推送回答文字，原来要等 complete 才能看到整段回答。
     if (event === "token") onToken((value as { text: string }).text);
+    if (event === "round" && onRound) onRound(value as unknown as AgentRound);
     if (event === "error") throw new Error((value as { detail?: string }).detail || "请求失败");
     if (event === "complete") complete = value as ChatResult;
   }
@@ -461,6 +517,11 @@ export async function sendChatStream(
   }
   if (!complete) throw new Error("服务未返回完整结果");
   return complete;
+}
+
+// 读取一次 Agent 问答的每一轮（会话历史里只有摘要）。只能读自己的。
+export function getAgentRun(requestId: string) {
+  return request<AgentRun>(`/agent/runs/${requestId}`);
 }
 
 // 提交或修改对一次回答的反馈，重复提交覆盖上一次。

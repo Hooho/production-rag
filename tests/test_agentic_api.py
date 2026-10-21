@@ -7,6 +7,7 @@ from app.agentic.service import DEMO_ANSWER
 from app.mysql.store import agent_runs, run_errors, runs
 from app.security import BLOCKED_ANSWER
 from test_agentic_loop import ScriptedModel, reply, tool_call
+from test_agentic_memory import response_agent
 from test_app import headers, question, session, setup  # noqa: F401  setup 是 pytest fixture
 
 
@@ -17,9 +18,11 @@ def use_model(client, *responses):
 
 
 # 完整一次 Agent 问答：处理阶段和固定流程同样的前后几步，中间换成 Agent 循环；
-# runs 里只存摘要，每一轮存在 agent_rounds，按 request_id 读取；下一轮能看到上一轮的问答和查过的订单。
-def test_agent_chat_saves_rounds_and_memory(setup):
+# runs 里只存摘要，每一轮存在 agent_rounds，按 request_id 读取；下一轮能看到上一轮的问答（从 Checkpointer 读）和查过的订单。
+def test_agent_chat_saves_rounds_and_memory(setup, monkeypatch):
     client, store = setup
+    # 历史原文从 Checkpointer 读：演示模式没有聊天模型、不写会话记忆，这里换成带假模型的回答 Agent。
+    client.app.state.agent.response_agent = response_agent(monkeypatch)
     session_id = session(client)
     use_model(client, reply(calls=[tool_call("c1", "lookup_order", order_id="A1001")], reasoning="先查订单"),
         reply("订单 A1001 已发货，预计明天送达 [O1]。"))
@@ -29,7 +32,8 @@ def test_agent_chat_saves_rounds_and_memory(setup):
     result = response.json()
     assert result["mode"] == "agent" and result["route"] == "agent"
     assert result["answer"] == "订单 A1001 已发货，预计明天送达 [O1]。"
-    assert [step["id"] for step in result["steps"]] == ["request", "input_guard", "memory", "agent", "output_guard", "complete"]
+    assert [step["id"] for step in result["steps"]] == ["request", "input_guard", "memory", "agent", "output_guard",
+        "memory_write", "complete"]
     assert result["sources"][0]["id"] == "O1" and result["last_order"] == "A1001"
     assert "rounds" not in result["agent"] and result["agent"]["tool_calls_used"] == 1
     cache = next(step for step in result["steps"] if step["id"] == "agent")["result"]["cache_hits"]

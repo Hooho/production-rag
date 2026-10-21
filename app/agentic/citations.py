@@ -42,6 +42,11 @@ def check_citations(answer, allowed):
 
 # 检查不通过时发给 Agent 的修改提示：说清楚哪里不对、可以用哪些编号，让它重写一次。
 def fix_prompt(check):
+    if not check["allowed"]:
+        return (f"引用检查没有通过：回答里出现了资料编号 {'、'.join(check['unknown'])}，但这次问答还没有调用任何工具，"
+            "这些编号来自历史消息里之前的回答，这次不能用。\n"
+            "历史消息只用来理解上下文，不能当资料。需要事实时，先调用工具查询，再根据查到的资料回答并标出新的编号；"
+            "不需要资料的问题直接回答，不要标编号。")
     allowed = "、".join(check["allowed"])
     problems = []
     if check["reason"] == "no_citation":

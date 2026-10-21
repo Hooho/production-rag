@@ -62,7 +62,9 @@ class AgentMode:
         emit(self.agent.read_memory(state))
 
         memory = state.get("memory_context") or {}
-        messages = initial_messages(question, previous, profile=memory.get("profile"), summary=memory.get("summary"),
+        # 历史原文和滚动摘要都来自 Checkpointer（读取 Memory 这一步的 inspect 结果），两者正好接上；
+        # previous（MySQL runs 表）只用于审计显示和输入检查，不再发给模型。
+        messages = initial_messages(question, memory.get("turns"), profile=memory.get("profile"), summary=memory.get("summary"),
             last_order=last_order)
         if self.client_factory is None and models.mode != "openai":
             self.agent.add_step(state, "agent", "agent", "Agent 循环", "演示模式没有大模型，Agent 模式不可用", {
@@ -129,7 +131,7 @@ class AgentMode:
 
     # 把本轮问答写进会话记忆（和固定流程同一份），超过阈值时用同一个摘要中间件压缩。
     # 只写问题和最终回答，工具调用、资料、推理过程不写，和“不同问题之间只传问答”一致。
-    # 写入失败不影响这次回答：只在步骤里记下原因，下一轮仍能从 runs 读到最近几轮问答。
+    # 写入失败不影响这次回答：只在步骤里记下原因；这一轮不会出现在后面提问的历史原文里。
     def remember(self, state, emit, answer):
         started = time.monotonic()
         try:
@@ -144,8 +146,13 @@ class AgentMode:
             detail = "超过压缩阈值，较早的问答已压缩成摘要"
         else:
             detail = "已追加本轮问答，未超过压缩阈值"
+        # 摘要按这次有没有压缩分成两个字段显示：压缩了是“本次压缩生成的摘要”，没压缩是之前已有的摘要（可能为空）。
+        shown = dict(written)
+        summary = shown.pop("summary", None)
+        if not written.get("error"):
+            shown["compressed_summary" if written["compressed"] else "existing_summary"] = summary or "尚未生成"
         self.agent.add_step(state, "memory_write", "memory", "写入会话记忆", detail, {
-            **written, "process_purpose": "让后面的提问（两种模式都一样）能读到这一轮"}, started_at=started)
+            **shown, "process_purpose": "让后面的提问（两种模式都一样）能读到这一轮"}, started_at=started)
         emit()
 
     def finish(self, state, emit, answer, sources, outcome, last_order):

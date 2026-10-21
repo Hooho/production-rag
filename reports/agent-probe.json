@@ -1,0 +1,281 @@
+{
+  "status_code": 200,
+  "answer": "- **订单状态**：系统未查到编号为 **A1001** 的订单记录，因此无法确认物流进度或是否签收。[D1]\n- **未签收能否退货**：现有资料中没有可用的退货政策，无法确认未签收订单是否可以退货及具体流程。\n\n请先核对订单编号；如果编号正确，可联系人工客服核实订单归属和退货规则。",
+  "agent": {
+    "status": "completed",
+    "answer": "- **订单状态**：系统未查到编号为 **A1001** 的订单记录，因此无法确认物流进度或是否签收。[D1]\n- **未签收能否退货**：现有资料中没有可用的退货政策，无法确认未签收订单是否可以退货及具体流程。\n\n请先核对订单编号；如果编号正确，可联系人工客服核实订单归属和退货规则。",
+    "stop_reason": "budget",
+    "tool_calls_used": 6,
+    "tool_budget": 6,
+    "citation": {
+      "passed": true,
+      "reason": null,
+      "allowed": [
+        "D1"
+      ],
+      "cited": [
+        "D1"
+      ],
+      "unknown": []
+    },
+    "usage": {
+      "prompt_tokens": 16380,
+      "completion_tokens": 755,
+      "cached_tokens": 11243
+    },
+    "duration_ms": 47805,
+    "citation_retried": false,
+    "model": "MiniMax-M3",
+    "prompt_version": "agent@内置"
+  },
+  "run": {
+    "id": "2504a043-46e9-4b4a-bd79-a4948496daa0",
+    "session_id": "fbf84858-1b43-47a3-a3d0-caf02eed0643",
+    "owner": "admin",
+    "status": "completed",
+    "stop_reason": "budget",
+    "tool_calls": 6,
+    "tool_budget": 6,
+    "citation_retried": false,
+    "citation_passed": true,
+    "prompt_tokens": 16380,
+    "completion_tokens": 755,
+    "cached_tokens": 11243,
+    "duration_ms": 47805,
+    "model": "MiniMax-M3",
+    "prompt_version": "agent@内置",
+    "error": null,
+    "created": "2026-10-20T08:33:32.699333+00:00",
+    "round_count": 5
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "kind": "normal",
+      "message_fields": [
+        "reasoning_content",
+        "reasoning_details",
+        "role",
+        "tool_calls"
+      ],
+      "reasoning": "The user asks about order A1001 status, and whether it can be returned if not signed. I need to look up the order and search knowledge base for return policy.",
+      "content": "",
+      "tool_calls": [
+        {
+          "name": "lookup_order",
+          "arguments": "{\"order_id\":\"A1001\"}"
+        },
+        {
+          "name": "search_knowledge",
+          "arguments": "{\"query\":\"订单未签收是否可以退货？退货申请的条件和流程是什么？\"}"
+        }
+      ],
+      "tool_results": [
+        {
+          "name": "lookup_order",
+          "status": "ok",
+          "content": "没有找到属于你的该订单。\n\n剩余预算：还能调用 5 次工具。"
+        },
+        {
+          "name": "search_knowledge",
+          "status": "ok",
+          "content": "没有找到相关资料。可以换一种问法，或者用 keyword 模式搜索名称、编号等原话。\n\n剩余预算：还能调用 4 次工具。"
+        }
+      ],
+      "finish_reason": "tool_calls",
+      "usage": {
+        "total_tokens": 3571,
+        "prompt_tokens": 3469,
+        "total_characters": 0,
+        "completion_tokens": 102,
+        "prompt_tokens_details": {
+          "cached_tokens": 128
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 35
+        }
+      },
+      "cached_tokens": 128,
+      "model_ms": 4548,
+      "citation_check": null,
+      "error": null
+    },
+    {
+      "round": 2,
+      "kind": "normal",
+      "message_fields": [
+        "reasoning_content",
+        "reasoning_details",
+        "role",
+        "tool_calls"
+      ],
+      "reasoning": "Order A1001 not found via lookup_order (\"属于你的\"). Let me try query_data on orders to see if it exists. Also search knowledge base with keyword mode for return policy.",
+      "content": "",
+      "tool_calls": [
+        {
+          "name": "query_data",
+          "arguments": "{\"data_type\":\"orders\",\"filters\":[{\"field\":\"id\",\"op\":\"eq\",\"value\":\"A1001\"}]}"
+        },
+        {
+          "name": "search_knowledge",
+          "arguments": "{\"query\":\"退货政策 退货条件 七天无理由\",\"mode\":\"keyword\",\"top_k\":8}"
+        }
+      ],
+      "tool_results": [
+        {
+          "name": "query_data",
+          "status": "ok",
+          "content": "[D1] 按条件（编号 = A1001）没有查到符合条件的订单。\n\n剩余预算：还能调用 3 次工具。"
+        },
+        {
+          "name": "search_knowledge",
+          "status": "ok",
+          "content": "没有找到相关资料。可以换一种问法，或者用 keyword 模式搜索名称、编号等原话。\n\n剩余预算：还能调用 2 次工具。"
+        }
+      ],
+      "finish_reason": "tool_calls",
+      "usage": {
+        "total_tokens": 3801,
+        "prompt_tokens": 3639,
+        "total_characters": 0,
+        "completion_tokens": 162,
+        "prompt_tokens_details": {
+          "cached_tokens": 3469
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 37
+        }
+      },
+      "cached_tokens": 3469,
+      "model_ms": 6237,
+      "citation_check": null,
+      "error": null
+    },
+    {
+      "round": 3,
+      "kind": "normal",
+      "message_fields": [
+        "reasoning_content",
+        "reasoning_details",
+        "role",
+        "tool_calls"
+      ],
+      "reasoning": "Order A1001 doesn't exist in the data. Let me try one more knowledge search with vector/hybrid different phrasing for return policy.",
+      "content": "",
+      "tool_calls": [
+        {
+          "name": "search_knowledge",
+          "arguments": "{\"query\":\"客户在什么情况下可以申请退货？售后处理流程\",\"mode\":\"vector\",\"top_k\":8}"
+        }
+      ],
+      "tool_results": [
+        {
+          "name": "search_knowledge",
+          "status": "ok",
+          "content": "没有找到相关资料。可以换一种问法，或者用 keyword 模式搜索名称、编号等原话。\n\n剩余预算：还能调用 1 次工具。"
+        }
+      ],
+      "finish_reason": "tool_calls",
+      "usage": {
+        "total_tokens": 3966,
+        "prompt_tokens": 3879,
+        "total_characters": 0,
+        "completion_tokens": 87,
+        "prompt_tokens_details": {
+          "cached_tokens": 3639
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 27
+        }
+      },
+      "cached_tokens": 3639,
+      "model_ms": 4462,
+      "citation_check": null,
+      "error": null
+    },
+    {
+      "round": 4,
+      "kind": "normal",
+      "message_fields": [
+        "reasoning_content",
+        "reasoning_details",
+        "role",
+        "tool_calls"
+      ],
+      "reasoning": "No knowledge base content about returns. And order A1001 not found. I should report honestly.\n\nMaybe check after_sales? Not needed. I have 1 tool call left — could try searching keyword \"退货\" but likely futile. Let me try once with keyword \"退货\" to be thorough.",
+      "content": "",
+      "tool_calls": [
+        {
+          "name": "search_knowledge",
+          "arguments": "{\"mode\":\"keyword\",\"query\":\"退货\",\"top_k\":8}"
+        }
+      ],
+      "tool_results": [
+        {
+          "name": "search_knowledge",
+          "status": "ok",
+          "content": "没有找到相关资料。可以换一种问法，或者用 keyword 模式搜索名称、编号等原话。\n\n剩余预算：还能调用 0 次工具。"
+        }
+      ],
+      "finish_reason": "tool_calls",
+      "usage": {
+        "total_tokens": 4123,
+        "prompt_tokens": 4012,
+        "total_characters": 0,
+        "completion_tokens": 111,
+        "prompt_tokens_details": {
+          "cached_tokens": 3879
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 61
+        }
+      },
+      "cached_tokens": 3879,
+      "model_ms": 3897,
+      "citation_check": null,
+      "error": null
+    },
+    {
+      "round": 5,
+      "kind": "forced",
+      "message_fields": [
+        "content",
+        "reasoning_content",
+        "reasoning_details",
+        "role"
+      ],
+      "reasoning": "We need answer Chinese. Need cite facts. We have [D1] says no order matching A1001. lookup no citation perhaps [O?] unavailable. Need say cannot determine status because no order found belonging or data query. Regarding return, no policy docs retrieved, so cannot determine. Need concise, no disclaimer. Maybe \"订单 A1001：系统未查到该编号的订单记录，因此无法确认物流/签收状态 [D1]. 未签收退货：知识库未检索到相关退货政策，无法确认是否可退及流程。请核对编号或提供...\" But request says based on prior info. We can ask user to verify order number. No citations for policy",
+      "content": "- **订单状态**：系统未查到编号为 **A1001** 的订单记录，因此无法确认物流进度或是否签收。[D1]\n- **未签收能否退货**：现有资料中没有可用的退货政策，无法确认未签收订单是否可以退货及具体流程。\n\n请先核对订单编号；如果编号正确，可联系人工客服核实订单归属和退货规则。",
+      "tool_calls": [],
+      "tool_results": [],
+      "finish_reason": "stop",
+      "usage": {
+        "total_tokens": 1674,
+        "prompt_tokens": 1381,
+        "total_characters": 0,
+        "completion_tokens": 293,
+        "prompt_tokens_details": {
+          "cached_tokens": 128
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 213
+        }
+      },
+      "cached_tokens": 128,
+      "model_ms": 6161,
+      "citation_check": {
+        "cited": [
+          "D1"
+        ],
+        "passed": true,
+        "reason": null,
+        "allowed": [
+          "D1"
+        ],
+        "unknown": []
+      },
+      "error": null
+    }
+  ],
+  "first_raw_response": "{\"id\":\"07265a2e5aa1e709ab61dff8c92d4bbd\",\"choices\":[{\"finish_reason\":\"tool_calls\",\"index\":0,\"message\":{\"role\":\"assistant\",\"tool_calls\":[{\"id\":\"call_01a1587116c877e2b7b44bbb\",\"type\":\"function\",\"function\":{\"name\":\"lookup_order\",\"arguments\":\"{\\\"order_id\\\":\\\"A1001\\\"}\"}},{\"id\":\"call_01a1587116c877e2b7b44bbc\",\"type\":\"function\",\"function\":{\"name\":\"search_knowledge\",\"arguments\":\"{\\\"query\\\":\\\"订单未签收是否可以退货？退货申请的条件和流程是什么？\\\"}\"}}],\"reasoning_content\":\"The user asks about order A1001 status, and whether it can be returned if not signed. I need to look up the order and search knowledge base for return policy.\",\"reasoning_details\":[{\"type\":\"reasoning.text\",\"id\":\"reasoning-text-1\",\"format\":\"MiniMax-response-v1\",\"index\":0,\"text\":\"The user asks about order A1001 status, and whether it can be returned if not signed. I need to look up the order and search knowledge base for return policy.\"}]}}],\"created\":1792485167,\"model\":\"MiniMax-M3\",\"object\":\"chat.completion\",\"usage\":{\"total_tokens\":3571,\"total_characters\":0,\"prompt_tokens\":3469,\"completion_tokens\":102,\"completion_tokens_details\":{\"reasoning_tokens\":35},\"prompt_tokens_details\":{\"cached_tokens\":128}},\"input_sensitive\":false,\"output_sensitive\":false,\"input_sensitive_type\":0,\"output_sensitive_type\":0,\"output_sensitive_int\":0,\"service_tier\":\"standard\",\"base_resp\":{\"status_code\":0,\"status_msg\":\"\"}}\n"
+}

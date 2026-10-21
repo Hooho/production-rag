@@ -9,9 +9,10 @@ import Memory from "./Memory";
 import "./guard.css";
 import Settings from "./Settings";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
+import { AgentLiveRounds, AgentStepView } from "./AgentTrace";
 import { durationTitle, formatDuration, formatShortTime, isDurationField } from "./format";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
-import { getContentMatches, fileSha256, type ContentMatches, LOGOUT_EVENT, listDataTypes, createSession, deleteDocument, retryDocument, retryDocumentContexts, listGroups, login, logout, storedUser, updateDocumentPermission, type AuthUser, type TableReport, type DocumentVisibility, type Group, getDocument, getSessionHistory, listDocumentChunks, listDocuments, listHistory, sendChatStream, uploadDocument, type ChatResult, type DocumentChunk, type ChunkSource, type DocumentChunkPage, type DocumentStatus, type DocumentStep, type FeedbackRecord, type HistoryRun, type RetrievalCandidate, type RetrievalDiagnosticsData, type Source, type TraceStep } from "./api";
+import { type AgentRound, type ChatMode, getContentMatches, fileSha256, type ContentMatches, LOGOUT_EVENT, listDataTypes, createSession, deleteDocument, retryDocument, retryDocumentContexts, listGroups, login, logout, storedUser, updateDocumentPermission, type AuthUser, type TableReport, type DocumentVisibility, type Group, getDocument, getSessionHistory, listDocumentChunks, listDocuments, listHistory, sendChatStream, uploadDocument, type ChatResult, type DocumentChunk, type ChunkSource, type DocumentChunkPage, type DocumentStatus, type DocumentStep, type FeedbackRecord, type HistoryRun, type RetrievalCandidate, type RetrievalDiagnosticsData, type Source, type TraceStep } from "./api";
 
 // 评测页面放在 /eval，与知识问答、知识库并列；历史记录和评测集分别使用独立子路由。
 // 业务数据页放在 /data：录入和维护商品、订单等业务数据，也是聊天里数据查询工具的数据来源。
@@ -352,6 +353,13 @@ function Chat({ sessionId, initialMessages, historyRuns, onNewChat, onOpenHistor
   const [streamSteps, setStreamSteps] = useState<TraceStep[]>([]);
   // 回答生成过程中已收到的文字；complete 后以服务端最终回答为准（引用校验失败时最终回答会被替换）。
   const [streamAnswer, setStreamAnswer] = useState("");
+  // Agent 模式：选中的模式（每个浏览器记住上次的选择）、回答过程中已完成的轮次、本页刚问完的问题的轮次
+  // （刚问完的不用再向后端读；历史问题展开执行链时才读取 /agent/runs）。
+  const [mode, setMode] = useState<ChatMode>(() => {
+    try { return localStorage.getItem("chat-mode") === "agent" ? "agent" : "fixed"; } catch { return "fixed"; }
+  });
+  const [streamRounds, setStreamRounds] = useState<AgentRound[]>([]);
+  const [roundsByRequest, setRoundsByRequest] = useState<Record<string, AgentRound[]>>({});
   const [error, setError] = useState("");
   const [collapsedMessages, setCollapsedMessages] = useState<Record<string, boolean>>({});
   const messagesRef = useRef<HTMLDivElement>(null);
@@ -404,6 +412,11 @@ function Chat({ sessionId, initialMessages, historyRuns, onNewChat, onOpenHistor
     setLocalHistory(historyRuns);
   }, [historyRuns]);
 
+  function chooseMode(value: ChatMode) {
+    setMode(value);
+    try { localStorage.setItem("chat-mode", value); } catch { /* 存不了就只在本页生效 */ }
+  }
+
   // retry 传入上次没处理完的问题时直接重发它，不动输入框里正在写的内容。
   async function submit(retry?: string) {
     const current = (retry ?? question).trim();
@@ -411,7 +424,8 @@ function Chat({ sessionId, initialMessages, historyRuns, onNewChat, onOpenHistor
     if (retry === undefined) setQuestion("");
     // 发出新问题时回到底部并恢复跟随。
     requestAnimationFrame(() => scrollToBottom(true));
-    setBusy(true); setError(""); setPendingError(""); setPendingQuestion(current); setStreamSteps([]); setStreamAnswer("");
+    setBusy(true); setError(""); setPendingError(""); setPendingQuestion(current); setStreamSteps([]); setStreamAnswer(""); setStreamRounds([]);
+    const rounds: AgentRound[] = [];
     try {
       const result = await sendChatStream({ session_id: sessionId, request_id: crypto.randomUUID(), question: current },
         (step) => setStreamSteps((items) => {
@@ -421,7 +435,10 @@ function Chat({ sessionId, initialMessages, historyRuns, onNewChat, onOpenHistor
           updated[index] = step;
           return updated;
         }),
-        (text) => setStreamAnswer((value) => value + text));
+        (text) => setStreamAnswer((value) => value + text),
+        mode,
+        (round) => { rounds.push(round); setStreamRounds([...rounds]); });
+      if (rounds.length) setRoundsByRequest((items) => ({ ...items, [result.request_id]: rounds }));
       setMessages((items) => [...items, result]);
       setPendingQuestion("");
       setPendingError("");
@@ -451,7 +468,7 @@ function Chat({ sessionId, initialMessages, historyRuns, onNewChat, onOpenHistor
     onOpenHistory(session);
   }
 
-  return <section className="chat-layout"><HistoryRail runs={localHistory} activeSessionId={sessionId} onSelect={selectHistory} onNewChat={onNewChat} busy={busy} /><div className="chat-column"><div className="messages" ref={messagesRef} onScroll={handleScroll}>{messages.length === 0 && !busy && !pendingQuestion && <div className="empty-state"><div className="empty-orbit">✦</div><h2>从一个问题开始</h2><p>试试“退货政策是什么？”或“查询订单 A1001”。</p></div>}{messages.map((message, index) => { const requestId = message.request_id || `message-${index}`; const questionText = message.steps.find((step) => step.id === "request")?.result?.question as string ?? "本轮问题"; const collapsed = collapsedMessages[requestId] ?? false; return <article className={`message-card ${collapsed ? "is-collapsed" : ""}`} key={requestId}><div className="message-index">{String(index + 1).padStart(2, "0")}</div><div className="message-content"><button className="message-toggle" onClick={() => toggleMessage(requestId)} aria-expanded={!collapsed}><span className="question-line">{questionText}</span><span className="collapse-icon">{collapsed ? "＋" : "−"}</span></button>{!collapsed && <div className="message-body"><TraceTimeline steps={message.steps} answer={message.answer} sources={message.sources} traceId={message.trace_id} /><div className="answer"><MarkdownAnswer content={message.answer} /></div>{message.request_id && <AnswerFeedback requestId={message.request_id} initial={message.feedback} onSaved={saveFeedback} />}{message.sources.length > 0 && <details className="sources-panel"><summary><span>来源</span><strong>{message.sources.length} 条检索结果</strong><span className="panel-chevron">⌄</span></summary><div className="sources">{/* 每条来源默认只显示一行正文，点击展开查看全文；以前长文本超出面板被截断，又没法看到完整内容。 */}{message.sources.map((source) => <details className="source" key={source.id}><summary><span>{source.id}</span><div><strong>{source.title}<small className="source-location">{sourceLocation(source.version, source.page_start, source.heading)}</small></strong><p>{source.text}</p></div><span className="source-toggle" aria-hidden="true">⌄</span></summary></details>)}</div></details>}<div className="trace">链路编号：{message.trace_id}</div></div>}</div></article>; })}{pendingQuestion && <article className="message-card pending-message"><div className="message-index">{String(messages.length + 1).padStart(2, "0")}</div><div className="message-content"><div className="pending-question"><span className="question-line">{pendingQuestion}</span>{busy && <span className="pending-indicator"><span className="pulse-dot" />处理中</span>}</div><div className="message-body"><TraceTimeline steps={streamSteps} live={busy} />{streamAnswer ? <div className="answer"><MarkdownAnswer content={streamAnswer} streaming={busy} /></div> : busy ? <ChatAnswerSkeleton /> : null}{pendingError && <div className="pending-error"><span>本次处理未完成，已保留收到的阶段记录：{pendingError}</span>{!busy && <button type="button" className="pending-retry" onClick={() => void submit(pendingQuestion)}>重试</button>}</div>}</div></div></article>}</div><div className="composer"><textarea value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submit(); } }} placeholder="询问知识库，或调用业务工具…" rows={3} /><button className="send-button" onClick={() => void submit()} disabled={busy || !sessionId}>{busy ? "处理中…" : "发送 ↑"}</button></div>{error && <div className="field-error">{error}</div>}</div></section>;
+  return <section className="chat-layout"><HistoryRail runs={localHistory} activeSessionId={sessionId} onSelect={selectHistory} onNewChat={onNewChat} busy={busy} /><div className="chat-column"><div className="messages" ref={messagesRef} onScroll={handleScroll}>{messages.length === 0 && !busy && !pendingQuestion && <div className="empty-state"><div className="empty-orbit">✦</div><h2>从一个问题开始</h2><p>试试“退货政策是什么？”或“查询订单 A1001”。</p></div>}{messages.map((message, index) => { const requestId = message.request_id || `message-${index}`; const questionText = message.steps.find((step) => step.id === "request")?.result?.question as string ?? "本轮问题"; const collapsed = collapsedMessages[requestId] ?? false; return <article className={`message-card ${collapsed ? "is-collapsed" : ""}`} key={requestId}><div className="message-index">{String(index + 1).padStart(2, "0")}</div><div className="message-content"><button className="message-toggle" onClick={() => toggleMessage(requestId)} aria-expanded={!collapsed}><span className="question-line">{questionText}{message.mode === "agent" && <span className="message-mode-tag">Agent</span>}</span><span className="collapse-icon">{collapsed ? "＋" : "−"}</span></button>{!collapsed && <div className="message-body"><TraceTimeline steps={message.steps} answer={message.answer} sources={message.sources} traceId={message.trace_id} requestId={message.request_id} rounds={roundsByRequest[message.request_id]} /><div className="answer"><MarkdownAnswer content={message.answer} /></div>{message.request_id && <AnswerFeedback requestId={message.request_id} initial={message.feedback} onSaved={saveFeedback} />}{message.sources.length > 0 && <details className="sources-panel"><summary><span>来源</span><strong>{message.sources.length} 条检索结果</strong><span className="panel-chevron">⌄</span></summary><div className="sources">{/* 每条来源默认只显示一行正文，点击展开查看全文；以前长文本超出面板被截断，又没法看到完整内容。 */}{message.sources.map((source) => <details className="source" key={source.id}><summary><span>{source.id}</span><div><strong>{source.title}<small className="source-location">{sourceLocation(source.version, source.page_start, source.heading)}</small></strong><p>{source.text}</p></div><span className="source-toggle" aria-hidden="true">⌄</span></summary></details>)}</div></details>}<div className="trace">链路编号：{message.trace_id}</div></div>}</div></article>; })}{pendingQuestion && <article className="message-card pending-message"><div className="message-index">{String(messages.length + 1).padStart(2, "0")}</div><div className="message-content"><div className="pending-question"><span className="question-line">{pendingQuestion}</span>{busy && <span className="pending-indicator"><span className="pulse-dot" />处理中</span>}</div><div className="message-body"><TraceTimeline steps={streamSteps} live={busy} /><AgentLiveRounds rounds={streamRounds} busy={busy} />{streamAnswer ? <div className="answer"><MarkdownAnswer content={streamAnswer} streaming={busy} /></div> : busy ? <ChatAnswerSkeleton /> : null}{pendingError && <div className="pending-error"><span>本次处理未完成，已保留收到的阶段记录：{pendingError}</span>{!busy && <button type="button" className="pending-retry" onClick={() => void submit(pendingQuestion)}>重试</button>}</div>}</div></div></article>}</div><div className="composer"><div className="chat-mode-row"><div className="chat-mode-switch" role="group" aria-label="问答模式"><button type="button" className={mode === "fixed" ? "active" : ""} onClick={() => chooseMode("fixed")} disabled={busy}>固定流程</button><button type="button" className={mode === "agent" ? "active" : ""} onClick={() => chooseMode("agent")} disabled={busy}>Agent</button></div><span>{mode === "agent" ? "模型自己决定调用哪些工具、调用几次，资料齐了再回答" : "意图识别 → 路由 → 检索 → 回答，每个问题只走一条路"}</span></div><textarea value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submit(); } }} placeholder="询问知识库，或调用业务工具…" rows={3} /><button className="send-button" onClick={() => void submit()} disabled={busy || !sessionId}>{busy ? "处理中…" : "发送 ↑"}</button></div>{error && <div className="field-error">{error}</div>}</div></section>;
 }
 
 // 回答流首个文字片段到达前使用内容骨架；原来只有阶段圆点，回答区域会显得空白且不稳定。
@@ -627,7 +644,7 @@ function formatHistoryDate(value: string, includeTime = false) {
 
 function formatRoute(route: string) {
   // blocked：问题命中注入规则，被输入安全检查拦截。
-  const labels: Record<string, string> = { knowledge: "知识问答", order: "订单查询", data: "数据查询", follow_up: "继续追问", greeting: "问候", fallback: "通用问答", blocked: "已拦截" };
+  const labels: Record<string, string> = { agent: "Agent 模式", knowledge: "知识问答", order: "订单查询", data: "数据查询", follow_up: "继续追问", greeting: "问候", fallback: "通用问答", blocked: "已拦截" };
   return labels[route] ?? "知识问答";
 }
 
@@ -654,7 +671,9 @@ function RunSummary({ steps, answer, sources, traceId }: { steps: TraceStep[]; a
   const models = steps.filter((step) => typeof step.result?.model_called === "string" && String(step.result.model_called).length > 0);
   const usage = find("response").token_usage as Record<string, number> | null | undefined;
   const text = (answer ?? "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
-  const cited = [...new Set(text.match(/\[S\d+\]/g) ?? [])].map((item) => item.slice(1, -1));
+  const agentMode = steps.some((step) => step.id === "agent");
+  // Agent 模式的资料有知识库 S、订单 O、业务数据 D 三种编号。
+  const cited = [...new Set(text.match(agentMode ? /\[[SOD]\d+\]/g : /\[S\d+\]/g) ?? [])].map((item) => item.slice(1, -1));
   const sourceCount = sources?.length ?? 0;
   const route = String(find("router").route ?? (find("input_guard").blocked ? "blocked" : ""));
   const routeLabel = route === "blocked" ? "已拦截" : ROUTE_TARGETS[route]?.[0] ?? (route || "—");
@@ -693,7 +712,8 @@ function RunSummary({ steps, answer, sources, traceId }: { steps: TraceStep[]; a
       <div className="run-store"><StackTag kind="store">MySQL · runs 表</StackTag><span>问题、回答与来源、{steps.length} 个处理阶段、追踪摘要</span></div>
       <small className="result-help">追踪摘要：路由 {routeLabel} · {refused ? "已拒答" : "未拒答"} · 耗时 {formatDuration(total)}{topScore !== null ? ` · 检索最高分 ${formatNumber(topScore, 2)}` : ""}</small>
       <div className="run-store"><StackTag kind="store">PostgreSQL · Checkpoint</StackTag><span>本轮问答消息和滚动摘要</span></div>
-      <small className="result-help">在「Agent 组织回答」时已写入，下一轮提问时作为对话记忆读取</small>
+      <small className="result-help">{agentMode ? "在「写入会话记忆」时已写入，下一轮提问时作为对话记忆读取" : "在「Agent 组织回答」时已写入，下一轮提问时作为对话记忆读取"}</small>
+      {agentMode && <div className="run-store"><StackTag kind="store">MySQL · agent_runs / agent_rounds 表</StackTag><span>Agent 循环的统计和每一轮的完整记录</span></div>}
       {traceId && <small className="result-help">链路编号 {traceId}</small>}
     </div></div>
   </div>;
@@ -760,7 +780,9 @@ function stepTags(step: TraceStep): StackTagItem[] {
   const models = modelTags(result.model_called);
   const method = String(result.process_method ?? "");
   switch (step.id) {
-    case "request": return [LANGGRAPH("StateGraph")];
+    case "request": return method.startsWith("Agent") ? [ALGO("Agent 模式")] : [LANGGRAPH("StateGraph")];
+    case "agent": return [ALGO("openai SDK"), ...models, ALGO("工具循环"), ALGO("引用检查")];
+    case "memory_write": return [LANGCHAIN("SummarizationMiddleware"), STORE("PostgreSQL")];
     case "input_guard": return guardTags(result);
     case "memory": return [STORE("MySQL"), LANGGRAPH("Checkpointer"),
       ...(Array.isArray(result.long_term_memory) ? [LANGGRAPH("Store")] : []),
@@ -838,8 +860,8 @@ function StackField({ field, value, step }: { field: string; value: unknown; ste
   return <><TagList tags={tags} />{typeof value === "string" && value.trim() && <small className="result-help">{value}</small>}</>;
 }
 
-function TraceTimeline({ steps, live = false, answer, sources, traceId }: { steps: TraceStep[]; live?: boolean; answer?: string; sources?: Source[]; traceId?: string }) {
-  return <details className={`trace-timeline ${live ? "is-live" : ""}`} open={live || undefined}><summary className="trace-toggle"><span>{live ? "当前处理阶段" : "处理阶段"}</span><strong>{steps.length} 个阶段{totalElapsed(steps) !== null ? ` · 共 ${formatDuration(totalElapsed(steps))}` : ""}{live ? " · 实时更新" : ""}</strong><span className="panel-chevron">⌄</span></summary><div className="trace-body">{steps.map((step, index) => <details className={`trace-step ${step.status}`} key={step.id} open={live || undefined}><summary><span className="step-number">{String(index + 1).padStart(2, "0")}</span><span className="step-status">{step.status === "failed" ? "!" : step.status === "running" ? "·" : "✓"}</span><span className="step-copy"><strong>{step.title}</strong><small>{(step.status !== "failed" && stepPurpose(step.result)) || step.detail}</small></span>{step.duration_ms !== undefined && <time title={durationTitle(step.duration_ms)}>{formatDuration(step.duration_ms)}</time>}</summary><div className="step-result">{step.id === "complete" && step.status !== "failed" ? <RunSummary steps={steps} answer={answer} sources={sources} traceId={traceId} /> : formatResult(step.result, step.status !== "failed" && stepPurpose(step.result) ? step.detail : undefined, step.field_order, step)}</div></details>)}{live && steps.length === 0 && <LoadingSkeleton className="trace-waiting" label="正在等待处理阶段"><SkeletonBlock className="skeleton-line" /><SkeletonBlock className="skeleton-line-short" /></LoadingSkeleton>}</div></details>;
+function TraceTimeline({ steps, live = false, answer, sources, traceId, requestId, rounds }: { steps: TraceStep[]; live?: boolean; answer?: string; sources?: Source[]; traceId?: string; requestId?: string; rounds?: AgentRound[] }) {
+  return <details className={`trace-timeline ${live ? "is-live" : ""}`} open={live || undefined}><summary className="trace-toggle"><span>{live ? "当前处理阶段" : "处理阶段"}</span><strong>{steps.length} 个阶段{totalElapsed(steps) !== null ? ` · 共 ${formatDuration(totalElapsed(steps))}` : ""}{live ? " · 实时更新" : ""}</strong><span className="panel-chevron">⌄</span></summary><div className="trace-body">{steps.map((step, index) => <details className={`trace-step ${step.status}`} key={step.id} open={live || undefined}><summary><span className="step-number">{String(index + 1).padStart(2, "0")}</span><span className="step-status">{step.status === "failed" ? "!" : step.status === "running" ? "·" : "✓"}</span><span className="step-copy"><strong>{step.title}</strong><small>{(step.status !== "failed" && stepPurpose(step.result)) || step.detail}</small></span>{step.duration_ms !== undefined && <time title={durationTitle(step.duration_ms)}>{formatDuration(step.duration_ms)}</time>}</summary><div className="step-result">{step.id === "agent" ? <AgentStepView step={step} requestId={requestId} rounds={rounds} /> : step.id === "complete" && step.status !== "failed" ? <RunSummary steps={steps} answer={answer} sources={sources} traceId={traceId} /> : formatResult(step.result, step.status !== "failed" && stepPurpose(step.result) ? step.detail : undefined, step.field_order, step)}</div></details>)}{live && steps.length === 0 && <LoadingSkeleton className="trace-waiting" label="正在等待处理阶段"><SkeletonBlock className="skeleton-line" /><SkeletonBlock className="skeleton-line-short" /></LoadingSkeleton>}</div></details>;
 }
 
 // 普通字段只保留名称和值，避免说明占满页面；这里只为需要排查的复杂字段提供解释。
@@ -1800,6 +1822,8 @@ function MemoryHistory({ items }: { items: unknown[] }) {
 
 function formatResultValue(value: unknown): string {
   if (value === null || value === undefined || value === "") return "无";
+  // 布尔值显示成中文：以前直接显示 true / false。
+  if (typeof value === "boolean") return value ? "是" : "否";
   if (Array.isArray(value)) return value.map(formatResultValue).join("\n") || "无";
   if (typeof value === "object") return Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, nested]) => `${formatResultLabel(key)}：${isDurationField(key, nested) ? formatDuration(nested) : formatResultValue(nested)}`).join("\n") || "无";
   return String(value);
@@ -1807,6 +1831,15 @@ function formatResultValue(value: unknown): string {
 
 function formatResultLabel(key: string) {
   const labels: Record<string, string> = {
+    // Agent 模式「写入会话记忆」这一步的字段。
+    compressed: "是否压缩",
+    message_count_before: "写入前的消息数",
+    message_count: "写入后的消息数",
+    summary: "当前摘要",
+    compressed_summary: "本次压缩生成的摘要",
+    existing_summary: "已有的摘要（本次未压缩）",
+    memory_trigger_tokens: "压缩阈值（Token）",
+    memory_keep_tokens: "压缩后保留原文（Token）",
     // 输入 / 输出安全检查（注入防护）的结果字段。
     blocked: "是否拦截",
     rules: "命中规则",

@@ -21,7 +21,7 @@ from openai import OpenAIError
 from ..business.definitions import DATA_TYPES
 from ..models import CITATION_REJECTED
 from ..runtime_config import snapshot as runtime_snapshot
-from .citations import check_citations, fix_prompt, sort_key
+from .citations import CITATION, check_citations, fix_prompt, sort_key
 from .llm import cached_tokens, parse_message
 from .tools import execute_tool, tool_definitions
 
@@ -112,8 +112,9 @@ class AgentLoop:
             stop_reason = stop_reason or "answered"
             citation = None
             allowed = list(self.ctx.evidence.items)
-            # 资料池为空（问候、闲聊，或者什么都没查到）时不检查：没有可引用的资料，回答本来就没有编号。
-            if allowed:
+            # 资料池为空、回答里也没有编号（问候、闲聊）时不检查。资料池为空却出现了 [S1] 这类编号，
+            # 说明编号是从历史消息里抄来的（历史里有上一次回答的引用），这次问答里根本不存在，同样算不通过。
+            if allowed or CITATION.search(answer):
                 citation = check_citations(answer, allowed)
                 record["citation_check"] = citation
                 if not citation["passed"]:
@@ -124,7 +125,12 @@ class AgentLoop:
                         record["duration_ms"] = elapsed_ms(call_started, self.clock)
                         self.finish_round(record)
                         messages.append({"role": "user", "content": prompt})
-                        kind = "citation_retry"
+                        # 有资料时只需要改写，不带工具；一条资料都没有时要先去查，下一轮照常带工具（仍受预算和超时约束）。
+                        if allowed:
+                            kind = "citation_retry"
+                        else:
+                            kind = "normal"
+                            stop_reason = None
                         continue
                     # 重写后仍不通过：保存模型原话供排查，用户看到固定的拒答文字。
                     citation["raw_answer"] = answer[:4000]
