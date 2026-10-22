@@ -3830,7 +3830,9 @@ input:focus {
    color: var(--ev-ink);
 }
 
-.ev-radio-option input[type="radio"] {
+/* 运行模式（固定流程 / Agent）用同样的样式但是复选框；全局 input 是 width: 100%，不改会把文字挤成一列。 */
+.ev-radio-option input[type="radio"],
+.ev-radio-option input[type="checkbox"] {
    width: auto;
    margin: 0;
    flex: none;
