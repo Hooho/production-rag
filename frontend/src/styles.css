@@ -3816,6 +3816,25 @@ input:focus {
    font-size: 11px;
 }
 
+/* 评测类型、运行模式、题目范围：标题后面紧跟说明（同一行），选项在下一行。 */
+.ev-launch-option.is-stacked {
+   grid-template-columns: minmax(0, 1fr);
+}
+
+.ev-launch-option.is-stacked legend {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: baseline;
+   gap: 4px 14px;
+   width: 100%;
+}
+
+.ev-option-title {
+   color: var(--ev-ink);
+   font-size: 13px;
+   font-weight: 600;
+}
+
 .ev-radio-options {
    display: flex;
    flex-wrap: wrap;

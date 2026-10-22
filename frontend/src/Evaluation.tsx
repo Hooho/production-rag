@@ -556,36 +556,33 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
               <span>对比记忆参数：多轮对话专项除了当前设置，再把压缩阈值、保留条数各调大调小跑一遍（共 5 组），给「系统管理 › RAG 配置」的「对话记忆」提供依据。调用大模型次数是 5 倍。</span>
             </div>}
           </div> : <>
-          <div className="ev-launch-option">
+          <div className="ev-launch-option is-stacked">
             <fieldset className="ev-radio-field">
-              <legend>评测类型</legend>
+              <legend><span className="ev-option-title">评测类型</span><span className="ev-option-description"><span className="ev-description-label"><span className="ev-info-icon" aria-hidden="true">i</span>说明</span>：{launchKind === "generation" ? "调用回答模型生成答案，再调用评审模型检查忠实度、正确性、拒答和引用。" : "只验证召回、重排和阈值过滤，不调用大模型，适合修改检索参数后反复运行。"}</span></legend>
               <div className="ev-radio-options" role="radiogroup" aria-label="评测类型">
                 <label className={`ev-radio-option ${launchKind === "retrieval" ? "is-selected" : ""}`}><input type="radio" name="eval-kind" value="retrieval" checked={launchKind === "retrieval"} onChange={() => changeLaunchKind("retrieval")} />检索评测</label>
                 <label className={`ev-radio-option ${launchKind === "generation" ? "is-selected" : ""}`}><input type="radio" name="eval-kind" value="generation" checked={launchKind === "generation"} onChange={() => changeLaunchKind("generation")} />生成评测</label>
               </div>
             </fieldset>
-            <span className="ev-option-description"><span className="ev-description-label"><span className="ev-info-icon" aria-hidden="true">i</span>说明</span>：{launchKind === "generation" ? "调用回答模型生成答案，再调用评审模型检查忠实度、正确性、拒答和引用。" : "只验证召回、重排和阈值过滤，不调用大模型，适合修改检索参数后反复运行。"}</span>
           </div>
-          {launchKind === "retrieval" && <div className="ev-launch-option">
+          {launchKind === "retrieval" && <div className="ev-launch-option is-stacked">
             <fieldset className="ev-radio-field">
-              <legend>运行模式</legend>
+              <legend><span className="ev-option-title">运行模式</span><span className="ev-option-description"><span className="ev-description-label"><span className="ev-info-icon" aria-hidden="true">i</span>说明</span>：{launchModes.length === 0 ? "至少勾选一个。" : launchModes.length === 2 ? "两个一起跑：每道题先跑固定流程，再让 Agent 跑一遍，结果在「Agent 对比」里逐题对比，点开看两边的检索日志。" : launchModes.includes("agent") ? "只跑 Agent：每道题让 Agent 自己检索，只看它最后拿到的资料里有没有证据。消融和参数对比只对固定流程，这次不跑。" : "只跑固定流程：和原来一样，看召回、重排、阈值三个阶段。"}</span></legend>
               <div className="ev-radio-options" role="group" aria-label="运行模式">
                 <label className={`ev-radio-option ${launchModes.includes("fixed") ? "is-selected" : ""}`}><input type="checkbox" checked={launchModes.includes("fixed")} onChange={() => toggleMode("fixed")} />固定流程</label>
                 <label className={`ev-radio-option ${launchModes.includes("agent") ? "is-selected" : ""}`}><input type="checkbox" checked={launchModes.includes("agent")} onChange={() => toggleMode("agent")} />Agent</label>
               </div>
             </fieldset>
-            <span className="ev-option-description"><span className="ev-description-label"><span className="ev-info-icon" aria-hidden="true">i</span>说明</span>：{launchModes.length === 0 ? "至少勾选一个。" : launchModes.length === 2 ? "两个一起跑：每道题先跑固定流程，再让 Agent 跑一遍，结果在「Agent 对比」里逐题对比，点开看两边的检索日志。" : launchModes.includes("agent") ? "只跑 Agent：每道题让 Agent 自己检索，只看它最后拿到的资料里有没有证据。消融和参数对比只对固定流程，这次不跑。" : "只跑固定流程：和原来一样，看召回、重排、阈值三个阶段。"}</span>
           </div>}
-          <div className="ev-launch-option">
+          <div className="ev-launch-option is-stacked">
             <fieldset className="ev-radio-field">
-              <legend>题目范围</legend>
+              <legend><span className="ev-option-title">题目范围</span><span className="ev-option-description"><span className="ev-description-label"><span className="ev-info-icon" aria-hidden="true">i</span>说明</span>：{launchSplit === "dev" ? `${splitCounts.dev || "—"} 题。每次修改检索参数后使用，可以反复试错；调参只看这一组，不动最终验证题。` : launchSplit === "holdout" ? `${splitCounts.holdout || "—"} 题。调参完成后再运行，只验证没有参与调参的题目，确认参数没有变差。` : `${splitCounts.dev + splitCounts.holdout || "—"} 题。合并已审核的开发集和留出集查看总体表现，不用于决定参数。`}</span></legend>
               <div className="ev-radio-options" role="radiogroup" aria-label="题目范围">
                 <label className={`ev-radio-option ${launchSplit === "dev" ? "is-selected" : ""}`}><input type="radio" name="eval-split" value="dev" checked={launchSplit === "dev"} onChange={() => setLaunchSplit("dev")} />开发集（日常调参）</label>
                 <label className={`ev-radio-option ${launchSplit === "holdout" ? "is-selected" : ""}`}><input type="radio" name="eval-split" value="holdout" checked={launchSplit === "holdout"} onChange={() => setLaunchSplit("holdout")} />留出集（最终验证）</label>
                 <label className={`ev-radio-option ${launchSplit === "all" ? "is-selected" : ""}`}><input type="radio" name="eval-split" value="all" checked={launchSplit === "all"} onChange={() => setLaunchSplit("all")} />全部题目</label>
               </div>
             </fieldset>
-            <span className="ev-option-description"><span className="ev-description-label"><span className="ev-info-icon" aria-hidden="true">i</span>说明</span>：{launchSplit === "dev" ? `${splitCounts.dev || "—"} 题。每次修改检索参数后使用，可以反复试错；调参只看这一组，不动最终验证题。` : launchSplit === "holdout" ? `${splitCounts.holdout || "—"} 题。调参完成后再运行，只验证没有参与调参的题目，确认参数没有变差。` : `${splitCounts.dev + splitCounts.holdout || "—"} 题。合并已审核的开发集和留出集查看总体表现，不用于决定参数。`}</span>
           </div>
           {/* 生成评测只跑基线，先在界面层禁用检索实验组选项，避免用户提交无效组合。 */}
           {suites.map((suite) => {
