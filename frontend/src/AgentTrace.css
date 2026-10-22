@@ -292,3 +292,134 @@ details.agent-ret-item[open] { gap: 6px; }
 .agent-citation-ids > div { display: flex; flex-wrap: wrap; gap: 4px; }
 .agent-citation-ids .agent-rid { margin: 0; }
 .agent-citation-line { margin: 0; font-size: 11px; }
+
+/* 概览表里的工具调用参数：每次调用一张小表，左列参数名、右列值。 */
+.agent-table .agent-param-table { width: 100%; border-collapse: collapse; border: 1px solid var(--t-e3ecf5); border-radius: 4px; background: #ffffff; font-size: 11px; }
+.agent-table .agent-param-table th, .agent-table .agent-param-table td { padding: 3px 8px; border: 1px solid var(--t-e3ecf5); text-align: left; vertical-align: top; }
+.agent-table .agent-param-table th { width: 1%; white-space: nowrap; font-weight: 400; color: var(--t-6f8ba4); background: var(--t-f6f8fc); font-family: 'DM Mono', monospace; }
+.agent-table .agent-param-table code { color: var(--t-173b5b); white-space: pre-wrap; word-break: break-all; font-family: 'DM Mono', monospace; }
+/* 参数小表跟着页面主题色走：不用纯白底，表格透明，参数名一列只加一层很淡的主题色。 */
+.agent-table .agent-param-table { background: transparent; }
+.agent-table .agent-param-table th { background: color-mix(in srgb, var(--t-e3ecf5) 45%, transparent); }
+/* 在行背景上再加深一层，让参数小表成为一个突出的块：值一列浅一档，参数名一列深一档，边框也跟着加深。 */
+.agent-table .agent-param-table { background: color-mix(in srgb, var(--t-d6e5f2) 35%, transparent); border-color: var(--t-d6e5f2); }
+.agent-table .agent-param-table th { background: color-mix(in srgb, var(--t-d6e5f2) 75%, transparent); color: var(--t-536d86); }
+.agent-table .agent-param-table th, .agent-table .agent-param-table td { border-color: var(--t-d6e5f2); }
+/* 内外边框比两列底色都深，否则和加深后的底色混在一起看不见。 */
+.agent-table .agent-param-table, .agent-table .agent-param-table th, .agent-table .agent-param-table td { border-color: color-mix(in srgb, var(--t-6f8ba4) 35%, transparent); }
+
+/* ① 收到：本次请求的输入清单。一个框装下 tools 和 messages，messages 每行同一种样式。 */
+.agent-input { border: 1px solid var(--t-d6e5f2); border-radius: 8px; background: #ffffff; overflow: hidden; }
+.agent-input-title { padding: 8px 12px; font-size: 12px; font-weight: 600; color: var(--t-173b5b); background: var(--t-f6f8fc); border-bottom: 1px solid var(--t-e3ecf5); }
+.agent-input-section { display: grid; gap: 6px; padding: 10px 12px; }
+.agent-input-section + .agent-input-section { border-top: 1px solid var(--t-e3ecf5); }
+.agent-input-head { display: flex; align-items: baseline; gap: 8px; font-size: 11px; color: var(--t-6f8ba4); }
+.agent-input-head code { font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 600; color: var(--t-173b5b); }
+.agent-input-head small { margin-left: auto; font-family: 'DM Mono', monospace; color: var(--t-8aa0b5); }
+.agent-input-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.agent-input-tools .agent-tag { margin: 0; }
+.agent-input-rows { display: grid; }
+.agent-input-row { border-top: 1px solid var(--t-eef2f6, #eef2f6); }
+.agent-input-rows > .agent-input-row:first-child { border-top: 0; }
+.agent-input-row > summary, .agent-input-row.reused { display: flex; align-items: center; gap: 10px; padding: 7px 4px; font-size: 12px; color: var(--t-173b5b); list-style: none; }
+.agent-input-row > summary { cursor: pointer; }
+.agent-input-row > summary::-webkit-details-marker { display: none; }
+.agent-input-row strong { font-weight: 600; display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.agent-input-row strong .agent-tag { margin: 0; }
+.agent-input-no { flex: none; min-width: 52px; font-family: 'DM Mono', monospace; font-size: 11px; color: var(--t-8aa0b5); }
+.agent-input-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--t-8aa0b5); }
+.agent-input-row small { margin-left: auto; flex: none; font-family: 'DM Mono', monospace; font-size: 11px; color: var(--t-8aa0b5); }
+/* 沿用的消息：浅色、紧凑，右边是跳转。 */
+.agent-input-row.reused { color: var(--t-6f8ba4); background: color-mix(in srgb, var(--t-f6f8fc) 70%, transparent); }
+.agent-input-row.reused strong { font-weight: 500; }
+.agent-input-row.reused a { flex: none; color: var(--t-1d4ed8); font-size: 11px; text-decoration: none; border: 1px solid var(--t-9bb7d2); border-radius: 4px; padding: 0 8px; }
+.agent-input-row.reused a:hover { border-color: var(--t-1d4ed8); }
+/* 新增的消息：箭头跟在大小后面，展开后正文和名称对齐。 */
+.agent-input-row > summary::after { content: ""; flex: none; width: 6px; height: 6px; margin: 0 2px 0 4px; position: relative; top: -2px;
+  border-right: 1.5px solid var(--t-6c86a1); border-bottom: 1.5px solid var(--t-6c86a1); transform: rotate(45deg); transition: transform .18s ease; }
+.agent-input-row[open] > summary::after { transform: rotate(-135deg); top: 1px; }
+.agent-input-body { display: grid; gap: 6px; padding: 2px 4px 10px 62px; }
+.agent-input-row.agent-jumped > summary { background: #fef3c7; border-radius: 4px; }
+.agent-input-divider { display: flex; align-items: center; gap: 10px; margin: 6px 0 2px; font-size: 10px; color: var(--t-8aa0b5); }
+.agent-input-divider::before, .agent-input-divider::after { content: ""; flex: 1; border-top: 1px dashed var(--t-c9d6e6); }
+@media (max-width: 720px) { .agent-input-body { padding-left: 4px; } .agent-input-note { display: none; } }
+
+/* 概览表：表头加深底色、字加粗，表头下面一条明显的线；轮次之间用实线分开，同一轮里的几次调用用浅一点的虚线。 */
+.agent-table > thead > tr > th { background: color-mix(in srgb, var(--t-d6e5f2) 85%, transparent); color: var(--t-24364b); font-weight: 600;
+  border-bottom: 1.5px solid color-mix(in srgb, var(--t-6f8ba4) 55%, transparent); }
+.agent-table > tbody > tr > td { border-top: 1px dashed color-mix(in srgb, var(--t-6f8ba4) 30%, transparent); }
+.agent-table > tbody > tr.round-start > td { border-top: 1px solid color-mix(in srgb, var(--t-6f8ba4) 50%, transparent); }
+.agent-table > tbody > tr:first-child > td { border-top: 0; }
+
+/* 渐隐蒙层只在内容真的超过 10 行、被收起时才加；没超过的内容不加蒙层。
+   限高仍然留在 .agent-clamp 上（判断有没有超出要靠它），蒙层改成只挂在 is-clamped 上。 */
+.agent-clamp:not(.open) { -webkit-mask-image: none; mask-image: none; }
+.agent-clamp-wrap.is-clamped > .agent-clamp:not(.open) { -webkit-mask-image: linear-gradient(to bottom, #000 45%, transparent 96%); mask-image: linear-gradient(to bottom, #000 45%, transparent 96%); }
+
+/* 内置程序处理里每块内容上方的说明：这块是什么、从哪来。 */
+.agent-block-label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-top: 2px; font-size: 11px; font-weight: 600; color: #6b4f2a; }
+.agent-block-label code { font-family: 'DM Mono', monospace; font-weight: 400; font-size: 10px; color: #92400e; }
+.agent-block-label span { font-weight: 400; color: #8a7458; }
+
+/* 工具调用的最终结果：返回的资料编号，排在参数、漏斗、查询计划之后。 */
+.agent-evidence-result { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding-top: 6px; border-top: 1px dashed #ecd9b4; font-size: 11px; color: #5c4a2c; }
+.agent-evidence-result .agent-rid { margin: 0; }
+.agent-evidence-result small { flex-basis: 100%; font-size: 10px; color: #8a7458; }
+
+/* 每次工具调用的卡片按工具颜色着色（--tool-h 和工具标签同一个色相）：浅底、细边框，漏斗、说明文字、分隔线都跟着同一色系，
+   一眼能看出这块属于哪个工具。里面的 JSON、正文块保持原来的底色。 */
+.tool-tinted { background: hsl(var(--tool-h) 70% 97.5%); border: 1px solid hsl(var(--tool-h) 45% 88%); }
+.tool-tinted .agent-block-label { color: hsl(var(--tool-h) 40% 28%); }
+.tool-tinted .agent-block-label code { color: hsl(var(--tool-h) 50% 36%); }
+.tool-tinted .agent-block-label span, .tool-tinted .agent-funnel-time, .tool-tinted .agent-evidence-result small { color: hsl(var(--tool-h) 20% 45%); }
+.tool-tinted .agent-prog-list, .tool-tinted .agent-evidence-result { color: hsl(var(--tool-h) 30% 26%); }
+.tool-tinted .agent-evidence-result { border-top-color: hsl(var(--tool-h) 45% 85%); }
+.tool-tinted .agent-funnel span, .tool-tinted .agent-funnel em { color: hsl(var(--tool-h) 20% 45%); }
+.tool-tinted .agent-funnel b { color: hsl(var(--tool-h) 45% 22%); }
+.tool-tinted .agent-funnel em.removed { color: #c2410c; }
+.tool-tinted .agent-funnel-track { background: hsl(var(--tool-h) 60% 90%); }
+.tool-tinted .agent-funnel-fill { background: hsl(var(--tool-h) 55% 50%); }
+.tool-tinted .agent-pre { background: rgb(255 255 255 / .7); }
+
+/* 工具调用卡片可折叠：标题行就是原来的「工具 · 状态 · 耗时 · 剩余预算」，右边加箭头；收起时只剩这一行。 */
+details.agent-prog-item { gap: 0; }
+details.agent-prog-item[open] { gap: 6px; }
+.agent-prog-item > summary { cursor: pointer; list-style: none; }
+.agent-prog-item > summary::-webkit-details-marker { display: none; }
+.agent-prog-item > summary::after { content: ""; margin-left: auto; flex: none; width: 6px; height: 6px; position: relative; top: -2px;
+  border-right: 1.5px solid hsl(var(--tool-h, 210) 30% 45%); border-bottom: 1.5px solid hsl(var(--tool-h, 210) 30% 45%); transform: rotate(45deg); transition: transform .18s ease; }
+.agent-prog-item[open] > summary::after { transform: rotate(-135deg); top: 1px; }
+
+/* 循环历史：本次问答前面几轮 Agent 循环的消息，用青色，和工具（橙）、模型输出（紫）区分。 */
+.agent-kind-tag.loop { background: #e3f4f7; color: #0e6a7a; }
+
+/* ② 输出里的 tool_calls：先列工具名，原文点「详情」展开。 */
+.agent-calls { display: grid; gap: 6px; }
+.agent-calls-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 11px; color: var(--t-536d86); }
+.agent-calls-tools .agent-tag { margin: 0; }
+.agent-calls-raw > summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; font-size: 11px; color: var(--t-1d4ed8); }
+.agent-calls-raw > summary::-webkit-details-marker { display: none; }
+.agent-calls-raw > summary::after { content: ""; width: 5px; height: 5px; position: relative; top: -2px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); transition: transform .18s ease; }
+.agent-calls-raw[open] > summary::after { transform: rotate(-135deg); top: 1px; }
+.agent-calls-raw[open] > summary { margin-bottom: 6px; }
+
+/* 统一按工具颜色着色（--tool-h 和工具标签同一个色相）：
+   ① 收到里工具返回的消息、概览表的参数小表、资料编号（S / O / D 跟着产出它的工具）。 */
+.agent-input-row.tool-tinted-row > .agent-input-body .agent-pre { background: hsl(var(--tool-h) 70% 97%); border: 1px solid hsl(var(--tool-h) 45% 88%); color: hsl(var(--tool-h) 35% 20%); }
+.agent-table .agent-param-table.tool-tinted-table { background: hsl(var(--tool-h) 70% 97%); }
+.agent-table .agent-param-table.tool-tinted-table th { background: hsl(var(--tool-h) 55% 92%); color: hsl(var(--tool-h) 30% 35%); }
+.agent-table .agent-param-table.tool-tinted-table, .agent-table .agent-param-table.tool-tinted-table th, .agent-table .agent-param-table.tool-tinted-table td { border-color: hsl(var(--tool-h) 35% 80%); }
+.agent-rid.s, .agent-rid.o, .agent-rid.d { color: hsl(var(--tool-h) 62% 32%); border-color: hsl(var(--tool-h) 45% 78%); background: transparent; }
+.agent-rid.new.s, .agent-rid.new.o, .agent-rid.new.d { background: hsl(var(--tool-h) 80% 96%); }
+.agent-rid.cited.s, .agent-rid.cited.o, .agent-rid.cited.d { background: hsl(var(--tool-h) 55% 40%); border-color: hsl(var(--tool-h) 55% 40%); color: #ffffff; }
+
+/* tool_calls：工具名和「详情」放在同一行，点这一行展开原文。 */
+.agent-calls-raw > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: inherit; }
+.agent-calls-raw > summary::after { display: none; }
+.agent-calls-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--t-1d4ed8); }
+.agent-calls-toggle::after { content: ""; width: 5px; height: 5px; position: relative; top: -2px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); transition: transform .18s ease; }
+.agent-calls-raw[open] .agent-calls-toggle::after { transform: rotate(-135deg); top: 1px; }
+
+/* 消息里模型输出的各个字段（reasoning_content / content / tool_calls）上方的标注。 */
+.agent-msg-field { display: flex; align-items: baseline; gap: 6px; font-size: 11px; color: var(--t-5b6690); }
+.agent-msg-field b { font-family: 'DM Mono', monospace; color: var(--t-2b3570); }

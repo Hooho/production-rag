@@ -17,8 +17,10 @@ function toolHue(name: string) {
   return TOOL_HUES[toolOrder.get(name)! % TOOL_HUES.length];
 }
 const KIND_LABELS: Record<string, string> = { forced: "强制回答轮 · 不带工具", citation_retry: "引用重写轮 · 不带工具" };
-const STOP_LABELS: Record<string, string> = { answered: "模型认为资料够了，自己结束", budget: "工具调用次数用完，程序要求直接回答",
-  timeout: "处理时间到上限，程序要求直接回答", model_error: "模型调用失败", demo: "演示模式，没有调用模型" };
+const STOP_LABELS: Record<string, string> = {
+  answered: "模型认为资料够了，自己结束", budget: "工具调用次数用完，程序要求直接回答",
+  timeout: "处理时间到上限，程序要求直接回答", model_error: "模型调用失败", demo: "演示模式，没有调用模型"
+};
 const STATUS_LABELS: Record<string, string> = { ok: "已执行", error: "执行出错", duplicate: "重复调用，未执行", skipped: "超出预算，未执行" };
 const REASON_LABELS: Record<string, string> = { no_citation: "回答里没有资料编号", unknown_source: "引用了不存在的编号", invented_marker: "有不是资料编号的方括号标记" };
 const ROLE_LABELS: Record<string, string> = { system: "系统提示词", user: "用户消息", assistant: "模型上一轮的输出", tool: "工具返回" };
@@ -46,8 +48,10 @@ function parseArguments(text: string): unknown {
 
 // 接口里 arguments 是 JSON 字符串；展示时解析成对象，和设计稿一样按编辑器的颜色格式化。
 function readableCalls(calls: AgentToolCall[]) {
-  return calls.map((call) => ({ id: call.id, type: call.type ?? "function",
-    function: { name: call.function?.name, arguments: parseArguments(call.function?.arguments) } }));
+  return calls.map((call) => ({
+    id: call.id, type: call.type ?? "function",
+    function: { name: call.function?.name, arguments: parseArguments(call.function?.arguments) }
+  }));
 }
 
 const JSON_TOKEN = /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[{}[\],]/g;
@@ -110,7 +114,10 @@ function toolNameOf(messages: AgentMessage[], message: AgentMessage) {
 
 function EvidenceId({ id, fresh = false, cited = false }: { id: string; fresh?: boolean; cited?: boolean }) {
   const kind = id[0] === "O" ? "o" : id[0] === "D" ? "d" : "s";
-  return <span className={`agent-rid ${kind} ${fresh ? "new" : ""} ${cited ? "cited" : ""}`} title={cited ? "回答引用了这条" : undefined}>{fresh ? "+" : ""}{id}</span>;
+  // 编号的颜色跟着产出它的工具：S 是 search_knowledge，O 是 lookup_order，D 是 query_data。
+  const hue = toolHue(kind === "o" ? "lookup_order" : kind === "d" ? "query_data" : "search_knowledge");
+  return <span className={`agent-rid ${kind} ${fresh ? "new" : ""} ${cited ? "cited" : ""}`} style={{ "--tool-h": hue } as React.CSSProperties}
+    title={cited ? "回答引用了这条" : undefined}>{fresh ? "+" : ""}{id}</span>;
 }
 
 function evidenceIds(result: AgentToolResult) {
@@ -167,16 +174,17 @@ function Overview({ rounds }: { rounds: AgentRound[] }) {
       const results = round.tool_results ?? [];
       if (results.length === 0) {
         const label = round.error ? "调用失败" : round.kind === "forced" ? "强制回答" : round.kind === "citation_retry" ? "重写回答" : "直接回答";
-        return <tr key={round.round}><td>第 {round.round} 轮</td><td><span className="agent-tag reply">{label}</span></td><td><span className="agent-muted">无（没有调用工具）</span></td>
+        return <tr key={round.round} className="round-start"><td>第 {round.round} 轮</td><td><span className="agent-tag reply">{label}</span></td><td><span className="agent-muted">无（没有调用工具）</span></td>
           <td>{round.citation_check ? <>{round.citation_check.passed ? "引用 " : "引用检查没通过 "}{round.citation_check.cited.map((id) => <EvidenceId key={id} id={id} />)}</> : round.error ? <span className="agent-warn">{round.error}</span> : ""}</td><td>{formatDuration(round.duration_ms)}</td></tr>;
       }
       return results.map((result, index) => {
         const ids = evidenceIds(result);
         const args = parseArguments(result.arguments);
-        return <tr key={`${round.round}-${index}`}>
+        return <tr key={`${round.round}-${index}`} className={index === 0 ? "round-start" : undefined}>
           {index === 0 && <td rowSpan={results.length}>第 {round.round} 轮{results.length > 1 && <small>同时调用 {results.length} 个</small>}</td>}
           <td><ToolTag name={result.name} /></td>
-          <td>{args && typeof args === "object" ? Object.entries(args as Record<string, unknown>).map(([key, value]) => <div className="agent-param" key={key}><span>{key}</span><code>{typeof value === "string" ? value : JSON.stringify(value)}</code></div>) : <code>{String(args)}</code>}</td>
+          <td>{args && typeof args === "object" ? <table className="agent-param-table tool-tinted-table" style={{ "--tool-h": toolHue(result.name) } as React.CSSProperties}><tbody>{Object.entries(args as Record<string, unknown>).map(([key, value]) =>
+            <tr key={key}><th>{key}</th><td><code>{typeof value === "string" ? value : JSON.stringify(value)}</code></td></tr>)}</tbody></table> : <code>{String(args)}</code>}</td>
           <td>{result.status !== "ok" ? <span className="agent-warn">{STATUS_LABELS[result.status]}</span> : ids.length ? ids.map((id) => { const fresh = !seen.has(id); seen.add(id); return <EvidenceId key={id} id={id} fresh={fresh} />; }) : <span className="agent-muted">没有资料</span>}</td>
           {index === 0 && <td rowSpan={results.length}>{formatDuration(round.duration_ms)}</td>}
         </tr>;
@@ -200,13 +208,18 @@ function messageText(message: AgentMessage) {
   return typeof message.content === "string" ? message.content : "";
 }
 
+function FieldLabel({ name, note }: { name: string; note: string }) {
+  return <div className="agent-msg-field"><span className="agent-field-tag">AI 响应字段</span><b>{name}</b><span>· {note}</span></div>;
+}
+
 // 一条消息的正文：assistant 可能带推理过程和工具调用，其他角色只有文字。
 function MessageBody({ message }: { message: AgentMessage }) {
   const text = messageText(message);
+  // 模型上一轮的输出原样放回消息里：每块标明是哪个响应字段，和「② 输出」里的写法一致。
   return message.role === "assistant" ? <>
-    {message.reasoning_content && <Clamp className="agent-pre think">{message.reasoning_content}</Clamp>}
-    {text && <Clamp className="agent-pre">{text}</Clamp>}
-    {message.tool_calls && message.tool_calls.length > 0 && <JsonView value={readableCalls(message.tool_calls)} />}
+    {message.reasoning_content && <><FieldLabel name="reasoning_content" note="推理过程" /><Clamp className="agent-pre think">{message.reasoning_content}</Clamp></>}
+    {text && <><FieldLabel name="content" note="文字回复" /><Clamp className="agent-pre">{text}</Clamp></>}
+    {message.tool_calls && message.tool_calls.length > 0 && <><FieldLabel name="tool_calls" note="工具调用" /><JsonView value={readableCalls(message.tool_calls)} /></>}
   </> : <Clamp className={`agent-pre ${message.role === "tool" ? "ret" : ""}`}>{text || "（空）"}</Clamp>;
 }
 
@@ -219,14 +232,23 @@ function MessageBlock({ message, anchor, name, tool }: { message: AgentMessage; 
 
 // group / kind：这条消息第一次出现时属于哪一组、哪一类，后面轮次的“和之前一样”列表按组合并、按类上色。
 type Placed = { message: AgentMessage; round: number; index: number; name: string; group: string; kind: GroupKind };
-type GroupKind = "system" | "memory" | "question" | "model" | "tool" | "prompt";
-const KIND_TEXT: Record<GroupKind, string> = { system: "系统", memory: "记忆", question: "问题", model: "模型输出", tool: "工具", prompt: "程序提示" };
-// 模型调用叫“第 N 轮”；之前的提问叫“历史问答 N”，不用“轮”，避免两种编号混在一起。
+type GroupKind = "system" | "memory" | "question" | "model" | "tool" | "prompt" | "loop";
+// loop：本次问答前面几轮 Agent 循环留下的消息（模型的工具调用决策 + 工具返回结果，或模型的回答 + 程序追加的提示），
+// 整组算作循环历史，和“历史问答”（之前的提问）区分开。
+const KIND_TEXT: Record<GroupKind, string> = { system: "系统", memory: "记忆", question: "问题", model: "模型输出", tool: "工具", prompt: "程序提示", loop: "循环历史" };
+// 模型调用叫“第 N 轮”；带上的之前的提问按离本轮多远命名（上一次提问、前 2 次提问……），
+// 不写成 1、2、3：带上的只是最近几次（更早的已压进摘要），编号容易被当成会话里的第几次提问。
+function earlierLabel(number: number, total: number) {
+  const distance = total - number;
+  return distance === 1 ? "上一次提问" : `前 ${distance} 次提问`;
+}
 // pairs：记忆这一组里每一次历史问答（问题、回答）的下标，分别再圈一个小框。
 type MemorySection = { title: string; text: string };
-type MessageGroup = { label: string; note: string; items: number[]; kind?: GroupKind; names?: string[]; pairs?: number[][];
+type MessageGroup = {
+  label: string; note: string; items: number[]; kind?: GroupKind; names?: string[]; pairs?: number[][];
   // 从本轮用户消息开头的 <memory> 里拆出来单独显示的部分（长期记忆、对话摘要、最近订单），question 是去掉记忆后的问题。
-  sections?: MemorySection[]; question?: string; virtual?: boolean };
+  sections?: MemorySection[]; question?: string; virtual?: boolean
+};
 
 // 拆开本轮用户消息：<memory> 里按“## 标题”分段，后面“本轮问题：”之后是用户的原话。没有 <memory> 时整条就是问题。
 function splitMemory(text: string): { sections: MemorySection[]; question: string } {
@@ -255,8 +277,10 @@ function groupMessages(messages: AgentMessage[], roundNo: number): MessageGroup[
       // 第 1 轮里本轮问题之前的问答都是记忆：读取记忆这一步从 Checkpointer 取出的压缩后保留的原文，写成真实的 user / assistant 消息。
       let memory = groups.find((group) => group.pairs);
       if (!memory) {
-        memory = { label: "本对话记忆", note: "这个会话里的短期记忆：更早对话的摘要，和摘要之后保留原文的提问和回答（Checkpointer，从早到晚）、最近查过的订单",
-          items: [], pairs: [], kind: "memory" };
+        memory = {
+          label: "本对话记忆", note: "这个会话里的短期记忆",
+          items: [], pairs: [], kind: "memory"
+        };
         groups.push(memory);
       }
       memory.items.push(index, index + 1);
@@ -266,11 +290,13 @@ function groupMessages(messages: AgentMessage[], roundNo: number): MessageGroup[
       const items = [index];
       index += 1;
       while (index < messages.length && messages[index].role === "tool") items.push(index++);
-      groups.push({ label: `第 ${roundNo - 1} 轮 Agent 调用详情：模型调用工具决策 + 工具返回结果`, note: "上一轮的输出和程序放回的结果", items, kind: "tool" });
+      groups.push({ label: `第 ${roundNo - 1} 轮 Agent 调用详情：模型调用工具决策 + 工具返回结果`, note: "上一轮的输出和程序放回的结果", items, kind: "loop" });
     } else if (message.role === "assistant") {
       const items = next?.role === "user" ? [index, index + 1] : [index];
-      groups.push({ label: `第 ${roundNo - 1} 轮 Agent 调用详情：模型的回答${items.length > 1 ? " + 程序追加的提示" : ""}`, note: "上一轮没有调用工具，程序检查后要求它继续", items, kind: "model",
-        names: ["模型上一轮的回答", "程序追加的提示"] });
+      groups.push({
+        label: `第 ${roundNo - 1} 轮 Agent 调用详情：模型的回答${items.length > 1 ? " + 程序追加的提示" : ""}`, note: "上一轮没有调用工具，程序检查后要求它继续", items, kind: "loop",
+        names: ["模型上一轮的回答", "程序追加的提示"]
+      });
       index += items.length;
     } else {
       if (roundNo === 1) {
@@ -281,19 +307,23 @@ function groupMessages(messages: AgentMessage[], roundNo: number): MessageGroup[
         if (longTerm.length) {
           // 长期记忆排在本对话记忆前面：先是跨会话的，再是这个会话的。
           const at = groups.findIndex((group) => group.pairs);
-          groups.splice(at < 0 ? groups.length : at, 0, { label: "长期记忆", note: "跨会话记住的用户偏好、身份（LangGraph Store），实际放在本轮用户消息开头的 <memory> 里",
-            items: [], sections: longTerm, virtual: true });
+          groups.splice(at < 0 ? groups.length : at, 0, {
+            label: "长期记忆", note: "跨会话记住的用户偏好、身份（LangGraph Store），实际放在本轮用户消息开头的 <memory> 里",
+            items: [], sections: longTerm, virtual: true
+          });
         }
         if (session.length) {
           let memory = groups.find((group) => group.pairs);
           if (!memory) {
-            memory = { label: "本对话记忆", note: "这个会话里的短期记忆：对话摘要、最近查过的订单", items: [], pairs: [], kind: "memory" };
+            memory = { label: "本对话记忆", note: "这个会话里的短期记忆", items: [], pairs: [], kind: "memory" };
             groups.push(memory);
           }
           memory.sections = session;
         }
-        groups.push({ label: "本轮问题", note: "用户这次的问题",
-          items: [index], names: ["本轮问题"], question, kind: "question" });
+        groups.push({
+          label: "本轮问题", note: "用户这次的问题",
+          items: [index], names: ["本轮问题"], question, kind: "question"
+        });
       } else {
         groups.push({ label: "程序追加的提示", note: "引用检查或预算、超时后程序发给模型的话", items: [index], names: ["程序追加的提示"], kind: "prompt" });
       }
@@ -308,9 +338,9 @@ function messageNames(messages: AgentMessage[], roundNo: number) {
   const names: string[] = messages.map((message) => ROLE_LABELS[message.role] ?? message.role);
   const groups: { label: string; kind: GroupKind }[] = messages.map(() => ({ label: "", kind: "model" }));
   for (const group of groupMessages(messages, roundNo)) {
-    const label = group.pairs ? `本对话记忆 · ${group.pairs.length} 次历史问答` : group.label;
+    const label = group.pairs ? `本对话记忆 · 最近 ${group.pairs.length} 次提问` : group.label;
     group.items.forEach((index) => { groups[index] = { label, kind: group.kind ?? "model" }; });
-    if (group.pairs) group.pairs.forEach((pair, number) => { names[pair[0]] = `历史问答 ${number + 1} 的问题`; names[pair[1]] = `历史问答 ${number + 1} 的回答`; });
+    if (group.pairs) group.pairs.forEach((pair, number) => { names[pair[0]] = `${earlierLabel(number, group.pairs!.length)}的问题`; names[pair[1]] = `${earlierLabel(number, group.pairs!.length)}的回答`; });
     else if (!group.virtual) group.items.forEach((index, position) => {
       const message = messages[index];
       names[index] = group.names?.[position] ?? (message.role === "tool" ? `工具返回（${message.tool_call_id ?? ""}）` : message.role === "assistant" ? "模型调用工具决策" : group.label);
@@ -319,23 +349,108 @@ function messageNames(messages: AgentMessage[], roundNo: number) {
   return { names, groups };
 }
 
-// “和之前完全一样”的消息按第一次出现时的组合并成一行：本对话记忆 8 条只占一行，工具调用和它的返回也合成一行。
-function SameAsBefore({ before, anchor }: { before: Placed[]; anchor: string }) {
-  const rows: { first: Placed; items: Placed[] }[] = [];
+// 「① 收到」里的输入清单：按接口请求的真实结构排，一个框装下 tools 和 messages。
+// messages 是一张连续的表，每行同一种样式：序号（消息在请求里的位置）、类型、名称、大小。
+// 和之前轮次完全一样的消息排在上面，浅色、按组合并，点击跳到第一次出现的地方；分隔线下面是本轮新增的，可以直接展开。
+function range(first: number, last: number) {
+  return first === last ? `#${first}` : `#${first}–${last}`;
+}
+
+function InputRow({ no, kind, label, note, size, id, link, children, hue }: {
+  no: string; kind: GroupKind; label: ReactNode; note?: ReactNode;
+  size: string; id?: string; link?: ReactNode; children?: ReactNode; hue?: number
+}) {
+  const head = <>
+    <span className="agent-input-no">{no}</span>
+    <span className={`agent-kind-tag ${kind}`}>{KIND_TEXT[kind]}</span>
+    <strong>{label}</strong>
+    {note && <span className="agent-input-note">{note}</span>}
+    <small>{size}</small>
+    {link}
+  </>;
+  if (!children) return <div className="agent-input-row reused">{head}</div>;
+  // hue：工具返回的消息按工具颜色着色（和 ③④ 里同一个工具的卡片一致）。
+  return <details className={`agent-input-row ${hue !== undefined ? "tool-tinted-row" : ""}`} id={id}
+    style={hue !== undefined ? { "--tool-h": hue } as React.CSSProperties : undefined}><summary>{head}</summary><div className="agent-input-body">{children}</div></details>;
+}
+
+function RequestInput({ round, before, anchor, startIndex }: { round: AgentRound; before: Placed[]; anchor: string; startIndex: number }) {
+  const messages = round.new_messages;
+  const position = (index: number) => startIndex + index + 1;
+  const reused: { first: Placed; items: Placed[] }[] = [];
   for (const item of before) {
-    const last = rows[rows.length - 1];
+    const last = reused[reused.length - 1];
     if (last && last.first.round === item.round && last.first.group === item.group) last.items.push(item);
-    else rows.push({ first: item, items: [item] });
+    else reused.push({ first: item, items: [item] });
+  }
+  const groups = groupMessages(messages, round.round);
+  const questionIndex = groups.find((group) => group.kind === "question")?.items[0];
+  const insideQuestion = questionIndex === undefined ? "" : `写在 #${position(questionIndex)} 开头的 <memory> 里`;
+  const rows: ReactNode[] = [];
+  for (const group of groups) {
+    const sectionChars = (group.sections ?? []).reduce((sum, section) => sum + section.text.length, 0);
+    const chars = group.items.reduce((sum, index) => sum + messageText(messages[index]).length, 0) + sectionChars;
+    if (group.virtual) {
+      // 长期记忆：从本轮问题那条消息里拆出来的，没有单独的一条消息。展开直接列出所有条目。
+      rows.push(<InputRow key="long-term" no={questionIndex === undefined ? "—" : `#${position(questionIndex)}`} kind="memory" label="长期记忆"
+        note={insideQuestion} size={`${chars} 字`}>
+        <Clamp className="agent-pre">{(group.sections ?? []).map((section) => section.text).filter(Boolean).join("\n")}</Clamp>
+      </InputRow>);
+    } else if (group.pairs) {
+      // 本对话记忆：带上的最近几次提问（每次一问一答两条消息），加上写在本轮问题开头的对话摘要、最近订单。
+      const no = group.items.length ? range(position(group.items[0]), position(group.items[group.items.length - 1])) : `#${position(questionIndex ?? 0)}`;
+      const parts = [group.pairs.length ? `最近 ${group.pairs.length} 次提问` : "", group.sections?.length ? `${group.sections.map((section) => section.title.replace(/^之前的/, "")).join("、")}（${insideQuestion}）` : ""].filter(Boolean);
+      rows.push(<InputRow key="memory" no={no} kind="memory" label="本对话记忆" note={parts.join(" + ")} size={`${chars} 字`}>
+        {(group.sections ?? []).map((section) => <details className="agent-msg-pair" key={section.title}>
+          <summary><strong>{section.title}</strong><small>{section.text.length} 字</small></summary>
+          <Clamp className="agent-pre">{section.text}</Clamp>
+        </details>)}
+        {group.pairs.map((pair, number) => <details className="agent-msg-pair" key={pair[0]}>
+          <summary><strong>{earlierLabel(number, group.pairs!.length)}</strong><small>{pair.reduce((sum, index) => sum + messageText(messages[index]).length, 0)} 字</small></summary>
+          <div className="agent-qa">{pair.map((index, side) => <Clamp as="div" className="agent-qa-row" key={index} id={`${anchor}-m${startIndex + index}`}>
+            <strong>{side === 0 ? "问题：" : "答案："}</strong><span>{messageText(messages[index])}</span>
+          </Clamp>)}</div>
+        </details>)}
+      </InputRow>);
+    } else if (group.kind === "question") {
+      const index = group.items[0];
+      rows.push(<InputRow key={index} no={`#${position(index)}`} kind="question" label="本轮问题" size={`${(group.question ?? messageText(messages[index])).length} 字`}
+        id={`${anchor}-m${startIndex + index}`}><Clamp className="agent-pre">{group.question ?? messageText(messages[index])}</Clamp></InputRow>);
+    } else {
+      // 系统提示词、上一轮的输出、工具返回、程序追加的提示：一条消息一行。
+      for (const index of group.items) {
+        const message = messages[index];
+        const tool = message.role === "tool" ? toolNameOf(messages, message) : undefined;
+        const kind: GroupKind = message.role === "system" ? "system" : message.role === "tool" ? "tool" : message.role === "assistant" ? "model" : "prompt";
+        // 本轮新增的这些消息都来自上一轮：上一轮模型的输出、上一轮执行工具的返回、上一轮结束后程序追加的提示。
+        // 名称里写明是第几轮的，免得以为是本轮产生的。
+        const previous = round.round - 1;
+        const label = message.role === "system" ? "系统提示词" : message.role === "tool" ? <>第 {previous} 轮的工具返回结果 {tool && <ToolTag name={tool} />}</>
+          : message.role === "assistant" ? (message.tool_calls?.length ? <>第 {previous} 轮的工具调用决策 {message.tool_calls.map((call, position) => <ToolTag key={call.id ?? position} name={call.function?.name ?? "?"} />)}</> : `第 ${previous} 轮的回答`)
+          : `第 ${previous} 轮结束后程序追加的提示${round.kind === "forced" ? "（要求直接回答）" : round.kind === "citation_retry" ? "（要求重写回答）" : ""}`;
+        rows.push(<InputRow key={index} no={`#${position(index)}`} kind={kind} label={label} note={message.tool_call_id} size={`${messageText(message).length} 字`}
+          id={`${anchor}-m${startIndex + index}`} hue={tool ? toolHue(tool) : undefined}><MessageBody message={message} /></InputRow>);
+      }
+    }
   }
   const target = (item: Placed) => `${anchor}-m${item.index}`;
-  return <div className="agent-same">
-    <p>前 {before.length} 条消息和之前完全一样（合成 {rows.length} 组），点击跳转查看：</p>
-    <div className="agent-same-list">{rows.map(({ first, items }) => <div className="agent-same-row" key={first.index}>
-      <span className={`agent-kind-tag ${first.kind}`}>{KIND_TEXT[first.kind]}</span>
-      <b title={items.map((item) => item.name).join("\n")}>{first.group}</b>
-      <small>{items.length} 条</small>
-      <a href={`#${target(first)}`} onClick={(event) => jumpTo(event, target(first))}>第 {first.round} 轮</a>
-    </div>)}</div>
+  return <div className="agent-input">
+    <div className="agent-input-title">本次请求的输入</div>
+    <div className="agent-input-section">
+      <div className="agent-input-head"><code>tools</code><span>{round.tools_sent.length ? `${round.tools_sent.length} 个` : "不带工具，模型只能直接回答"}</span></div>
+      {round.tools_sent.length > 0 && <div className="agent-input-tools">{round.tools_sent.map((name) => <ToolTag key={name} name={name} />)}</div>}
+    </div>
+    <div className="agent-input-section">
+      <div className="agent-input-head"><code>messages</code><span>{round.message_count} 条</span>
+        {before.length > 0 && <small>沿用 {before.length} · 新增 {messages.length}</small>}</div>
+      <div className="agent-input-rows">
+        {reused.map(({ first, items }) => <InputRow key={`reused-${first.index}`} no={range(first.index + 1, items[items.length - 1].index + 1)} kind={first.kind}
+          label={<span title={items.map((item) => item.name).join("\n")}>{first.group}</span>} size={`${items.length} 条`}
+          link={<a href={`#${target(first)}`} onClick={(event) => jumpTo(event, target(first))}>沿用 → 第 {first.round} 轮</a>} />)}
+        {before.length > 0 && messages.length > 0 && <div className="agent-input-divider">以下为本轮新增</div>}
+        {rows}
+      </div>
+    </div>
   </div>;
 }
 
@@ -360,23 +475,32 @@ function ProgramItem({ result }: { result: AgentToolResult }) {
   const retrieval = trace.retrieval as { stats?: Record<string, unknown> } | undefined;
   const stats = retrieval?.stats ?? {};
   const ids = evidenceIds(result);
-  return <div className="agent-prog-item">
-    <div className="agent-prog-head"><ToolTag name={result.name} /><span className={`agent-status ${result.status}`}>{STATUS_LABELS[result.status] ?? result.status}</span>
+  // 每次工具调用一张可折叠的卡片，默认展开；标题行写工具、执行状态、耗时、剩余预算和返回了几条资料，收起后也能看个大概。
+  return <details className="agent-prog-item tool-tinted" open style={{ "--tool-h": toolHue(result.name) } as React.CSSProperties}>
+    <summary className="agent-prog-head"><ToolTag name={result.name} /><span className={`agent-status ${result.status}`}>{STATUS_LABELS[result.status] ?? result.status}</span>
       {typeof result.duration_ms === "number" && <small>{formatDuration(result.duration_ms)}</small>}
-      {typeof result.budget_left === "number" && <small>剩余预算 {result.budget_left} 次</small>}</div>
+      {typeof result.budget_left === "number" && <small>剩余预算 {result.budget_left} 次</small>}
+      {ids.length > 0 && <small>返回 {ids.length} 条资料</small>}</summary>
+    <div className="agent-block-label">模型给出的参数<code>tool_calls.arguments</code></div>
     <JsonView value={parseArguments(result.arguments)} />
     <ul className="agent-prog-list">
       {result.status === "duplicate" && <li>工具名和参数都和之前某一轮完全相同，程序没有再执行，不占预算</li>}
       {result.status === "skipped" && <li>这一轮调用的工具超过了剩余预算，超出的部分没有执行</li>}
       {result.name === "read_context" && Array.isArray(trace.positions) && <li>读取 {String(trace.source_id)} 的{trace.direction === "before" ? "前文" : "后文"}：第 {(trace.positions as number[]).join("、")} 片</li>}
       {result.name === "lookup_order" && trace.found === false && <li>没有找到：订单不存在，或者当前用户没有权限查看（两种情况返回同一句话）</li>}
-      {result.name === "query_data" && trace.plan != null && result.ok && <li>校验后的查询计划（程序生成 SQL 执行，共 {count(trace.total)} 条）：</li>}
       {typeof trace.error === "string" && <li className="agent-warn">{trace.error}</li>}
-      {ids.length > 0 && <li>编入资料池：{ids.map((id) => <EvidenceId key={id} id={id} />)}</li>}
     </ul>
     {result.name === "search_knowledge" && retrieval && <RetrievalFunnel stats={stats} topK={trace.top_k} given={ids.length} />}
-    {result.name === "query_data" && trace.plan != null && result.ok && <JsonView value={trace.plan} />}
-  </div>;
+    {result.name === "query_data" && trace.plan != null && result.ok && <>
+      <div className="agent-block-label">程序校验后，实际用来生成 SQL 的查询计划<span>校验字段、操作符、权限，并补上默认值；按它执行后查到 {count(trace.total)} 条</span></div>
+      <JsonView value={trace.plan} />
+    </>}
+    {/* 工具的最终结果放在最后：这次返回了哪几条资料、编号是什么（资料池是整次问答所有工具查到的资料的总清单）。 */}
+    {ids.length > 0 && <div className="agent-evidence-result">
+      <span>本次返回 {ids.length} 条资料，编号</span>{ids.map((id) => <EvidenceId key={id} id={id} />)}
+      <small>模型回答时用这些编号标注出处，最后的引用检查也按它们核对</small>
+    </div>}
+  </details>;
 }
 
 // 检索漏斗（设计稿：③ 程序处理里的漏斗）：每一行是这一步之后剩下多少，右边写这一步去掉多少、为什么。
@@ -393,7 +517,9 @@ function RetrievalFunnel({ stats, topK, given }: { stats: Record<string, unknown
     { label: "RRF 融合去重", value: fused, ...removed(dense + keyword - fused, "重复", "没有重复") },
     hasRerank ? { label: "交给重排", value: reranked, ...removed(fused - reranked, "超出候选上限", "全部交给重排") }
       : { label: stats.rerank_error ? "重排失败" : "未重排", value: fused, text: "按 RRF 排序", removed: false },
-    hasRerank && minScore !== null ? { label: `相关性 ≥ ${minScore}`, value: passed, ...removed(filtered, "低于阈值", "全部通过") }
+    hasRerank && minScore !== null ? (stats.fallback_used
+      ? { label: `相关性 ≥ ${minScore}`, value: passed, text: `全部低于阈值，兜底保留最高的 1 条（> ${stats.fallback_min_score}）`, removed: true }
+      : { label: `相关性 ≥ ${minScore}`, value: passed, ...removed(filtered, "低于阈值", "全部通过") })
       : { label: "未做相关性过滤", value: passed, text: "未过滤", removed: false },
     { label: "返回", value: returned, ...removed(passed - returned, "超出上限或并入同一父块", "全部返回") },
     { label: `交给模型（top_k ${typeof topK === "number" ? topK : "—"}）`, value: given, ...removed(returned - given, "超出 top_k", "全部交给模型") },
@@ -438,7 +564,10 @@ function nextDecision(round: AgentRound, next: AgentRound | undefined, stopReaso
   const reasons: string[] = [];
   if (round.error) return { go: false, title: "模型调用失败，循环结束", reasons: [`模型调用失败：${round.error}`, "已经跑完的轮次会保存下来，这次问答返回失败"] };
   if (results.length > 0) {
-    reasons.push(`模型这一轮调用了 ${results.length} 个工具（finish_reason: tool_calls），说明它认为资料还不够；工具结果要交回给模型，由它判断够不够`);
+    // 这一轮只是查资料：查到的东西够不够回答，要等下一轮模型读了工具结果才知道，所以这里不说“资料不足”。
+    const found = results.reduce((sum, result) => sum + evidenceIds(result).length, 0);
+    reasons.push(`模型这一轮调用了 ${results.length} 个工具查资料（finish_reason: tool_calls）`);
+    reasons.push(found ? `共返回 ${found} 条资料，下一轮交给模型读取，由它判断能不能回答、要不要再查` : "没有查到资料，下一轮交给模型决定换个问法再查，还是直接回答");
     const lefts = results.map((result) => result.budget_left).filter((value): value is number => typeof value === "number");
     const left = lefts.length ? Math.min(...lefts) : undefined;
     if (next?.kind === "forced") {
@@ -447,10 +576,10 @@ function nextDecision(round: AgentRound, next: AgentRound | undefined, stopReaso
       return { go: true, title: outOfBudget ? "工具次数用完，下一轮强制回答" : "处理超时，下一轮强制回答", reasons };
     }
     if (next) {
-      reasons.push(`剩余预算 ${left ?? "—"} 次，处理时间没到上限，下一轮继续提供工具`);
-      return { go: true, title: "资料不足，继续查询", reasons };
+      reasons.push(`剩余预算 ${left ?? "—"} 次，处理时间没到上限，下一轮继续提供工具信息给模型调用`);
+      return { go: true, title: found ? "已查到资料，下一轮交给模型读取并判断能否回答" : "没查到资料，下一轮交给模型决定下一步", reasons };
     }
-    if (!stopReason) return { go: true, title: "资料不足，继续查询（进行中）", reasons };
+    if (!stopReason) return { go: true, title: "已调用工具，等待下一轮（进行中）", reasons };
     reasons.push(STOP_LABELS[stopReason] ?? stopReason);
     return { go: false, title: "调用了工具，但循环结束", reasons };
   }
@@ -500,52 +629,13 @@ function RoundView({ round, before, anchor, next, stopReason }: { round: AgentRo
   const results = round.tool_results ?? [];
   const calls = round.tool_calls ?? [];
   const startIndex = before.length;
-  return <details className={`agent-round kind-${round.kind}`}>
+  return <details className={`agent-round kind-${round.kind}`} open>
     <summary className="agent-round-head"><b>第 {round.round} 轮</b>{KIND_LABELS[round.kind] && <span className="agent-kind">{KIND_LABELS[round.kind]}</span>}
       <span className="agent-round-meta">{formatDuration(round.duration_ms)} · 输入 {count(prompt)} tok · 命中缓存 {count(cached)}（{percent(cached, prompt)}%）· 输出 {count(output)} tok</span></summary>
     <div className="agent-flow">
       <Flow kind="in" no={no("收到")} title="模型收到的输入" meta={`${round.message_count} 条消息 · 新增 ${round.new_messages.length} 条`}>
         {prompt > 0 && <CacheBar prompt={prompt} cached={cached} first={round.round === 1} />}
-        <p className="agent-tools-line">tools：{round.tools_sent.length ? <>本轮提供 {round.tools_sent.length} 个工具 {round.tools_sent.map((name) => <ToolTag key={name} name={name} />)}</> : "这一轮不带工具，模型只能直接回答"}</p>
-        {before.length > 0 && <SameAsBefore before={before} anchor={anchor} />}
-        {groupMessages(round.new_messages, round.round).map((group) => {
-          const sectionChars = (group.sections ?? []).reduce((sum, section) => sum + section.text.length, 0);
-          const chars = group.items.reduce((sum, index) => sum + messageText(round.new_messages[index]).length, 0) + sectionChars;
-          const sections = (group.sections ?? []).map((section) => <details className="agent-msg-pair" key={section.title}>
-            <summary><strong>{section.title}</strong><small>{section.text.length} 字</small></summary>
-            <Clamp className="agent-pre">{section.text}</Clamp>
-          </details>);
-          // 长期记忆：从本轮用户消息里拆出来的，没有对应的一条消息。不按小标题分块，展开直接列出所有条目。
-          if (group.virtual) return <details className="agent-msg-group" key={group.label}>
-            <summary><strong>{group.label}</strong><span>{group.note}</span><small>{chars} 字</small></summary>
-            <div className="agent-msg-group-body"><Clamp className="agent-pre">{(group.sections ?? []).map((section) => section.text).filter(Boolean).join("\n")}</Clamp></div>
-          </details>;
-          // 只有一条消息的组（系统提示词、本轮问题、程序追加的提示）：组本身就是这条消息，展开直接看正文。
-          if (group.items.length === 1 && !group.pairs) {
-            const message = round.new_messages[group.items[0]];
-            return <details className="agent-msg-group" key={group.items[0]} id={`${anchor}-m${startIndex + group.items[0]}`}>
-              <summary><strong>{group.label}</strong><span>{group.note}</span><small>{group.question !== undefined ? group.question.length : chars} 字</small></summary>
-              <div className="agent-msg-group-body">{group.question !== undefined && group.question !== messageText(message)
-                ? <Clamp className="agent-pre">{group.question}</Clamp>
-                : <MessageBody message={message} />}</div>
-            </details>;
-          }
-          return <details className="agent-msg-group" key={group.items[0] ?? group.label}>
-            <summary><strong>{group.label}</strong><span>{group.note}</span><small>{group.pairs ? `${group.pairs.length} 次历史问答 · ` : `${group.items.length} 条 · `}{chars} 字</small></summary>
-            <div className="agent-msg-group-body">
-              {sections}
-              {group.pairs ? group.pairs.map((pair, number) => <details className="agent-msg-pair" key={pair[0]}>
-                <summary><strong>历史问答 {number + 1}</strong>{number === 0 && group.pairs!.length > 1 && <span>最早</span>}{number === group.pairs!.length - 1 && <span>最近一次</span>}<small>{pair.reduce((sum, index) => sum + messageText(round.new_messages[index]).length, 0)} 字</small></summary>
-                {/* 一次历史问答展开后直接显示：问题：xxx / 答案：xxx，不再分两个折叠块 */}
-                <div className="agent-qa">{pair.map((index, position) => <Clamp as="div" className="agent-qa-row" key={index} id={`${anchor}-m${startIndex + index}`}>
-                  <strong>{position === 0 ? "问题：" : "答案："}</strong><span>{messageText(round.new_messages[index])}</span>
-                </Clamp>)}</div>
-              </details>)
-                : group.items.map((index, position) => <MessageBlock key={index} message={round.new_messages[index]} anchor={`${anchor}-m${startIndex + index}`} name={group.names?.[position]}
-                  tool={round.new_messages[index].role === "tool" ? toolNameOf(round.new_messages, round.new_messages[index]) : undefined} />)}
-            </div>
-          </details>;
-        })}
+        <RequestInput round={round} before={before} anchor={anchor} startIndex={startIndex} />
       </Flow>
       <Flow kind="out" no={no("输出")} title="模型的输出（一次调用返回的一条回复）" meta={round.error ? "调用失败" : `finish_reason: ${round.finish_reason ?? "—"} · ${formatDuration(round.model_ms)}`}>
         {round.error ? <p className="agent-warn">{round.error}</p> : <>
@@ -553,13 +643,20 @@ function RoundView({ round, before, anchor, next, stopReason }: { round: AgentRo
           <p className="agent-note">↓ 下面是从原始响应里提取出来的字段，方便逐个查看</p>
           <Field tag="AI 响应字段" name="reasoning_content" note="推理过程（开启思考的模型才有）">{round.reasoning ? <Clamp className="agent-pre think">{round.reasoning}</Clamp> : <p className="agent-empty">（无，这个模型没有返回推理过程）</p>}</Field>
           <Field tag="AI 响应字段" name="content" note="文字回复（不再调用工具时就是答案）">{round.content ? <Clamp className="agent-pre final">{round.content}</Clamp> : <p className="agent-empty">（空，这一轮只调用工具）</p>}</Field>
-          <Field tag="AI 响应字段" name="tool_calls" note="工具调用（arguments 在接口里是一段 JSON 字符串，这里解析后格式化显示）">{calls.length ? <JsonView value={readableCalls(calls)} /> : <p className="agent-empty">（无，这一轮没有调用工具）</p>}</Field>
+          <Field tag="AI 响应字段" name="tool_calls" note="工具调用">{calls.length ? <div className="agent-calls">
+            {/* 先列出这一轮调用了哪些工具；原文（arguments 在接口里是一段 JSON 字符串，这里解析后格式化）点「详情」再展开。 */}
+            <details className="agent-calls-raw">
+              <summary><span className="agent-calls-tools"><span>模型想要调用 {calls.length} 个工具（由程序执行）：</span>{calls.map((call, index) => <ToolTag key={call.id ?? index} name={call.function?.name ?? "?"} />)}</span>
+                <span className="agent-calls-toggle">详情</span></summary>
+              <JsonView value={readableCalls(calls)} />
+            </details>
+          </div> : <p className="agent-empty">（无，这一轮没有调用工具）</p>}</Field>
           {!round.reasoning && calls.length === 0 && round.kind === "normal" && <p className="agent-note agent-warn-note">模型这一轮没有返回推理过程，看不到它为什么没有调用工具就直接回答（推理过程由模型自己决定是否返回）。</p>}
         </>}
       </Flow>
       {results.length > 0 && <>
         <Flow kind="prog" no={no("内置程序处理")} title="执行工具调用" meta={`${results.length} 次`}>{results.map((result, index) => <ProgramItem key={index} result={result} />)}</Flow>
-        <Flow kind="ret" no={no("工具返回结果")} title="下一轮发给模型的内容">{results.map((result, index) => <details className="agent-ret-item" key={index}>
+        <Flow kind="ret" no={no("工具返回结果")} title="下一轮发给模型的内容">{results.map((result, index) => <details className="agent-ret-item tool-tinted" key={index} style={{ "--tool-h": toolHue(result.name) } as React.CSSProperties}>
           <summary><ToolTag name={result.name} />{result.id && <span className="agent-ret-id">{result.id}</span>}<small>{(result.content ?? "").length} 字</small></summary>
           <Clamp className="agent-pre ret">{result.content}</Clamp>
         </details>)}</Flow>
@@ -577,8 +674,10 @@ export function AgentRounds({ rounds, anchor, stopReason }: { rounds: AgentRound
   rounds.forEach((round, position) => {
     views.push(<RoundView key={round.round} round={round} before={placed} anchor={anchor} next={rounds[position + 1]} stopReason={stopReason} />);
     const { names, groups } = messageNames(round.new_messages, round.round);
-    placed = placed.concat(round.new_messages.map((message, index) => ({ message, round: round.round, index: placed.length + index, name: names[index],
-      group: groups[index].label || names[index], kind: groups[index].kind })));
+    placed = placed.concat(round.new_messages.map((message, index) => ({
+      message, round: round.round, index: placed.length + index, name: names[index],
+      group: groups[index].label || names[index], kind: groups[index].kind
+    })));
   });
   return <div className="agent-rounds">
     <div className="agent-legend"><span><i className="dot in" />① 收到 模型收到的输入</span><span><i className="dot out" />② 输出 模型返回的内容</span><span><i className="dot prog" />③ 内置程序处理</span><span><i className="dot ret" />④ 工具返回结果</span><span><i className="dot next" />本轮执行结果 是否开启下一轮</span>
