@@ -83,7 +83,7 @@ export function ComparePanel({ run }: { run: EvalRun }) {
     ["平均输入 token", "0", number(summary.agent_avg_prompt_tokens, 0), "固定流程检索不调用大模型"],
   ];
   return <div className="ev-overview ag-eval">
-    <p className="ev-muted-note">同一套题，固定流程和 Agent 各跑一遍，比较的是<strong>最后拿到的资料里有没有题目预设的证据</strong>，判断方法相同。Agent 的回答这一步不评分。{summary.answerable_count ?? 0} 道能回答 · {summary.unanswerable_count ?? 0} 道无法回答。</p>
+    <p className="ev-muted-note">同一套题，固定流程和 Agent 各跑一遍，比较的是<strong>最后拿到的资料里有没有题目预设的证据</strong>，判断方法相同。{summary.answerable_count ?? 0} 道能回答 · {summary.unanswerable_count ?? 0} 道无法回答。</p>
     <div className="diag-table-wrap"><table className="diag-table ev-table ag-compare-table">
       <thead><tr><th>指标</th><th className="num">固定流程</th><th className="num">Agent</th><th>说明</th></tr></thead>
       <tbody>{rows.map(([label, fixed, agent, hint]) => <tr key={label}><td>{label}</td><td className="num">{fixed}</td><td className="num">{agent}</td><td className="ag-muted">{hint}</td></tr>)}</tbody>
@@ -110,7 +110,7 @@ export function AgentPanel({ run }: { run: EvalRun }) {
   const summary: EvalSummary = run.summary ?? {};
   const config = run.config.agent;
   return <div className="ev-overview ag-eval">
-    <p className="ev-muted-note">Agent 每道题用一个新会话跑一遍，自己决定查几次、用什么词。这里只看它<strong>最后拿到的资料</strong>里有没有题目预设的证据（所有检索结果和读到的前后文合在一起）。Agent 的回答照样生成，但这一步不评分。{config && <> 本次配置：工具预算 {config.tool_budget} 次 · 超时 {config.timeout} 秒 · 提示词版本 {config.prompt_version}{config.model ? ` · ${config.model}` : ""}。</>}</p>
+    <p className="ev-muted-note">Agent 每道题用一个新会话跑一遍，自己决定查几次、用什么词。这里只看它<strong>最后拿到的资料</strong>里有没有题目预设的证据（所有检索结果和读到的前后文合在一起）。{config && <> 本次配置：工具预算 {config.tool_budget} 次 · 超时 {config.timeout} 秒 · 提示词版本 {config.prompt_version}{config.model ? ` · ${config.model}` : ""}。</>}</p>
     <div className="ev-section-title">命中<small>{summary.answerable_count ?? 0} 道能回答 · {summary.unanswerable_count ?? 0} 道无法回答</small></div>
     <div className="ev-cards">
       <Card label="资料命中率" value={percent(summary.agent_recall)} note="能回答的题里，拿到的证据比例" />
@@ -261,7 +261,6 @@ function AgentLog({ question }: { question: EvalQuestion }) {
     {agent.question_sent !== question.question && <div className="ag-call-meta">实际提问（多轮追问按规则补全）：{agent.question_sent}</div>}
     {agent.calls.length === 0 && <p className="ag-muted">没有调用任何工具，直接回答了。</p>}
     {agent.calls.map((call) => <AgentCall key={call.call} call={call} />)}
-    <details className="ag-answer"><summary>Agent 的回答（这一步不评分）</summary><p>{agent.answer || "（没有回答）"}</p></details>
   </section>;
 }
 
