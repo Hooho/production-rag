@@ -6,13 +6,14 @@ import Overview from "./Overview";
 import Maintenance, { MAINTENANCE_TABS, type MaintenanceTab } from "./Maintenance";
 import { ListingPanel } from "./Listing";
 import Memory from "./Memory";
+import { clearLiveChat, finishedRoundsFor, getLiveChat, saveFinishedRounds, startLiveChat, updateLiveChat, useLiveChat } from "./liveChat";
 import "./guard.css";
 import Settings from "./Settings";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import { AgentLiveRounds, AgentStepView } from "./AgentTrace";
 import { durationTitle, formatDuration, formatShortTime, isDurationField } from "./format";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
-import { type AgentRound, type ChatMode, getContentMatches, fileSha256, type ContentMatches, LOGOUT_EVENT, listDataTypes, createSession, deleteDocument, retryDocument, retryDocumentContexts, listGroups, login, logout, storedUser, updateDocumentPermission, type AuthUser, type TableReport, type DocumentVisibility, type Group, getDocument, getSessionHistory, listDocumentChunks, listDocuments, listHistory, sendChatStream, uploadDocument, type ChatResult, type DocumentChunk, type ChunkSource, type DocumentChunkPage, type DocumentStatus, type DocumentStep, type FeedbackRecord, type HistoryRun, type RetrievalCandidate, type RetrievalDiagnosticsData, type Source, type TraceStep } from "./api";
+import { type AgentRound, type ChatMode, ConnectionLost, getChatLive, resumeChatStream, getContentMatches, fileSha256, type ContentMatches, LOGOUT_EVENT, listDataTypes, createSession, deleteDocument, retryDocument, retryDocumentContexts, listGroups, login, logout, storedUser, updateDocumentPermission, type AuthUser, type TableReport, type DocumentVisibility, type Group, getDocument, getSessionHistory, listDocumentChunks, listDocuments, listHistory, sendChatStream, uploadDocument, type ChatResult, type DocumentChunk, type ChunkSource, type DocumentChunkPage, type DocumentStatus, type DocumentStep, type FeedbackRecord, type HistoryRun, type RetrievalCandidate, type RetrievalDiagnosticsData, type Source, type TraceStep } from "./api";
 
 // 评测页面放在 /eval，与知识问答、知识库并列；历史记录和评测集分别使用独立子路由。
 // 业务数据页放在 /data：录入和维护商品、订单等业务数据，也是聊天里数据查询工具的数据来源。
@@ -347,18 +348,20 @@ function Chat({ sessionId, initialMessages, historyRuns, onNewChat, onOpenHistor
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<ChatResult[]>(initialMessages);
   const [localHistory, setLocalHistory] = useState<HistoryRun[]>(historyRuns);
-  const [busy, setBusy] = useState(false);
-  const [pendingQuestion, setPendingQuestion] = useState("");
-  const [pendingError, setPendingError] = useState("");
-  const [streamSteps, setStreamSteps] = useState<TraceStep[]>([]);
-  // 回答生成过程中已收到的文字；complete 后以服务端最终回答为准（引用校验失败时最终回答会被替换）。
-  const [streamAnswer, setStreamAnswer] = useState("");
+  // 正在回答的问题放在 liveChat 里（按会话保存，不随组件卸载丢失）：切到别的页面再回来，进度还在。
+  // streamAnswer 是回答生成过程中已收到的文字；complete 后以服务端最终回答为准（引用校验失败时最终回答会被替换）。
+  const live = useLiveChat(sessionId);
+  const busy = live?.busy ?? false;
+  const pendingQuestion = live?.question ?? "";
+  const pendingError = live?.error ?? "";
+  const streamSteps = live?.steps ?? [];
+  const streamAnswer = live?.answer ?? "";
   // Agent 模式：选中的模式（每个浏览器记住上次的选择）、回答过程中已完成的轮次、本页刚问完的问题的轮次
   // （刚问完的不用再向后端读；历史问题展开执行链时才读取 /agent/runs）。
   const [mode, setMode] = useState<ChatMode>(() => {
     try { return localStorage.getItem("chat-mode") === "agent" ? "agent" : "fixed"; } catch { return "fixed"; }
   });
-  const [streamRounds, setStreamRounds] = useState<AgentRound[]>([]);
+  const streamRounds = live?.rounds ?? [];
   const [roundsByRequest, setRoundsByRequest] = useState<Record<string, AgentRound[]>>({});
   const [error, setError] = useState("");
   const [collapsedMessages, setCollapsedMessages] = useState<Record<string, boolean>>({});
@@ -417,43 +420,87 @@ function Chat({ sessionId, initialMessages, historyRuns, onNewChat, onOpenHistor
     try { localStorage.setItem("chat-mode", value); } catch { /* 存不了就只在本页生效 */ }
   }
 
+  // 把收到的进度事件写进 liveChat（按发问时的会话，组件卸载或切了会话也照样写）。
+  function liveHandlers(session: string, rounds: AgentRound[]) {
+    return {
+      onStep: (step: TraceStep) => updateLiveChat(session, (state) => {
+        const index = state.steps.findIndex((item) => item.id === step.id);
+        const steps = index < 0 ? [...state.steps, step] : state.steps.map((item, position) => position === index ? step : item);
+        return { ...state, steps };
+      }),
+      onToken: (text: string) => updateLiveChat(session, (state) => ({ ...state, answer: state.answer + text })),
+      onRound: (round: AgentRound) => { rounds.push(round); updateLiveChat(session, (state) => ({ ...state, rounds: [...rounds] })); },
+    };
+  }
+
+  // 回答完成：放进消息列表和历史记录，清掉正在回答的状态。同一个结果可能从原连接和续看两处到达，按 request_id 去重。
+  function finishChat(session: string, current: string, result: ChatResult, rounds: AgentRound[]) {
+    if (rounds.length) {
+      saveFinishedRounds(result.request_id, rounds);
+      setRoundsByRequest((items) => ({ ...items, [result.request_id]: rounds }));
+    }
+    setMessages((items) => items.some((item) => item.request_id === result.request_id) ? items : [...items, result]);
+    clearLiveChat(session);
+    const savedRun: HistoryRun = { id: result.request_id, session_id: session, question: current, response: result, created: new Date().toISOString() };
+    setLocalHistory((items) => items.some((item) => item.id === savedRun.id) ? items : [...items, savedRun]);
+    onMessageSaved(savedRun);
+  }
+
+  function failChat(session: string, reason: unknown) {
+    const message = (reason as Error).message;
+    setError(message);
+    updateLiveChat(session, (state) => ({ ...state, busy: false, error: message }));
+  }
+
+  // 从后端的进度记录接着看：重放全部事件，所以先清空已经收到的部分，避免重复。
+  function resume(session: string, requestId: string, current: string) {
+    const rounds: AgentRound[] = [];
+    updateLiveChat(session, (state) => ({ ...state, busy: true, error: "", steps: [], answer: "", rounds: [] }));
+    const handlers = liveHandlers(session, rounds);
+    return resumeChatStream(requestId, handlers.onStep, handlers.onToken, handlers.onRound)
+      .then((result) => finishChat(session, current, result, rounds));
+  }
+
+  // 打开问答页（包括切页面回来、刷新页面）时，查这个会话有没有正在回答的问题，有就接着看进度。
+  // 本页正在收着的（liveChat 里 busy）不用再查；已经在消息列表里的（刚回答完、历史已经读到）也不用。
+  useEffect(() => {
+    if (!sessionId || getLiveChat(sessionId)?.busy) return;
+    let cancelled = false;
+    getChatLive(sessionId).then(({ live: state }) => {
+      if (cancelled || !state || getLiveChat(sessionId)?.busy) return;
+      if (latestMessages.current.some((item) => item.request_id === state.request_id)) return;
+      startLiveChat(sessionId, state.question, state.mode);
+      resume(sessionId, state.request_id, state.question).catch((reason) => failChat(sessionId, reason));
+    }).catch(() => { /* 查不到进度不影响正常使用 */ });
+    return () => { cancelled = true; };
+  }, [sessionId]);
+
   // retry 传入上次没处理完的问题时直接重发它，不动输入框里正在写的内容。
   async function submit(retry?: string) {
     const current = (retry ?? question).trim();
-    if (!current || !sessionId || busy) return;
+    if (!current || !sessionId || busy || getLiveChat(sessionId)?.busy) return;
     if (retry === undefined) setQuestion("");
     // 发出新问题时回到底部并恢复跟随。
     requestAnimationFrame(() => scrollToBottom(true));
-    setBusy(true); setError(""); setPendingError(""); setPendingQuestion(current); setStreamSteps([]); setStreamAnswer(""); setStreamRounds([]);
+    // 回调里用发问时的 session，不用组件当前的（组件可能已经卸载，或者切到了别的会话）。
+    const session = sessionId;
+    const requestId = crypto.randomUUID();
+    setError("");
+    startLiveChat(session, current, mode);
     const rounds: AgentRound[] = [];
+    const handlers = liveHandlers(session, rounds);
     try {
-      const result = await sendChatStream({ session_id: sessionId, request_id: crypto.randomUUID(), question: current },
-        (step) => setStreamSteps((items) => {
-          const index = items.findIndex((item) => item.id === step.id);
-          if (index < 0) return [...items, step];
-          const updated = items.slice();
-          updated[index] = step;
-          return updated;
-        }),
-        (text) => setStreamAnswer((value) => value + text),
-        mode,
-        (round) => { rounds.push(round); setStreamRounds([...rounds]); });
-      if (rounds.length) setRoundsByRequest((items) => ({ ...items, [result.request_id]: rounds }));
-      setMessages((items) => [...items, result]);
-      setPendingQuestion("");
-      setPendingError("");
-      const savedRun: HistoryRun = {
-        id: result.request_id,
-        session_id: sessionId,
-        question: current,
-        response: result,
-        created: new Date().toISOString(),
-      };
-      setLocalHistory((items) => [...items, savedRun]);
-      onMessageSaved(savedRun);
+      const result = await sendChatStream({ session_id: session, request_id: requestId, question: current },
+        handlers.onStep, handlers.onToken, mode, handlers.onRound);
+      finishChat(session, current, result, rounds);
+    } catch (reason) {
+      // 连接断了（网络波动、浏览器掐断后台连接），后端可能还在回答：改从进度记录接着看。
+      if (reason instanceof ConnectionLost) {
+        try { await resume(session, requestId, current); return; }
+        catch (again) { failChat(session, again); return; }
+      }
+      failChat(session, reason);
     }
-    catch (reason) { setError((reason as Error).message); setPendingError((reason as Error).message); }
-    finally { setBusy(false); }
   }
   // 反馈保存后更新当前会话的消息，并通知上层同步历史记录。
   function saveFeedback(value: FeedbackRecord) {
@@ -468,7 +515,7 @@ function Chat({ sessionId, initialMessages, historyRuns, onNewChat, onOpenHistor
     onOpenHistory(session);
   }
 
-  return <section className="chat-layout"><HistoryRail runs={localHistory} activeSessionId={sessionId} onSelect={selectHistory} onNewChat={onNewChat} busy={busy} /><div className="chat-column"><div className="messages" ref={messagesRef} onScroll={handleScroll}>{messages.length === 0 && !busy && !pendingQuestion && <div className="empty-state"><div className="empty-orbit">✦</div><h2>从一个问题开始</h2><p>试试“退货政策是什么？”或“查询订单 A1001”。</p></div>}{messages.map((message, index) => { const requestId = message.request_id || `message-${index}`; const questionText = message.steps.find((step) => step.id === "request")?.result?.question as string ?? "本轮问题"; const collapsed = collapsedMessages[requestId] ?? false; return <article className={`message-card ${collapsed ? "is-collapsed" : ""}`} key={requestId}><div className="message-index">{String(index + 1).padStart(2, "0")}</div><div className="message-content"><button className="message-toggle" onClick={() => toggleMessage(requestId)} aria-expanded={!collapsed}><span className="question-line">{questionText}{message.mode === "agent" && <span className="message-mode-tag">Agent</span>}</span><span className="collapse-icon">{collapsed ? "＋" : "−"}</span></button>{!collapsed && <div className="message-body"><TraceTimeline steps={message.steps} answer={message.answer} sources={message.sources} traceId={message.trace_id} requestId={message.request_id} rounds={roundsByRequest[message.request_id]} /><div className="answer"><MarkdownAnswer content={message.answer} /></div>{message.request_id && <AnswerFeedback requestId={message.request_id} initial={message.feedback} onSaved={saveFeedback} />}{message.sources.length > 0 && <details className="sources-panel"><summary><span>来源</span><strong>{message.sources.length} 条检索结果</strong><span className="panel-chevron">⌄</span></summary><div className="sources">{/* 每条来源默认只显示一行正文，点击展开查看全文；以前长文本超出面板被截断，又没法看到完整内容。 */}{message.sources.map((source) => <details className="source" key={source.id}><summary><span>{source.id}</span><div><strong>{source.title}<small className="source-location">{sourceLocation(source.version, source.page_start, source.heading)}</small></strong><p>{source.text}</p></div><span className="source-toggle" aria-hidden="true">⌄</span></summary></details>)}</div></details>}<div className="trace">链路编号：{message.trace_id}</div></div>}</div></article>; })}{pendingQuestion && <article className="message-card pending-message"><div className="message-index">{String(messages.length + 1).padStart(2, "0")}</div><div className="message-content"><div className="pending-question"><span className="question-line">{pendingQuestion}</span>{busy && <span className="pending-indicator"><span className="pulse-dot" />处理中</span>}</div><div className="message-body"><TraceTimeline steps={streamSteps} live={busy} /><AgentLiveRounds rounds={streamRounds} busy={busy} />{streamAnswer ? <div className="answer"><MarkdownAnswer content={streamAnswer} streaming={busy} /></div> : busy ? <ChatAnswerSkeleton /> : null}{pendingError && <div className="pending-error"><span>本次处理未完成，已保留收到的阶段记录：{pendingError}</span>{!busy && <button type="button" className="pending-retry" onClick={() => void submit(pendingQuestion)}>重试</button>}</div>}</div></div></article>}</div><div className="composer"><div className="chat-mode-row"><div className="chat-mode-switch" role="group" aria-label="问答模式"><button type="button" className={mode === "fixed" ? "active" : ""} onClick={() => chooseMode("fixed")} disabled={busy}>固定流程</button><button type="button" className={mode === "agent" ? "active" : ""} onClick={() => chooseMode("agent")} disabled={busy}>Agent</button></div><span>{mode === "agent" ? "模型自己决定调用哪些工具、调用几次，资料齐了再回答" : "意图识别 → 路由 → 检索 → 回答，每个问题只走一条路"}</span></div><textarea value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submit(); } }} placeholder="询问知识库，或调用业务工具…" rows={3} /><button className="send-button" onClick={() => void submit()} disabled={busy || !sessionId}>{busy ? "处理中…" : "发送 ↑"}</button></div>{error && <div className="field-error">{error}</div>}</div></section>;
+  return <section className="chat-layout"><HistoryRail runs={localHistory} activeSessionId={sessionId} onSelect={selectHistory} onNewChat={onNewChat} busy={busy} /><div className="chat-column"><div className="messages" ref={messagesRef} onScroll={handleScroll}>{messages.length === 0 && !busy && !pendingQuestion && <div className="empty-state"><div className="empty-orbit">✦</div><h2>从一个问题开始</h2><p>试试“退货政策是什么？”或“查询订单 A1001”。</p></div>}{messages.map((message, index) => { const requestId = message.request_id || `message-${index}`; const questionText = message.steps.find((step) => step.id === "request")?.result?.question as string ?? "本轮问题"; const collapsed = collapsedMessages[requestId] ?? false; return <article className={`message-card ${collapsed ? "is-collapsed" : ""}`} key={requestId}><div className="message-index">{String(index + 1).padStart(2, "0")}</div><div className="message-content"><button className="message-toggle" onClick={() => toggleMessage(requestId)} aria-expanded={!collapsed}><span className="question-line">{questionText}{message.mode === "agent" && <span className="message-mode-tag">Agent</span>}</span><span className="collapse-icon">{collapsed ? "＋" : "−"}</span></button>{!collapsed && <div className="message-body"><TraceTimeline steps={message.steps} answer={message.answer} sources={message.sources} traceId={message.trace_id} requestId={message.request_id} rounds={roundsByRequest[message.request_id] ?? finishedRoundsFor(message.request_id)} /><div className="answer"><MarkdownAnswer content={message.answer} /></div>{message.request_id && <AnswerFeedback requestId={message.request_id} initial={message.feedback} onSaved={saveFeedback} />}{message.sources.length > 0 && <details className="sources-panel"><summary><span>来源</span><strong>{message.sources.length} 条检索结果</strong><span className="panel-chevron">⌄</span></summary><div className="sources">{/* 每条来源默认只显示一行正文，点击展开查看全文；以前长文本超出面板被截断，又没法看到完整内容。 */}{message.sources.map((source) => <details className="source" key={source.id}><summary><span>{source.id}</span><div><strong>{source.title}<small className="source-location">{sourceLocation(source.version, source.page_start, source.heading)}</small></strong><p>{source.text}</p></div><span className="source-toggle" aria-hidden="true">⌄</span></summary></details>)}</div></details>}<div className="trace">链路编号：{message.trace_id}</div></div>}</div></article>; })}{pendingQuestion && <article className="message-card pending-message"><div className="message-index">{String(messages.length + 1).padStart(2, "0")}</div><div className="message-content"><div className="pending-question"><span className="question-line">{pendingQuestion}</span>{busy && <span className="pending-indicator"><span className="pulse-dot" />处理中</span>}</div><div className="message-body"><TraceTimeline steps={streamSteps} live={busy} /><AgentLiveRounds rounds={streamRounds} busy={busy} />{streamAnswer ? <div className="answer"><MarkdownAnswer content={streamAnswer} streaming={busy} /></div> : busy ? <ChatAnswerSkeleton /> : null}{pendingError && <div className="pending-error"><span>本次处理未完成，已保留收到的阶段记录：{pendingError}</span>{!busy && <button type="button" className="pending-retry" onClick={() => void submit(pendingQuestion)}>重试</button>}</div>}</div></div></article>}</div><div className="composer"><div className="chat-mode-row"><div className="chat-mode-switch" role="group" aria-label="问答模式"><button type="button" className={mode === "fixed" ? "active" : ""} onClick={() => chooseMode("fixed")} disabled={busy}>固定流程</button><button type="button" className={mode === "agent" ? "active" : ""} onClick={() => chooseMode("agent")} disabled={busy}>Agent</button></div><span>{mode === "agent" ? "模型自己决定调用哪些工具、调用几次，资料齐了再回答" : "意图识别 → 路由 → 检索 → 回答，每个问题只走一条路"}</span></div><textarea value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submit(); } }} placeholder="询问知识库，或调用业务工具…" rows={3} /><button className="send-button" onClick={() => void submit()} disabled={busy || !sessionId}>{busy ? "处理中…" : "发送 ↑"}</button></div>{error && <div className="field-error">{error}</div>}</div></section>;
 }
 
 // 回答流首个文字片段到达前使用内容骨架；原来只有阶段圆点，回答区域会显得空白且不稳定。

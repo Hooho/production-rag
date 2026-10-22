@@ -194,17 +194,32 @@ class ResponseAgent:
     # 压缩规则不另写：直接调用回答 Agent 身上同一个摘要中间件（同样的阈值、Token 估算、切点对齐、去掉 <think>、
     # 同一个 memory_summary 提示词），结果按回答模型节点写回同一个会话，固定流程下一次回答时读到的是同一份记忆。
     # 固定流程的知识问答仍在 answer() 里由中间件在调用模型前处理，两边用的是同一套规则、同一份数据。
-    def remember_turn(self, owner, session_id, question, answer):
+    # request_id 用来保证幂等：外箱任务可能重试（写进去了、还没来得及标记完成就重启），同一次问答只写一次。
+    # 写入的两条消息都带上 request_id；这次触发压缩时，新摘要上记下 last_request_id（这次问答可能被一起压进摘要）。
+    # 重试时只要最新的消息或摘要上有这个 request_id，就说明已经写过，直接跳过。外箱按会话顺序写，所以只需要看最新一条。
+    def remember_turn(self, owner, session_id, question, answer, request_id=None):
         if self.agent is None or self.memory.middleware is None:
             return None
         self.sync_memory_settings()
         config = {"configurable": {"thread_id": self.memory.thread_id(owner, session_id)}}
         before = self.memory.inspect(owner, session_id)
         state = self.agent.get_state(config)
-        added = [HumanMessage(question), AIMessage(answer)]
-        messages = list(state.values.get("messages", [])) + added
+        current = list(state.values.get("messages", []))
+        if request_id and self.memory.applied(current, request_id):
+            return {"compressed": False, "summary_updated": False, "already_applied": True,
+                "message_count_before": before["message_count"], "message_count": before["message_count"],
+                "summary": before["summary"], "memory_trigger_tokens": self.memory.trigger_tokens,
+                "memory_keep_tokens": self.memory.keep_tokens}
+        marker = {"request_id": request_id} if request_id else {}
+        added = [HumanMessage(question, additional_kwargs=dict(marker)), AIMessage(answer, additional_kwargs=dict(marker))]
+        messages = current + added
         # 中间件判断要不要压缩：要压缩时返回“删除全部 + 新摘要 + 保留的原文”，不压缩时返回 None，只追加本轮。
         update = self.memory.middleware.before_model({"messages": messages}, None)
+        if update and request_id:
+            for message in update.get("messages", []):
+                kwargs = getattr(message, "additional_kwargs", None)
+                if isinstance(kwargs, dict) and kwargs.get("lc_source") == "summarization":
+                    kwargs["last_request_id"] = request_id
         self.agent.update_state(config, update or {"messages": added}, as_node="model")
         after = self.memory.inspect(owner, session_id)
         return {"compressed": update is not None, "summary_updated": after["summary"] != before["summary"],

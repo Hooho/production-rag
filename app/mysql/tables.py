@@ -507,3 +507,23 @@ agent_rounds = Table("agent_rounds", metadata,
     Column("record", JSON, nullable=False),
     Column("duration_ms", Integer),
 )
+
+# 会话记忆的外箱（Outbox）：问答结果要写两个库，runs 在 MySQL，会话记忆在 PostgreSQL（LangGraph Checkpointer），
+# 两个库没法放进同一个事务。做法是写 runs 时在同一个 MySQL 事务里插入一条“待写入会话记忆”的任务，
+# 提交后立刻写会话记忆并标记完成；写失败就留着 pending，下次这个会话提问前先补写。
+# 这样 runs 有的问答，会话记忆最终一定有；runs 没写成，会话记忆也一定没有。写入按 request_id 幂等，重试不会重复。
+memory_outbox = Table("memory_outbox", metadata,
+    # 和 runs.id 相同（request_id）。
+    Column("request_id", String(36), primary_key=True),
+    Column("owner", String(32), nullable=False),
+    Column("session_id", String(36), nullable=False),
+    Column("question", Text, nullable=False),
+    Column("answer", Text, nullable=False),
+    # pending：待写入；done：已写入；failed：重试多次仍失败，不再重试（这一轮会出现在对话里，但会话记忆里没有）。
+    Column("status", String(16), nullable=False),
+    Column("attempts", Integer, nullable=False, default=0),
+    Column("error", String(500)),
+    Column("created", String(32), nullable=False),
+    Column("applied", String(32)),
+    Index("ix_memory_outbox_session_status", "owner", "session_id", "status"),
+)

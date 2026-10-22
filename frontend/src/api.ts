@@ -479,6 +479,32 @@ export async function sendChatStream(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+  return readChatEvents(response, onStep, onToken, onRound);
+}
+
+// 这个会话正在回答（或刚回答完）的问题。切页面、刷新之后用它接着看进度；没有就是 null。
+export type LiveChatState = { request_id: string; question: string; mode: ChatMode; status: "running" | "done"; started: string };
+export function getChatLive(sessionId: string) {
+  return request<{ live: LiveChatState | null }>(`/chat/live?session_id=${encodeURIComponent(sessionId)}`);
+}
+
+// 重放一次回答的全部进度事件，再接着收新的，直到完成。和 sendChatStream 收到的事件一样，返回最终结果。
+export async function resumeChatStream(
+  requestId: string,
+  onStep: (step: TraceStep) => void,
+  onToken: (text: string) => void,
+  onRound?: (round: AgentRound) => void,
+): Promise<ChatResult> {
+  const response = await authorizedFetch(`/chat/live/${encodeURIComponent(requestId)}/events`);
+  return readChatEvents(response, onStep, onToken, onRound);
+}
+
+async function readChatEvents(
+  response: Response,
+  onStep: (step: TraceStep) => void,
+  onToken: (text: string) => void,
+  onRound?: (round: AgentRound) => void,
+): Promise<ChatResult> {
   if (!response.ok || !response.body) {
     const body = await response.json().catch(() => ({ detail: response.statusText }));
     throw new Error(body.detail || `请求失败：${response.status}`);
@@ -507,7 +533,7 @@ export async function sendChatStream(
     try {
       result = await reader.read();
     } catch {
-      throw new Error("与服务器的连接中断（服务重启或网络波动），请稍后重试");
+      throw new ConnectionLost();
     }
     buffer += decoder.decode(result.value ?? new Uint8Array(), { stream: !result.done });
     const blocks = buffer.split("\n\n");
@@ -515,8 +541,15 @@ export async function sendChatStream(
     for (const block of blocks) handle(block);
     if (result.done) break;
   }
-  if (!complete) throw new Error("服务未返回完整结果");
+  if (!complete) throw new ConnectionLost("服务未返回完整结果");
   return complete;
+}
+
+// 连接中途断开（网络波动、切到后台被浏览器掐断）。后端可能还在回答，调用方可以改用 resumeChatStream 接着看。
+export class ConnectionLost extends Error {
+  constructor(message = "与服务器的连接中断（服务重启或网络波动），请稍后重试") {
+    super(message);
+  }
 }
 
 // 读取一次 Agent 问答的每一轮（会话历史里只有摘要）。只能读自己的。

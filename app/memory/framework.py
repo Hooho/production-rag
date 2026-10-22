@@ -161,6 +161,15 @@ class FrameworkMemory:
         return {"summary": summary, "turns": turns, "message_count": len(messages),
             "estimated_tokens": estimated_tokens}
 
+    # 这次问答（request_id）是不是已经写进会话记忆：最新的原文消息或摘要上带着这个 request_id 就算写过。
+    @staticmethod
+    def applied(messages, request_id):
+        for message in messages:
+            kwargs = getattr(message, "additional_kwargs", None) or {}
+            if kwargs.get("request_id") == request_id or kwargs.get("last_request_id") == request_id:
+                return True
+        return False
+
     # 直接读取 Checkpoint 消息，记忆模块不依赖回答 Agent。
     def inspect(self, owner, session_id):
         if self.models.chat_model is None:

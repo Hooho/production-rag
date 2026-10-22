@@ -23,6 +23,9 @@ from sqlalchemy.exc import IntegrityError
 from ..agent.service import Agent
 from ..agentic.records import load_run as load_agent_run, save_run as save_agent_run, summary as agent_summary
 from ..agentic.service import AgentFailed, AgentMode
+from ..memory import outbox as memory_outbox
+from . import live as live_state
+from .live import LiveLog
 from ..business.sample_data import MAX_COUNT, generate_preview
 from ..business.definitions import ACTIONS, DATA_TYPES, public_schema
 from ..business.service import (DataError, can_pick, create_batch, create_record, delete_batch, delete_record, list_records,
@@ -1368,7 +1371,7 @@ def create_app(store=None, models=None, jwt_secret=None):
     # 同一会话串行处理；成功请求持久化后，同一 request_id 重放直接返回原结果。
     # mode="agent" 时走 Agent 模式（/agent/chat）：会话、限流、加锁、重放、写 runs 和长期记忆都和固定流程共用，
     # 另外把每一轮的记录写进 agent_runs / agent_rounds；on_round 在每轮结束时调用，流式接口据此推送。
-    def process_chat(body, request, owner, on_step=None, on_token=None, mode="fixed", on_round=None):
+    def process_chat(body, request, owner, on_step=None, on_token=None, mode="fixed", on_round=None, on_start=None):
         store = app.state.store
         session_id, request_id = str(body.session_id), str(body.request_id)
         check_session(store, session_id, owner)
@@ -1398,6 +1401,11 @@ def create_app(store=None, models=None, jwt_secret=None):
                 if (existing["owner"], existing["session_id"], existing["question"]) != (owner, session_id, body.question):
                     raise HTTPException(409, "request_id 已用于其他请求")
                 return existing["response"]
+            # 拿到会话锁、确认不是重放之后才开始记录进度（见 app/api/live.py）。
+            if on_start is not None:
+                on_start()
+            # 先补写这个会话之前没写进会话记忆的问答（外箱里 pending 的任务），再读取记忆，两种模式都一样。
+            catch_up_memory(owner, session_id, request)
             previous = app.state.memory.history(store, session_id, owner)
             last_order = app.state.memory.last_order(store, owner, session_id, previous)
             # 记下已完成的阶段，处理失败时据此判断失败发生在哪一步。
@@ -1428,19 +1436,32 @@ def create_app(store=None, models=None, jwt_secret=None):
                     except Exception:
                         logger.exception("agent_run_record_failed trace_id=%s", request.state.trace_id)
                     raise HTTPException(503, "模型调用失败，请稍后重试") from error
+                if isinstance(error, HTTPException):
+                    raise error from None
                 raise
             result.update({"request_id": request_id, "trace_id": request.state.trace_id})
             if not lock.owned():
-                raise HTTPException(409, "处理时间过长，请重试")
+                # 会话锁已过期：结果不保存（runs、外箱、会话记忆都不写）。以前这里不留记录，现在记进 run_errors，方便排查。
+                error = HTTPException(409, "处理时间过长，请重试")
+                record_run_error(request, owner, session_id, request_id, body.question, error,
+                    completed_steps, round((time.monotonic() - started) * 1000))
+                raise error
             agent_outcome = result.get("agent")
+            remember = mode == "agent" and app.state.agent_mode.should_remember(result) \
+                and app.state.agent.response_agent.memory.middleware is not None
             if agent_outcome is not None:
                 result["agent"] = agent_summary(agent_outcome)
+            # runs 和外箱任务在同一个事务里：要么都写进去，要么都没有（见 app/memory/outbox.py）。
             with store.engine.begin() as connection:
                 connection.execute(runs.insert().values(id=request_id, session_id=session_id,
                     owner=owner, question=body.question, response=result,
                     created=datetime.now(timezone.utc).isoformat(), **run_columns(summarize_run(result))))
                 if agent_outcome is not None:
                     save_agent_run(connection, request_id, session_id, owner, agent_outcome)
+                if remember:
+                    memory_outbox.enqueue(connection, request_id, owner, session_id, body.question, result["answer"])
+            if remember:
+                write_memory(result, owner, session_id, request_id, started, on_step, request)
             # 长期记忆在后台提取，不增加这次回答的等待时间；提取失败只记日志。
             try:
                 app.state.agent.response_agent.memory.long_term.schedule(owner, session_id, request_id, body.question, result)
@@ -1454,6 +1475,43 @@ def create_app(store=None, models=None, jwt_secret=None):
                     lock.release()
             except Exception:
                 logger.warning("lock_release_failed trace_id=%s", request.state.trace_id)
+
+    # 补写外箱里这个会话还没写进会话记忆的问答。调用时已经拿到会话锁；补写失败不影响这次提问，任务留着下次再写。
+    def catch_up_memory(owner, session_id, request):
+        response_agent = app.state.agent.response_agent
+        if response_agent.memory.middleware is None:
+            return
+        try:
+            results = memory_outbox.apply_pending(app.state.store.engine, response_agent, owner, session_id)
+        except Exception:
+            logger.exception("memory_outbox_catch_up_failed trace_id=%s", request.state.trace_id)
+            return
+        if results:
+            logger.warning("memory_outbox_caught_up trace_id=%s session=%s results=%s", request.state.trace_id,
+                session_id, {key: "error" if value.get("error") else "ok" for key, value in results.items()})
+
+    # runs 提交之后写会话记忆：按顺序写完这个会话的外箱任务，把这一次的结果做成「写入会话记忆」一步，
+    # 插在「完成本次处理」前面，并更新 runs 里保存的步骤。写失败时任务留在外箱，下次提问前补写。
+    def write_memory(result, owner, session_id, request_id, started, on_step, request):
+        write_started = time.monotonic()
+        try:
+            results = memory_outbox.apply_pending(app.state.store.engine, app.state.agent.response_agent, owner, session_id)
+        except Exception as error:
+            logger.exception("memory_outbox_apply_failed trace_id=%s", request.state.trace_id)
+            results = {request_id: {"error": f"{type(error).__name__}: {str(error)[:200]}"}}
+        step = app.state.agent_mode.memory_step(results.get(request_id), started, write_started)
+        if step is None:
+            return
+        steps = result["steps"]
+        position = next((index for index, item in enumerate(steps) if item["id"] == "complete"), len(steps))
+        steps.insert(position, step)
+        try:
+            with app.state.store.engine.begin() as connection:
+                connection.execute(runs.update().where(runs.c.id == request_id).values(response=result))
+        except Exception:
+            logger.exception("memory_step_record_failed trace_id=%s", request.state.trace_id)
+        if on_step is not None:
+            on_step(step)
 
     # 记录一次失败的问答。错误详情只写入数据库供排查，不返回给客户端；记录本身失败不影响原来的错误响应。
     def record_run_error(request, owner, session_id, request_id, question, error, steps, duration_ms):
@@ -1488,6 +1546,20 @@ def create_app(store=None, models=None, jwt_secret=None):
     def agent_chat_stream(body: ChatInput, request: Request, owner=Depends(identity)):
         return stream_chat(body, request, owner, "agent")
 
+    # 这个会话有没有正在回答（或刚回答完）的问题。前端打开问答页时调用，有就接着看进度。
+    @app.get("/chat/live")
+    def chat_live(session_id: str, owner=Depends(identity)):
+        check_session(app.state.store, session_id, owner)
+        return {"live": live_state.current(app.state.store.cache, owner, session_id)}
+
+    # 重放一次回答的全部进度事件（从第 after 个开始），再接着推送新的，直到 complete / error。只能看自己的。
+    @app.get("/chat/live/{request_id}/events")
+    def chat_live_events(request_id: str, after: int = 0, owner=Depends(identity)):
+        if live_state.owner_of(app.state.store.cache, request_id) != owner:
+            raise HTTPException(404, "没有这次回答的进度记录")
+        return StreamingResponse(live_state.replay(app.state.store.cache, request_id, max(0, after)),
+            media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
     # 读取一次 Agent 问答的每一轮（会话历史里只存了摘要），只能读自己的。
     @app.get("/agent/runs/{run_id}")
     def agent_run(run_id: UUID, owner=Depends(identity)):
@@ -1498,20 +1570,33 @@ def create_app(store=None, models=None, jwt_secret=None):
 
     def stream_chat(body, request, owner, mode):
         events = Queue()
+        # 每个事件同时记进 Redis：切页面、刷新、断网之后，前端可以从 /chat/live 接着看进度（见 app/api/live.py）。
+        live = LiveLog(app.state.store.cache, owner, str(body.session_id), str(body.request_id), body.question, mode)
+
+        def put(event, payload):
+            events.put((event, payload))
+            try:
+                live.push(event, payload)
+            except Exception:
+                logger.warning("chat_live_push_failed", exc_info=True)
 
         def run():
             try:
                 # 原来只推送阶段，回答要等 complete 才整段出现；现在额外推送 token 事件，前端可以逐字显示。
-                result = process_chat(body, request, owner, on_step=lambda step: events.put(("step", step)),
-                    on_token=lambda text: events.put(("token", {"text": text})), mode=mode,
-                    on_round=lambda record: events.put(("round", record)))
-                events.put(("complete", result))
+                result = process_chat(body, request, owner, on_step=lambda step: put("step", step),
+                    on_token=lambda text: put("token", {"text": text}), mode=mode,
+                    on_round=lambda record: put("round", record), on_start=live.start)
+                put("complete", result)
             except Exception as error:
                 if not isinstance(error, HTTPException):
                     logger.exception("chat_stream_failed")
                 detail = error.detail if isinstance(error, HTTPException) else dependency_error_message(error)
-                events.put(("error", {"detail": detail,
-                    "status_code": getattr(error, "status_code", 500)}))
+                put("error", {"detail": detail, "status_code": getattr(error, "status_code", 500)})
+            finally:
+                try:
+                    live.finish()
+                except Exception:
+                    logger.warning("chat_live_finish_failed", exc_info=True)
 
         Thread(target=run, daemon=True).start()
 

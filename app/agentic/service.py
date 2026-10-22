@@ -129,19 +129,25 @@ class AgentMode:
         orders = [item for item in ctx.evidence.items.values() if item["type"] == "order"]
         return orders[-1]["order_id"] if orders else previous
 
-    # 把本轮问答写进会话记忆（和固定流程同一份），超过阈值时用同一个摘要中间件压缩。
+    # 这次问答要不要写进会话记忆：正常回答完的才写；输入被拦截、演示模式、模型失败都不写。
+    # 真正的写入在 API 层：写 runs 时同一个事务里插入外箱任务，提交后再写（见 app/memory/outbox.py）。
+    @staticmethod
+    def should_remember(result):
+        outcome = result.get("agent") or {}
+        return result.get("route") != "blocked" and outcome.get("status") == "completed" and outcome.get("stop_reason") != "demo"
+
+    # 把外箱写入的结果做成「写入会话记忆」这一步，插在「完成本次处理」前面。
     # 只写问题和最终回答，工具调用、资料、推理过程不写，和“不同问题之间只传问答”一致。
-    # 写入失败不影响这次回答：只在步骤里记下原因；这一轮不会出现在后面提问的历史原文里。
-    def remember(self, state, emit, answer):
-        started = time.monotonic()
-        try:
-            written = self.agent.response_agent.remember_turn(state["owner"], state["session_id"], state["question"], answer)
-        except Exception as error:  # noqa: BLE001
-            written = {"error": f"{type(error).__name__}: {str(error)[:200]}"}
+    # started：整次问答开始的时间；write_started：开始写会话记忆的时间（算这一步耗时）。
+    def memory_step(self, written, started, write_started):
         if written is None:
-            return
+            return None
         if written.get("error"):
-            detail = "写入会话记忆失败"
+            detail = "写入会话记忆失败，已留在外箱，下次提问前会再写" if not written.get("gave_up") else "写入会话记忆多次失败，已放弃"
+        elif written.get("already_applied"):
+            detail = "这一轮之前已经写过，没有重复写入"
+        elif written.get("skipped"):
+            return None
         elif written["compressed"]:
             detail = "超过压缩阈值，较早的问答已压缩成摘要"
         else:
@@ -151,9 +157,9 @@ class AgentMode:
         summary = shown.pop("summary", None)
         if not written.get("error"):
             shown["compressed_summary" if written["compressed"] else "existing_summary"] = summary or "尚未生成"
-        self.agent.add_step(state, "memory_write", "memory", "写入会话记忆", detail, {
-            **shown, "process_purpose": "让后面的提问（两种模式都一样）能读到这一轮"}, started_at=started)
-        emit()
+        state = {"started_at": started, "steps": []}
+        return self.agent.add_step(state, "memory_write", "memory", "写入会话记忆", detail, {
+            **shown, "process_purpose": "让后面的提问（两种模式都一样）能读到这一轮"}, started_at=write_started)
 
     def finish(self, state, emit, answer, sources, outcome, last_order):
         if state.get("route") != "blocked":
@@ -164,8 +170,6 @@ class AgentMode:
                     "issues": issues, "checked_rules": list(OUTPUT_CHECKS),
                     **self.agent.no_model_info("程序内规则检查", "拦截系统说明泄露，移除图片和资料外链接")})
             emit()
-        if outcome.get("status") == "completed" and outcome.get("stop_reason") != "demo":
-            self.remember(state, emit, answer)
         total = round((time.monotonic() - state["started_at"]) * 1000)
         self.agent.add_step(state, "complete", "complete", "完成本次处理", "Agent 模式已完成，结果将写入 MySQL", {
             "total_duration_ms": total, **self.agent.no_model_info("Agent 模式完成状态记录", "记录本次处理结果并持久化")})
