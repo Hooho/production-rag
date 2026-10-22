@@ -7639,3 +7639,85 @@ input:focus {
    font-weight: 600;
    white-space: nowrap;
 }
+
+/* 对比 / Agent 页签整体放大一号：原来表格 10px、说明 11px，看不清。只作用在这两个页签，不影响固定流程原来的页面。 */
+.ag-eval .ev-muted-note {
+   font-size: 13px;
+}
+
+.ag-eval .ev-section-title {
+   font-size: 15px;
+}
+
+.ag-eval .ev-section-title small {
+   font-size: 12px;
+}
+
+.ag-eval .diag-table {
+   font-size: 13px;
+}
+
+.ag-eval .diag-table th {
+   font-size: 12px;
+}
+
+.ag-eval .ev-card-label {
+   font-size: 13px;
+}
+
+.ag-eval .ev-card-explanation {
+   font-size: 12px;
+}
+
+.ag-eval .ev-chips button {
+   font-size: 13px;
+}
+
+.ag-eval .ev-filter-count,
+.ag-eval .ag-q-columns {
+   font-size: 12px;
+}
+
+.ag-eval .ag-q-head {
+   font-size: 14px;
+}
+
+.ag-eval .ev-question-text small,
+.ag-eval .ev-verdict,
+.ag-eval .ag-num,
+.ag-eval .ev-qid {
+   font-size: 13px;
+}
+
+.ag-eval .ag-evidence {
+   font-size: 13px;
+}
+
+.ag-eval .ag-evidence p {
+   font-size: 14px;
+}
+
+.ag-eval .ag-log-title {
+   font-size: 15px;
+}
+
+.ag-eval .ag-log-title small,
+.ag-eval .ag-call-meta,
+.ag-eval .ag-hit,
+.ag-eval .ag-result-head small,
+.ag-eval .ag-muted,
+.ag-eval .ag-answer summary {
+   font-size: 12px;
+}
+
+.ag-eval .ag-call-head,
+.ag-eval .ag-result-head,
+.ag-eval .ag-call-head code,
+.ag-eval .ag-call-meta code {
+   font-size: 13px;
+}
+
+.ag-eval .ag-text p,
+.ag-eval .ag-answer p {
+   font-size: 13px;
+}
