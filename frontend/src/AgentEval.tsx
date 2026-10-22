@@ -168,7 +168,7 @@ function AgentQuestionList({ run, hasFixed }: { run: EvalRun; hasFixed: boolean 
       <Chips value={resultFilter} options={resultOptions} onChange={setResultFilter} />
       <span className="ev-filter-count">{visible.length} / {questions.length} 题</span>
     </div>
-    <div className={`ag-q-columns ${hasFixed ? "" : "is-agent-only"}`} aria-hidden="true"><span>编号</span><span>问题</span>{hasFixed && <span>固定流程</span>}<span>Agent</span><span>检索次数</span><span>Agent 耗时</span><span /></div>
+    <div className={`ag-q-columns ${hasFixed ? "" : "is-agent-only"}`} aria-hidden="true"><span>编号</span><span>问题</span>{hasFixed && <span>固定流程</span>}<span>Agent</span><span>Agent 检索次数</span><span>Agent 耗时</span><span /></div>
     <div className="ev-question-list">{visible.map((question) => {
       const open = expanded === question.id;
       const agent = question.agent;
