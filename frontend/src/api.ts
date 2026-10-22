@@ -662,6 +662,57 @@ export type EvalQuestion = {
   judgement?: EvalJudgement;
   pair_id?: string | null;
   pair_role?: "original" | "paraphrase" | null;
+  // 勾选了 Agent 时：这道题 Agent 的检索日志和最后命中；compare 是一起跑时的逐题分类（只有能回答的题有）。
+  agent?: EvalAgentQuestion;
+  compare?: EvalCompareKey;
+};
+// Agent 检索评测（app/evaluation/agent_retrieval.py）：只看最后命中，口径和固定流程的过滤后 Recall 一致。
+export type EvalMode = "fixed" | "agent";
+export type EvalCompareKey = "both" | "fixed_only" | "agent_only" | "neither";
+export type EvalAgentResult = { evidence_id: string; title: string | null; heading?: string | null; chunk_id: string | null; relevance: number | null; low_relevance: boolean; text: string; hits: number[] };
+export type EvalAgentCall = {
+  call: number;
+  round: number | null;
+  name: string;
+  arguments: Record<string, unknown>;
+  // ok / error 是执行了的调用；duplicate（和之前完全相同，没执行）、skipped（预算用完）只有说明。
+  status: string;
+  chunk_ids: string[];
+  hits: number[];
+  query?: string;
+  mode?: string;
+  top_k?: number;
+  results?: EvalAgentResult[];
+  source_id?: string;
+  direction?: string;
+  text?: string;
+  read_hits?: number[];
+  note?: string;
+  error?: string;
+};
+export type EvalAgentQuestion = {
+  question_sent: string;
+  status: string;
+  error: string | null;
+  latency_ms: number;
+  recall: number | null;
+  evidence: { text: string; found: boolean; where: { call: number; evidence_id: string | null }[] }[];
+  calls: EvalAgentCall[];
+  returned: number;
+  searches: number;
+  empty_searches: number;
+  queries: (string | null)[];
+  reads: number;
+  duplicates: number;
+  tool_calls: number;
+  rounds: number;
+  stop_reason: string | null;
+  forced: boolean;
+  citation_retried: boolean;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cached_tokens: number;
+  answer: string;
 };
 export type EvalParaphraseMetric = { original: number | null; paraphrase: number | null; delta: number | null };
 export type EvalParaphrasePair = {
@@ -702,7 +753,9 @@ export type EvalHistoryMetrics = {
   false_reject_questions: number;
   false_accept_questions: number;
 };
-export type EvalConfig = { split: string | null; suites: string[]; special?: { suites: { id: string; name: string }[]; compare_memory?: boolean }; dataset_size?: number; rrf_k?: number; pool_size?: number; return_limit?: number; min_score?: number | null; reranked?: boolean; fusion?: string; methods?: string[]; model_mode?: string; embedding_mode?: string; embedding_model?: string; rerank_model?: string; rerank_mode?: string; query_source?: string[] };
+export type EvalConfig = { split: string | null; suites: string[]; special?: { suites: { id: string; name: string }[]; compare_memory?: boolean }; dataset_size?: number; rrf_k?: number; pool_size?: number; return_limit?: number; min_score?: number | null; reranked?: boolean; fusion?: string; methods?: string[]; model_mode?: string; embedding_mode?: string; embedding_model?: string; rerank_model?: string; rerank_mode?: string; query_source?: string[];
+  // 检索评测跑了哪些模式（旧记录没有，都是只跑固定流程）；agent 是 Agent 的运行配置。
+  modes?: EvalMode[]; agent?: { tool_budget: number; timeout: number; prompt_version: string; model: string | null } };
 export type EvalRunBrief = {
   id: string;
   // memory 是以前单独的多轮对话评测（现在并入专项评测集），旧记录仍然能打开。
@@ -730,6 +783,8 @@ export type EvalRun = EvalRunBrief & {
   paraphrase?: EvalParaphraseAnalysis | null;
   // 专项评测：每个专项一块结果。
   special?: EvalSpecialSection[];
+  // 固定流程和 Agent 一起跑时，能回答的题按两边是否命中分成四类的题数。
+  comparison?: Record<EvalCompareKey, number>;
   previous_id: string | null;
 };
 export type EvalComparisonRow = { key: string; label: string; direction: "higher" | "lower"; base: number | null; target: number | null; delta: number | null; change: "better" | "worse" | "same" | "unknown" };
@@ -803,11 +858,11 @@ export function compareEvalRuns(base: string, target: string) {
 }
 
 // 在界面上发起一次评测：调参评测按 split 选开发集或留出集；专项评测按 suite_ids 选专项。
-export function startEvalRun(kind: "retrieval" | "generation", split: string, suites: string[]) {
+export function startEvalRun(kind: "retrieval" | "generation", split: string, suites: string[], modes: EvalMode[] = ["fixed"]) {
   return request<{ id: string; status: string }>("/eval/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind, split, suites }),
+    body: JSON.stringify({ kind, split, suites, modes }),
   });
 }
 
