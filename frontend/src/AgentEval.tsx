@@ -71,23 +71,53 @@ function Card({ label, value, note }: { label: string; value: string; note?: str
   return <div className="ev-card"><span className="ev-card-label">{label}</span><strong className="ev-card-value">{value}</strong>{note && <div className="ev-card-explanation"><span>{note}</span></div>}</div>;
 }
 
-export function AgentEvalPanel({ run }: { run: EvalRun }) {
+// 「对比」页签（固定流程和 Agent 一起跑时默认打开）：两边的核心指标左右并排，下面是逐题对比，点开看两边的检索日志。
+export function ComparePanel({ run }: { run: EvalRun }) {
   const summary: EvalSummary = run.summary ?? {};
-  const hasFixed = runModes(run).includes("fixed");
-  const config = run.config.agent;
+  const rows: [string, string, string, string][] = [
+    ["资料命中率", percent(summary.recall_final), percent(summary.agent_recall), "能回答的题里，最后拿到的资料包含的证据比例（固定流程是阈值过滤后的来源，Agent 是所有检索结果和读到的前后文合起来）"],
+    ["误杀率", percent(summary.false_reject_rate), percent(summary.agent_false_reject_rate), "能回答的题里，一段资料都没拿到的比例（越低越好）"],
+    ["漏放率", percent(summary.false_accept_rate), percent(summary.agent_false_accept_rate), "无法回答的题里，仍然拿到了资料的比例（越低越好）"],
+    ["平均检索次数", "1", number(summary.agent_avg_searches), "固定流程每题检索一次；Agent 自己决定查几次"],
+    ["平均耗时", formatMs(summary.latency_avg_ms), formatMs(summary.agent_latency_avg_ms), "固定流程只算检索（召回 + 重排）；Agent 包括多轮模型调用和写回答"],
+    ["平均输入 token", "0", number(summary.agent_avg_prompt_tokens, 0), "固定流程检索不调用大模型"],
+  ];
   return <div className="ev-overview ag-eval">
-    <p className="ev-muted-note">Agent 每道题用一个新会话跑一遍，自己决定查几次、用什么词。这里只看它<strong>最后拿到的资料</strong>里有没有题目预设的证据（所有检索结果和读到的前后文合在一起），判断方法和固定流程的「过滤后 Recall」相同。Agent 的回答照样生成，但这一步不评分。{config && <> 本次配置：工具预算 {config.tool_budget} 次 · 超时 {config.timeout} 秒 · 提示词版本 {config.prompt_version}{config.model ? ` · ${config.model}` : ""}。</>}</p>
-    <div className="ev-section-title">命中<small>{summary.answerable_count ?? 0} 道能回答 · {summary.unanswerable_count ?? 0} 道无法回答</small></div>
-    <div className="ev-cards">
-      <Card label="Agent 资料命中率" value={percent(summary.agent_recall)} note={hasFixed ? `固定流程过滤后 Recall：${percent(summary.recall_final)}` : "能回答的题里，拿到的证据比例"} />
-      <Card label="Agent 误杀率" value={percent(summary.agent_false_reject_rate)} note={`能回答的题里一段资料都没拿到的比例${hasFixed ? `；固定流程 ${percent(summary.false_reject_rate)}` : ""}`} />
-      <Card label="Agent 漏放率" value={percent(summary.agent_false_accept_rate)} note={`无法回答的题里拿到了资料的比例${hasFixed ? `；固定流程 ${percent(summary.false_accept_rate)}` : ""}`} />
-      {summary.agent_failed ? <Card label="运行失败" value={`${summary.agent_failed} 题`} note="模型调用失败等，点逐题看原因" /> : null}
-    </div>
-    {hasFixed && run.comparison && <>
+    <p className="ev-muted-note">同一套题，固定流程和 Agent 各跑一遍，比较的是<strong>最后拿到的资料里有没有题目预设的证据</strong>，判断方法相同。Agent 的回答这一步不评分。{summary.answerable_count ?? 0} 道能回答 · {summary.unanswerable_count ?? 0} 道无法回答。</p>
+    <div className="diag-table-wrap"><table className="diag-table ev-table ag-compare-table">
+      <thead><tr><th>指标</th><th className="num">固定流程</th><th className="num">Agent</th><th>说明</th></tr></thead>
+      <tbody>{rows.map(([label, fixed, agent, hint]) => <tr key={label}><td>{label}</td><td className="num">{fixed}</td><td className="num">{agent}</td><td className="ag-muted">{hint}</td></tr>)}</tbody>
+    </table></div>
+    {run.comparison && <>
       <div className="ev-section-title">逐题对比<small>能回答的题，证据全部拿到算命中</small></div>
       <div className="ev-cards">{(Object.keys(COMPARE_LABELS) as EvalCompareKey[]).map((key) => <Card key={key} label={COMPARE_LABELS[key]} value={`${run.comparison?.[key] ?? 0} 题`} note={COMPARE_HINTS[key]} />)}</div>
     </>}
+    <div className="ev-section-title">按题目类型<small>资料命中率</small></div>
+    <div className="diag-table-wrap"><table className="diag-table ev-table">
+      <thead><tr><th>题型</th><th className="num">题数</th><th className="num">固定流程</th><th className="num">Agent</th><th className="num">Agent 平均检索次数</th></tr></thead>
+      <tbody>{Object.entries(run.by_type ?? {}).map(([type, row]) => <tr key={type}>
+        <td>{type}</td><td className="num">{row.count ?? row.agent_count ?? "—"}</td><td className="num">{percent(row.recall_final)}</td>
+        <td className="num">{percent(row.agent_recall)}</td><td className="num">{number(row.agent_avg_searches)}</td>
+      </tr>)}</tbody>
+    </table></div>
+    <div className="ev-section-title">逐题<small>点开看两边的检索日志</small></div>
+    <AgentQuestionList run={run} hasFixed />
+  </div>;
+}
+
+// 「Agent」页签：Agent 自己的命中、检索过程和成本，逐题只看 Agent 的检索日志。
+export function AgentPanel({ run }: { run: EvalRun }) {
+  const summary: EvalSummary = run.summary ?? {};
+  const config = run.config.agent;
+  return <div className="ev-overview ag-eval">
+    <p className="ev-muted-note">Agent 每道题用一个新会话跑一遍，自己决定查几次、用什么词。这里只看它<strong>最后拿到的资料</strong>里有没有题目预设的证据（所有检索结果和读到的前后文合在一起）。Agent 的回答照样生成，但这一步不评分。{config && <> 本次配置：工具预算 {config.tool_budget} 次 · 超时 {config.timeout} 秒 · 提示词版本 {config.prompt_version}{config.model ? ` · ${config.model}` : ""}。</>}</p>
+    <div className="ev-section-title">命中<small>{summary.answerable_count ?? 0} 道能回答 · {summary.unanswerable_count ?? 0} 道无法回答</small></div>
+    <div className="ev-cards">
+      <Card label="资料命中率" value={percent(summary.agent_recall)} note="能回答的题里，拿到的证据比例" />
+      <Card label="误杀率" value={percent(summary.agent_false_reject_rate)} note="能回答的题里一段资料都没拿到的比例" />
+      <Card label="漏放率" value={percent(summary.agent_false_accept_rate)} note="无法回答的题里拿到了资料的比例" />
+      {summary.agent_failed ? <Card label="运行失败" value={`${summary.agent_failed} 题`} note="模型调用失败等，点逐题看原因" /> : null}
+    </div>
     <div className="ev-section-title">检索过程<small>每题平均</small></div>
     <div className="ev-cards">
       <Card label="检索次数" value={number(summary.agent_avg_searches)} note={`其中空检索 ${number(summary.agent_avg_empty_searches)} 次`} />
@@ -99,18 +129,18 @@ export function AgentEvalPanel({ run }: { run: EvalRun }) {
     <div className="ev-cards">
       <Card label="输入 token" value={number(summary.agent_avg_prompt_tokens, 0)} note={`缓存命中 ${percent(summary.agent_cache_hit_rate)}`} />
       <Card label="输出 token" value={number(summary.agent_avg_completion_tokens, 0)} />
-      <Card label="耗时" value={formatMs(summary.agent_latency_avg_ms)} note={`P95 ${formatMs(summary.agent_latency_p95_ms)}${hasFixed ? `；固定流程检索 ${formatMs(summary.latency_avg_ms)}` : ""}`} />
+      <Card label="耗时" value={formatMs(summary.agent_latency_avg_ms)} note={`P95 ${formatMs(summary.agent_latency_p95_ms)}`} />
     </div>
     <div className="ev-section-title">按题目类型</div>
     <div className="diag-table-wrap"><table className="diag-table ev-table">
-      <thead><tr><th>题型</th><th className="num">题数</th>{hasFixed && <th className="num">固定流程过滤后 Recall</th>}<th className="num">Agent 资料命中率</th><th className="num">平均检索次数</th><th className="num">平均耗时</th></tr></thead>
+      <thead><tr><th>题型</th><th className="num">题数</th><th className="num">资料命中率</th><th className="num">平均检索次数</th><th className="num">平均耗时</th></tr></thead>
       <tbody>{Object.entries(run.by_type ?? {}).map(([type, row]) => <tr key={type}>
-        <td>{type}</td><td className="num">{row.count ?? row.agent_count ?? "—"}</td>{hasFixed && <td className="num">{percent(row.recall_final)}</td>}
+        <td>{type}</td><td className="num">{row.count ?? row.agent_count ?? "—"}</td>
         <td className="num">{percent(row.agent_recall)}</td><td className="num">{number(row.agent_avg_searches)}</td><td className="num">{formatMs(row.agent_latency_avg_ms)}</td>
       </tr>)}</tbody>
     </table></div>
-    <div className="ev-section-title">逐题<small>点开看{hasFixed ? "两边的" : ""}检索日志</small></div>
-    <AgentQuestionList run={run} hasFixed={hasFixed} />
+    <div className="ev-section-title">逐题<small>点开看 Agent 的检索日志</small></div>
+    <AgentQuestionList run={run} hasFixed={false} />
   </div>;
 }
 

@@ -7629,3 +7629,13 @@ input:focus {
       display: none;
    }
 }
+
+/* 勾了 Agent 的评测：固定流程页签里的子页签（总览 / 逐题 / 阈值 / 消融）用小按钮，和上面一层的模式页签区分开。 */
+.ev-subtabs {
+   margin: 14px 0 4px;
+}
+
+.ag-compare-table td:first-child {
+   font-weight: 600;
+   white-space: nowrap;
+}

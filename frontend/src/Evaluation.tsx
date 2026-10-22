@@ -7,11 +7,14 @@ import { EvidenceDetails } from "./EvidenceChunks";
 import "./Special.css";
 // 耗时格式化移到公共文件，知识库、问答、设置页共用同一套规则。
 import { durationTitle, formatDuration as formatMs, formatDurationDelta } from "./format";
-import { AgentEvalPanel, modesLabel, runModes } from "./AgentEval";
+import { AgentPanel, ComparePanel, modesLabel, runModes } from "./AgentEval";
 
 export type EvaluationSection = "history" | "dataset" | "special" | "regression";
 type TopTab = EvaluationSection;
-type DetailTab = "overview" | "questions" | "sweep" | "variants" | "agent";
+type DetailTab = "overview" | "questions" | "sweep" | "variants";
+// 勾了 Agent 的检索评测：第一层按模式分页签（对比、固定流程、Agent），固定流程里再分原来的四个子页签。
+type ModeTab = "compare" | "fixed" | "agent";
+const MODE_TAB_LABELS: Record<ModeTab, string> = { compare: "对比", fixed: "固定流程", agent: "Agent" };
 // memory 是以前单独的多轮对话评测，现在并入专项评测集，只用来显示旧记录。
 type EvalKind = "retrieval" | "generation" | "memory" | "special";
 type LaunchKind = "retrieval" | "generation";
@@ -42,7 +45,6 @@ const DETAIL_TAB_LABELS: Record<DetailTab, string> = {
   questions: "逐题明细",
   sweep: "阈值与段数",
   variants: "消融与参数",
-  agent: "Agent 对比",
 };
 const SPLIT_LABELS: Record<string, string> = { dev: "开发集", holdout: "留出集", all: "全部题目" };
 const STATUS_LABELS: Record<string, string> = { running: "运行中", completed: "已完成", failed: "失败", interrupted: "已中断" };
@@ -462,7 +464,7 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
       const suites = launchKind !== "retrieval" || !modes.includes("fixed") ? [] : launchSuites;
       const started = await startEvalRun(launchKind, launchSplit, suites, modes);
       setSelectedId(started.id);
-      setDetailTab(modes.includes("agent") ? "agent" : "overview");
+      setDetailTab("overview");
       await refreshRuns();
       // 评测进度继续留在页面内；Toast 只确认启动结果，避免把持续状态变成短暂提示。
       onToast("success", `${KIND_LABELS[launchKind]}评测已启动。`);
@@ -521,7 +523,7 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
     return counts;
   }, [dataset]);
   const detailCounts: Record<DetailTab, string | number> = {
-    overview: "", questions: questionCount || "", sweep: run?.sweep?.length ? "" : "", variants: run?.variants?.length || "", agent: "",
+    overview: "", questions: questionCount || "", sweep: run?.sweep?.length ? "" : "", variants: run?.variants?.length || "",
   };
   const agentLaunch = launchMode === "tuning" && launchKind === "retrieval" && launchModes.includes("agent");
 
@@ -663,22 +665,31 @@ function RunDetailView({ onBack, run, running, detailTab, setDetailTab, detailCo
   comparison: EvalComparison | null;
   Diagnostics: ComponentType<{ data: RetrievalDiagnosticsData }>;
 }) {
-  // 勾选了 Agent 时多一个「Agent 对比」页签；只跑 Agent 时没有固定流程的结果，只显示这一个页签。
+  // 只跑固定流程：和原来一样一层页签。勾了 Agent：第一层是模式（两个都跑时有「对比」并默认打开），
+  // 固定流程里再分原来的总览 / 逐题 / 阈值 / 消融；只跑 Agent 时只有 Agent 一页。
   const modes = run ? runModes(run) : ["fixed"];
-  const tabs = (Object.keys(DETAIL_TAB_LABELS) as DetailTab[]).filter((key) => key === "agent" ? modes.includes("agent") : modes.includes("fixed"));
-  const activeTab = tabs.includes(detailTab) ? detailTab : tabs[0];
+  const modeTabs: ModeTab[] = !modes.includes("agent") ? [] : modes.includes("fixed") ? ["compare", "fixed", "agent"] : ["agent"];
+  const [modeTab, setModeTab] = useState<ModeTab>("compare");
+  const activeMode: ModeTab | null = modeTabs.length ? (modeTabs.includes(modeTab) ? modeTab : modeTabs[0]) : null;
+  const showFixed = activeMode === null || activeMode === "fixed";
+  const tabs = Object.keys(DETAIL_TAB_LABELS) as DetailTab[];
+  const activeTab = detailTab;
   return <div className="ev-detail-view">
     <div className="ev-detail-toolbar"><button className="ev-back-button" onClick={onBack}>← 返回历次记录</button></div>
     {/* 详情页只展示当前评测配置；切换记录回到历史表格，避免下拉框和详情页职责重叠。 */}
     {run?.kind === "special" ? <div className="ev-body">{run.status !== "completed" ? <RunStatus run={run} live={run.id === running} /> : <SpecialRunResults run={run} />}</div> : run?.kind === "memory" ? <div className="ev-body">{run.status !== "completed" ? <RunStatus run={run} live={run.id === running} /> : <MemoryResults run={run} />}</div> : <>
     {run && <RunConfig run={run} />}
-    <div className="document-detail-tabs ev-tabs ev-detail-tabs" role="tablist">
+    {activeMode && <div className="document-detail-tabs ev-tabs ev-detail-tabs" role="tablist">
+      {modeTabs.map((key) => <button key={key} role="tab" aria-selected={activeMode === key} className={activeMode === key ? "active" : ""} onClick={() => setModeTab(key)}>{MODE_TAB_LABELS[key]}</button>)}
+    </div>}
+    {showFixed && <div className={activeMode ? "ev-chips ev-subtabs" : "document-detail-tabs ev-tabs ev-detail-tabs"} role="tablist">
       {tabs.map((key) => <button key={key} role="tab" aria-selected={activeTab === key} className={activeTab === key ? "active" : ""} onClick={() => setDetailTab(key)}>{DETAIL_TAB_LABELS[key]}{detailCounts[key] !== "" && <span>{detailCounts[key]}</span>}</button>)}
-    </div>
+    </div>}
     <div className="ev-body">
       {!run ? <RunDetailSkeleton /> :
         run.status !== "completed" ? <RunStatus run={run} live={run.id === running} /> :
-          activeTab === "agent" ? <AgentEvalPanel run={run} /> :
+          activeMode === "compare" ? <ComparePanel run={run} /> :
+          activeMode === "agent" ? <AgentPanel run={run} /> :
           activeTab === "overview" ? <Overview run={run} comparison={comparison} /> :
             activeTab === "questions" ? <QuestionList run={run} Diagnostics={Diagnostics} /> :
               activeTab === "sweep" ? <SweepPanel run={run} /> :
