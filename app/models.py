@@ -523,7 +523,11 @@ class Models:
     def judge_sufficiency(self, question, sources):
         source_lines = []
         for source in sources:
-            source_lines.append(f"[{source['id']}] {source['text']}")
+            # 相关性是重排模型给的分数，低分的资料由判断模型自己看是否切题。
+            note = ""
+            if source.get("relevance") is not None:
+                note = f"（相关性 {source['relevance']:.2f}{'，相关性较低' if source.get('low_relevance') else ''}）"
+            source_lines.append(f"[{source['id']}]{note} {source['text']}")
         prompt = ChatPromptTemplate.from_messages([("system", prompts.compose("sufficiency", template=True)),
             ("human", "{payload}")])
         payload = json.dumps({"question": question, "sources": "\n".join(source_lines)}, ensure_ascii=False)

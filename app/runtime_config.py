@@ -45,6 +45,8 @@ PAGES = {"retrieval": "rag", "chunking": "rag", "answer": "rag", "memory": "rag"
 SPECS = [
     {"key": "rerank_min_score", "group": "retrieval", "type": "float", "default": 0.85,
         "min": 0.0, "max": 1.0},
+    # 兜底分数线：全部低于相关度阈值时，最高的一条只要高于它，就单独返回这一条并标明相关性较低，不直接当作没找到。
+    {"key": "rerank_fallback_min_score", "group": "retrieval", "type": "float", "default": 0.2, "min": 0.0, "max": 1.0},
     {"key": "rerank_candidates", "group": "retrieval", "type": "int", "default": 12, "min": 5, "max": 50},
     {"key": "return_limit", "group": "retrieval", "type": "int", "default": 6, "min": 1, "max": 50},
     {"key": "parent_context", "group": "retrieval", "type": "bool", "default": True},
@@ -208,6 +210,8 @@ def check(spec, raw, strict=True):
 def check_relations(values):
     if values["chunk_overlap"] * 3 > values["chunk_size"]:
         raise ValueError("分片重叠不能超过分片大小的三分之一")
+    if values["rerank_fallback_min_score"] > values["rerank_min_score"]:
+        raise ValueError("兜底分数线不能高于相关度阈值")
     if values["return_limit"] > values["rerank_candidates"]:
         raise ValueError("交给模型的段数不能超过候选池大小")
     if values["memory_keep_tokens"] * 2 > values["memory_trigger_tokens"]:

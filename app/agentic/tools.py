@@ -110,6 +110,8 @@ def format_source(evidence_id, source):
     head = f"[{evidence_id}] 《{source['title']}》"
     if source.get("heading"):
         head += f"· {source['heading']}"
+    if source.get("relevance") is not None:
+        head += f"（相关性 {source['relevance']:.2f}{'，相关性较低，仅供参考' if source.get('low_relevance') else ''}）"
     return f"{head}\n{source['text']}"
 
 

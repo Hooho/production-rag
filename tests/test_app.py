@@ -839,6 +839,26 @@ def test_relevance_threshold_filters_all_and_is_configurable(monkeypatch, runtim
     assert result["stats"]["min_score"] == 0.03
 
 
+# 兜底：全部低于阈值时，最高的一条高于兜底分数线（默认 0.2）就单独返回，标明相关性较低；不高于就仍然为空。
+# 来源带上重排相关性，交给回答模型和充分性判断时一起写上。
+def test_relevance_fallback_returns_best_low_source(monkeypatch, runtime):
+    from app.agent.response import format_source
+    from app.tools.search import DocumentSearchTool
+
+    class MidReranker:
+        def rerank(self, query, documents):
+            return [0.3, 0.5]
+
+    result = DocumentSearchTool().execute(FixedSearchStore(), MidReranker(), "alice", ["天气"], "明天东京天气")
+    assert len(result["sources"]) == 1 and result["sources"][0]["low_relevance"] is True
+    assert result["sources"][0]["relevance"] == 0.5
+    assert result["stats"]["fallback_used"] is True and result["stats"]["filtered"] == 1
+    assert 'relevance="0.50" low_relevance="true"' in format_source(result["sources"][0])
+    runtime(rerank_fallback_min_score=0.6)
+    result = DocumentSearchTool().execute(FixedSearchStore(), MidReranker(), "alice", ["天气"], "明天东京天气")
+    assert result["sources"] == [] and result["stats"]["fallback_used"] is False
+
+
 # 重排关闭时没有可靠分数，不做过滤并明确标记未启用。
 def test_relevance_filter_off_without_rerank():
     from app.tools.search import DocumentSearchTool

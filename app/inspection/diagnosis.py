@@ -150,6 +150,12 @@ def current_route(models, question):
         "classifier": analysis.get("classifier"), "reason": decision.get("reason")}
 
 
+# 有没有达到相关度阈值的资料。兜底返回的那一条（全部低于阈值时单独返回、标了相关性较低）不算：
+# 巡检要判断的是“现在能不能可靠地找到资料”，兜底只是交给模型自己判断，不能当作已经解决。
+def confident(result):
+    return any(not source.get("low_relevance") for source in result["sources"])
+
+
 # 判断一个问题现在属于哪一类。feedback_missed：用户反馈过"资料里有却说找不到"。
 def diagnose_question(store, models, owner, queries, rerank_query, scope, feedback_missed=False):
     tool = DocumentSearchTool()
@@ -161,7 +167,7 @@ def diagnose_question(store, models, owner, queries, rerank_query, scope, feedba
             "documents": [], "chunks": []}
     visible = set(store.readable_scope(owner)["versions"]) if hasattr(store, "readable_scope") else set(scope["versions"])
     found = top_chunks(store, mine, "mine", visible)
-    if mine["sources"]:
+    if confident(mine):
         return {"category": "answerable", "user_top": user_top, "full_top": None,
             "documents": matched_documents(store, mine["sources"], scope), "chunks": found}
     everything = tool.execute(store, models, owner, queries, rerank_query, parent=False,
@@ -172,7 +178,7 @@ def diagnose_question(store, models, owner, queries, rerank_query, scope, feedba
     if best_all and (not found or best_all[0]["score"] > found[0]["score"]):
         found = best_all
     result = {"user_top": user_top, "full_top": full_top, "documents": [], "chunks": found}
-    if everything["sources"]:
+    if confident(everything):
         result.update(category="permission", documents=matched_documents(store, everything["sources"], scope))
         return result
     # 知识库里找不到，又提到了业务数据：看现在会被分到哪里。分到数据查询说明分流已经修好，算现在能处理。

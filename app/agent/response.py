@@ -38,7 +38,13 @@ def prompt_markers():
 # 把一条来源格式化为 <source> 标签。标题同样来自上传文档，也要处理引号和伪造标签。
 def format_source(source):
     title = neutralize_tags(source["title"]).replace('"', "'")
-    return f'<source id="{source["id"]}" title="{title}">\n{neutralize_tags(source["text"])}\n</source>'
+    # 带上重排模型给出的相关性（0～1）；兜底返回的那一条另外标 low_relevance，由模型自己判断是否切题。
+    extra = ""
+    if source.get("relevance") is not None:
+        extra += f' relevance="{source["relevance"]:.2f}"'
+    if source.get("low_relevance"):
+        extra += ' low_relevance="true"'
+    return f'<source id="{source["id"]}" title="{title}"{extra}>\n{neutralize_tags(source["text"])}\n</source>'
 
 
 # 充分性判断认为资料只能回答一部分时，拼在系统说明后面的提示；回答步骤也用它显示模型实际收到了什么。

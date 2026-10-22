@@ -92,6 +92,7 @@ class DocumentSearchTool:
         rerank_ms = round((time.monotonic() - rerank_started) * 1000)
         rerank_count = 0
         filtered = 0
+        fallback_used = False
         threshold = min_score
         min_score = None
         if rerank_scores:
@@ -119,6 +120,14 @@ class DocumentSearchTool:
                 else:
                     item["status"] = "filtered_low_score"
                     filtered += 1
+            # 兜底：全部低于阈值时，最高的一条只要高于兜底分数线，就单独返回这一条并标明相关性较低，
+            # 交给后面的模型（充分性判断、回答模型、Agent）自己判断是否切题，不再直接当作没找到。
+            fallback = config["rerank_fallback_min_score"]
+            if not ranked and pool and pool[0]["final_score"] > fallback:
+                pool[0]["low_relevance"] = True
+                ranked = [pool[0]]
+                filtered -= 1
+                fallback_used = True
         # 重排关闭或调用失败时 ranked 保持 RRF 顺序且不做相关性过滤：此时没有可靠的分数可设阈值，
         # 统计中标记 relevance_filter 为 off，避免误以为结果已经过相关性检查。
         sources = []
@@ -162,7 +171,10 @@ class DocumentSearchTool:
                 "page_start": item.get("page_start"), "heading": item.get("heading"),
                 "chunk_id": item["id"], "position": item.get("position"), "document_id": item.get("document_id"),
                 "parent_chunk_ids": chunk_ids,
-                "parent_parts": parts, "injection": injection_hits})
+                "parent_parts": parts, "injection": injection_hits,
+                # relevance：重排模型给出的相关性（0～1），交给模型时一起写上；没有重排时 score 只是名次分，不写。
+                "relevance": round(item["final_score"], 2) if rerank_count else None,
+                "low_relevance": bool(item.get("low_relevance"))})
         stats = {"queries": len(queries), "dense_hits": dense_hits,
             "keyword_hits": keyword_hits, "fused_candidates": len(candidates),
             "rerank_query": rerank_query, "reranked": rerank_count,
@@ -171,7 +183,8 @@ class DocumentSearchTool:
             "min_score": min_score, "filtered": filtered, "returned": len(sources),
             "parent_context": "on" if use_parent else "off", "source_characters": parent_characters,
             "recall_ms": recall_ms, "rerank_ms": rerank_ms, "injection_redacted": injection_redacted,
-            "rerank_error": rerank_error}
+            "rerank_error": rerank_error, "fallback_used": fallback_used,
+            "fallback_min_score": config["rerank_fallback_min_score"] if rerank_count else None}
         reranked = rerank_count > 0
         diagnostics = self.build_diagnostics(candidates, lists, stats, reranked, pool_size, fusion, methods, config)
         if scope:

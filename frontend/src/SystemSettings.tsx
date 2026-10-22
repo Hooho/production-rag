@@ -24,10 +24,15 @@ const GROUP_INTROS: Record<string, string> = {
 
 const META: Record<string, Meta> = {
   rerank_min_score: { label: "相关度阈值", step: 0.05, impact: "judgement",
-    what: "重排后得分低于它的资料不交给模型；全部低于就直接拒答。",
+    what: "重排后得分低于它的资料不交给模型；全部低于时看兜底分数线。交给模型的资料都带着相关性分数，由模型自己判断是否切题。",
     why: "开发集阈值扫描：0.85 时可回答题的召回仍是 1.0，无法回答题的漏放率从 0.625 降到 0.25。",
     effect: "调高更容易拒答、编造更少；调低更敢答，可能拿不相关的资料凑答案。巡检里「差一点就找到」的分数线跟着变。",
     when: "之后的问答；已有的问答记录和诊断结论不变，下次巡检按新值判断。", dependsOn: "rerank_enabled" },
+  rerank_fallback_min_score: { label: "兜底分数线", step: 0.05, impact: "judgement",
+    what: "全部资料都低于相关度阈值时，得分最高的一条只要高于它，就单独交给模型，并标明相关性较低；不高于就当作没找到。",
+    why: "避免阈值把有用的资料全部挡掉：模型拿到这一条后自己判断是否切题，而不是直接被告知没找到。",
+    effect: "调低更少出现“没找到”，但模型更常看到不相关的资料；调高相反。不能高于相关度阈值。",
+    when: "之后的问答。知识巡检不把兜底返回的资料算作“现在能答”。", dependsOn: "rerank_enabled" },
   rerank_candidates: { label: "候选池大小", unit: "条", step: 1, impact: "judgement",
     what: "向量和关键词融合后，取前多少条交给重排模型打分。",
     why: "开发集对比：12 和 20 的召回都是 1.0，12 平均耗时 9.2 秒，比 20 快约 4 秒，无法回答题的漏放率也从 0.625 降到 0.5。",
