@@ -7407,20 +7407,98 @@ input:focus {
 .ag-q-columns,
 .ag-q-head {
    display: grid;
-   grid-template-columns: 40px minmax(0, 1fr) 120px 120px 70px 80px 20px;
+   grid-template-columns: 40px minmax(0, 1fr) 100px 80px 150px 80px 80px 20px;
    gap: 12px;
    align-items: center;
 }
 
 .ag-q-columns.is-agent-only,
 .ag-q-head.is-agent-only {
-   grid-template-columns: 40px minmax(0, 1fr) 120px 70px 80px 20px;
+   grid-template-columns: 40px minmax(0, 1fr) 150px 80px 80px 20px;
 }
 
+/* 表头固定在顶部，往下翻也知道每一列是什么。 */
 .ag-q-columns {
-   padding: 0 14px 6px;
+   position: sticky;
+   top: 0;
+   z-index: 2;
+   padding: 8px 14px;
    font-size: 10px;
    color: var(--ev-muted);
+   background: rgb(var(--t-f6fafe-rgb) / .98);
+   border-bottom: 1px solid var(--ev-line);
+}
+
+.ag-verdict-cell {
+   display: grid;
+   gap: 2px;
+}
+
+.ag-verdict-cell small {
+   color: var(--ev-muted);
+   font-size: 11px;
+}
+
+/* 分块编号做成标签：命中证据的有背景色，点开看内容。 */
+.ag-chunk-tabs {
+   display: flex;
+   flex-wrap: wrap;
+   gap: 6px;
+}
+
+.ag-chunk-tab {
+   min-width: 38px;
+   padding: 3px 8px;
+   border: 1px solid var(--ev-line);
+   background: transparent;
+   color: var(--t-536d86);
+   font-family: 'DM Mono', monospace;
+   font-size: 12px;
+   cursor: pointer;
+}
+
+.ag-chunk-tab.is-hit {
+   background: #d8f2e6;
+   border-color: var(--ev-good);
+   color: #24684a;
+   font-weight: 700;
+}
+
+.ag-chunk-tab.is-active {
+   outline: 2px solid var(--t-2563eb);
+   outline-offset: 1px;
+}
+
+.ag-chunk-body {
+   margin-top: 8px;
+   padding: 8px 10px;
+   border-left: 2px solid var(--ev-line);
+   background: rgb(var(--t-e0eefa-rgb) / .35);
+}
+
+.ag-chunk-body.is-hit {
+   border-left-color: var(--ev-good);
+   background: rgba(216, 242, 230, .45);
+}
+
+.ag-chunk-meta {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: baseline;
+   gap: 4px 8px;
+   font-size: 12px;
+}
+
+.ag-chunk-body p {
+   margin: 6px 0 0;
+   font-size: 13px;
+   line-height: 1.65;
+   white-space: pre-wrap;
+   overflow-wrap: anywhere;
+}
+
+.ag-call.is-hit {
+   border-color: var(--ev-good);
 }
 
 .ag-q-head {
@@ -7614,13 +7692,12 @@ input:focus {
       grid-template-columns: minmax(0, 1fr);
    }
 
-   .ag-q-head,
-   .ag-q-head.is-agent-only {
-      grid-template-columns: minmax(0, 1fr) 96px 96px 16px;
+   .ag-q-head {
+      grid-template-columns: minmax(0, 1fr) 96px 120px 16px;
    }
 
    .ag-q-head.is-agent-only {
-      grid-template-columns: minmax(0, 1fr) 96px 16px;
+      grid-template-columns: minmax(0, 1fr) 120px 16px;
    }
 
    .ag-q-columns,

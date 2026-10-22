@@ -144,6 +144,13 @@ export function AgentPanel({ run }: { run: EvalRun }) {
   </div>;
 }
 
+// Agent 在第几次调用拿到了证据（去重、按顺序），例如 [1, 3]。
+function agentHitCalls(question: EvalQuestion) {
+  const calls = new Set<number>();
+  for (const evidence of question.agent?.evidence ?? []) for (const where of evidence.where) calls.add(where.call);
+  return [...calls].sort((a, b) => a - b);
+}
+
 function AgentQuestionList({ run, hasFixed }: { run: EvalRun; hasFixed: boolean }) {
   const questions = run.questions ?? [];
   const [typeFilter, setTypeFilter] = useState("all");
@@ -162,22 +169,25 @@ function AgentQuestionList({ run, hasFixed }: { run: EvalRun; hasFixed: boolean 
     if (resultFilter === "good") return agentVerdict(question).key === "good";
     return question.compare === resultFilter;
   });
+  const layout = hasFixed ? "" : "is-agent-only";
   return <div>
     <div className="ev-filters">
       <Chips value={typeFilter} options={[["all", "全部题型"], ...types.map((type): [string, string] => [type, type])]} onChange={setTypeFilter} />
       <Chips value={resultFilter} options={resultOptions} onChange={setResultFilter} />
       <span className="ev-filter-count">{visible.length} / {questions.length} 题</span>
     </div>
-    <div className={`ag-q-columns ${hasFixed ? "" : "is-agent-only"}`} aria-hidden="true"><span>编号</span><span>问题</span>{hasFixed && <span>固定流程</span>}<span>Agent</span><span>Agent 检索次数</span><span>Agent 耗时</span><span /></div>
+    {/* 表头固定在顶部：题目多、展开详情后往下翻，仍然知道每一列是什么。 */}
+    <div className={`ag-q-columns ${layout}`} aria-hidden="true"><span>编号</span><span>问题</span>{hasFixed && <><span>固定流程</span><span>固定流程耗时</span></>}<span>Agent</span><span>Agent 检索次数</span><span>Agent 耗时</span><span /></div>
     <div className="ev-question-list">{visible.map((question) => {
       const open = expanded === question.id;
       const agent = question.agent;
+      const hitCalls = agentHitCalls(question);
       return <article className={`ev-question ${open ? "is-open" : ""}`} key={question.id}>
-        <button className={`ag-q-head ${hasFixed ? "" : "is-agent-only"}`} aria-expanded={open} onClick={() => setExpanded(open ? null : question.id)}>
+        <button className={`ag-q-head ${layout}`} aria-expanded={open} onClick={() => setExpanded(open ? null : question.id)}>
           <span className="ev-qid">{question.id}</span>
           <span className="ev-question-text">{question.question}<small>{question.type}{question.evidence_count > 1 ? ` · ${question.evidence_count} 条证据` : ""}{question.compare ? ` · ${COMPARE_LABELS[question.compare]}` : ""}</small></span>
-          {hasFixed && <Verdict verdict={fixedVerdict(question)} />}
-          <Verdict verdict={agentVerdict(question)} />
+          {hasFixed && <><Verdict verdict={fixedVerdict(question)} /><span className="ag-num">{formatMs(question.latency_ms)}</span></>}
+          <span className="ag-verdict-cell"><Verdict verdict={agentVerdict(question)} />{hitCalls.length > 0 && <small>第 {hitCalls.join("、")} 次调用命中</small>}</span>
           <span className="ag-num">{agent ? `${agent.searches} 次` : "—"}</span>
           <span className="ag-num">{agent ? formatMs(agent.latency_ms) : "—"}</span>
           <span className="collapse-icon">{open ? "−" : "＋"}</span>
@@ -192,7 +202,25 @@ function Chips({ value, options, onChange }: { value: string; options: [string, 
   return <div className="ev-chips" role="group">{options.map(([key, label]) => <button key={key} className={value === key ? "active" : ""} aria-pressed={value === key} onClick={() => onChange(key)}>{label}</button>)}</div>;
 }
 
-// 展开后：先列出题目预设的证据，每条注明两边各在哪里拿到；下面左右两栏是两边的检索日志。
+// 一个分块：编号做成标签，命中证据的标签有背景色；点标签才显示内容。
+type ChunkItem = { key: string; id: string; title: string | null; heading: string | null; text: string; relevance?: number | null; low?: boolean; hit: boolean };
+
+function ChunkTabs({ items, empty }: { items: ChunkItem[]; empty: string }) {
+  const [selected, setSelected] = useState<string | null>(null);
+  if (items.length === 0) return <p className="ag-muted">{empty}</p>;
+  const current = items.find((item) => item.key === selected) ?? null;
+  return <div className="ag-chunks">
+    <div className="ag-chunk-tabs" role="tablist">{items.map((item) => <button key={item.key} type="button" role="tab" aria-selected={selected === item.key}
+      className={`ag-chunk-tab ${item.hit ? "is-hit" : ""} ${selected === item.key ? "is-active" : ""}`}
+      title={item.hit ? "这个分块包含证据" : item.title ?? ""} onClick={() => setSelected(selected === item.key ? null : item.key)}>{item.id}</button>)}</div>
+    {current && <div className={`ag-chunk-body ${current.hit ? "is-hit" : ""}`}>
+      <div className="ag-chunk-meta"><strong>{current.id}</strong>{current.title ?? "—"}{current.heading ? ` · ${current.heading}` : ""}{current.relevance !== undefined && current.relevance !== null && <small> · 相关性 {current.relevance.toFixed(2)}{current.low ? "（较低）" : ""}</small>}{current.hit && <span className="ag-hit">含证据</span>}</div>
+      <p>{current.text}</p>
+    </div>}
+  </div>;
+}
+
+// 展开后：先说每条证据在哪个分块（两边各自的编号，Agent 还标第几次调用），下面左右两栏只列分块编号。
 function QuestionDetail({ question, hasFixed }: { question: EvalQuestion; hasFixed: boolean }) {
   const agent = question.agent;
   return <div className="ev-question-body">
@@ -202,8 +230,8 @@ function QuestionDetail({ question, hasFixed }: { question: EvalQuestion; hasFix
       const fixedFound = fixed?.status === "returned";
       return <div className="ag-evidence" key={index}>
         <p>证据 {index + 1}：“{evidence.text}”</p>
-        {hasFixed && <span className={fixedFound ? "is-hit" : "is-miss"}>固定流程：{fixedFound ? `来源 ${fixed?.source_id ?? "—"}` : "没拿到"}</span>}
-        <span className={evidence.found ? "is-hit" : "is-miss"}>Agent：{evidence.found ? evidence.where.map((item) => `第 ${item.call} 次调用 · ${item.evidence_id ?? "—"}`).join("、") : "没拿到"}</span>
+        {hasFixed && <span className={fixedFound ? "is-hit" : "is-miss"}>固定流程：{fixedFound ? `在 ${fixed?.source_id ?? "—"}` : "没拿到"}</span>}
+        <span className={evidence.found ? "is-hit" : "is-miss"}>Agent：{evidence.found ? evidence.where.map((item) => `第 ${item.call} 次调用的 ${item.evidence_id ?? "—"}`).join("、") : "没拿到"}</span>
       </div>;
     })}</div> : <p className="ev-muted-note">这道题知识库里没有答案，没有预设证据；拿到的资料越少越好（拿到了模型可能硬凑答案）。</p>}
     <div className={`ag-columns ${hasFixed ? "" : "is-single"}`}>
@@ -215,13 +243,13 @@ function QuestionDetail({ question, hasFixed }: { question: EvalQuestion; hasFix
 
 function FixedLog({ question }: { question: EvalQuestion }) {
   const hitSources = new Set((question.evidence ?? []).filter((item) => item.status === "returned").map((item) => item.source_id));
-  const sources = question.sources ?? [];
+  const items: ChunkItem[] = (question.sources ?? []).map((source) => ({ key: source.id, id: source.id, title: source.title,
+    heading: source.heading ?? null, text: source.text, hit: hitSources.has(source.id) }));
   return <section className="ag-log">
-    <div className="ag-log-title">固定流程<small>检索一次 · 耗时 {formatMs(question.latency_ms)}</small></div>
+    <div className="ag-log-title">固定流程<small>检索 1 次 · 耗时 {formatMs(question.latency_ms)}</small></div>
     <div className="ag-call">
-      <div className="ag-call-head"><span className="ag-tool">检索</span><span>检索词 {question.queries.map((query) => <code key={query}>{query}</code>)}</span></div>
-      <div className="ag-call-meta">重排问题 <code>{question.rerank_query}</code> · {question.query_source === "rewrite_cache" ? "来自改写缓存" : "规则改写（未调用大模型）"}</div>
-      {sources.length === 0 ? <p className="ag-muted">过滤后没有资料。</p> : sources.map((source) => <ResultItem key={source.id} id={source.id} title={source.title} heading={source.heading ?? null} text={source.text} hit={hitSources.has(source.id)} />)}
+      <div className="ag-call-head"><span className="ag-tool">检索</span>{question.queries.map((query) => <code key={query}>{query}</code>)}{hitSources.size > 0 && <span className="ag-hit">命中</span>}</div>
+      <ChunkTabs items={items} empty="过滤后没有分块。" />
     </div>
   </section>;
 }
@@ -229,7 +257,7 @@ function FixedLog({ question }: { question: EvalQuestion }) {
 function AgentLog({ question }: { question: EvalQuestion }) {
   const agent = question.agent!;
   return <section className="ag-log">
-    <div className="ag-log-title">Agent<small>{agent.rounds} 轮 · 工具调用 {agent.tool_calls} 次 · 输入 {agent.prompt_tokens} token · 耗时 {formatMs(agent.latency_ms)} · {STOP_LABELS[agent.stop_reason ?? ""] ?? agent.stop_reason ?? "—"}</small></div>
+    <div className="ag-log-title">Agent<small>检索 {agent.searches} 次 · {agent.rounds} 轮 · {agent.prompt_tokens} token · 耗时 {formatMs(agent.latency_ms)} · {STOP_LABELS[agent.stop_reason ?? ""] ?? agent.stop_reason ?? "—"}</small></div>
     {agent.question_sent !== question.question && <div className="ag-call-meta">实际提问（多轮追问按规则补全）：{agent.question_sent}</div>}
     {agent.calls.length === 0 && <p className="ag-muted">没有调用任何工具，直接回答了。</p>}
     {agent.calls.map((call) => <AgentCall key={call.call} call={call} />)}
@@ -239,35 +267,22 @@ function AgentLog({ question }: { question: EvalQuestion }) {
 
 function AgentCall({ call }: { call: EvalAgentCall }) {
   const status = CALL_STATUS[call.status] ?? call.status;
-  return <div className={`ag-call ${call.status !== "ok" ? "is-off" : ""}`}>
+  const hit = call.hits.length > 0;
+  let items: ChunkItem[] = [];
+  if (call.results) items = call.results.map((result) => ({ key: `${call.call}-${result.evidence_id}`, id: result.evidence_id, title: result.title,
+    heading: result.heading ?? null, text: result.text, relevance: result.relevance, low: result.low_relevance, hit: result.hits.length > 0 }));
+  else if (call.name === "read_context" && call.text) items = [{ key: `${call.call}-read`, id: `${call.source_id ?? ""} ${call.direction === "before" ? "前文" : "后文"}`,
+    title: null, heading: null, text: call.text, hit: (call.read_hits ?? []).length > 0 }];
+  return <div className={`ag-call ${call.status !== "ok" ? "is-off" : ""} ${hit ? "is-hit" : ""}`}>
     <div className="ag-call-head">
       <span className="ag-tool">第 {call.call} 次 · {TOOL_LABELS[call.name] ?? call.name}</span>
-      {call.name === "search_knowledge" && call.query !== undefined ? <span><code>{call.query}</code><small> {call.mode} · top_k {call.top_k}</small></span>
+      {call.name === "search_knowledge" && call.query !== undefined ? <><code>{call.query}</code><small className="ag-muted">{call.mode} · top_k {call.top_k}</small></>
         : call.name === "read_context" && call.source_id ? <span>{call.source_id} 的{call.direction === "before" ? "前文" : "后文"}</span>
-          : <span><code>{JSON.stringify(call.arguments)}</code></span>}
-      {call.round !== null && <small className="ag-muted">第 {call.round} 轮</small>}
-      {call.hits.length > 0 && <span className="ag-hit">命中证据 {call.hits.map((index) => index + 1).join("、")}</span>}
+          : <code>{JSON.stringify(call.arguments)}</code>}
+      {hit && <span className="ag-hit">命中证据 {call.hits.map((index) => index + 1).join("、")}</span>}
     </div>
     {status && <div className="ag-call-meta">{status}{call.error ? `：${call.error}` : ""}</div>}
     {call.note && call.status !== "ok" && <div className="ag-call-meta">{call.note}</div>}
-    {call.results && (call.results.length === 0 ? <p className="ag-muted">没有返回资料（空检索）。</p>
-      : call.results.map((result) => <ResultItem key={`${call.call}-${result.evidence_id}`} id={result.evidence_id} title={result.title} heading={result.heading ?? null} text={result.text} hit={result.hits.length > 0} relevance={result.relevance} low={result.low_relevance} />))}
-    {call.name === "read_context" && call.text && <ClampText text={call.text} hit={(call.read_hits ?? []).length > 0} />}
-  </div>;
-}
-
-function ResultItem({ id, title, heading, text, hit, relevance, low }: { id: string; title: string | null; heading: string | null; text: string; hit: boolean; relevance?: number | null; low?: boolean }) {
-  return <div className={`ag-result ${hit ? "is-hit" : ""}`}>
-    <div className="ag-result-head"><strong>{id}</strong><span>{title ?? "—"}{heading ? ` · ${heading}` : ""}</span>{relevance !== undefined && relevance !== null && <small>相关性 {relevance.toFixed(2)}{low ? "（较低）" : ""}</small>}{hit && <span className="ag-hit">含证据</span>}</div>
-    <ClampText text={text} />
-  </div>;
-}
-
-function ClampText({ text, hit }: { text: string; hit?: boolean }) {
-  const [open, setOpen] = useState(false);
-  const long = text.length > 120;
-  return <div className={`ag-text ${hit ? "is-hit" : ""}`}>
-    <p className={open || !long ? "is-open" : ""}>{text}</p>
-    {long && <button type="button" className="ev-leak-toggle" onClick={() => setOpen(!open)}>{open ? "收起" : "展开更多"}<span aria-hidden="true">{open ? "↑" : "↓"}</span></button>}
+    {(call.results || call.name === "read_context") && <ChunkTabs items={items} empty={call.results ? "没有返回分块（空检索）。" : "没有读到内容。"} />}
   </div>;
 }
