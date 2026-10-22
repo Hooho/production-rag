@@ -3733,26 +3733,24 @@ input:focus {
    font-size: 11px;
 }
 
-/* 左边选项列按内容自动取宽（所有行取最宽的那个，说明的起点对齐；最多占 60%，再宽就换行），右边说明占满剩下的宽度。
-   原来左列固定 160～220px，选项多的一行（如题目范围、运行模式）会被挤得换行甚至竖排。 */
 .ev-launch-options {
    display: grid;
-   grid-template-columns: fit-content(60%) minmax(0, 1fr);
    gap: 0;
 }
 
-/* 每一行只负责一个范围或实验开关，长说明可以自然换行而不挤压其他选项。 */
+/* 每一行只负责一个范围或实验开关，长说明可以自然换行而不挤压其他选项。
+   左边选项按这一行自己的内容取宽（最多占 60%，再宽就换行），右边说明紧跟在后面、占满剩下的宽度；
+   原来左列固定 160～220px，选项多的一行（如题目范围、运行模式）会被挤得换行甚至竖排。 */
 .ev-launch-option {
-   grid-column: 1 / -1;
    display: grid;
-   grid-template-columns: subgrid;
+   grid-template-columns: fit-content(60%) minmax(0, 1fr);
    align-items: start;
    gap: 14px;
    padding: 9px 0;
    border-top: 1px solid rgb(var(--t-80a4c7-rgb) / .42);
 }
 
-/* 专项的勾选列表没有说明列，占满整行，不参与左列取宽。 */
+/* 专项的勾选列表没有说明列，占满整行。 */
 .sp-pick-option > * {
    grid-column: 1 / -1;
 }
@@ -5863,10 +5861,6 @@ input:focus {
    }
 
    /* 小屏将每个操作选项改为上下结构，保证说明文字有足够阅读宽度。 */
-   .ev-launch-options {
-      grid-template-columns: minmax(0, 1fr);
-   }
-
    .ev-launch-option {
       grid-template-columns: minmax(0, 1fr);
       gap: 6px;
