@@ -292,6 +292,9 @@ def test_eval_api(setup, eval_dir, monkeypatch):
     assert client.get("/eval/dataset").status_code == 401
     dataset = client.get("/eval/dataset", headers=headers()).json()
     assert len(dataset["items"]) == 4 and dataset["corpus"] == ["售后", "物流"]
+    # 先在主线程导入语料：测试库是多线程共用的一个 SQLite 连接，后台线程导入时和轮询请求交错，
+    # 偶尔读不到刚插入的文档（activate_version 拿到 None）。导入过之后后台线程只会判定“未变化”。
+    import_corpus(setup[1], client.app.state.models)
     started = client.post("/eval/runs", headers=headers(), json={"split": "all", "suites": []})
     assert started.status_code == 202
     run_id = started.json()["id"]

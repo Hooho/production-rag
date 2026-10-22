@@ -39,10 +39,13 @@ def today():
 
 # 返回用户对每种数据的权限：{数据类型: {"read", "create", ...}}。
 # 管理员拥有全部权限；普通用户是所在各部门权限的并集。每次都查数据库，改了权限立即生效。
+# 用户表里没有这个身份（例如评测用的 eval 账号、已删除的用户）时没有任何数据权限；原来这里会直接报错。
 def user_permissions(engine, user):
     result = {}
     for data_type in DATA_TYPES:
         result[data_type] = set()
+    if user is None:
+        return result
     if user["is_admin"]:
         for data_type in DATA_TYPES:
             result[data_type] = set(ACTIONS)

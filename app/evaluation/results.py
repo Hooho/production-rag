@@ -41,7 +41,15 @@ METRICS = [
     ("correctness", "正确性", "higher"),
     ("refusal_accuracy", "拒答正确率", "higher"),
     ("citation_validity", "引用有效性", "higher"),
+    # Agent 检索评测（勾选了 Agent 时才有）：只有“最后命中”，口径和固定流程的过滤后 Recall 一致。
+    ("agent_recall", "Agent 资料命中率", "higher"),
+    ("agent_false_reject_rate", "Agent 误杀率", "lower"),
+    ("agent_false_accept_rate", "Agent 漏放率", "lower"),
+    ("agent_avg_tool_calls", "Agent 平均工具调用次数", "lower"),
+    ("agent_avg_prompt_tokens", "Agent 平均输入 token", "lower"),
+    ("agent_latency_avg_ms", "Agent 平均耗时（毫秒）", "lower"),
 ]
+MODES = ("fixed", "agent")
 
 
 # 读取当前代码的提交号；容器里没有 .git 时用环境变量 GIT_COMMIT，仍拿不到就记为 unknown。
@@ -142,6 +150,9 @@ def summarize_history_metrics(run):
     questions = run.get("questions")
     if not isinstance(questions, list):
         return None
+    # 只跑 Agent 的评测没有固定流程的分阶段结果，这组说明用不上。
+    if questions and "stages" not in questions[0]:
+        return None
 
     config = run.get("config") or {}
     return_limit = config.get("return_limit") or 6
@@ -236,6 +247,9 @@ def previous_run(run, runs):
             continue
         if (candidate.get("config") or {}).get("split") != split:
             continue
+        # 跑的模式不同（只跑固定流程 / 只跑 Agent / 一起跑）时指标不完全相同，不自动对比。
+        if run_modes(candidate) != run_modes(run):
+            continue
         return candidate
     return None
 
@@ -277,10 +291,16 @@ def compare_runs(base, target):
     return {"base": run_brief(base), "target": run_brief(target), "metrics": rows, "settings_diff": settings_diff}
 
 
+# 这次评测跑了哪些模式；旧记录没有这一项，都是只跑固定流程。
+def run_modes(run):
+    return list((run.get("config") or {}).get("modes") or ["fixed"])
+
+
 # 新建一次评测记录并立即保存为 running，前端马上就能在列表里看到它和进度。
-def start_run(kind, split, suites, special=None):
+# modes：检索评测跑哪些模式（fixed 固定流程、agent），可以只跑一个，也可以一起跑。
+def start_run(kind, split, suites, special=None, modes=("fixed",)):
     commit = git_commit()
-    config = {"split": split, "suites": list(suites)}
+    config = {"split": split, "suites": list(suites), "modes": [mode for mode in MODES if mode in modes]}
     # 专项评测：要跑的专项（编号和名称）以及多轮对话是否对比记忆参数。
     if special is not None:
         config["special"] = special
@@ -312,7 +332,7 @@ def answer_hook(store, models, responder, run_id):
 
 # 执行一次评测并把结果写回同一个文件。generate=True 时在检索之后继续生成回答并请大模型评审。
 # 任何异常都记录到结果里再抛出，避免界面上永远显示"运行中"。
-def execute_run(store, models, items, run, generate=False, responder=None):
+def execute_run(store, models, items, run, generate=False, responder=None, agent_mode=None):
     last_saved = [0.0]
 
     # 进度最多每秒写一次文件，逐题写入会让慢速磁盘上的评测明显变慢。
@@ -334,7 +354,14 @@ def execute_run(store, models, items, run, generate=False, responder=None):
             return run
         split = run["config"]["split"]
         suites = run["config"]["suites"]
-        result = run_retrieval(store, models, items, split, suites, on_progress, on_item)
+        modes = run_modes(run)
+        if "agent" in modes:
+            # 勾选了 Agent：只跑 Agent，或者和固定流程一起跑（见 app/evaluation/agent_retrieval.py）。
+            from .agent_retrieval import run_agent_retrieval
+            result = run_agent_retrieval(store, models, agent_mode, items, split, suites, "fixed" in modes, on_progress)
+        else:
+            result = run_retrieval(store, models, items, split, suites, on_progress, on_item)
+        result["config"]["modes"] = modes
         run.update(result)
         if generate:
             generation = summarize_generation(result["questions"])

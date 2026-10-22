@@ -82,6 +82,8 @@ class EvalRunInput(BaseModel):
     suite_ids: list[str] = Field(default_factory=list, max_length=50)
     # 多轮对话专项是否把记忆参数换成几组各跑一遍（默认只用当前设置）。
     compare_memory: bool = False
+    # 检索评测跑哪些模式：fixed 固定流程、agent（Agent 自己决定怎么检索）；可以只跑一个，也可以一起跑。
+    modes: list[Literal["fixed", "agent"]] = Field(default_factory=lambda: ["fixed"], min_length=1, max_length=2)
 
 
 # 手动录入一道评测题；编号、来源和审核状态由服务端统一生成，避免客户端伪造元数据。
@@ -1799,6 +1801,12 @@ def create_app(store=None, models=None, jwt_secret=None):
             needs_responder = any(suite["method"] == "answer" for suite in loaded)
         else:
             needs_responder = body.kind == "generation"
+            if "agent" in body.modes:
+                # Agent 检索评测：每道题让 Agent 真跑一遍，需要真实大模型；目前只评检索（只看最后拿到的资料）。
+                if body.kind != "retrieval":
+                    raise HTTPException(422, "Agent 目前只支持检索评测")
+                if app.state.models.mode != "openai" and app.state.agent_mode.client_factory is None:
+                    raise HTTPException(422, "Agent 检索评测需要真实大模型：请设置 MODEL_MODE=openai 和 LLM_API_KEY")
             if body.kind == "generation" and app.state.models.mode != "openai":
                 raise HTTPException(422, "生成评测需要真实大模型：请设置 MODEL_MODE=openai 和 LLM_API_KEY")
             if body.kind == "generation" and body.suites:
@@ -1809,7 +1817,8 @@ def create_app(store=None, models=None, jwt_secret=None):
         if not app.state.eval_lock.acquire(blocking=False):
             raise HTTPException(409, "已有评测正在运行，请等待完成")
         try:
-            run = start_run(body.kind, None if special else body.split, body.suites, special)
+            run = start_run(body.kind, None if special else body.split, body.suites, special,
+                body.modes if body.kind == "retrieval" else ("fixed",))
         except Exception:
             app.state.eval_lock.release()
             raise
@@ -1822,7 +1831,7 @@ def create_app(store=None, models=None, jwt_secret=None):
                     # 生成评测只验证回答质量，不应把评测题写进线上会话的持久化记忆，回答 Agent 用进程内记忆。
                     responder = ResponseAgent(app.state.models, use_postgres=False)
                 execute_run(app.state.store, app.state.models, [] if special else load_dataset(), run,
-                    generate=body.kind == "generation", responder=responder)
+                    generate=body.kind == "generation", responder=responder, agent_mode=app.state.agent_mode)
             except Exception:
                 logger.exception("eval_run_failed run_id=%s", run["id"])
             finally:
