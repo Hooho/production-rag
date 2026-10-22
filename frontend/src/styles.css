@@ -7533,7 +7533,8 @@ input:focus {
 
 .ag-evidence {
    border-left: 2px solid var(--series-1);
-   padding: 6px 10px;
+   background: rgb(var(--t-e0eefa-rgb) / .55);
+   padding: 8px 12px;
    display: flex;
    flex-wrap: wrap;
    gap: 6px 14px;
