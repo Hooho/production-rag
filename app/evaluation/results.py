@@ -32,7 +32,7 @@ METRICS = [
     ("recall_final", "过滤后 Recall", "higher"),
     # 交给回答模型的资料（含父块扩展拼进来的相邻分片）里的证据比例；和 Agent 资料命中率口径一致。
     # 固定流程现在和线上一样做充分性判断和补充检索（见 app/evaluation/flow.py），这是判断之后最终交给模型的。
-    ("recall_given", "最终交给模型的资料命中率", "higher"),
+    ("recall_given", "固定流程资料命中率", "higher"),
     ("recall_given_first", "第一次检索交给模型的资料命中率", "higher"),
     ("rescued_count", "补充检索救回的题数", "higher"),
     ("wrong_clear_rate", "误清空率（有答案被清空）", "lower"),

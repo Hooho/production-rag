@@ -275,7 +275,7 @@ function metricLabel(key: string, run: EvalRunBrief) {
   const pool = run.config.pool_size ?? 20;
   const top = run.config.return_limit ?? 6;
   const labels: Record<string, string> = {
-    recall_pool: `召回 Recall@${pool}`, recall_top: `重排 Recall@${top}`, recall_final: "过滤后 Recall", recall_given: "最终交给模型的资料命中率",
+    recall_pool: `召回 Recall@${pool}`, recall_top: `重排 Recall@${top}`, recall_final: "过滤后 Recall", recall_given: "固定流程资料命中率",
     recall_given_first: "第一次检索交给模型的资料命中率", rescued_count: "补充检索救回", wrong_clear_rate: "误清空率",
     right_clear_rate: "正确清空率", retry_rate: "补充检索比例", avg_judge_calls: "平均判断次数", flow_latency_avg_ms: "完整检索平均耗时",
     mrr_pool: `召回 MRR@${pool}`, mrr_top: `重排 MRR@${top}`, mrr_final: "过滤后 MRR",
@@ -296,7 +296,7 @@ const GENERATION_METRIC_EXPLANATIONS: Record<string, string> = {
 // 完整检索流程（改写 → 检索 → 充分性判断 → 补充检索）的指标说明，和线上用户实际拿到的资料一致。
 const FLOW_METRIC_EXPLANATIONS: Record<string, string> = {
   recall_given_first: "判断之前，第一次检索的资料里有证据的比例。",
-  recall_given: "最后交给大模型写答案的资料里，是否有题目要的证据",
+  recall_given: "最后交给大模型写答案的资料里，包含题目的证据的比例",
   rescued_count: "补充检索后拿到更多证据的题。",
   wrong_clear_rate: "有答案却被判资料不足、清空的比例，越低越好。",
   right_clear_rate: "没答案、被清空的比例，越高越好。",
@@ -1509,7 +1509,7 @@ function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: 
               {runModes(item).includes("agent") && <HistoryMetric label="Agent 资料命中率" value={formatPercent(item.summary?.agent_recall)} hint="Agent 找到资料，包含题目的证据的比例" />}
               {runModes(item).includes("fixed") && <>
               {/* 完整检索流程的新记录：最终交给模型的命中率（结果列显示的就是它）和误清空率。 */}
-              {item.config.flow?.name === "full" && <HistoryMetric label="最终交给模型命中率" value={formatPercent(item.summary?.recall_given)} hint="最后交给大模型写答案的资料里，是否有题目要的证据" />}
+              {item.config.flow?.name === "full" && <HistoryMetric label="固定流程资料命中率" value={formatPercent(item.summary?.recall_given)} hint="最后交给大模型写答案的资料里，包含题目的证据的比例" />}
               {item.config.flow?.name === "full" && <HistoryMetric label="误清空率" value={formatPercent(item.summary?.wrong_clear_rate)} hint="有答案的题被判资料不足、清空" />}
               <HistoryMetric label="候选池 Recall" value={formatPercent(item.summary?.recall_pool)} hint={poolHint} />
               {/* 补齐召回、重排、阈值过滤三个阶段，避免只看首尾指标而定位不到重排损失。 */}
