@@ -1506,7 +1506,7 @@ function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: 
           </tr>}
           {metricsExpanded && item.kind !== "special" && <tr id={`history-metrics-${item.id}`} className="ev-history-metrics-row">
             <td colSpan={9}><div className="ev-history-metrics-panel"><div className="ev-history-metrics-heading">本条记录指标</div><div className="ev-history-metrics-grid">
-              {runModes(item).includes("agent") && <HistoryMetric label="Agent 资料命中率" value={formatPercent(item.summary?.agent_recall)} hint={`平均每题检索 ${typeof item.summary?.agent_avg_searches === "number" ? item.summary.agent_avg_searches.toFixed(1) : "—"} 次`} />}
+              {runModes(item).includes("agent") && <HistoryMetric label="Agent 资料命中率" value={formatPercent(item.summary?.agent_recall)} hint="Agent 找到资料，包含题目的证据的比例" />}
               {runModes(item).includes("fixed") && <>
               {/* 完整检索流程的新记录：最终交给模型的命中率（结果列显示的就是它）和误清空率。 */}
               {item.config.flow?.name === "full" && <HistoryMetric label="最终交给模型命中率" value={formatPercent(item.summary?.recall_given)} hint="最后交给大模型写答案的资料里，是否有题目要的证据" />}

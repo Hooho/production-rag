@@ -131,7 +131,7 @@ export function AgentPanel({ run }: { run: EvalRun }) {
     <p className="ev-muted-note">只看 Agent 最后拿到的资料里有没有证据。{config && <> 工具预算 {config.tool_budget} 次 · 超时 {config.timeout} 秒 · 提示词 {config.prompt_version}{config.model ? ` · ${config.model}` : ""}</>}</p>
     <div className="ev-section-title">命中<small>{summary.answerable_count ?? 0} 道能回答 · {summary.unanswerable_count ?? 0} 道无法回答</small></div>
     <div className="ev-cards">
-      <Card label="资料命中率" value={percent(summary.agent_recall)} note="能回答的题里，拿到的证据比例" />
+      <Card label="资料命中率" value={percent(summary.agent_recall)} note="Agent 找到资料，包含题目的证据的比例" />
       <Card label="误杀率" value={percent(summary.agent_false_reject_rate)} note="能回答的题里一段资料都没拿到的比例" />
       <Card label="漏放率" value={percent(summary.agent_false_accept_rate)} note="无法回答的题里拿到了资料的比例" />
       {summary.agent_failed ? <Card label="运行失败" value={`${summary.agent_failed} 题`} note="模型调用失败等，点逐题看原因" /> : null}
