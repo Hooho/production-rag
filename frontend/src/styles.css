@@ -4579,14 +4579,6 @@ input:focus {
    border-bottom: 0;
 }
 
-.ev-history-expand-hint {
-   display: inline-block;
-   margin-left: 8px;
-   color: var(--t-2563eb);
-   font-size: 10px;
-   white-space: nowrap;
-}
-
 /* 子行和其中的指标面板共用同一底色，让整块内容明确属于上方记录。 */
 .ev-history-metrics-row td {
    padding: 0 10px 12px;
@@ -8060,4 +8052,17 @@ input:focus {
 
 .ev-option-description.ev-hint .ev-info-icon {
    flex: none;
+}
+
+/* 评测记录：展开指标的按钮放在操作列（以前「▶ 指标」夹在配置文字后面，看不出是按钮）；专项的通过数跟在状态后面。 */
+.ev-link.ev-expand-link {
+   border-color: transparent;
+   background: transparent;
+   white-space: nowrap;
+}
+
+.ev-history-pass {
+   color: var(--ev-muted);
+   font-size: 12px;
+   white-space: nowrap;
 }
