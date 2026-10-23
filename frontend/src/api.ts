@@ -698,7 +698,8 @@ export type EvalAgentQuestion = {
   error: string | null;
   latency_ms: number;
   recall: number | null;
-  evidence: { text: string; found: boolean; where: { call: number; evidence_id: string | null }[] }[];
+  // chunk_ids：证据在知识库里所属的分块（旧记录没有）。
+  evidence: { text: string; chunk_ids?: string[]; found: boolean; where: { call: number; evidence_id: string | null }[] }[];
   calls: EvalAgentCall[];
   returned: number;
   searches: number;

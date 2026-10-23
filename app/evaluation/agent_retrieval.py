@@ -116,6 +116,10 @@ def evaluate_agent(agent_mode, store, models, item, chunk_texts):
                 where[index].append({"call": entry["call"], "evidence_id": source["evidence_id"]})
         for index in entry.get("read_hits") or []:
             where[index].append({"call": entry["call"], "evidence_id": entry.get("source_id")})
+    evidence_chunks = {}
+    for chunk_id, indexes in evidence_hits([{"chunk_id": chunk_id} for chunk_id in chunk_texts], evidence, chunk_texts).items():
+        for index in indexes:
+            evidence_chunks.setdefault(index, []).append(chunk_id)
     searches = [entry for entry in calls if entry["name"] == "search_knowledge" and entry["status"] in ("ok", "error")]
     chunks = {chunk_id for entry in calls for chunk_id in entry["chunk_ids"]}
     usage = outcome.get("usage") or {}
@@ -124,7 +128,9 @@ def evaluate_agent(agent_mode, store, models, item, chunk_texts):
         row["status"] = "failed"
     row.update({
         "recall": len(found) / len(evidence) if evidence else None,
-        "evidence": [{"text": text, "found": index in found, "where": where[index]} for index, text in enumerate(evidence)],
+        # chunk_ids：这条证据在知识库里属于哪个（哪些）分块，和检索结果无关，用来对照两边拿到的分块。
+        "evidence": [{"text": text, "chunk_ids": evidence_chunks.get(index, []), "found": index in found, "where": where[index]}
+            for index, text in enumerate(evidence)],
         "calls": calls, "returned": len(chunks),
         "searches": len(searches), "empty_searches": sum(1 for entry in searches if not entry.get("results")),
         "queries": [entry.get("query") for entry in searches],

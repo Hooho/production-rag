@@ -7972,3 +7972,19 @@ input:focus {
    line-height: 1.6;
    white-space: nowrap;
 }
+
+.ag-evidence-chunk {
+   display: inline-flex;
+   align-items: center;
+   gap: 6px;
+   color: var(--t-536d86);
+}
+
+.ag-evidence-chunk code,
+.ag-chunk-meta code {
+   padding: 1px 6px;
+   border-radius: 4px;
+   background: rgba(255, 255, 255, .9);
+   border: 1px solid var(--ev-line);
+   font-size: 12px;
+}
