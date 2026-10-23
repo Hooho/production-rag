@@ -296,7 +296,7 @@ const GENERATION_METRIC_EXPLANATIONS: Record<string, string> = {
 // 完整检索流程（改写 → 检索 → 充分性判断 → 补充检索）的指标说明，和线上用户实际拿到的资料一致。
 const FLOW_METRIC_EXPLANATIONS: Record<string, string> = {
   recall_given_first: "判断之前，第一次检索的资料里有证据的比例。",
-  recall_given: "判断之后最终交给模型的资料；被清空算 0。和 Agent 比用这个。",
+  recall_given: "最后交给大模型写答案的资料里，是否有题目要的证据",
   rescued_count: "补充检索后拿到更多证据的题。",
   wrong_clear_rate: "有答案却被判资料不足、清空的比例，越低越好。",
   right_clear_rate: "没答案、被清空的比例，越高越好。",
@@ -1509,7 +1509,7 @@ function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: 
               {runModes(item).includes("agent") && <HistoryMetric label="Agent 资料命中率" value={formatPercent(item.summary?.agent_recall)} hint={`平均每题检索 ${typeof item.summary?.agent_avg_searches === "number" ? item.summary.agent_avg_searches.toFixed(1) : "—"} 次`} />}
               {runModes(item).includes("fixed") && <>
               {/* 完整检索流程的新记录：最终交给模型的命中率（结果列显示的就是它）和误清空率。 */}
-              {item.config.flow?.name === "full" && <HistoryMetric label="最终交给模型命中率" value={formatPercent(item.summary?.recall_given)} hint={`第一次检索 ${formatPercent(item.summary?.recall_given_first)}`} />}
+              {item.config.flow?.name === "full" && <HistoryMetric label="最终交给模型命中率" value={formatPercent(item.summary?.recall_given)} hint="最后交给大模型写答案的资料里，是否有题目要的证据" />}
               {item.config.flow?.name === "full" && <HistoryMetric label="误清空率" value={formatPercent(item.summary?.wrong_clear_rate)} hint="有答案的题被判资料不足、清空" />}
               <HistoryMetric label="候选池 Recall" value={formatPercent(item.summary?.recall_pool)} hint={poolHint} />
               {/* 补齐召回、重排、阈值过滤三个阶段，避免只看首尾指标而定位不到重排损失。 */}
