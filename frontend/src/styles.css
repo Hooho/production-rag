@@ -3732,15 +3732,6 @@ input:focus {
    line-height: 1.7;
 }
 
-/* 信息图标让说明字段更容易扫读，同时保留文字标签，避免只靠图形传达含义。 */
-.ev-description-label {
-   display: inline-flex;
-   align-items: center;
-   gap: 4px;
-   color: var(--t-315c7c);
-   font-weight: 700;
-}
-
 .ev-info-icon {
    display: inline-grid;
    place-items: center;
@@ -8058,3 +8049,9 @@ input:focus {
    color: var(--ev-muted);
 }
 
+/* 选项下面的一句说明：只留图标，不再写「说明：」，文字尽量一句话。 */
+.ev-hint {
+   display: flex;
+   align-items: center;
+   gap: 6px;
+}

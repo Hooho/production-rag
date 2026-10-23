@@ -59,9 +59,10 @@ const EVIDENCE_STATUS: Record<string, string> = {
   returned: "已返回", beyond_limit: "超出返回数", filtered_low_score: "低于阈值", in_pool: "候选池", not_in_pool: "未进重排", not_recalled: "未召回",
 };
 // 操作栏直接解释每个实验开关，用户能在勾选前知道实验目的和会运行的变体。
+// 实验组只比第一次检索：用基线同一批检索词，只换检索参数。
 const SUITE_DESCRIPTIONS: Record<string, string> = {
-  ablation: "固定其他条件，逐个拿掉一种检索组件，回答“向量检索、关键词检索、重排分别贡献多少”。",
-  params: "保持完整检索流程，只替换候选池大小或多查询融合方式，比较不同配置的效果。",
+  ablation: "每次去掉一种检索组件，看它贡献多少",
+  params: "只换候选池大小或多查询融合方式",
 };
 // 题型筛选说明跟随当前选项变化，帮助用户在题目卡片前理解这一组题检验的能力。
 const DATASET_TYPE_DESCRIPTIONS: Record<string, string> = {
@@ -554,14 +555,14 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
     {section === "history" && <>
       {/* 操作区只属于历史记录，评测集 Tab 保持为题目管理入口。 */}
       <div className="ev-launch">
-        <div className="ev-launch-title">操作：发起{launchMode === "special" ? "专项" : KIND_LABELS[launchKind]}评测<small>{launchMode === "special" ? "固定流程会调用大模型改写和判断资料够不够；回答和多轮对话方式还会调用大模型回答和评审" : launchKind === "generation" ? "调用回答和评审大模型，会产生少量费用" : agentLaunch ? "Agent 每道题要调用大模型几轮，会产生费用，耗时也长得多" : "会调用大模型改写和判断资料够不够（改写有缓存，第二次起更快）"}</small></div>
+        <div className="ev-launch-title">操作：发起{launchMode === "special" ? "专项" : KIND_LABELS[launchKind]}评测<small>{launchKind === "generation" && launchMode !== "special" ? "会调用大模型，有少量费用" : agentLaunch ? "Agent 每题调用大模型几轮，较慢" : "会调用大模型"}</small></div>
         <div className="ev-launch-options">
           <div className="ev-launch-option is-stacked">
             <div className="sp-mode" role="radiogroup" aria-label="评测目的">
               <button type="button" role="radio" aria-checked={launchMode === "tuning"} className={launchMode === "tuning" ? "is-selected" : ""} onClick={() => setLaunchMode("tuning")}>调参</button>
               <button type="button" role="radio" aria-checked={launchMode === "special"} className={launchMode === "special" ? "is-selected" : ""} onClick={() => setLaunchMode("special")}>专项</button>
             </div>
-            <span className="ev-option-description"><span className="ev-description-label"><span className="ev-info-icon" aria-hidden="true">i</span>说明</span>：{launchMode === "special" ? "检查某个方向有没有问题，用「专项评测集」里的题目，不计入调参分数。可以一次勾选几个专项，每个专项单独出结果。" : "比较参数好坏，用「调参评测集」里的开发集或留出集，看整体分数。"}</span>
+            <Hint text={launchMode === "special" ? "检查某个方向的问题，不计入调参分数；每个专项单独出结果。" : "用开发集或留出集比较参数好坏。"} />
           </div>
           {launchMode === "special" ? <div className="ev-launch-option sp-pick-option">
             {specialSuites === null ? <span className="ev-muted-note">正在读取专项…</span>
@@ -574,11 +575,11 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
               <span className="ev-option-title">运行模式</span>
               <label className={`ev-radio-option ${specialModes.includes("fixed") ? "is-selected" : ""}`}><input type="checkbox" checked={specialModes.includes("fixed")} onChange={() => setSpecialModes((items) => items.includes("fixed") ? items.filter((item) => item !== "fixed") : ["fixed", ...items])} />固定流程</label>
               <label className={`ev-radio-option ${specialModes.includes("agent") ? "is-selected" : ""}`}><input type="checkbox" checked={specialModes.includes("agent")} onChange={() => setSpecialModes((items) => items.includes("agent") ? items.filter((item) => item !== "agent") : [...items, "agent"])} />Agent</label>
-              <span className="ev-option-description"><span className="ev-description-label"><span className="ev-info-icon" aria-hidden="true">i</span>说明</span>：只对检索方式的专项生效。勾 Agent 会调用大模型，每题几轮。{specialModes.includes("agent") && specialSuites.some((suite) => suite.method === "retrieval" && suite.search_mode !== "hybrid" && pickedSuites.includes(suite.id)) ? "选中的专项里有不是混合检索的：固定流程按专项的设置检索，Agent 自己选检索方式，两边比的不是同一件事。" : ""}</span>
+              <span className="ev-option-description is-below ev-hint"><span className="ev-info-icon" aria-hidden="true">i</span>只对检索方式的专项生效。{specialModes.includes("agent") && specialSuites.some((suite) => suite.method === "retrieval" && suite.search_mode !== "hybrid" && pickedSuites.includes(suite.id)) ? "选中的专项有不是混合检索的，和 Agent 比不公平。" : ""}</span>
             </div>}
             {specialSuites?.some((suite) => suite.method === "dialogue" && pickedSuites.includes(suite.id)) && <div className="sp-switch-line">
               <button type="button" role="switch" aria-checked={compareMemory} className={`sp-switch ${compareMemory ? "is-on" : ""}`} onClick={() => setCompareMemory(!compareMemory)}><span /></button>
-              <span>对比记忆参数：多轮对话专项除了当前设置，再把压缩阈值、保留条数各调大调小跑一遍（共 5 组），给「系统管理 › RAG 配置」的「对话记忆」提供依据。调用大模型次数是 5 倍。</span>
+              <span>对比记忆参数：压缩阈值、保留条数各调大调小再跑，共 5 组，大模型调用是 5 倍。</span>
             </div>}
           </div> : <>
           <div className="ev-launch-option is-stacked">
@@ -588,7 +589,7 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
                 <label className={`ev-radio-option ${launchKind === "retrieval" ? "is-selected" : ""}`}><input type="radio" name="eval-kind" value="retrieval" checked={launchKind === "retrieval"} onChange={() => changeLaunchKind("retrieval")} />检索评测</label>
                 <label className={`ev-radio-option ${launchKind === "generation" ? "is-selected" : ""}`}><input type="radio" name="eval-kind" value="generation" checked={launchKind === "generation"} onChange={() => changeLaunchKind("generation")} />生成评测</label>
               </div>
-              <span className="ev-option-description is-below"><span className="ev-description-label"><span className="ev-info-icon" aria-hidden="true">i</span>说明</span>：{launchKind === "generation" ? "调用回答模型生成答案，再调用评审模型检查忠实度、正确性、拒答和引用。" : "和线上检索一致：改写 → 检索 → 充分性判断 → 补充检索。改写有缓存，召回、重排、阈值的指标按第一次检索算，适合修改检索参数后反复运行。"}</span>
+              <Hint text={launchKind === "generation" ? "检索后生成回答，由评审模型打分。" : "改写 → 检索 → 充分性判断 → 补充检索，和线上一致。"} />
             </fieldset>
           </div>
           {launchKind === "retrieval" && <div className="ev-launch-option is-stacked">
@@ -598,7 +599,7 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
                 <label className={`ev-radio-option ${launchModes.includes("fixed") ? "is-selected" : ""}`}><input type="checkbox" checked={launchModes.includes("fixed")} onChange={() => toggleMode("fixed")} />固定流程</label>
                 <label className={`ev-radio-option ${launchModes.includes("agent") ? "is-selected" : ""}`}><input type="checkbox" checked={launchModes.includes("agent")} onChange={() => toggleMode("agent")} />Agent</label>
               </div>
-              <span className="ev-option-description is-below"><span className="ev-description-label"><span className="ev-info-icon" aria-hidden="true">i</span>说明</span>：{launchModes.length === 0 ? "至少勾选一个。" : launchModes.length === 2 ? "两个一起跑：每道题先跑固定流程，再让 Agent 跑一遍，结果在「Agent 对比」里逐题对比，点开看两边的检索日志。" : launchModes.includes("agent") ? "只跑 Agent：每道题让 Agent 自己检索，只看它最后拿到的资料里有没有证据。消融和参数对比只对固定流程，这次不跑。" : "只跑固定流程：改写 → 检索 → 充分性判断 → 补充检索，和线上一致。"}</span>
+              <Hint text={launchModes.length === 0 ? "至少勾一个。" : launchModes.length === 2 ? "两边逐题对比，点开看各自的检索日志。" : launchModes.includes("agent") ? "只看 Agent 最后拿到的资料；实验组不跑。" : ""} />
             </fieldset>
           </div>}
           <div className="ev-launch-option is-stacked">
@@ -609,20 +610,20 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
                 <label className={`ev-radio-option ${launchSplit === "holdout" ? "is-selected" : ""}`}><input type="radio" name="eval-split" value="holdout" checked={launchSplit === "holdout"} onChange={() => setLaunchSplit("holdout")} />留出集（最终验证）</label>
                 <label className={`ev-radio-option ${launchSplit === "all" ? "is-selected" : ""}`}><input type="radio" name="eval-split" value="all" checked={launchSplit === "all"} onChange={() => setLaunchSplit("all")} />全部题目</label>
               </div>
-              <span className="ev-option-description is-below"><span className="ev-description-label"><span className="ev-info-icon" aria-hidden="true">i</span>说明</span>：{launchSplit === "dev" ? `${splitCounts.dev || "—"} 题。每次修改检索参数后使用，可以反复试错；调参只看这一组，不动最终验证题。` : launchSplit === "holdout" ? `${splitCounts.holdout || "—"} 题。调参完成后再运行，只验证没有参与调参的题目，确认参数没有变差。` : `${splitCounts.dev + splitCounts.holdout || "—"} 题。合并已审核的开发集和留出集查看总体表现，不用于决定参数。`}</span>
+              <Hint text={launchSplit === "dev" ? `${splitCounts.dev || "—"} 题，调参时用。` : launchSplit === "holdout" ? `${splitCounts.holdout || "—"} 题，调参完成后验证。` : `${splitCounts.dev + splitCounts.holdout || "—"} 题，看总体，不用来定参数。`} />
             </fieldset>
           </div>
           {/* 生成评测只跑基线，先在界面层禁用检索实验组选项，避免用户提交无效组合。 */}
           {suites.map((suite) => {
             const suiteOff = launchKind !== "retrieval" || !launchModes.includes("fixed");
             const suiteDescription = launchKind !== "retrieval"
-              ? "只有检索评测能运行这组实验。"
-              : !launchModes.includes("fixed") ? "实验组只对固定流程，勾选「固定流程」后才能运行。"
-              : (SUITE_DESCRIPTIONS[suite.key] ?? "对比这一实验组和基线的指标差异。") + " 本次会各跑一次：" + suite.variants.join("、") + "。";
+              ? "只有检索评测能跑。"
+              : !launchModes.includes("fixed") ? "要勾选固定流程才能跑。"
+              : `${SUITE_DESCRIPTIONS[suite.key] ?? "和基线对比"}：${suite.variants.join("、")}。`;
             const suiteClass = suiteOff ? "ev-check is-disabled" : "ev-check";
             return <div className="ev-launch-option is-stacked" key={suite.key}>
               <label className={suiteClass} title={launchKind !== "retrieval" ? "只有检索评测能运行这组实验" : suite.variants.join("、")}><input type="checkbox" disabled={suiteOff} checked={launchSuites.includes(suite.key)} onChange={() => toggleSuite(suite.key)} />{suite.label}<small>{suite.variants.length} 组</small></label>
-              <span className="ev-option-description"><span className="ev-description-label"><span className="ev-info-icon" aria-hidden="true">i</span>说明</span>：{suiteDescription}</span>
+              <Hint text={suiteDescription} />
             </div>;
           })}
           </>}
@@ -649,6 +650,12 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
 }
 
 // 历史评测首次读取时保持表格骨架，避免接口还没返回就显示“还没有评测记录”。
+// 选项下面的一句说明；没有要说的就不显示。
+function Hint({ text }: { text: string }) {
+  if (!text) return null;
+  return <span className="ev-option-description is-below ev-hint"><span className="ev-info-icon" aria-hidden="true">i</span>{text}</span>;
+}
+
 function RunHistorySkeleton() {
   return <LoadingSkeleton className="ev-loading-panel" label="正在加载评测记录">
     <div className="ev-skeleton-toolbar"><SkeletonBlock className="skeleton-title" /><SkeletonBlock className="skeleton-button" /></div>
