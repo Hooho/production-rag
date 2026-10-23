@@ -1309,7 +1309,7 @@ function VariantPanel({ run }: { run: EvalRun }) {
 
 // 历史记录中的单个指标子项：把解释放在数值下方，用户不必再对照页面底部说明。
 function HistoryMetric({ label, value, hint }: { label: string; value: string; hint: ReactNode }) {
-  return <div className="ev-history-metric-item"><strong>{label}</strong><strong>{value}</strong><small>{hint}</small></div>;
+  return <div className="ev-history-metric-item"><span className="ev-history-metric-label">{label}</span><strong>{value}</strong><small>{hint}</small></div>;
 }
 
 // 历次评测记录：选中两次查看逐项对比。
@@ -1398,7 +1398,7 @@ function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: 
           </tr>}
           {metricsExpanded && item.kind !== "special" && <tr id={`history-metrics-${item.id}`} className="ev-history-metrics-row">
             <td colSpan={9}><div className="ev-history-metrics-panel"><div className="ev-history-metrics-heading">本条记录指标</div><div className="ev-history-metrics-grid">
-              {runModes(item).includes("agent") && <HistoryMetric label="Agent 资料命中率" value={formatPercent(item.summary?.agent_recall)} hint={`能回答的题里，Agent 最后拿到的资料（所有检索结果和读到的前后文）包含的证据比例；和「最终 Recall」口径相同。平均每题检索 ${item.summary?.agent_avg_searches ?? "—"} 次。`} />}
+              {runModes(item).includes("agent") && <HistoryMetric label="Agent 资料命中率" value={formatPercent(item.summary?.agent_recall)} hint={`能回答的题里，Agent 最后拿到的资料（所有检索结果和读到的前后文）包含的证据比例；和「最终 Recall」口径相同。平均每题检索 ${typeof item.summary?.agent_avg_searches === "number" ? item.summary.agent_avg_searches.toFixed(1) : "—"} 次。`} />}
               {runModes(item).includes("fixed") && <>
               <HistoryMetric label="候选池 Recall" value={formatPercent(item.summary?.recall_pool)} hint={poolHint} />
               {/* 补齐召回、重排、阈值过滤三个阶段，避免只看首尾指标而定位不到重排损失。 */}
