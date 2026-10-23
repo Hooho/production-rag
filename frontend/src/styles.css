@@ -8096,3 +8096,29 @@ input:focus {
    font-size: 12px;
    cursor: pointer;
 }
+
+/* Agent 日志按轮分组：每轮一个标题；同一轮同时发出多次调用时用橙色虚线框圈起来。 */
+.ag-round {
+   display: grid;
+   gap: 8px;
+}
+
+.ag-round + .ag-round {
+   margin-top: 6px;
+}
+
+.ag-round-head {
+   display: flex;
+   align-items: center;
+   gap: 8px;
+   color: var(--ev-muted);
+   font-size: 12px;
+   font-weight: 600;
+}
+
+.ag-round.is-parallel {
+   padding: 8px;
+   border: 1px dashed var(--tone-warning-border);
+   border-radius: 8px;
+   background: rgba(255, 244, 229, .35);
+}

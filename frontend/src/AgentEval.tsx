@@ -430,8 +430,25 @@ function AgentLog({ question }: { question: EvalQuestion }) {
     <div className="ag-log-title">Agent<small>检索 {agent.searches} 次{fresh.wasted > 0 ? `（${fresh.wasted} 次无新增）` : ""} · {agent.rounds} 轮 · {agent.prompt_tokens} token · 耗时 {formatMs(agent.latency_ms)} · {STOP_LABELS[agent.stop_reason ?? ""] ?? agent.stop_reason ?? "—"}</small></div>
     {agent.question_sent !== question.question && <div className="ag-call-meta">实际提问（多轮追问按规则补全）：{agent.question_sent}</div>}
     {agent.calls.length === 0 && <p className="ag-muted">没有调用任何工具，直接回答了。</p>}
-    {agent.calls.map((call) => <AgentCall key={call.call} call={call} fresh={fresh.perCall.get(call.call) ?? new Set()} evidenceChunks={evidenceChunks} />)}
+    {/* 按轮分组：同一轮里模型同时发出的几次调用放在一个框里，它们彼此看不到对方的结果。 */}
+    {groupByRound(agent.calls).map(([round, calls]) => <div key={round ?? "none"} className={`ag-round ${calls.length > 1 ? "is-parallel" : ""}`}>
+      <div className="ag-round-head">第 {round ?? "—"} 轮{calls.length > 1 ? <Tag size="sm" tone="warning">同时发出 {calls.length} 次，彼此看不到结果</Tag> : null}</div>
+      {calls.map((call) => <AgentCall key={call.call} call={call} fresh={fresh.perCall.get(call.call) ?? new Set()} evidenceChunks={evidenceChunks} />)}
+    </div>)}
+    {/* 预算用完或超时后，程序再让模型跑一轮不带工具的，直接写回答；这一轮没有检索。 */}
+    {agent.forced && <div className="ag-round-head">第 {agent.rounds} 轮<Tag size="sm" outline plain>{agent.stop_reason === "timeout" ? "时间到了" : "工具预算用完"}，不带工具直接回答，没有检索</Tag></div>}
   </section>;
+}
+
+// 把调用按轮次分组（保持原来的顺序）；旧记录没有轮次时每次调用单独一组。
+function groupByRound(calls: EvalAgentCall[]) {
+  const groups: [number | null, EvalAgentCall[]][] = [];
+  for (const call of calls) {
+    const last = groups[groups.length - 1];
+    if (last && call.round !== null && call.round !== undefined && last[0] === call.round) last[1].push(call);
+    else groups.push([call.round ?? null, [call]]);
+  }
+  return groups;
 }
 
 function AgentCall({ call, fresh, evidenceChunks }: { call: EvalAgentCall; fresh: Set<string>; evidenceChunks: Set<string> }) {
