@@ -401,8 +401,6 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
   const [launchModes, setLaunchModes] = useState<EvalMode[]>(["fixed"]);
   // 专项也能选模式：只对检索方式的专项生效，回答和多轮对话方式照常只跑固定流程。
   const [specialModes, setSpecialModes] = useState<EvalMode[]>(["fixed"]);
-  // 固定流程默认复用改写缓存（两次评测的检索词一样、可比）；勾选后这次重新让大模型改写。
-  const [refreshRewrite, setRefreshRewrite] = useState(false);
   const [launching, setLaunching] = useState(false);
 
   // 刷新评测列表时不再自动打开某条记录，让页面首次进入先展示历史表格。
@@ -474,7 +472,7 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
     setError("");
     try {
       if (launchMode === "special") {
-        const started = await startSpecialRun(pickedSuites, compareMemory, specialModes, refreshRewrite);
+        const started = await startSpecialRun(pickedSuites, compareMemory, specialModes);
         setSelectedId(started.id);
         await refreshRuns();
         onToast("success", "专项评测已启动。");
@@ -482,7 +480,7 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
       }
       const modes: EvalMode[] = launchKind === "retrieval" ? launchModes : ["fixed"];
       const suites = launchKind !== "retrieval" || !modes.includes("fixed") ? [] : launchSuites;
-      const started = await startEvalRun(launchKind, launchSplit, suites, modes, refreshRewrite);
+      const started = await startEvalRun(launchKind, launchSplit, suites, modes);
       setSelectedId(started.id);
       setDetailTab("overview");
       await refreshRuns();
@@ -579,7 +577,6 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
               <label className={`ev-radio-option ${specialModes.includes("agent") ? "is-selected" : ""}`}><input type="checkbox" checked={specialModes.includes("agent")} onChange={() => setSpecialModes((items) => items.includes("agent") ? items.filter((item) => item !== "agent") : [...items, "agent"])} />Agent</label>
               <span className="ev-option-description">只对检索方式的专项生效。勾 Agent 会调用大模型，每题几轮。{specialModes.includes("agent") && specialSuites.some((suite) => suite.method === "retrieval" && suite.search_mode !== "hybrid" && pickedSuites.includes(suite.id)) ? "选中的专项里有不是混合检索的：固定流程按专项的设置检索，Agent 自己选检索方式，两边比的不是同一件事。" : ""}</span>
             </div>}
-            {specialModes.includes("fixed") && <RefreshRewriteOption checked={refreshRewrite} onChange={setRefreshRewrite} />}
             {specialSuites?.some((suite) => suite.method === "dialogue" && pickedSuites.includes(suite.id)) && <div className="sp-switch-line">
               <button type="button" role="switch" aria-checked={compareMemory} className={`sp-switch ${compareMemory ? "is-on" : ""}`} onClick={() => setCompareMemory(!compareMemory)}><span /></button>
               <span>对比记忆参数：多轮对话专项除了当前设置，再把压缩阈值、保留条数各调大调小跑一遍（共 5 组），给「系统管理 › RAG 配置」的「对话记忆」提供依据。调用大模型次数是 5 倍。</span>
@@ -613,7 +610,6 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
               </div>
             </fieldset>
           </div>
-          {(launchKind === "generation" || launchModes.includes("fixed")) && <RefreshRewriteOption checked={refreshRewrite} onChange={setRefreshRewrite} />}
           {/* 生成评测只跑基线，先在界面层禁用检索实验组选项，避免用户提交无效组合。 */}
           {suites.map((suite) => {
             const suiteOff = launchKind !== "retrieval" || !launchModes.includes("fixed");
@@ -651,14 +647,6 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
 }
 
 // 历史评测首次读取时保持表格骨架，避免接口还没返回就显示“还没有评测记录”。
-// 固定流程的改写缓存开关：默认同一道题复用第一次的改写，勾选后重新改写（看改写本身的波动）。
-function RefreshRewriteOption({ checked, onChange }: { checked: boolean; onChange: (value: boolean) => void }) {
-  return <div className="ev-launch-option">
-    <label className="ev-check"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />重新改写</label>
-    <span className="ev-option-description"><span className="ev-description-label"><span className="ev-info-icon" aria-hidden="true">i</span>说明</span>：固定流程和线上一样先让大模型改写检索词。默认同一道题复用上次的改写（提示词或模型变了会自动重新改写），两次评测的检索词一样才好比；勾选后这次全部重新改写，用来看改写本身稳不稳定。</span>
-  </div>;
-}
-
 function RunHistorySkeleton() {
   return <LoadingSkeleton className="ev-loading-panel" label="正在加载评测记录">
     <div className="ev-skeleton-toolbar"><SkeletonBlock className="skeleton-title" /><SkeletonBlock className="skeleton-button" /></div>
@@ -797,7 +785,6 @@ function flowRewriteLabel(config: EvalRunBrief["config"]) {
   if (!flow) return (config.query_source ?? []).map((item) => (item === "rewrite_cache" ? "改写缓存" : "规则改写（旧口径）")).join("、") || "—";
   const parts = [`${flow.model} 改写 · 提示词 ${flow.intent_prompt}`];
   if (flow.rewrite_cached || flow.rewrite_fresh) parts.push(`缓存 ${flow.rewrite_cached} 题 · 新改写 ${flow.rewrite_fresh} 题`);
-  if (flow.refresh) parts.push("本次不用缓存");
   return parts.join(" · ");
 }
 

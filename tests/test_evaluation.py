@@ -503,9 +503,6 @@ def test_retrieval_full_flow_rewrite_cache_and_sufficiency(setup, eval_dir, monk
     assert len(rewrites) == called
     assert again["config"]["flow"]["rewrite_cached"] == 3 and again["summary"]["rewrite_cache_rate"] == 1.0
     assert again["questions"][0]["queries"] == first["queries"]
-    # 勾选重新改写：不读缓存，三道题重新调用模型。
-    execute_run(store, models, dataset_module.load_dataset(), start_run("retrieval", "dev", [], refresh_rewrite=True))
-    assert len(rewrites) == called + 3
     # 和旧记录（规则检索词、只检索）对比时提示检索口径不同。
     old = {**again, "config": {k: v for k, v in again["config"].items() if k != "flow"}}
     diff = {item["key"] for item in compare_runs(old, again)["settings_diff"]}

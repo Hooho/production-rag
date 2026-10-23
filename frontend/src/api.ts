@@ -780,8 +780,7 @@ export type EvalConfig = { split: string | null; suites: string[]; special?: { s
   // 检索评测跑了哪些模式（旧记录没有，都是只跑固定流程）；agent 是 Agent 的运行配置。
   modes?: EvalMode[]; agent?: { tool_budget: number; timeout: number; prompt_version: string; prompt_identity?: string; model: string | null };
   // 固定流程怎么跑的：name=full 是完整检索（改写 + 判断，旧记录没有，是规则检索词、只检索）。
-  flow?: { name: string; intent_prompt: string; model: string; refresh: boolean; rewrite_cached: number; rewrite_fresh: number; sufficiency: boolean };
-  refresh_rewrite?: boolean };
+  flow?: { name: string; intent_prompt: string; model: string; rewrite_cached: number; rewrite_fresh: number; sufficiency: boolean } };
 export type EvalRunBrief = {
   id: string;
   // memory 是以前单独的多轮对话评测（现在并入专项评测集），旧记录仍然能打开。
@@ -884,19 +883,19 @@ export function compareEvalRuns(base: string, target: string) {
 }
 
 // 在界面上发起一次评测：调参评测按 split 选开发集或留出集；专项评测按 suite_ids 选专项。
-export function startEvalRun(kind: "retrieval" | "generation", split: string, suites: string[], modes: EvalMode[] = ["fixed"], refreshRewrite = false) {
+export function startEvalRun(kind: "retrieval" | "generation", split: string, suites: string[], modes: EvalMode[] = ["fixed"]) {
   return request<{ id: string; status: string }>("/eval/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind, split, suites, modes, refresh_rewrite: refreshRewrite }),
+    body: JSON.stringify({ kind, split, suites, modes }),
   });
 }
 
-export function startSpecialRun(suiteIds: string[], compareMemory = false, modes: EvalMode[] = ["fixed"], refreshRewrite = false) {
+export function startSpecialRun(suiteIds: string[], compareMemory = false, modes: EvalMode[] = ["fixed"]) {
   return request<{ id: string; status: string }>("/eval/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind: "special", suite_ids: suiteIds, compare_memory: compareMemory, modes, refresh_rewrite: refreshRewrite }),
+    body: JSON.stringify({ kind: "special", suite_ids: suiteIds, compare_memory: compareMemory, modes }),
   });
 }
 

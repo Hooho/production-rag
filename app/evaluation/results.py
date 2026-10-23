@@ -340,11 +340,9 @@ def run_modes(run):
 
 # 新建一次评测记录并立即保存为 running，前端马上就能在列表里看到它和进度。
 # modes：检索评测跑哪些模式（fixed 固定流程、agent），可以只跑一个，也可以一起跑。
-# refresh_rewrite：固定流程不用改写缓存，重新让大模型改写（想看改写本身的波动时用）。
-def start_run(kind, split, suites, special=None, modes=("fixed",), refresh_rewrite=False):
+def start_run(kind, split, suites, special=None, modes=("fixed",)):
     commit = git_commit()
-    config = {"split": split, "suites": list(suites), "modes": [mode for mode in MODES if mode in modes],
-        "refresh_rewrite": bool(refresh_rewrite)}
+    config = {"split": split, "suites": list(suites), "modes": [mode for mode in MODES if mode in modes]}
     # 专项评测：要跑的专项（编号和名称）以及多轮对话是否对比记忆参数。
     if special is not None:
         config["special"] = special
@@ -399,15 +397,13 @@ def execute_run(store, models, items, run, generate=False, responder=None, agent
             return run
         split = run["config"]["split"]
         suites = run["config"]["suites"]
-        refresh = bool(run["config"].get("refresh_rewrite"))
         modes = run_modes(run)
         if "agent" in modes:
             # 勾选了 Agent：只跑 Agent，或者和固定流程一起跑（见 app/evaluation/agent_retrieval.py）。
             from .agent_retrieval import run_agent_retrieval
-            result = run_agent_retrieval(store, models, agent_mode, items, split, suites, "fixed" in modes, on_progress,
-                refresh=refresh)
+            result = run_agent_retrieval(store, models, agent_mode, items, split, suites, "fixed" in modes, on_progress)
         else:
-            result = run_retrieval(store, models, items, split, suites, on_progress, on_item, refresh)
+            result = run_retrieval(store, models, items, split, suites, on_progress, on_item)
         result["config"]["modes"] = modes
         run.update(result)
         if generate:

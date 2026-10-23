@@ -240,8 +240,7 @@ def agent_config(models):
 
 
 # 运行 Agent 检索评测。with_fixed=True 时固定流程照常跑全套，Agent 接在每道基线题后面跑。
-def run_agent_retrieval(store, models, agent_mode, items, split, suites=(), with_fixed=True, on_progress=None,
-        refresh=False):
+def run_agent_retrieval(store, models, agent_mode, items, split, suites=(), with_fixed=True, on_progress=None):
     state = {}
 
     def texts():
@@ -255,7 +254,7 @@ def run_agent_retrieval(store, models, agent_mode, items, split, suites=(), with
         def on_item(item, row, retrieval):
             row["agent"] = evaluate_agent(agent_mode, store, models, item, texts(), state["positions"])
 
-        result = run_retrieval(store, models, items, split, suites, on_progress, on_item, refresh)
+        result = run_retrieval(store, models, items, split, suites, on_progress, on_item)
         rows = result["questions"]
         result["comparison"] = compare_rows(rows)
     else:

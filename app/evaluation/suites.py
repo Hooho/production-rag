@@ -254,7 +254,7 @@ def method_ranks(row, chunk_id):
 
 # 按指定的几路检索逐题跑固定流程并打分，和调参评测用同一套（evaluate_items：改写 → 检索 → 充分性判断 → 补充检索）。
 # 专项题都是独立的完整问题，改写一般只是拆检索词；改写结果同样走缓存。
-def search_items(store, models, items, methods, progress, on_item=None, refresh=False):
+def search_items(store, models, items, methods, progress, on_item=None):
     from .retrieval import evaluate_items, flow_config
     import_corpus(store, models)
     chunk_texts = current_chunk_texts(store)
@@ -267,30 +267,30 @@ def search_items(store, models, items, methods, progress, on_item=None, refresh=
         done[0] += 1
         progress(done[0])
 
-    rows = evaluate_items(store, models, items, chunk_texts, {"methods": methods}, True, advance, {}, refresh, True)
+    rows = evaluate_items(store, models, items, chunk_texts, {"methods": methods}, True, advance, {}, True)
     config = {}
     if rows:
         used = rows[-1]["diagnostics"]["config"]
         config = {"pool_size": pool_size, "return_limit": used.get("return_limit"), "min_score": used.get("min_score"),
-            "reranked": used.get("reranked"), "flow": flow_config(models, rows, refresh)}
+            "reranked": used.get("reranked"), "flow": flow_config(models, rows)}
     return rows, config
 
 
 # 检索、回答方式：把专项题目当成调参题跑同一套检索（可选再回答），逐题整理成专项结果。
-def run_search_suite(store, models, suite, responder, run_id, progress, modes=("fixed",), agent_mode=None, refresh=False):
+def run_search_suite(store, models, suite, responder, run_id, progress, modes=("fixed",), agent_mode=None):
     # 检索方式的专项可以选模式：只跑固定流程（原来的样子）、只跑 Agent，或者两个一起跑逐题对比。
     # 回答方式只有固定流程（Agent 的答案还不评分）。
     if suite["method"] != "retrieval":
         modes = ("fixed",)
     if "agent" in modes:
-        return run_agent_search_suite(store, models, suite, progress, modes, agent_mode, refresh)
+        return run_agent_search_suite(store, models, suite, progress, modes, agent_mode)
     items = []
     for item in suite["items"]:
         items.append({"id": item["id"], "question": item["question"], "type": "事实", "answerable": True,
             "evidence": item.get("evidence") or [], "reference_answer": item.get("reference_answer") or "",
             "split": "dev", "reviewed": True})
     on_item = answer_hook(store, models, responder, run_id) if suite["method"] == "answer" else None
-    rows, config = search_items(store, models, items, SEARCH_METHODS[suite["search_mode"]], progress, on_item, refresh)
+    rows, config = search_items(store, models, items, SEARCH_METHODS[suite["search_mode"]], progress, on_item)
     questions = []
     dense_found = keyword_found = evidence_total = 0
     for item, row in zip(items, rows):
@@ -341,13 +341,13 @@ def run_search_suite(store, models, suite, responder, run_id, progress, modes=("
 # 检索方式的专项跑 Agent（app/evaluation/agent_retrieval.py 同一套）：每题让 Agent 跑一遍，证据全部拿到算通过。
 # 和固定流程一起跑时，先按原来的方式跑固定流程，再逐题接上 Agent；每题记 fixed_passed、agent_passed 和对比分类，
 # passed 仍表示固定流程是否通过（只跑 Agent 时就是 Agent 是否通过），专项的通过数和以前的记录口径一致。
-def run_agent_search_suite(store, models, suite, progress, modes, agent_mode, refresh=False):
+def run_agent_search_suite(store, models, suite, progress, modes, agent_mode):
     from .agent_retrieval import agent_config, chunk_positions, evaluate_agent
     with_fixed = "fixed" in modes
     total = len(suite["items"])
     if with_fixed:
         fixed_section, config = run_search_suite(store, models, suite, None, None,
-            lambda done: progress(done), ("fixed",), refresh=refresh)
+            lambda done: progress(done), ("fixed",))
         fixed_by_id = {question["id"]: question for question in fixed_section["questions"]}
     else:
         import_corpus(store, models)
@@ -439,8 +439,7 @@ def run_special(store, models, run, on_progress, responder, agent_mode=None):
             section = run_dialogue_suite(store, models, suite, run["id"], compare, progress)
             offset[0] += len(suite["items"]) * len(memory_suites_variants(compare))
         else:
-            section, config = run_search_suite(store, models, suite, responder, run["id"], progress, modes, agent_mode,
-                bool(run["config"].get("refresh_rewrite")))
+            section, config = run_search_suite(store, models, suite, responder, run["id"], progress, modes, agent_mode)
             search_config = config or search_config
             offset[0] += len(suite["items"]) * (len(modes) if suite["method"] == "retrieval" else 1)
         passed = sum(1 for question in section["questions"] if question["passed"])

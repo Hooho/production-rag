@@ -84,8 +84,6 @@ class EvalRunInput(BaseModel):
     compare_memory: bool = False
     # 检索评测跑哪些模式：fixed 固定流程、agent（Agent 自己决定怎么检索）；可以只跑一个，也可以一起跑。
     modes: list[Literal["fixed", "agent"]] = Field(default_factory=lambda: ["fixed"], min_length=1, max_length=2)
-    # 固定流程的检索词默认复用改写缓存（两次评测可比）；勾选后重新让大模型改写，用来看改写本身的波动。
-    refresh_rewrite: bool = False
 
 
 # 手动录入一道评测题；编号、来源和审核状态由服务端统一生成，避免客户端伪造元数据。
@@ -1828,7 +1826,7 @@ def create_app(store=None, models=None, jwt_secret=None):
             raise HTTPException(409, "已有评测正在运行，请等待完成")
         try:
             run = start_run(body.kind, None if special else body.split, body.suites, special,
-                body.modes if body.kind in ("retrieval", "special") else ("fixed",), body.refresh_rewrite)
+                body.modes if body.kind in ("retrieval", "special") else ("fixed",))
         except Exception:
             app.state.eval_lock.release()
             raise

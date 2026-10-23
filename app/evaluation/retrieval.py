@@ -486,18 +486,18 @@ def return_limit_sweep(rows, threshold, pool_size):
 # 对一组题执行一次检索并打分；options 是传给 DocumentSearchTool 的变体参数。
 # 逐题跑固定流程并打分（见 app/evaluation/flow.py）：改写 → 第一次检索 →（judge=True 时）充分性判断 + 补充检索。
 # rewrites：题目编号 → 改写结果。基线跑的时候填进去，参数变体复用同一批检索词，只换检索参数、不做判断，
-# 这样变体和基线的差别只来自参数。refresh=True 时不用改写缓存。
+# 这样变体和基线的差别只来自参数。
 # 耗时：latency_ms 只算第一次检索（调参看这个，和旧记录可比）；flow_latency_ms 是改写 + 检索 + 判断的总耗时
 # （用了改写缓存时，改写按当时实际花的时间算），和 Agent 比耗时用它。
 def evaluate_items(store, models, items, chunk_texts, options, keep_diagnostics, on_item=None, rewrites=None,
-        refresh=False, judge=False):
+        judge=False):
     tool = DocumentSearchTool()
     pool_size = options.get("pool_size") or runtime_snapshot()["rerank_candidates"]
     rows = []
     for item in items:
         rewrite = (rewrites or {}).get(item["id"])
         if rewrite is None:
-            rewrite = rewrite_item(store, models, item, refresh)
+            rewrite = rewrite_item(store, models, item)
             if rewrites is not None:
                 rewrites[item["id"]] = rewrite
         queries, rerank_query = rewrite["queries"], rewrite["standalone_query"]
@@ -530,18 +530,18 @@ def evaluate_items(store, models, items, chunk_texts, options, keep_diagnostics,
 
 # 这次固定流程怎么跑的：完整检索（改写 + 判断）、改写用了几题缓存、意图提示词版本、模型、充分性判断是否启用。
 # 对比两次评测时据此提示"检索口径不同"（旧记录没有 flow，是规则检索词、只检索）。
-def flow_config(models, rows, refresh):
+def flow_config(models, rows):
     from .. import prompts
     rewrites = [row.get("rewrite") or {} for row in rows]
     llm = [item for item in rewrites if item.get("classifier") == "llm"]
-    return {"name": "full", "intent_prompt": prompts.tag("intent"), "model": models.llm_model, "refresh": bool(refresh),
+    return {"name": "full", "intent_prompt": prompts.tag("intent"), "model": models.llm_model,
         "rewrite_cached": sum(1 for item in llm if item.get("cached")), "rewrite_fresh": sum(1 for item in llm if not item.get("cached")),
         "sufficiency": models.mode == "openai" and bool(runtime_snapshot()["sufficiency_check"])}
 
 
 # 运行一次完整的检索评测：导入语料 → 基线逐题评测 → 汇总、分组、漏斗、阈值扫描 → 可选的消融与参数对比。
 # on_progress(已完成, 总数) 用于把进度写回结果文件，前端据此显示进度条。
-def run_retrieval(store, models, items, split, suites=(), on_progress=None, on_item=None, refresh=False):
+def run_retrieval(store, models, items, split, suites=(), on_progress=None, on_item=None):
     corpus = import_corpus(store, models)
     chunk_texts = current_chunk_texts(store)
     selected = select_split(items, split)
@@ -564,7 +564,7 @@ def run_retrieval(store, models, items, split, suites=(), on_progress=None, on_i
         advance()
 
     rewrites = {}
-    rows = evaluate_items(store, models, selected, chunk_texts, {}, True, advance_baseline, rewrites, refresh, True)
+    rows = evaluate_items(store, models, selected, chunk_texts, {}, True, advance_baseline, rewrites, True)
     # 重排关闭或调用失败时没有相关性阈值，也无法做阈值扫描；配置里如实记录，避免把"未过滤"误读成"阈值很低"。
     min_score = None
     reranked = False
@@ -592,7 +592,7 @@ def run_retrieval(store, models, items, split, suites=(), on_progress=None, on_i
         "model_mode": models.mode, "embedding_mode": models.embedding_mode,
         "embedding_model": models.embedding_model, "rerank_model": models.rerank_model,
         "rerank_mode": "local" if settings["rerank_enabled"] else "off", "query_source": sorted(query_sources),
-        "flow": flow_config(models, rows, refresh),
+        "flow": flow_config(models, rows),
         "corpus": corpus, "settings": settings}
     return {"config": config, "summary": summarize(rows), "by_type": summarize_by_type(rows),
         "funnel": funnel(rows), "sweep": threshold_sweep(rows, settings["return_limit"]) if reranked else [],

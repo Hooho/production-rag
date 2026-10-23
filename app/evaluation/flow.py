@@ -38,14 +38,13 @@ def rewrite_view(analysis, question):
 # 改写一道题：和线上意图识别同一个函数（规则 → 本地小模型 → 大模型 → 规则兜底），只取检索词和补全后的问题；
 # 分流结果（route）只记录，不影响检索（评测题都是知识题）。
 # 返回 queries、standalone_query、route、intent、classifier、cached（是否用了缓存）、duration_ms、prompt_tag。
-# refresh=True 时不读缓存，重新改写后覆盖缓存（想看改写本身的波动时用）。
-def rewrite_item(store, models, item, refresh=False):
+def rewrite_item(store, models, item):
     question = item["question"]
     history = item_history(item)
     prompt_tag = prompts.tag("intent")
     use_cache = models.mode == "openai"
     key = rewrite_key(question, history, prompt_tag, models.llm_model, models.intent_mode) if use_cache else None
-    if use_cache and not refresh:
+    if use_cache:
         with store.engine.connect() as connection:
             row = connection.execute(select(eval_query_cache).where(eval_query_cache.c.cache_key == key)).mappings().first()
         if row is not None:
