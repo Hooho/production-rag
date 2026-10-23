@@ -436,7 +436,7 @@ function AgentLog({ question }: { question: EvalQuestion }) {
       {calls.map((call) => <AgentCall key={call.call} call={call} fresh={fresh.perCall.get(call.call) ?? new Set()} evidenceChunks={evidenceChunks} />)}
     </div>)}
     {/* 预算用完或超时后，程序再让模型跑一轮不带工具的，直接写回答；这一轮没有检索。 */}
-    {agent.forced && <div className="ag-round-head">第 {agent.rounds} 轮<Tag size="sm" outline plain>{agent.stop_reason === "timeout" ? "时间到了" : "工具预算用完"}，不带工具直接回答，没有检索</Tag></div>}
+    {agent.forced && <div className="ag-round"><div className="ag-round-head">第 {agent.rounds} 轮<Tag size="sm" outline plain>{agent.stop_reason === "timeout" ? "时间到了" : "工具预算用完"}，不带工具直接回答，没有检索</Tag></div></div>}
   </section>;
 }
 

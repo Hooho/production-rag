@@ -8097,10 +8097,13 @@ input:focus {
    cursor: pointer;
 }
 
-/* Agent 日志按轮分组：每轮一个标题；同一轮同时发出多次调用时用橙色虚线框圈起来。 */
+/* Agent 日志按轮分组：每一轮都用虚线框圈起来（框里是同一轮的调用）；同一轮同时发出多次调用时虚线框是橙色。 */
 .ag-round {
    display: grid;
    gap: 8px;
+   padding: 8px;
+   border: 1px dashed var(--ev-line);
+   border-radius: 8px;
 }
 
 .ag-round + .ag-round {
@@ -8117,8 +8120,7 @@ input:focus {
 }
 
 .ag-round.is-parallel {
-   padding: 8px;
-   border: 1px dashed var(--tone-warning-border);
+   border-color: var(--tone-warning-border);
    border-radius: 8px;
    background: rgba(255, 244, 229, .35);
 }
