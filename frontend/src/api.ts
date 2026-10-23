@@ -780,7 +780,9 @@ export type EvalConfig = { split: string | null; suites: string[]; special?: { s
   // 检索评测跑了哪些模式（旧记录没有，都是只跑固定流程）；agent 是 Agent 的运行配置。
   modes?: EvalMode[]; agent?: { tool_budget: number; timeout: number; prompt_version: string; prompt_identity?: string; model: string | null };
   // 固定流程怎么跑的：name=full 是完整检索（改写 + 判断，旧记录没有，是规则检索词、只检索）。
-  flow?: { name: string; intent_prompt: string; model: string; rewrite_cached: number; rewrite_fresh: number; sufficiency: boolean } };
+  flow?: { name: string; intent_prompt: string; model: string; rewrite_cached: number; rewrite_fresh: number; sufficiency: boolean };
+  // 这次评测用的全部设置页参数（评测记录里比较「参数改过」用）。
+  settings?: Record<string, unknown> };
 export type EvalRunBrief = {
   id: string;
   // memory 是以前单独的多轮对话评测（现在并入专项评测集），旧记录仍然能打开。

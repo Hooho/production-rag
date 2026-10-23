@@ -203,6 +203,11 @@ function formatTime(value: string) {
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+// 参数的中文名（评测记录里提示「参数改过」时用）。
+export function settingLabel(key: string) {
+  return META[key]?.label ?? key;
+}
+
 export default function SystemSettings({ page, onToast }: { page: "rag" | "system"; onToast: ShowToast }) {
   const [data, setData] = useState<RuntimeSettingsView | null>(null);
   // 每组各自的未保存修改：{参数: 新值}，null 表示恢复默认。

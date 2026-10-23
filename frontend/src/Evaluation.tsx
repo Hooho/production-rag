@@ -10,6 +10,7 @@ import { durationTitle, formatDuration as formatMs, formatDurationDelta } from "
 import { AgentPanel, ComparePanel, modesLabel, rewriteLabel, runModes } from "./AgentEval";
 import { HueTag, Tag } from "./Tag";
 import { runStatus } from "./tags";
+import { settingLabel } from "./SystemSettings";
 
 export type EvaluationSection = "history" | "dataset" | "special" | "regression";
 type TopTab = EvaluationSection;
@@ -1366,6 +1367,49 @@ function HistoryMetric({ label, value, hint }: { label: string; value: string; h
 }
 
 // 历次评测记录：选中两次查看逐项对比。
+// 评测记录的「结果」列：每次最主要的那个数。调参检索看最终交给模型的命中率，生成看正确性，专项看通过数；
+// 两种模式一起跑时两边各写一个。没跑完的显示「—」。
+function runResult(item: EvalRunBrief) {
+  const summary = (item.summary ?? {}) as Record<string, number | null | undefined>;
+  if (item.status !== "completed" || !item.summary) return "—";
+  const modes = runModes(item);
+  const both = modes.includes("fixed") && modes.includes("agent");
+  if (item.kind === "special") {
+    const passed = `${summary.passed ?? 0} / ${summary.count ?? 0}`;
+    if (both) return `固定流程 ${passed} · Agent ${summary.agent_passed ?? 0} / ${summary.count ?? 0}`;
+    return `${modes[0] === "agent" ? "Agent " : ""}通过 ${passed}`;
+  }
+  if (item.kind === "generation") return `正确性 ${formatPercent(summary.correctness)}`;
+  if (item.kind === "retrieval") {
+    const fixed = formatPercent(summary.recall_given ?? summary.recall_final);
+    if (both) return `固定流程 ${fixed} · Agent ${formatPercent(summary.agent_recall)}`;
+    return modes[0] === "agent" ? `Agent 命中 ${formatPercent(summary.agent_recall)}` : `命中 ${fixed}`;
+  }
+  return "—";
+}
+
+// 和上一次同类评测比，参数改过哪些（设置页参数、改写提示词和模型、Agent 提示词和模型）；没改过返回空数组。
+// 参数平时不怎么改，表格里不再每行列出参数，只在改过时提示。
+function settingsChanges(item: EvalRunBrief, runs: EvalRunBrief[]) {
+  const index = runs.findIndex((run) => run.id === item.id);
+  const previous = runs.slice(index + 1).find((run) => run.kind === item.kind && run.status === "completed" && run.config.settings);
+  if (!previous || !item.config.settings) return [];
+  const changes: string[] = [];
+  const before = previous.config.settings as Record<string, unknown>;
+  const after = item.config.settings as Record<string, unknown>;
+  for (const key of Object.keys(after)) {
+    if (key in before && JSON.stringify(before[key]) !== JSON.stringify(after[key])) changes.push(`${settingLabel(key)} ${String(before[key])} → ${String(after[key])}`);
+  }
+  const pairs: [string, unknown, unknown][] = [
+    ["改写提示词", previous.config.flow?.intent_prompt, item.config.flow?.intent_prompt],
+    ["改写模型", previous.config.flow?.model, item.config.flow?.model],
+    ["Agent 提示词", previous.config.agent?.prompt_version, item.config.agent?.prompt_version],
+    ["Agent 模型", previous.config.agent?.model, item.config.agent?.model],
+  ];
+  for (const [label, from, to] of pairs) if (from && to && from !== to) changes.push(`${label} ${String(from)} → ${String(to)}`);
+  return changes;
+}
+
 function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: (id: string) => void; onDelete: (id: string) => Promise<void> }) {
   const [picked, setPicked] = useState<string[]>([]);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -1427,7 +1471,7 @@ function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: 
     </div>
     <div className="diag-table-wrap ev-history-table-wrap"><table className="diag-table ev-table ev-history-table">
       {/* 历史记录只保留运行结果相关字段；提交号属于构建元数据，移除后给题数、配置和状态留出空间。 */}
-      <thead><tr><th>对比</th><th>时间</th><th>类型</th><th>范围</th><th>题数</th><th>参数</th><th>平均耗时</th><th>状态</th><th /></tr></thead>
+      <thead><tr><th>对比</th><th>时间</th><th>类型</th><th>范围</th><th>题数</th><th>结果</th><th>耗时</th><th>状态</th><th /></tr></thead>
       <tbody>{runs.map((item) => {
         const metricsExpanded = expandedMetricRuns.includes(item.id);
         // 指标说明所需统计已随历史列表返回，展开行只做本地渲染，不再触发逐条详情请求。
@@ -1458,11 +1502,10 @@ function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: 
           <tr className={`ev-history-main-row ${picked.includes(item.id) ? "is-current" : ""}`} tabIndex={0} aria-expanded={metricsExpanded} aria-controls={`history-metrics-${item.id}`} title="点击展开或收起指标" onClick={() => toggleMetrics(item.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleMetrics(item.id); } }}>
             <td><input type="checkbox" aria-label={`选择 ${item.id}`} checked={picked.includes(item.id)} disabled={item.status !== "completed"} onClick={(event) => event.stopPropagation()} onChange={() => toggle(item.id)} /></td>
             <td className="ev-history-time">{formatTime(item.created)}</td><td><span className="tag-row"><HueTag label={KIND_LABELS[item.kind]} />{(item.kind === "retrieval" || item.kind === "special") && runModes(item).includes("agent") && runModes(item).map((mode) => <HueTag key={mode} label={mode === "agent" ? "Agent" : "固定流程"} />)}</span></td><td>{item.kind === "special" ? (item.config.special?.suites ?? []).map((suite) => suite.name).join("、") : SPLIT_LABELS[item.config.split ?? ""] ?? item.config.split}</td><td className="num ev-history-number">{item.kind === "special" ? item.summary?.count ?? "—" : item.config.dataset_size ?? "—"}</td>
-            {/* 参数列只放这次用的检索参数；结果（通过数、指标）在状态列和展开的面板里。运行中还没记下参数时显示「—」。 */}
-            {item.kind === "special" ? <td className="ev-config-cell">{item.config.special?.compare_memory ? "对比记忆参数" : "—"}</td>
-              : <td className="ev-config-cell">{item.config.pool_size === undefined || item.config.pool_size === null ? "—" : <>候选池 {item.config.pool_size} · 阈值 {item.config.reranked === false ? "未启用" : formatScore(item.config.min_score ?? null, 2)}{item.config.suites.length ? ` · 含${item.config.suites.map((suite) => (suite === "ablation" ? "消融" : "参数")).join("、")}` : ""}</>}</td>}
-            <td className="num ev-history-latency" title={durationTitle(item.summary?.latency_avg_ms ?? item.summary?.agent_latency_avg_ms)}>{formatMs(item.summary?.latency_avg_ms ?? item.summary?.agent_latency_avg_ms)}</td>
-            <td><span className="tag-row"><Tag dot tone={runStatus(item.status).tone}>{runStatus(item.status).label}{item.status === "running" ? ` ${progressPercent(item)}%` : ""}</Tag>{item.kind === "special" && item.status === "completed" && item.summary && <small className="ev-history-pass">通过 {item.summary.passed ?? 0} / {item.summary.count ?? 0}</small>}</span></td>
+            {/* 结果列：每次最主要的那个数；参数平时不变，只在和上一次同类评测不一样时标「参数改过」，鼠标放上去看改了什么。 */}
+            <td className="ev-result-cell"><span className="tag-row"><span>{runResult(item)}</span>{(() => { const changes = settingsChanges(item, runs); return changes.length > 0 && <Tag size="sm" tone="warning" title={changes.join("\n")}>参数改过</Tag>; })()}</span></td>
+            <td className="num ev-history-latency" title={durationTitle(item.summary?.flow_latency_avg_ms ?? item.summary?.latency_avg_ms ?? item.summary?.agent_latency_avg_ms)}>{formatMs(item.summary?.flow_latency_avg_ms ?? item.summary?.latency_avg_ms ?? item.summary?.agent_latency_avg_ms)}</td>
+            <td><span className="tag-row"><Tag dot tone={runStatus(item.status).tone}>{runStatus(item.status).label}{item.status === "running" ? ` ${progressPercent(item)}%` : ""}</Tag></span></td>
             <td><div className="ev-history-actions"><button className="ev-link ev-expand-link" aria-expanded={metricsExpanded} onClick={(event) => { event.stopPropagation(); toggleMetrics(item.id); }}>{item.kind === "special" ? "各专项" : "指标"} {metricsExpanded ? "▴" : "▾"}</button><button className="ev-link" onClick={(event) => { event.stopPropagation(); onOpen(item.id); }}>查看</button><button className="ev-delete-link" disabled={item.status === "running" || deletingId === item.id} title={item.status === "running" ? "评测运行中，不能删除" : "删除这条评测记录"} onClick={(event) => { event.stopPropagation(); void remove(item); }}>{deletingId === item.id ? "删除中…" : "删除"}</button></div></td>
           </tr>
           {metricsExpanded && item.kind === "special" && <tr id={`history-metrics-${item.id}`} className="ev-history-metrics-row">
