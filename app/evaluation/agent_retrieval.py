@@ -134,6 +134,13 @@ def evaluate_agent(agent_mode, store, models, item, chunk_texts, positions=None)
     for chunk_id, indexes in evidence_hits([{"chunk_id": chunk_id} for chunk_id in chunk_texts], evidence, chunk_texts).items():
         for index in indexes:
             evidence_chunks.setdefault(index, []).append(chunk_id)
+    # 每次调用新拿到了几个分块（之前的调用没拿到过的）。一次检索一个新分块都没有，就是白查了：
+    # 用来看 Agent 是不是在简单题上查得太多（同一批分块反复拿回来）。空检索也算没有新增。
+    seen = set()
+    for entry in calls:
+        fresh = [chunk_id for chunk_id in dict.fromkeys(entry["chunk_ids"]) if chunk_id not in seen]
+        entry["new_chunks"] = len(fresh)
+        seen.update(fresh)
     searches = [entry for entry in calls if entry["name"] == "search_knowledge" and entry["status"] in ("ok", "error")]
     chunks = {chunk_id for entry in calls for chunk_id in entry["chunk_ids"]}
     usage = outcome.get("usage") or {}
@@ -148,6 +155,7 @@ def evaluate_agent(agent_mode, store, models, item, chunk_texts, positions=None)
             "found": index in found, "where": where[index]} for index, text in enumerate(evidence)],
         "calls": calls, "returned": len(chunks),
         "searches": len(searches), "empty_searches": sum(1 for entry in searches if not entry.get("results")),
+        "wasted_searches": sum(1 for entry in searches if entry["new_chunks"] == 0),
         "queries": [entry.get("query") for entry in searches],
         "reads": sum(1 for entry in calls if entry["name"] == "read_context" and entry["status"] == "ok"),
         "duplicates": sum(1 for entry in calls if entry["status"] == "duplicate"),
@@ -187,6 +195,11 @@ def summarize_agent(rows):
         "agent_false_reject_rate": rate(answerable, lambda agent: agent["returned"] == 0),
         "agent_false_accept_rate": rate(unanswerable, lambda agent: agent["returned"] > 0),
         "agent_avg_searches": average("searches"), "agent_avg_empty_searches": average("empty_searches"),
+        # 无新增检索：一个新分块都没拿到的检索。比例 = 无新增检索次数 / 全部检索次数，越低越好。
+        "agent_avg_wasted_searches": mean([agent.get("wasted_searches", 0) for agent in agents]),
+        "agent_wasted_searches": sum(agent.get("wasted_searches", 0) for agent in agents),
+        "agent_wasted_rate": (round(sum(agent.get("wasted_searches", 0) for agent in agents)
+            / sum(agent["searches"] for agent in agents), 4) if sum(agent["searches"] for agent in agents) else None),
         "agent_avg_reads": average("reads"), "agent_avg_tool_calls": average("tool_calls"),
         "agent_avg_rounds": average("rounds"), "agent_duplicates": sum(agent["duplicates"] for agent in agents),
         "agent_forced": sum(1 for agent in agents if agent["forced"]),

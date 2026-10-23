@@ -16,6 +16,7 @@ from test_evaluation import eval_dir, fake_rerank, headers  # noqa: F401  pytest
 def scripted_agent(client):
     model = ScriptedModel(
         reply(calls=[tool_call("c1", "search_knowledge", query="耳机签收后几天内可以退货")]),
+        reply(calls=[tool_call("c2", "search_knowledge", query="耳机签收后几天内可以退货吗")]),
         reply("签收后七天内可以退货 [S1]。"),
         reply("资料中没有找到保修期。"),
         reply("资料中没有找到天气信息。"))
@@ -39,24 +40,27 @@ def test_agent_retrieval_runs_with_fixed(setup, eval_dir, monkeypatch):
 
     first, second, third = run["questions"]
     agent = first["agent"]
-    assert agent["recall"] == 1.0 and agent["searches"] == 1 and agent["empty_searches"] == 0
-    assert agent["queries"] == ["耳机签收后几天内可以退货"]
+    assert agent["recall"] == 1.0 and agent["searches"] == 2 and agent["empty_searches"] == 0
+    assert agent["queries"] == ["耳机签收后几天内可以退货", "耳机签收后几天内可以退货吗"]
+    # 第二次检索拿回的分块第一次都拿到过：没有新增，算一次无新增检索。
+    assert agent["calls"][0]["new_chunks"] > 0 and agent["calls"][1]["new_chunks"] == 0 and agent["wasted_searches"] == 1
     call = agent["calls"][0]
     assert call["name"] == "search_knowledge" and call["arguments"]["query"] == "耳机签收后几天内可以退货"
     assert isinstance(call["duration_ms"], int)
     assert call["results"][0]["evidence_id"] == "S1" and call["results"][0]["hits"] == [0] and call["hits"] == [0]
     assert agent["evidence"][0] == {"text": "耳机签收后七天内可以无理由退货", "found": True,
         "chunk_ids": [call["results"][0]["chunk_id"]], "positions": [call["results"][0]["position"]],
-        "where": [{"call": 1, "evidence_id": "S1"}]}
+        "where": [{"call": 1, "evidence_id": "S1"}, {"call": 2, "evidence_id": "S1"}]}
     assert isinstance(call["results"][0]["position"], int)
-    assert agent["rounds"] == 2 and agent["tool_calls"] == 1 and agent["prompt_tokens"] == 200
+    assert agent["rounds"] == 3 and agent["tool_calls"] == 2 and agent["prompt_tokens"] == 300
     assert agent["answer"] == "签收后七天内可以退货 [S1]。"
     assert second["agent"]["recall"] == 0 and second["agent"]["returned"] == 0 and second["agent"]["calls"] == []
     assert third["agent"]["recall"] is None
 
     summary = run["summary"]
     assert summary["agent_recall"] == 0.5 and summary["agent_false_reject_rate"] == 0.5
-    assert summary["agent_false_accept_rate"] == 0.0 and summary["agent_avg_tool_calls"] == round(1 / 3, 4)
+    assert summary["agent_false_accept_rate"] == 0.0 and summary["agent_avg_tool_calls"] == round(2 / 3, 4)
+    assert summary["agent_wasted_searches"] == 1 and summary["agent_wasted_rate"] == 0.5
     assert summary["agent_cache_hit_rate"] == 0.8 and summary["agent_failed"] == 0
     assert run["by_type"]["事实"]["agent_recall"] == 1.0 and "recall_final" in run["by_type"]["事实"]
     assert first["compare"] == "both" and second["compare"] == "fixed_only" and "compare" not in third

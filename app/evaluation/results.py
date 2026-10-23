@@ -46,6 +46,7 @@ METRICS = [
     ("agent_false_reject_rate", "Agent 误杀率", "lower"),
     ("agent_false_accept_rate", "Agent 漏放率", "lower"),
     ("agent_avg_tool_calls", "Agent 平均工具调用次数", "lower"),
+    ("agent_wasted_rate", "Agent 无新增检索比例", "lower"),
     ("agent_avg_prompt_tokens", "Agent 平均输入 token", "lower"),
     ("agent_latency_avg_ms", "Agent 平均耗时（毫秒）", "lower"),
 ]

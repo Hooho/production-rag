@@ -8054,3 +8054,31 @@ input:focus {
    font-size: 12px;
    line-height: 1.7;
 }
+
+/* 每次调用的新增分块：新增是绿色，无新增是橙色（白查了）。前面调用已经拿到过的分块标签用虚线框。 */
+.ag-tag.is-new {
+   border-color: var(--ev-good);
+   color: #24684a;
+   background: #eef9f3;
+}
+
+.ag-tag.is-waste {
+   border-color: var(--ev-warn);
+   color: #8a5f12;
+   background: #fff6e3;
+}
+
+.ag-chunk-tab.is-repeat {
+   border-style: dashed;
+   opacity: .75;
+}
+
+.ag-search-cell {
+   display: grid;
+   gap: 2px;
+}
+
+.ag-search-cell small {
+   color: var(--ev-warn);
+   font-size: 11px;
+}

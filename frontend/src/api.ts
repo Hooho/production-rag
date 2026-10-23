@@ -690,6 +690,8 @@ export type EvalAgentCall = {
   text?: string;
   read_hits?: number[];
   positions?: number[];
+  // 这次调用新拿到的分块数（之前的调用没拿到过的）；0 表示白查了。旧记录没有，页面按 chunk_ids 现算。
+  new_chunks?: number;
   note?: string;
   error?: string;
 };
@@ -706,6 +708,8 @@ export type EvalAgentQuestion = {
   returned: number;
   searches: number;
   empty_searches: number;
+  // 一个新分块都没拿到的检索次数（旧记录没有）。
+  wasted_searches?: number;
   queries: (string | null)[];
   reads: number;
   duplicates: number;

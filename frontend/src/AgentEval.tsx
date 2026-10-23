@@ -80,6 +80,7 @@ export function ComparePanel({ run }: { run: EvalRun }) {
     ["误杀率", percent(summary.false_reject_rate), percent(summary.agent_false_reject_rate), "能回答的题里，一段资料都没拿到的比例（越低越好）"],
     ["漏放率", percent(summary.false_accept_rate), percent(summary.agent_false_accept_rate), "无法回答的题里，仍然拿到了资料的比例（越低越好）"],
     ["平均检索次数", "1", number(summary.agent_avg_searches), "固定流程每题检索一次；Agent 自己决定查几次"],
+    ["平均无新增检索", "—", number(summary.agent_avg_wasted_searches), `Agent 的检索里，一个新分块都没拿到的次数（反复拿回同一批分块，越低越好）；占全部检索 ${percent(summary.agent_wasted_rate)}`],
     ["平均耗时", formatMs(summary.latency_avg_ms), formatMs(summary.agent_latency_avg_ms), "固定流程只算检索（召回 + 重排）；Agent 包括多轮模型调用和写回答"],
     ["平均输入 token", "0", number(summary.agent_avg_prompt_tokens, 0), "固定流程检索不调用大模型"],
   ];
@@ -122,6 +123,7 @@ export function AgentPanel({ run }: { run: EvalRun }) {
     <div className="ev-section-title">检索过程<small>每题平均</small></div>
     <div className="ev-cards">
       <Card label="检索次数" value={number(summary.agent_avg_searches)} note={`其中空检索 ${number(summary.agent_avg_empty_searches)} 次`} />
+      <Card label="无新增检索" value={number(summary.agent_avg_wasted_searches)} note={`一个新分块都没拿到的检索，占全部检索 ${percent(summary.agent_wasted_rate)}（越低越好）`} />
       <Card label="读前后文" value={number(summary.agent_avg_reads)} />
       <Card label="工具调用" value={number(summary.agent_avg_tool_calls)} note={`重复调用被拦下 ${summary.agent_duplicates ?? 0} 次`} />
       <Card label="模型轮数" value={number(summary.agent_avg_rounds)} note={`强制回答 ${summary.agent_forced ?? 0} 题 · 引用重写 ${summary.agent_citation_retried ?? 0} 题`} />
@@ -143,6 +145,21 @@ export function AgentPanel({ run }: { run: EvalRun }) {
     <div className="ev-section-title">逐题<small>点开看 Agent 的检索日志</small></div>
     <AgentQuestionList run={run} hasFixed={false} />
   </div>;
+}
+
+// 每次调用新拿到了哪些分块（之前的调用没拿到过的），以及一个新分块都没拿到的检索有几次。
+// 后端从这次起会记 new_chunks / wasted_searches；旧记录没有，就按每次调用的 chunk_ids 现算，结果一样。
+function freshness(question: EvalQuestion) {
+  const seen = new Set<string>();
+  const perCall = new Map<number, Set<string>>();
+  let wasted = 0;
+  for (const call of question.agent?.calls ?? []) {
+    const fresh = new Set(call.chunk_ids.filter((chunkId) => !seen.has(chunkId)));
+    fresh.forEach((chunkId) => seen.add(chunkId));
+    perCall.set(call.call, fresh);
+    if (call.name === "search_knowledge" && (call.status === "ok" || call.status === "error") && (call.new_chunks ?? fresh.size) === 0) wasted += 1;
+  }
+  return { perCall, wasted: question.agent?.wasted_searches ?? wasted };
 }
 
 // Agent 在第几次调用拿到了证据（去重、按顺序），例如 [1, 3]。
@@ -208,7 +225,7 @@ function AgentQuestionList({ run, hasFixed }: { run: EvalRun; hasFixed: boolean 
           <span className="ev-question-text">{question.question}<small>{question.type}{question.evidence_count > 1 ? ` · ${question.evidence_count} 条证据` : ""}{question.compare ? ` · ${COMPARE_LABELS[question.compare]}` : ""}</small></span>
           {hasFixed && <><Verdict verdict={fixedVerdict(question)} /><span className="ag-num">{formatMs(question.latency_ms)}</span></>}
           <span className="ag-verdict-cell"><Verdict verdict={agentVerdict(question)} />{hitCalls.length > 0 && <small>第 {hitCalls.join("、")} 次调用命中</small>}</span>
-          <span className="ag-num">{agent ? `${agent.searches} 次` : "—"}</span>
+          <span className="ag-num ag-search-cell">{agent ? `${agent.searches} 次` : "—"}{agent && freshness(question).wasted > 0 && <small>{freshness(question).wasted} 次无新增</small>}</span>
           <span className="ag-num">{agent ? formatMs(agent.latency_ms) : "—"}</span>
           <span className="collapse-icon">{open ? "−" : "＋"}</span>
         </button>
@@ -234,7 +251,7 @@ function chunkLabel(position: number | null | undefined, chunkId?: string | null
 }
 
 // 一个分块：编号做成标签，命中证据的标签有背景色；点标签才显示内容。
-type ChunkItem = { key: string; id: string; chunkId?: string | null; position?: number | null; title: string | null; heading: string | null; text: string; relevance?: number | null; low?: boolean; hit: boolean };
+type ChunkItem = { key: string; id: string; chunkId?: string | null; position?: number | null; repeat?: boolean; title: string | null; heading: string | null; text: string; relevance?: number | null; low?: boolean; hit: boolean };
 
 function ChunkTabs({ items, empty }: { items: ChunkItem[]; empty: string }) {
   const [selected, setSelected] = useState<string | null>(null);
@@ -242,8 +259,8 @@ function ChunkTabs({ items, empty }: { items: ChunkItem[]; empty: string }) {
   const current = items.find((item) => item.key === selected) ?? null;
   return <div className="ag-chunks">
     <div className="ag-chunk-tabs" role="tablist">{items.map((item) => <button key={item.key} type="button" role="tab" aria-selected={selected === item.key}
-      className={`ag-chunk-tab ${item.hit ? "is-hit" : ""} ${selected === item.key ? "is-active" : ""}`}
-      title={item.hit ? "这个分块包含证据" : item.title ?? ""} onClick={() => setSelected(selected === item.key ? null : item.key)}>
+      className={`ag-chunk-tab ${item.hit ? "is-hit" : ""} ${item.repeat ? "is-repeat" : ""} ${selected === item.key ? "is-active" : ""}`}
+      title={[item.hit ? "这个分块包含证据" : item.title ?? "", item.repeat ? "前面的调用已经拿到过" : ""].filter(Boolean).join("；")} onClick={() => setSelected(selected === item.key ? null : item.key)}>
       {chunkLabel(item.position, item.chunkId)}<small>{item.id}</small></button>)}</div>
     {current && <div className={`ag-chunk-body ${current.hit ? "is-hit" : ""}`}>
       <div className="ag-chunk-meta"><strong>{chunkLabel(current.position, current.chunkId)}</strong><small>本次检索的 {current.id}</small>{current.title ?? "—"}{current.heading ? ` · ${current.heading}` : ""}{current.relevance !== undefined && current.relevance !== null && <small> · 相关性 {current.relevance.toFixed(2)}{current.low ? "（较低）" : ""}</small>}{current.hit && <span className="ag-hit">含证据</span>}</div>
@@ -293,20 +310,24 @@ function FixedLog({ question }: { question: EvalQuestion }) {
 
 function AgentLog({ question }: { question: EvalQuestion }) {
   const agent = question.agent!;
+  const fresh = freshness(question);
   return <section className="ag-log">
-    <div className="ag-log-title">Agent<small>检索 {agent.searches} 次 · {agent.rounds} 轮 · {agent.prompt_tokens} token · 耗时 {formatMs(agent.latency_ms)} · {STOP_LABELS[agent.stop_reason ?? ""] ?? agent.stop_reason ?? "—"}</small></div>
+    <div className="ag-log-title">Agent<small>检索 {agent.searches} 次{fresh.wasted > 0 ? `（${fresh.wasted} 次无新增）` : ""} · {agent.rounds} 轮 · {agent.prompt_tokens} token · 耗时 {formatMs(agent.latency_ms)} · {STOP_LABELS[agent.stop_reason ?? ""] ?? agent.stop_reason ?? "—"}</small></div>
     {agent.question_sent !== question.question && <div className="ag-call-meta">实际提问（多轮追问按规则补全）：{agent.question_sent}</div>}
     {agent.calls.length === 0 && <p className="ag-muted">没有调用任何工具，直接回答了。</p>}
-    {agent.calls.map((call) => <AgentCall key={call.call} call={call} />)}
+    {agent.calls.map((call) => <AgentCall key={call.call} call={call} fresh={fresh.perCall.get(call.call) ?? new Set()} />)}
   </section>;
 }
 
-function AgentCall({ call }: { call: EvalAgentCall }) {
+function AgentCall({ call, fresh }: { call: EvalAgentCall; fresh: Set<string> }) {
   const status = CALL_STATUS[call.status] ?? call.status;
   const hit = call.hits.length > 0;
+  const executed = call.status === "ok" || call.status === "error";
+  const newCount = call.new_chunks ?? fresh.size;
   let items: ChunkItem[] = [];
   if (call.results) items = call.results.map((result) => ({ key: `${call.call}-${result.evidence_id}`, id: result.evidence_id, chunkId: result.chunk_id, position: result.position ?? null, title: result.title,
-    heading: result.heading ?? null, text: result.text, relevance: result.relevance, low: result.low_relevance, hit: result.hits.length > 0 }));
+    heading: result.heading ?? null, text: result.text, relevance: result.relevance, low: result.low_relevance, hit: result.hits.length > 0,
+    repeat: Boolean(result.chunk_id) && !fresh.has(result.chunk_id as string) }));
   else if (call.name === "read_context" && call.text) items = [{ key: `${call.call}-read`, id: `${call.source_id ?? ""} ${call.direction === "before" ? "前文" : "后文"}`,
     position: call.positions?.length ? call.positions[0] : null, chunkId: call.chunk_ids[0] ?? null,
     title: null, heading: null, text: call.text, hit: (call.read_hits ?? []).length > 0 }];
@@ -318,6 +339,9 @@ function AgentCall({ call }: { call: EvalAgentCall }) {
         : call.name === "read_context" && call.source_id ? <span>{call.source_id} 的{call.direction === "before" ? "前文" : "后文"}</span>
           : <code>{JSON.stringify(call.arguments)}</code>}
       {call.duration_ms !== undefined && call.duration_ms !== null && <span className="ag-tag">耗时 {formatMs(call.duration_ms)}</span>}
+      {executed && (call.name === "search_knowledge" || call.name === "read_context") && (newCount > 0
+        ? <span className="ag-tag is-new">新增 {newCount} 片</span>
+        : <span className="ag-tag is-waste" title="这次拿回的分块，前面的调用都已经拿到过">无新增</span>)}
       {hit && <span className="ag-hit">命中证据 {call.hits.map((index) => index + 1).join("、")}</span>}
     </div>
     {status && <div className="ag-call-meta">{status}{call.error ? `：${call.error}` : ""}</div>}
