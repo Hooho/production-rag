@@ -251,7 +251,7 @@ function chunkLabel(position: number | null | undefined, chunkId?: string | null
 }
 
 // 一个分块：编号做成标签，命中证据的标签有背景色；点标签才显示内容。
-type ChunkItem = { key: string; id: string; chunkId?: string | null; position?: number | null; repeat?: boolean; title: string | null; heading: string | null; text: string; relevance?: number | null; low?: boolean; hit: boolean };
+type ChunkItem = { key: string; id: string; chunkId?: string | null; position?: number | null; fresh?: boolean; title: string | null; heading: string | null; text: string; relevance?: number | null; low?: boolean; hit: boolean };
 
 function ChunkTabs({ items, empty }: { items: ChunkItem[]; empty: string }) {
   const [selected, setSelected] = useState<string | null>(null);
@@ -259,8 +259,8 @@ function ChunkTabs({ items, empty }: { items: ChunkItem[]; empty: string }) {
   const current = items.find((item) => item.key === selected) ?? null;
   return <div className="ag-chunks">
     <div className="ag-chunk-tabs" role="tablist">{items.map((item) => <button key={item.key} type="button" role="tab" aria-selected={selected === item.key}
-      className={`ag-chunk-tab ${item.hit ? "is-hit" : ""} ${item.repeat ? "is-repeat" : ""} ${selected === item.key ? "is-active" : ""}`}
-      title={[item.hit ? "这个分块包含证据" : item.title ?? "", item.repeat ? "前面的调用已经拿到过" : ""].filter(Boolean).join("；")} onClick={() => setSelected(selected === item.key ? null : item.key)}>
+      className={`ag-chunk-tab ${item.hit ? "is-hit" : ""} ${item.fresh ? "is-new" : ""} ${selected === item.key ? "is-active" : ""}`}
+      title={[item.hit ? "这个分块包含证据" : item.title ?? "", item.fresh ? "这次调用新拿到的（前面的调用没拿到过）" : ""].filter(Boolean).join("；")} onClick={() => setSelected(selected === item.key ? null : item.key)}>
       {chunkLabel(item.position, item.chunkId)}<small>{item.id}</small></button>)}</div>
     {current && <div className={`ag-chunk-body ${current.hit ? "is-hit" : ""}`}>
       <div className="ag-chunk-meta"><strong>{chunkLabel(current.position, current.chunkId)}</strong><small>本次检索的 {current.id}</small>{current.title ?? "—"}{current.heading ? ` · ${current.heading}` : ""}{current.relevance !== undefined && current.relevance !== null && <small> · 相关性 {current.relevance.toFixed(2)}{current.low ? "（较低）" : ""}</small>}{current.hit && <span className="ag-hit">含证据</span>}</div>
@@ -285,7 +285,7 @@ function QuestionDetail({ question, hasFixed }: { question: EvalQuestion; hasFix
         <span className={evidence.found ? "is-hit" : "is-miss"}>Agent：{evidence.found ? `拿到了（${evidence.where.map((item) => `第 ${item.call} 次调用的 ${item.evidence_id ?? "—"}`).join("、")}）` : "没拿到"}</span>
       </div>;
     })}</div> : <p className="ev-muted-note">这道题知识库里没有答案，没有预设证据；拿到的资料越少越好（拿到了模型可能硬凑答案）。</p>}
-    <p className="ag-muted ag-numbering-note">「第 N 片」是分块在文档里的编号，固定不变；小字的 S1、S2 是某一次检索返回结果的顺序（每次检索都从 S1 开始），只在那一次检索里有意义。绿色的分块包含证据。</p>
+    <p className="ag-muted ag-numbering-note">「第 N 片」是分块在文档里的编号，固定不变；小字的 S1、S2 是某一次检索返回结果的顺序（每次检索都从 S1 开始），只在那一次检索里有意义。绿色的分块包含证据；Agent 那边红框的分块是这次调用新拿到的（前面的调用没拿到过）。</p>
     <div className={`ag-columns ${hasFixed ? "" : "is-single"}`}>
       {hasFixed && <FixedLog question={question} />}
       {agent && <AgentLog question={question} />}
@@ -327,9 +327,10 @@ function AgentCall({ call, fresh }: { call: EvalAgentCall; fresh: Set<string> })
   let items: ChunkItem[] = [];
   if (call.results) items = call.results.map((result) => ({ key: `${call.call}-${result.evidence_id}`, id: result.evidence_id, chunkId: result.chunk_id, position: result.position ?? null, title: result.title,
     heading: result.heading ?? null, text: result.text, relevance: result.relevance, low: result.low_relevance, hit: result.hits.length > 0,
-    repeat: Boolean(result.chunk_id) && !fresh.has(result.chunk_id as string) }));
+    fresh: Boolean(result.chunk_id) && fresh.has(result.chunk_id as string) }));
   else if (call.name === "read_context" && call.text) items = [{ key: `${call.call}-read`, id: `${call.source_id ?? ""} ${call.direction === "before" ? "前文" : "后文"}`,
     position: call.positions?.length ? call.positions[0] : null, chunkId: call.chunk_ids[0] ?? null,
+    fresh: call.chunk_ids.some((chunkId) => fresh.has(chunkId)),
     title: null, heading: null, text: call.text, hit: (call.read_hits ?? []).length > 0 }];
   return <div className={`ag-call ${call.status !== "ok" ? "is-off" : ""} ${hit ? "is-hit" : ""}`}>
     <div className="ag-call-head">

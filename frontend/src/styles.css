@@ -8055,11 +8055,11 @@ input:focus {
    line-height: 1.7;
 }
 
-/* 每次调用的新增分块：新增是绿色，无新增是橙色（白查了）。前面调用已经拿到过的分块标签用虚线框。 */
+/* 每次调用的新增分块：「新增 N 片」红色，和新分块的红框对应；无新增是橙色（白查了）。 */
 .ag-tag.is-new {
-   border-color: var(--ev-good);
-   color: #24684a;
-   background: #eef9f3;
+   border-color: var(--ev-bad);
+   color: #a8323f;
+   background: #fdecee;
 }
 
 .ag-tag.is-waste {
@@ -8068,9 +8068,9 @@ input:focus {
    background: #fff6e3;
 }
 
-.ag-chunk-tab.is-repeat {
-   border-style: dashed;
-   opacity: .75;
+/* 这次调用新拿到的分块：红色边框（和是否含证据的绿色底色可以同时出现）。 */
+.ag-chunk-tab.is-new {
+   border: 2px solid var(--ev-bad);
 }
 
 .ag-search-cell {
