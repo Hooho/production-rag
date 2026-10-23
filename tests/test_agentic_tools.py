@@ -53,6 +53,9 @@ def test_search_numbers_evidence_across_calls(monkeypatch, runtime):
     second = call(ctx, "search_knowledge", query="换货需要什么条件？", mode="vector")
     assert second["trace"]["evidence_ids"] == ["S2"]
     assert "和前面返回的 S2 是同一段资料" in second["content"]
+    # 返回的全是前面给过的资料：开头明确说这次没有新资料。
+    assert second["content"].startswith("这次检索没有新资料：返回的 S2 前面都已经给过。") and second["trace"]["no_new"] is True
+    assert first["trace"]["no_new"] is False
     limited = call(ctx, "search_knowledge", query="退货流程是什么？", mode="vector", top_k=1)
     assert limited["trace"]["evidence_ids"] == ["S1"]
     assert call(ctx, "search_knowledge", query="其他问题", mode="vector")["content"].startswith("没有找到相关资料")

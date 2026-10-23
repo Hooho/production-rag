@@ -752,7 +752,7 @@ function RunConfig({ run }: { run: EvalRunBrief }) {
   const items: [string, string][] = [
     ["题目", `${SPLIT_LABELS[config.split ?? ""] ?? config.split}${config.dataset_size ? ` · ${config.dataset_size} 题` : ""}`],
     ["模式", modesLabel(run)],
-    ...(config.agent ? [["Agent", `预算 ${config.agent.tool_budget} 次 · 超时 ${config.agent.timeout} 秒 · 提示词 ${config.agent.prompt_version}`] as [string, string]] : []),
+    ...(config.agent ? [["Agent", `预算 ${config.agent.tool_budget} 次 · 超时 ${config.agent.timeout} 秒 · 提示词 ${config.agent.prompt_version}${config.agent.prompt_identity ? `（${config.agent.prompt_identity.slice(0, 6)}）` : ""}`] as [string, string]] : []),
     ["候选池", String(config.pool_size ?? "—")], ["返回上限", String(config.return_limit ?? "—")], ["RRF k", String(config.rrf_k ?? "—")],
     ["相关性阈值", config.reranked === false ? "未启用（没有重排）" : formatScore(config.min_score ?? null, 2)],
     ["向量模型", `${config.embedding_mode ?? "—"} · ${config.embedding_model ?? "—"}`],

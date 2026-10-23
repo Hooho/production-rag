@@ -766,7 +766,7 @@ export type EvalHistoryMetrics = {
 };
 export type EvalConfig = { split: string | null; suites: string[]; special?: { suites: { id: string; name: string }[]; compare_memory?: boolean }; dataset_size?: number; rrf_k?: number; pool_size?: number; return_limit?: number; min_score?: number | null; reranked?: boolean; fusion?: string; methods?: string[]; model_mode?: string; embedding_mode?: string; embedding_model?: string; rerank_model?: string; rerank_mode?: string; query_source?: string[];
   // 检索评测跑了哪些模式（旧记录没有，都是只跑固定流程）；agent 是 Agent 的运行配置。
-  modes?: EvalMode[]; agent?: { tool_budget: number; timeout: number; prompt_version: string; model: string | null } };
+  modes?: EvalMode[]; agent?: { tool_budget: number; timeout: number; prompt_version: string; prompt_identity?: string; model: string | null } };
 export type EvalRunBrief = {
   id: string;
   // memory 是以前单独的多轮对话评测（现在并入专项评测集），旧记录仍然能打开。

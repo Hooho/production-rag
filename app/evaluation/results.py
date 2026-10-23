@@ -297,7 +297,10 @@ def compare_runs(base, target):
     base_agent = base_config.get("agent") or {}
     target_agent = target_config.get("agent") or {}
     if base_agent and target_agent:
-        for key, label in (("prompt_version", "Agent 提示词版本"), ("model", "Agent 模型")):
+        for key, label in (("prompt_version", "Agent 提示词版本"), ("prompt_identity", "Agent 提示词内容"), ("model", "Agent 模型")):
+            if key == "prompt_identity" and (base_agent.get("prompt_version") != target_agent.get("prompt_version")
+                    or not base_agent.get(key) or not target_agent.get(key)):
+                continue  # 版本号已经不同（内容当然不同）或旧记录没有指纹时不列
             if base_agent.get(key) != target_agent.get(key):
                 settings_diff.append({"key": label, "base": base_agent.get(key), "target": target_agent.get(key)})
     return {"base": run_brief(base), "target": run_brief(target), "metrics": rows, "settings_diff": settings_diff}

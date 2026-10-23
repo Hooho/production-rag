@@ -92,17 +92,25 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
             query=query, mode=mode, top_k=top_k, evidence_ids=[], retrieval=retrieval)
     blocks = []
     evidence_ids = []
+    repeated = []
     for source in sources:
         # 原来的 id 是这次检索内的编号（每次从 S1 开始），换成整次问答的编号后不再保留。
         item = {key: value for key, value in source.items() if key != "id"}
         evidence_id, is_new = ctx.evidence.add("S", {"type": "knowledge", **item}, chunk_id=source["chunk_id"])
         evidence_ids.append(evidence_id)
         if not is_new:
+            repeated.append(evidence_id)
             blocks.append(f"[{evidence_id}] 和前面返回的 {evidence_id} 是同一段资料，见上文。")
             continue
         blocks.append(format_source(evidence_id, source))
+    # 这次返回的资料前面全都给过：明确告诉模型这次检索没有新资料。原来只逐条写“同一段资料”，模型要自己比对编号，
+    # 评测里常见换几种说法反复拿回同一批资料（无新增检索）。这里只给信息、不强制停，查不查由模型决定。
+    if len(repeated) == len(evidence_ids):
+        blocks.insert(0, f"这次检索没有新资料：返回的 {'、'.join(repeated)} 前面都已经给过。"
+            "换说法再查大多还是拿回同一批资料；已有资料能回答用户的问题就直接回答，"
+            "还缺某一部分时，只针对缺的那部分换一个角度查，或者用 keyword 模式查名称、编号、原话。")
     return result("\n\n".join(blocks), query=query, mode=mode, top_k=top_k, evidence_ids=evidence_ids,
-        retrieval=retrieval)
+        retrieval=retrieval, no_new=len(repeated) == len(evidence_ids))
 
 
 # 一条资料：编号、标题和小节，然后是正文（父块已带"标题路径"时正文里有完整路径）。

@@ -228,7 +228,9 @@ def compare_rows(rows):
 def agent_config(models):
     settings = runtime_snapshot()
     return {"tool_budget": settings["agent_tool_budget"], "timeout": settings["agent_timeout"],
-        "prompt_version": prompts.tag("agent"), "model": getattr(models, "llm_model", None)}
+        "prompt_version": prompts.tag("agent"), "model": getattr(models, "llm_model", None),
+        # 提示词内容的指纹：改了内置提示词时版本号仍是「内置」，靠它区分前后两次用的是不是同一段提示词。
+        "prompt_identity": prompts.identity("agent")}
 
 
 # 运行 Agent 检索评测。with_fixed=True 时固定流程照常跑全套，Agent 接在每道基线题后面跑。

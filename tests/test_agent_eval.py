@@ -131,3 +131,14 @@ def test_compare_lists_agent_prompt_and_modes():
     target = {"id": "b", "config": {"modes": ["agent"], "agent": {"prompt_version": "agent@v2", "model": "m"}}, "summary": {}}
     diff = {row["key"]: (row["base"], row["target"]) for row in compare_runs(base, target)["settings_diff"]}
     assert diff == {"模式": ("fixed+agent", "agent"), "Agent 提示词版本": ("agent@内置", "agent@v2")}
+
+
+# 内置提示词改过时版本号还是「内置」，靠内容指纹列出来；旧记录没有指纹时不列。
+def test_compare_lists_builtin_prompt_change():
+    from app.evaluation.results import compare_runs
+    agent = {"prompt_version": "agent@内置", "model": "m"}
+    base = {"id": "a", "config": {"modes": ["agent"], "agent": {**agent, "prompt_identity": "aaa"}}, "summary": {}}
+    target = {"id": "b", "config": {"modes": ["agent"], "agent": {**agent, "prompt_identity": "bbb"}}, "summary": {}}
+    assert compare_runs(base, target)["settings_diff"] == [{"key": "Agent 提示词内容", "base": "aaa", "target": "bbb"}]
+    old = {"id": "c", "config": {"modes": ["agent"], "agent": agent}, "summary": {}}
+    assert compare_runs(old, target)["settings_diff"] == []
