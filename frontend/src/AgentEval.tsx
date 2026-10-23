@@ -81,8 +81,8 @@ export function ComparePanel({ run }: { run: EvalRun }) {
     ["漏放率", percent(summary.false_accept_rate), percent(summary.agent_false_accept_rate), "无法回答的题里，仍然拿到了资料的比例（越低越好）"],
     ["平均检索次数", "1", number(summary.agent_avg_searches), "固定流程每题检索一次；Agent 自己决定查几次"],
     ["平均无新增检索", "—", number(summary.agent_avg_wasted_searches), `Agent 的检索里，一个新分块都没拿到的次数（反复拿回同一批分块，越低越好）；占全部检索 ${percent(summary.agent_wasted_rate)}`],
-    ["平均耗时", formatMs(summary.latency_avg_ms), formatMs(summary.agent_latency_avg_ms), "固定流程只算检索（召回 + 重排）；Agent 包括多轮模型调用和写回答"],
-    ["平均输入 token", "0", number(summary.agent_avg_prompt_tokens, 0), "固定流程检索不调用大模型"],
+    ["平均耗时", formatMs(summary.latency_avg_ms), formatMs(summary.agent_latency_avg_ms), "口径不同：固定流程这里只算检索（召回 + 重排），没算线上还有的意图识别、充分性判断和写回答（各调一次大模型）；Agent 包括它所有轮次的模型调用和写回答"],
+    ["平均输入 token", "0", number(summary.agent_avg_prompt_tokens, 0), "口径不同：评测里固定流程的检索不调用大模型；线上固定流程每题还要调 3 次（意图识别、充分性判断、写回答）"],
   ];
   return <div className="ev-overview ag-eval">
     <p className="ev-muted-note">同一套题，固定流程和 Agent 各跑一遍，比较的是<strong>最后拿到的资料里有没有题目预设的证据</strong>，判断方法相同。{summary.answerable_count ?? 0} 道能回答 · {summary.unanswerable_count ?? 0} 道无法回答。</p>
