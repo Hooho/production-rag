@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SpecialAgentResults } from "./AgentEval";
 import { addEvalSuiteItem, createEvalSuite, deleteEvalSuite, deleteEvalSuiteItem, getEvalRun, getEvalSuite, listEvalSuites, startSpecialRun, updateEvalSuite, updateEvalSuiteItem, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSuiteBrief, type EvalSuiteFull, type EvalSuiteItem, type EvalSuiteMethod, type EvalSuiteSearchMode, type EvalSuiteRunEntry } from "./api";
 import { EvidenceDetails } from "./EvidenceChunks";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
@@ -365,6 +366,8 @@ function rankText(label: string, rank: number | null, limit: number) {
 
 // 一个专项在一次评测里的结果：先看通过数和与上次相比的变化，没通过的排在前面；检索方式额外统计向量和关键词各找到几条证据。
 export function SpecialSection({ section }: { section: EvalSpecialSection }) {
+  // 检索方式的专项勾了 Agent：换成两种模式的逐题对比（和调参评测的「对比」页同一个列表）。
+  if (section.modes?.includes("agent")) return <SpecialAgentResults section={section} />;
   const questions = [...section.questions].sort((a, b) => Number(a.passed) - Number(b.passed));
   const fixed = section.questions.filter((item) => item.passed && item.previous_passed === false).length;
   const regressed = section.questions.filter((item) => !item.passed && item.previous_passed === true).length;

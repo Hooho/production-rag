@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { type EvalAgentCall, type EvalCompareKey, type EvalMode, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalSummary } from "./api";
+import { type EvalAgentCall, type EvalCompareKey, type EvalMode, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSummary } from "./api";
 import { formatDuration as formatMs } from "./format";
 
 // Agent 检索评测的结果页（后端 app/evaluation/agent_retrieval.py）。
@@ -222,7 +222,7 @@ function AgentQuestionList({ run, hasFixed }: { run: EvalRun; hasFixed: boolean 
       return <article className={`ev-question ${open ? "is-open" : ""}`} key={question.id}>
         <button className={`ag-q-head ${layout}`} aria-expanded={open} onClick={() => setExpanded(open ? null : question.id)}>
           <span className="ev-qid">{question.id}</span>
-          <span className="ev-question-text">{question.question}<small>{question.type}{question.evidence_count > 1 ? ` · ${question.evidence_count} 条证据` : ""}{question.compare ? ` · ${COMPARE_LABELS[question.compare]}` : ""}</small></span>
+          <span className="ev-question-text">{question.question}<small>{question.type}{question.evidence_count > 1 ? ` · ${question.evidence_count} 条证据` : ""}{question.compare ? ` · ${COMPARE_LABELS[question.compare]}` : ""}{question.note ? ` · ${question.note}` : ""}</small></span>
           {hasFixed && <><Verdict verdict={fixedVerdict(question)} /><span className="ag-num">{formatMs(question.latency_ms)}</span></>}
           <span className="ag-verdict-cell"><Verdict verdict={agentVerdict(question)} />{hitCalls.length > 0 && <small>第 {hitCalls.join("、")} 次调用命中</small>}</span>
           <span className="ag-num ag-search-cell">{agent ? `${agent.searches} 次` : "—"}{agent && freshness(question).wasted > 0 && <small>{freshness(question).wasted} 次无新增</small>}</span>
@@ -348,5 +348,63 @@ function AgentCall({ call, fresh }: { call: EvalAgentCall; fresh: Set<string> })
     {status && <div className="ag-call-meta">{status}{call.error ? `：${call.error}` : ""}</div>}
     {call.note && call.status !== "ok" && <div className="ag-call-meta">{call.note}</div>}
     {(call.results || call.name === "read_context") && <ChunkTabs items={items} empty={call.results ? "没有返回分块（空检索）。" : "没有读到内容。"} />}
+  </div>;
+}
+
+// ---------- 专项评测里的 Agent ----------
+
+// 和上次比：上次没通过、这次通过算新通过，反过来算新失败；上次没跑过这个模式就不标。
+function change(now: boolean | undefined, before: boolean | null | undefined) {
+  if (now === undefined || before === undefined || before === null || before === now) return null;
+  return now ? "新通过" : "新失败";
+}
+
+// 专项的一道题转成调参评测逐题对比用的格式，复用同一个列表和左右两栏的检索日志。
+function fromSpecial(question: EvalSpecialQuestion, hasFixed: boolean): EvalQuestion {
+  const notes = [hasFixed ? change(question.fixed_passed, question.previous_passed) && `固定流程${change(question.fixed_passed, question.previous_passed)}` : null,
+    change(question.agent_passed, question.previous_agent_passed) && `Agent ${change(question.agent_passed, question.previous_agent_passed)}`].filter(Boolean);
+  const recall = question.recall_final ?? (question.fixed_passed ? 1 : 0);
+  return {
+    id: question.id, question: question.question, type: "专项", answerable: true,
+    evidence_count: question.evidence_count ?? question.agent?.evidence.length ?? 0,
+    stages: (hasFixed ? { pool: { recall, rr: 0, rank: null }, top: { recall, rr: 0, rank: null }, final: { recall, rr: 0, rank: null } } : undefined) as EvalQuestion["stages"],
+    lost_stage: question.lost_stage ?? null,
+    evidence: (question.fixed_evidence ?? []).map((item) => ({ ...item, rrf_rank: null, rerank_rank: null, rerank_probability: null, status: item.status ?? "not_recalled" })),
+    returned: question.returned ?? 0, max_probability: null, latency_ms: question.latency_ms ?? 0,
+    queries: question.queries ?? [], rerank_query: question.rerank_query ?? "", query_source: "rule",
+    sources: question.sources, agent: question.agent, compare: question.compare, note: notes.join(" · ") || undefined,
+  };
+}
+
+// 检索方式的专项勾了 Agent 时的结果：两边的通过数（和上次比）、对比分类，下面是逐题对比列表。
+export function SpecialAgentResults({ section }: { section: EvalSpecialSection }) {
+  const modes = section.modes ?? ["fixed"];
+  const hasFixed = modes.includes("fixed");
+  const questions = section.questions.map((question) => fromSpecial(question, hasFixed));
+  const fixedPassed = section.questions.filter((question) => question.fixed_passed ?? (hasFixed && question.passed)).length;
+  const agentPassed = section.agent_passed ?? section.questions.filter((question) => question.agent_passed).length;
+  const counts = { both: 0, fixed_only: 0, agent_only: 0, neither: 0 } as Record<EvalCompareKey, number>;
+  for (const question of section.questions) if (question.compare) counts[question.compare] += 1;
+  const newly = (key: "previous_passed" | "previous_agent_passed", now: "fixed_passed" | "agent_passed") => {
+    let better = 0, worse = 0;
+    for (const question of section.questions) {
+      const result = change(question[now], question[key]);
+      if (result === "新通过") better += 1;
+      if (result === "新失败") worse += 1;
+    }
+    return { better, worse };
+  };
+  const fixedChange = newly("previous_passed", "fixed_passed");
+  const agentChange = newly("previous_agent_passed", "agent_passed");
+  const run = { questions, config: { split: null, suites: [], modes } } as unknown as EvalRun;
+  return <div className="ev-overview ag-eval ag-special">
+    {hasFixed && section.search_mode && section.search_mode !== "hybrid" && <p className="ev-settings-diff">这个专项设置了「{section.search_mode_label}」：固定流程按这个设置检索，Agent 每次检索自己选方式，两边比的不是同一件事。比较两种模式时，专项请用混合检索。</p>}
+    <div className="ev-cards">
+      {hasFixed && <Card label="固定流程通过" value={`${fixedPassed} / ${section.count}`} note={section.previous ? `和上次（${section.previous.passed} / ${section.previous.count}）比：新通过 ${fixedChange.better}，新失败 ${fixedChange.worse}` : "这是第一次用固定流程跑这个专项"} />}
+      <Card label="Agent 通过" value={`${agentPassed} / ${section.count}`} note={section.previous_agent ? `和上次（${section.previous_agent.passed ?? "—"} / ${section.previous_agent.count}）比：新通过 ${agentChange.better}，新失败 ${agentChange.worse}` : "这是第一次用 Agent 跑这个专项"} />
+      {hasFixed && (Object.keys(COMPARE_LABELS) as EvalCompareKey[]).map((key) => <Card key={key} label={COMPARE_LABELS[key]} value={`${counts[key]} 题`} note={COMPARE_HINTS[key]} />)}
+    </div>
+    <p className="ev-muted-note">证据全部拿到算通过：固定流程看过滤后交给回答模型的分块，Agent 看它所有检索和读前后文拿到的分块。{section.agent && <> Agent 配置：工具预算 {section.agent.tool_budget} 次 · 超时 {section.agent.timeout} 秒 · 提示词版本 {section.agent.prompt_version}。</>}</p>
+    <AgentQuestionList run={run} hasFixed={hasFixed} />
   </div>;
 }

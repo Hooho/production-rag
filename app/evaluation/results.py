@@ -361,7 +361,7 @@ def execute_run(store, models, items, run, generate=False, responder=None, agent
         # 专项评测：每个专项按自己的评测方式跑，结果分开（见 app/evaluation/suites.py）。
         if run["kind"] == "special":
             from .suites import run_special
-            run_special(store, models, run, on_progress, responder)
+            run_special(store, models, run, on_progress, responder, agent_mode)
             run["status"] = "completed"
             return run
         split = run["config"]["split"]

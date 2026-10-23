@@ -138,3 +138,55 @@ def test_import_result_files(setup, tmp_path, monkeypatch):
     assert client.get("/eval/runs/20260101-120000_abc", headers=headers()).json()["summary"] == {"recall_pool": 1.0}
     assert client.delete("/eval/runs/20260101-120000_abc", headers=headers()).status_code == 200
     assert client.get("/eval/runs/20260101-120000_abc", headers=headers()).status_code == 404
+
+
+# 检索方式的专项也能跑 Agent：和固定流程一起跑时逐题记两边是否通过和对比分类；
+# 第二次运行时，固定流程和 Agent 各自找上一次跑过这个模式的评测，标出新通过 / 新失败。
+def test_special_retrieval_with_agent(setup, eval_dir, monkeypatch):
+    from app.agentic.service import AgentMode
+    from test_agentic_loop import ScriptedModel, reply, tool_call
+    client, store = setup
+    monkeypatch.setattr(Models, "rerank", fake_rerank)
+    suite = client.post("/eval/suites", headers=headers(), json={"name": "区分题", "method": "retrieval"}).json()
+    for question, evidence in (("耳机几天内可以退货？", "耳机签收后七天内可以无理由退货"),
+            ("付款后多久发货？", "订单付款后四十八小时内发货")):
+        client.post(f"/eval/suites/{suite['id']}/items", headers=headers(), json={"question": question, "evidence": [evidence]})
+    special = {"suites": [{"id": suite["id"], "name": suite["name"]}], "compare_memory": False}
+
+    def agent(*responses):
+        model = ScriptedModel(*responses)
+        return AgentMode(client.app.state.agent, client_factory=lambda models: model)
+
+    # 第一次：Agent 只查了第一题，第二题直接回答（没拿到证据）。
+    first_agent = agent(reply(calls=[tool_call("c1", "search_knowledge", query="耳机签收后几天内可以退货")]),
+        reply("七天 [S1]。"), reply("资料中没有找到。"))
+    first = execute_run(store, client.app.state.models, [], start_run("special", None, [], special, ["fixed", "agent"]),
+        agent_mode=first_agent)
+    assert first["status"] == "completed", first.get("error")
+    assert first["progress"]["total"] == 4
+    section = first["special"][0]
+    assert section["modes"] == ["fixed", "agent"] and section["agent_passed"] == 1
+    one, two = section["questions"]
+    assert one["agent_passed"] is True and two["agent_passed"] is False
+    assert one["fixed_passed"] == one["passed"] and two["compare"] in ("fixed_only", "neither")
+    assert one["sources"] and one["queries"] and isinstance(one["latency_ms"], int) and one["fixed_evidence"][0]["status"]
+    assert first["summary"]["suites"][suite["id"]]["agent_passed"] == 1 and first["summary"]["agent_passed"] == 1
+
+    # 第二次只跑 Agent，两题都查到：第二题 Agent 新通过；固定流程没跑，不标。
+    second_agent = agent(reply(calls=[tool_call("c1", "search_knowledge", query="耳机签收后几天内可以退货")]),
+        reply("七天 [S1]。"), reply(calls=[tool_call("c2", "search_knowledge", query="订单付款后多久发货")]),
+        reply("四十八小时 [S1]。"))
+    second = execute_run(store, client.app.state.models, [], start_run("special", None, [], special, ["agent"]),
+        agent_mode=second_agent)
+    attach_previous(second)
+    section = second["special"][0]
+    assert section["modes"] == ["agent"] and section["passed"] == 2
+    assert section["previous_agent"]["id"] == first["id"] and section["previous"]["passed"] == 1
+    assert [question["previous_agent_passed"] for question in section["questions"]] == [True, False]
+    assert [question["previous_passed"] for question in section["questions"]] == [True, False]
+    assert "fixed_passed" not in section["questions"][0]
+
+    # 接口：演示模式下没有大模型，不能选 Agent。
+    response = client.post("/eval/runs", headers=headers(), json={"kind": "special", "suite_ids": [suite["id"]],
+        "modes": ["agent"]})
+    assert response.status_code == 422 and "MODEL_MODE=openai" in response.json()["detail"]

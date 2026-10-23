@@ -8148,3 +8148,22 @@ input:focus {
 .ev-compare-modal .ev-settings-diff {
    margin-bottom: 14px;
 }
+
+/* 专项发起区的运行模式（选中检索方式的专项时出现）。 */
+.sp-mode-line {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: 8px 16px;
+   margin-top: 12px;
+   padding-top: 12px;
+   border-top: 1px dashed var(--ev-line);
+}
+
+.sp-mode-line .ev-option-description {
+   flex: 1 1 320px;
+}
+
+.ag-special {
+   margin-top: 6px;
+}

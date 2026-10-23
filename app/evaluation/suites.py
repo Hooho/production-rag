@@ -6,6 +6,7 @@
 #   answer 回答：检索后完整回答，评审模型判定「要点一致」算通过；
 #   dialogue 多轮对话：按顺序问完一段对话，最后一问评审「要点一致」算通过；可选对比几组记忆参数。
 # 和调参评测共用评测语料、评测记录（eval/results）和同时只能跑一个评测的限制。
+import time
 from uuid import uuid4
 
 from sqlalchemy import func, select
@@ -266,10 +267,11 @@ def search_items(store, models, items, methods, progress, on_item=None):
     for done, item in enumerate(items, 1):
         analysis = Models.fallback_query(item["question"], [], None)
         queries, rerank_query = analysis["queries"], analysis["standalone_query"]
+        started = time.monotonic()
         retrieval = tool.execute(store, models, EVAL_OWNER, queries, rerank_query, methods=methods)
         row = score_question(item, retrieval, chunk_texts, pool_size)
         row.update({"queries": queries, "rerank_query": rerank_query, "diagnostics": retrieval["diagnostics"],
-            "sources": retrieval["sources"]})
+            "sources": retrieval["sources"], "latency_ms": round((time.monotonic() - started) * 1000)})
         used = retrieval["diagnostics"]["config"]
         config = {"pool_size": pool_size, "return_limit": used.get("return_limit"), "min_score": used.get("min_score"),
             "reranked": used.get("reranked")}
@@ -281,7 +283,13 @@ def search_items(store, models, items, methods, progress, on_item=None):
 
 
 # 检索、回答方式：把专项题目当成调参题跑同一套检索（可选再回答），逐题整理成专项结果。
-def run_search_suite(store, models, suite, responder, run_id, progress):
+def run_search_suite(store, models, suite, responder, run_id, progress, modes=("fixed",), agent_mode=None):
+    # 检索方式的专项可以选模式：只跑固定流程（原来的样子）、只跑 Agent，或者两个一起跑逐题对比。
+    # 回答方式只有固定流程（Agent 的答案还不评分）。
+    if suite["method"] != "retrieval":
+        modes = ("fixed",)
+    if "agent" in modes:
+        return run_agent_search_suite(store, models, suite, progress, modes, agent_mode)
     items = []
     for item in suite["items"]:
         items.append({"id": item["id"], "question": item["question"], "type": "事实", "answerable": True,
@@ -304,7 +312,13 @@ def run_search_suite(store, models, suite, responder, run_id, progress):
         found = ((row.get("stages") or {}).get("final") or {}).get("recall") or 0
         entry = {"id": item["id"], "question": item["question"], "evidence": evidence, "found": found >= 1,
             "lost_stage": row.get("lost_stage"), "returned": row.get("returned"),
-            "reference_answer": item["reference_answer"] or None}
+            "reference_answer": item["reference_answer"] or None,
+            # 和 Agent 逐题对比时要用：过滤后的召回、证据去向、交给回答模型的来源、检索词和耗时。
+            "recall_final": found, "fixed_evidence": [{key: value.get(key) for key in ("text", "chunk_id", "source_id",
+                "status")} for value in row.get("evidence") or []],
+            "sources": [{key: source.get(key) for key in ("id", "title", "heading", "text", "chunk_id", "position")}
+                for source in row.get("sources") or []],
+            "queries": row.get("queries"), "rerank_query": row.get("rerank_query"), "latency_ms": row.get("latency_ms")}
         if suite["method"] == "answer":
             judgement = row.get("judgement") or {}
             entry.update({"answer": row.get("answer"), "judgement": judgement,
@@ -318,6 +332,48 @@ def run_search_suite(store, models, suite, responder, run_id, progress):
         section["evidence_total"] = evidence_total
         section["dense_found"] = dense_found
         section["keyword_found"] = keyword_found
+    return section, config
+
+
+# 检索方式的专项跑 Agent（app/evaluation/agent_retrieval.py 同一套）：每题让 Agent 跑一遍，证据全部拿到算通过。
+# 和固定流程一起跑时，先按原来的方式跑固定流程，再逐题接上 Agent；每题记 fixed_passed、agent_passed 和对比分类，
+# passed 仍表示固定流程是否通过（只跑 Agent 时就是 Agent 是否通过），专项的通过数和以前的记录口径一致。
+def run_agent_search_suite(store, models, suite, progress, modes, agent_mode):
+    from .agent_retrieval import agent_config, chunk_positions, evaluate_agent
+    with_fixed = "fixed" in modes
+    total = len(suite["items"])
+    if with_fixed:
+        fixed_section, config = run_search_suite(store, models, suite, None, None,
+            lambda done: progress(done), ("fixed",))
+        fixed_by_id = {question["id"]: question for question in fixed_section["questions"]}
+    else:
+        import_corpus(store, models)
+        fixed_section, config, fixed_by_id = {}, {}, {}
+    chunk_texts = current_chunk_texts(store)
+    positions = chunk_positions(store)
+    questions = []
+    agent_passed = 0
+    for done, item in enumerate(suite["items"], 1):
+        evidence = item.get("evidence") or []
+        agent = evaluate_agent(agent_mode, store, models, {"id": item["id"], "question": item["question"],
+            "evidence": evidence, "history": []}, chunk_texts, positions)
+        passed_agent = agent["recall"] is not None and agent["recall"] >= 1
+        agent_passed += passed_agent
+        entry = dict(fixed_by_id.get(item["id"]) or {"id": item["id"], "question": item["question"],
+            "reference_answer": item.get("reference_answer") or None})
+        entry.update({"evidence_count": len(evidence), "agent": agent, "agent_passed": passed_agent})
+        if with_fixed:
+            entry["fixed_passed"] = entry["passed"]
+            entry["compare"] = ("both" if entry["passed"] and passed_agent else "fixed_only" if entry["passed"]
+                else "agent_only" if passed_agent else "neither")
+        else:
+            entry["passed"] = passed_agent
+        questions.append(entry)
+        progress(total + done if with_fixed else done)
+    section = {**fixed_section, "questions": questions, "modes": [mode for mode in ("fixed", "agent") if mode in modes],
+        "agent_passed": agent_passed, "agent": agent_config(models)}
+    section.setdefault("search_mode", suite["search_mode"])
+    section.setdefault("search_mode_label", SEARCH_MODES[suite["search_mode"]])
     return section, config
 
 
@@ -354,13 +410,15 @@ def run_dialogue_suite(store, models, suite, run_id, compare, progress):
 
 
 # 执行一次专项评测：依次跑每个专项，结果按专项分开写进 run["special"]，总览写进 summary。
-def run_special(store, models, run, on_progress, responder):
+def run_special(store, models, run, on_progress, responder, agent_mode=None):
     special = run["config"]["special"]
+    modes = tuple(run["config"].get("modes") or ["fixed"])
     suites = load_for_run(store.engine, [suite["id"] for suite in special["suites"]])
     compare = bool(special.get("compare_memory"))
     total = 0
     for suite in suites:
-        variants = len(memory_suites_variants(compare)) if suite["method"] == "dialogue" else 1
+        variants = len(memory_suites_variants(compare)) if suite["method"] == "dialogue" else \
+            (len(modes) if suite["method"] == "retrieval" else 1)
         total += len(suite["items"]) * variants
     offset = [0]
     sections = []
@@ -375,8 +433,9 @@ def run_special(store, models, run, on_progress, responder):
             section = run_dialogue_suite(store, models, suite, run["id"], compare, progress)
             offset[0] += len(suite["items"]) * len(memory_suites_variants(compare))
         else:
-            section, search_config = run_search_suite(store, models, suite, responder, run["id"], progress)
-            offset[0] += len(suite["items"])
+            section, config = run_search_suite(store, models, suite, responder, run["id"], progress, modes, agent_mode)
+            search_config = config or search_config
+            offset[0] += len(suite["items"]) * (len(modes) if suite["method"] == "retrieval" else 1)
         passed = sum(1 for question in section["questions"] if question["passed"])
         section.update({"suite_id": suite["id"], "name": suite["name"], "description": suite["description"],
             "method": suite["method"], "method_label": METHODS[suite["method"]], "count": len(suite["items"]),
@@ -393,7 +452,10 @@ def run_special(store, models, run, on_progress, responder):
     passed = sum(section["passed"] for section in sections)
     run["summary"] = {"count": count, "passed": passed, "pass_rate": round(passed / count, 4) if count else None,
         "suites": {section["suite_id"]: {"name": section["name"], "method": section["method"],
-            "count": section["count"], "passed": section["passed"]} for section in sections}}
+            "count": section["count"], "passed": section["passed"], "modes": section.get("modes") or ["fixed"],
+            "agent_passed": section.get("agent_passed")} for section in sections}}
+    if any("agent" in (section.get("modes") or []) for section in sections):
+        run["summary"]["agent_passed"] = sum(section.get("agent_passed") or 0 for section in sections)
     return run
 
 
@@ -404,26 +466,48 @@ def memory_suites_variants(compare):
 
 
 # 打开一次专项评测时，给每个专项找到上一次跑过它的评测，逐题标出上次是否通过，页面据此显示「变好 / 变差」。
+# 固定流程和 Agent 分开找：各自找上一次跑过这个专项、而且跑了这个模式的评测（旧记录没有 modes，都是固定流程）。
 def attach_previous(run, runs=None):
     from .results import load_run
     runs = runs if runs is not None else list_runs()
-    for section in run.get("special") or []:
-        previous = None
+    loaded = {}
+
+    def previous_section(suite_id, mode):
         for candidate in runs:
             if candidate["id"] >= run["id"] or candidate.get("kind") != "special" or candidate.get("status") != "completed":
                 continue
-            if section["suite_id"] in ((candidate.get("summary") or {}).get("suites") or {}):
-                previous = candidate
-                break
-        if previous is None:
-            continue
-        full = load_run(previous["id"]) or {}
-        before = next((item for item in full.get("special") or [] if item["suite_id"] == section["suite_id"]), None)
-        if before is None:
-            continue
-        passed = {question["id"]: question["passed"] for question in before["questions"]}
-        section["previous"] = {"id": previous["id"], "created": previous["created"], "passed": before["passed"],
-            "count": before["count"]}
-        for question in section["questions"]:
-            question["previous_passed"] = passed.get(question["id"])
+            brief = ((candidate.get("summary") or {}).get("suites") or {}).get(suite_id)
+            if brief is None or mode not in (brief.get("modes") or ["fixed"]):
+                continue
+            if candidate["id"] not in loaded:
+                loaded[candidate["id"]] = load_run(candidate["id"]) or {}
+            before = next((item for item in loaded[candidate["id"]].get("special") or [] if item["suite_id"] == suite_id), None)
+            if before is not None:
+                return candidate, before
+        return None, None
+
+    for section in run.get("special") or []:
+        modes = section.get("modes") or ["fixed"]
+        if "fixed" in modes:
+            candidate, before = previous_section(section["suite_id"], "fixed")
+            if before is not None:
+                passed = {question["id"]: question.get("fixed_passed", question["passed"]) for question in before["questions"]}
+                section["previous"] = {"id": candidate["id"], "created": candidate["created"], "count": before["count"],
+                    "passed": sum(1 for value in passed.values() if value)}
+                for question in section["questions"]:
+                    question["previous_passed"] = passed.get(question["id"])
+        if "agent" in modes:
+            candidate, before = previous_section(section["suite_id"], "agent")
+            if before is not None:
+                passed = {question["id"]: question.get("agent_passed") for question in before["questions"]}
+                section["previous_agent"] = {"id": candidate["id"], "created": candidate["created"], "count": before["count"],
+                    "passed": before.get("agent_passed")}
+                for question in section["questions"]:
+                    question["previous_agent_passed"] = passed.get(question["id"])
+        if modes == ["agent"]:
+            # 只跑 Agent 时 passed 就是 Agent 是否通过，「新通过 / 新失败」也按 Agent 的上一次来比。
+            for question in section["questions"]:
+                question["previous_passed"] = question.get("previous_agent_passed")
+            if section.get("previous_agent"):
+                section["previous"] = section["previous_agent"]
     return run

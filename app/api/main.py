@@ -1796,6 +1796,12 @@ def create_app(store=None, models=None, jwt_secret=None):
             needs_llm = [suite["name"] for suite in loaded if suite["method"] in special_suites.LLM_METHODS]
             if needs_llm and app.state.models.mode != "openai":
                 raise HTTPException(422, f"「{'」「'.join(needs_llm)}」需要真实大模型：请设置 MODEL_MODE=openai 和 LLM_API_KEY")
+            if "agent" in body.modes:
+                # 专项里只有检索方式能跑 Agent；回答、多轮对话方式照常只跑固定流程。
+                if not any(suite["method"] == "retrieval" for suite in loaded):
+                    raise HTTPException(422, "Agent 只能跑检索方式的专项")
+                if app.state.models.mode != "openai" and app.state.agent_mode.client_factory is None:
+                    raise HTTPException(422, "Agent 检索评测需要真实大模型：请设置 MODEL_MODE=openai 和 LLM_API_KEY")
             special = {"suites": [{"id": suite["id"], "name": suite["name"]} for suite in loaded],
                 "compare_memory": body.compare_memory}
             needs_responder = any(suite["method"] == "answer" for suite in loaded)
@@ -1818,7 +1824,7 @@ def create_app(store=None, models=None, jwt_secret=None):
             raise HTTPException(409, "已有评测正在运行，请等待完成")
         try:
             run = start_run(body.kind, None if special else body.split, body.suites, special,
-                body.modes if body.kind == "retrieval" else ("fixed",))
+                body.modes if body.kind in ("retrieval", "special") else ("fixed",))
         except Exception:
             app.state.eval_lock.release()
             raise

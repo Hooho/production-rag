@@ -665,6 +665,8 @@ export type EvalQuestion = {
   // 勾选了 Agent 时：这道题 Agent 的检索日志和最后命中；compare 是一起跑时的逐题分类（只有能回答的题有）。
   agent?: EvalAgentQuestion;
   compare?: EvalCompareKey;
+  // 列表里题目下方的补充说明（专项里用来显示「Agent 新通过」这类和上次的比较）。
+  note?: string;
 };
 // Agent 检索评测（app/evaluation/agent_retrieval.py）：只看最后命中，口径和固定流程的过滤后 Recall 一致。
 export type EvalMode = "fixed" | "agent";
@@ -875,11 +877,11 @@ export function startEvalRun(kind: "retrieval" | "generation", split: string, su
   });
 }
 
-export function startSpecialRun(suiteIds: string[], compareMemory = false) {
+export function startSpecialRun(suiteIds: string[], compareMemory = false, modes: EvalMode[] = ["fixed"]) {
   return request<{ id: string; status: string }>("/eval/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind: "special", suite_ids: suiteIds, compare_memory: compareMemory }),
+    body: JSON.stringify({ kind: "special", suite_ids: suiteIds, compare_memory: compareMemory, modes }),
   });
 }
 
@@ -909,6 +911,20 @@ export type EvalSpecialQuestion = {
   turns?: string[];
   summarized?: boolean;
   input_tokens?: number | null;
+  // 检索方式的专项勾了 Agent 时：两边各自是否通过、上次是否通过、对比分类、Agent 的检索日志，
+  // 以及固定流程逐题对比要用的召回、证据去向、来源、检索词和耗时。
+  evidence_count?: number;
+  fixed_passed?: boolean;
+  agent_passed?: boolean;
+  previous_agent_passed?: boolean | null;
+  compare?: EvalCompareKey;
+  agent?: EvalAgentQuestion;
+  recall_final?: number;
+  fixed_evidence?: { text: string; chunk_id: string | null; source_id: string | null; status: string | null }[];
+  sources?: (Source & { chunk_id?: string | null; position?: number | null })[];
+  queries?: string[];
+  rerank_query?: string;
+  latency_ms?: number;
 };
 export type EvalSpecialSection = {
   suite_id: string;
@@ -926,6 +942,11 @@ export type EvalSpecialSection = {
   questions: EvalSpecialQuestion[];
   variants?: { name: string; label: string; passed: number; correctness: number | null; summarized_rate: number | null; input_tokens_avg: number | null }[];
   previous?: { id: string; created: string; passed: number; count: number };
+  // 勾了 Agent 时：跑了哪些模式、Agent 通过数、Agent 的上一次、Agent 运行配置。
+  modes?: EvalMode[];
+  agent_passed?: number;
+  previous_agent?: { id: string; created: string; passed: number | null; count: number };
+  agent?: { tool_budget: number; timeout: number; prompt_version: string; model: string | null };
 };
 
 export function listEvalSuites() {
