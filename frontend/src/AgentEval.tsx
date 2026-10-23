@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { type EvalAgentCall, type EvalCompareKey, type EvalMode, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalSummary } from "./api";
 import { formatDuration as formatMs } from "./format";
 
@@ -170,6 +170,24 @@ function AgentQuestionList({ run, hasFixed }: { run: EvalRun; hasFixed: boolean 
     return question.compare === resultFilter;
   });
   const layout = hasFixed ? "" : "is-agent-only";
+  // 表头吸顶后加阴影：在表头前放一个 1px 的标记，标记滚到表头上方，说明表头已经贴在顶部了。
+  // 页面的滚动可能发生在某个内层容器里，所以在捕获阶段监听所有滚动。
+  const sentinel = useRef<HTMLDivElement>(null);
+  const header = useRef<HTMLDivElement>(null);
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    function check() {
+      if (!sentinel.current || !header.current) return;
+      setStuck(sentinel.current.getBoundingClientRect().top < header.current.getBoundingClientRect().top - 1);
+    }
+    check();
+    document.addEventListener("scroll", check, true);
+    window.addEventListener("resize", check);
+    return () => {
+      document.removeEventListener("scroll", check, true);
+      window.removeEventListener("resize", check);
+    };
+  }, []);
   return <div>
     <div className="ev-filters">
       <Chips value={typeFilter} options={[["all", "全部题型"], ...types.map((type): [string, string] => [type, type])]} onChange={setTypeFilter} />
@@ -177,7 +195,8 @@ function AgentQuestionList({ run, hasFixed }: { run: EvalRun; hasFixed: boolean 
       <span className="ev-filter-count">{visible.length} / {questions.length} 题</span>
     </div>
     {/* 表头固定在顶部：题目多、展开详情后往下翻，仍然知道每一列是什么。 */}
-    <div className={`ag-q-columns ${layout}`} aria-hidden="true"><span>编号</span><span>问题</span>{hasFixed && <><span>固定流程</span><span>固定流程耗时</span></>}<span>Agent</span><span>Agent 检索次数</span><span>Agent 耗时</span><span /></div>
+    <div ref={sentinel} className="ag-sticky-sentinel" aria-hidden="true" />
+    <div ref={header} className={`ag-q-columns ${layout} ${stuck ? "is-stuck" : ""}`} aria-hidden="true"><span>编号</span><span>问题</span>{hasFixed && <><span>固定流程</span><span>固定流程耗时</span></>}<span>Agent</span><span>Agent 检索次数</span><span>Agent 耗时</span><span /></div>
     <div className="ev-question-list">{visible.map((question) => {
       const open = expanded === question.id;
       const agent = question.agent;

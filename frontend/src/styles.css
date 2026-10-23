@@ -7425,8 +7425,19 @@ input:focus {
    padding: 8px 14px;
    font-size: 10px;
    color: var(--ev-muted);
-   background: rgb(var(--t-f6fafe-rgb) / .98);
+   background: rgb(var(--t-f6fafe-rgb));
    border-bottom: 1px solid var(--ev-line);
+   transition: box-shadow .15s ease;
+}
+
+/* 吸顶时加阴影，和下面滚过去的题目分开；背景不透明，下面的文字不会透上来。 */
+.ag-q-columns.is-stuck {
+   box-shadow: 0 8px 16px -8px rgba(15, 45, 80, .28);
+}
+
+.ag-sticky-sentinel {
+   height: 1px;
+   margin-bottom: -1px;
 }
 
 .ag-verdict-cell {
