@@ -180,6 +180,9 @@ def summarize_history_metrics(run):
     final_hits = 0
     false_reject_questions = 0
     false_accept_questions = 0
+    # 最后交给模型的资料（固定流程，含补充检索、被清空算 0）、Agent 拿到的资料里各有几条证据，被清空的有答案题数。
+    # 旧记录没有这些字段时是 None，前端退回只写比例的说明。
+    given_hits = agent_hits = cleared_questions = None
 
     for question in questions:
         pool = question.get("pool")
@@ -208,6 +211,13 @@ def summarize_history_metrics(run):
             final_answerable_chunks += returned
             if returned == 0:
                 false_reject_questions += 1
+            if question.get("given_recall") is not None:
+                given_hits = (given_hits or 0) + int(question["given_recall"] * evidence_count + 0.5)
+            agent = question.get("agent") or {}
+            if agent.get("recall") is not None:
+                agent_hits = (agent_hits or 0) + int(agent["recall"] * evidence_count + 0.5)
+            if "cleared" in question:
+                cleared_questions = (cleared_questions or 0) + bool(question.get("cleared"))
         else:
             unanswerable_questions += 1
             if returned > 0:
@@ -227,6 +237,9 @@ def summarize_history_metrics(run):
         "final_hits": final_hits,
         "false_reject_questions": false_reject_questions,
         "false_accept_questions": false_accept_questions,
+        "given_hits": given_hits,
+        "agent_hits": agent_hits,
+        "cleared_questions": cleared_questions,
     }
 
 

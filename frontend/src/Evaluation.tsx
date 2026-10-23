@@ -187,6 +187,9 @@ type HistoryEvidenceStats = {
   finalHits: number;
   falseRejectQuestions: number;
   falseAcceptQuestions: number;
+  givenHits?: number | null;
+  agentHits?: number | null;
+  clearedQuestions?: number | null;
 };
 
 // 从完整评测逐题结果统计真实证据数量，说明文字与页面上的汇总百分比使用同一批数据。
@@ -238,7 +241,30 @@ function summarizeHistoryEvidence(run: EvalRun): HistoryEvidenceStats | null {
     finalHits,
     falseRejectQuestions: answerable.filter((question) => question.returned === 0).length,
     falseAcceptQuestions: unanswerable.filter((question) => question.returned > 0).length,
+    givenHits: answerable.some((question) => question.given_recall !== undefined && question.given_recall !== null)
+      ? answerable.reduce((sum, question) => sum + Math.round((question.given_recall ?? 0) * question.evidence_count), 0) : null,
+    agentHits: answerable.some((question) => question.agent) ? answerable.reduce((sum, question) => sum + (question.agent?.evidence ?? []).filter((item) => item.found).length, 0) : null,
+    clearedQuestions: answerable.some((question) => question.cleared !== undefined) ? answerable.filter((question) => question.cleared).length : null,
   };
+}
+
+// 指标卡片下面的一句说明：统一写成「共 N 条证据，有 X 条……」「N 道……题，有 X 道……」，分母、分子、条件都写清楚。
+// 评测记录展开的卡片和详情页总览的卡片共用。没有逐题统计（旧记录）时返回 null，调用方退回通用说明。
+function metricSentence(key: string, stats: HistoryEvidenceStats | null, config: EvalRunBrief["config"]) {
+  if (key.startsWith("mrr")) return "1 = 每题第 1 段就是证据，0.5 ≈ 平均排第 2";
+  if (!stats) return null;
+  const evidence = `共 ${stats.evidenceTotal} 条证据`;
+  switch (key) {
+    case "recall_given": return stats.givenHits === null || stats.givenHits === undefined ? null : `${evidence}，最后交给大模型的资料里有 ${stats.givenHits} 条`;
+    case "agent_recall": return stats.agentHits === null || stats.agentHits === undefined ? null : `${evidence}，Agent 找到的资料里有 ${stats.agentHits} 条`;
+    case "wrong_clear_rate": return stats.clearedQuestions === null || stats.clearedQuestions === undefined ? null : `${stats.answerableQuestions} 道有答案的题，有 ${stats.clearedQuestions} 道被判资料不足、清空了`;
+    case "recall_pool": return `${evidence}，有 ${stats.poolHits} 条进了候选池（每题前 ${config.pool_size ?? "—"} 段）`;
+    case "recall_top": return `${evidence}，有 ${stats.topHits} 条排进了重排后的前 ${config.return_limit ?? 6} 段`;
+    case "recall_final": return `${evidence}，有 ${stats.finalHits} 条过了阈值（过滤后一共剩 ${stats.finalRemaining} 段）`;
+    case "false_reject_rate": return `${stats.answerableQuestions} 道有答案的题，有 ${stats.falseRejectQuestions} 道一段资料都没拿到`;
+    case "false_accept_rate": return `${stats.unanswerableQuestions} 道没答案的题，有 ${stats.falseAcceptQuestions} 道还拿到了资料`;
+    default: return null;
+  }
 }
 
 // 列表接口返回蛇形命名，详情页沿用原有驼峰命名；这里集中转换，历史页不需要再拉取详情。
@@ -258,6 +284,9 @@ function historyEvidenceStats(metrics: EvalHistoryMetrics | null | undefined): H
     finalHits: metrics.final_hits,
     falseRejectQuestions: metrics.false_reject_questions,
     falseAcceptQuestions: metrics.false_accept_questions,
+    givenHits: metrics.given_hits,
+    agentHits: metrics.agent_hits,
+    clearedQuestions: metrics.cleared_questions,
   };
 }
 
@@ -320,37 +349,10 @@ const METRIC_HINTS: Record<string, string> = {
 
 // 根据当前评测的逐题结果生成卡片说明，展示真实 chunk 数量而不是固定示例。
 function metricCardDetails(metricKey: string, run: EvalRun, value: number | null | undefined) {
-  const generationExplanation = GENERATION_METRIC_EXPLANATIONS[metricKey] ?? FLOW_METRIC_EXPLANATIONS[metricKey];
-  if (generationExplanation) return [generationExplanation];
-
-  const stats = summarizeHistoryEvidence(run);
-  if (stats) {
-    if (metricKey === "recall_pool") {
-      return [`候选池 ${stats.poolChunks} 段，含 ${stats.poolHits} / ${stats.evidenceTotal} 条证据`];
-    }
-    if (metricKey === "recall_top") {
-      const returnLimit = run.config.return_limit ?? 6;
-      return [`每题取前 ${returnLimit}，共 ${stats.topChunks} 段，含 ${stats.topHits} / ${stats.evidenceTotal} 条证据`];
-    }
-    if (metricKey === "recall_final") {
-      return [`过滤后剩 ${stats.finalAnswerableChunks} 段，含 ${stats.finalHits} / ${stats.evidenceTotal} 条证据`];
-    }
-    if (metricKey === "mrr_pool") {
-      return ["越接近 1，证据排得越靠前"];
-    }
-    if (metricKey === "mrr_top") {
-      return ["越接近 1，证据排得越靠前"];
-    }
-    if (metricKey === "mrr_final") {
-      return ["越接近 1，证据排得越靠前"];
-    }
-    if (metricKey === "false_reject_rate") {
-      return [`${stats.falseRejectQuestions} / ${stats.answerableQuestions} 道有答案的题没拿到资料`];
-    }
-    if (metricKey === "false_accept_rate") {
-      return [`${stats.falseAcceptQuestions} / ${stats.unanswerableQuestions} 道无答案的题仍拿到资料`];
-    }
-  }
+  const sentence = metricSentence(metricKey, summarizeHistoryEvidence(run), run.config);
+  if (sentence) return [sentence];
+  const explanation = GENERATION_METRIC_EXPLANATIONS[metricKey] ?? FLOW_METRIC_EXPLANATIONS[metricKey] ?? METRIC_HINTS[metricKey];
+  if (explanation && !["faithfulness", "correctness", "refusal_accuracy", "citation_validity"].includes(metricKey)) return [explanation];
 
   const questions = run.questions ?? [];
   const judgedQuestions: EvalQuestion[] = [];
@@ -1474,15 +1476,8 @@ function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: 
         const metricsExpanded = expandedMetricRuns.includes(item.id);
         // 指标说明所需统计已随历史列表返回，展开行只做本地渲染，不再触发逐条详情请求。
         const stats = historyEvidenceStats(item.history_metrics);
-        const evidenceTotal = stats?.evidenceTotal ?? 0;
-        // 指标卡片下面只写一句实际数字，解释性的长句放在详情页。
-        const poolHint = stats ? `${stats.poolHits} / ${evidenceTotal} 条证据进了候选池` : "—";
-        const returnLimit = item.config.return_limit ?? 6;
-        const topHint = stats ? `重排后前 ${returnLimit} 条里有 ${stats.topHits} / ${evidenceTotal} 条` : "—";
-        const finalHint = stats ? `过滤后剩 ${stats.finalRemaining} 段，含 ${stats.finalHits} / ${evidenceTotal} 条证据` : "—";
-        const mrrHint = "越接近 1，证据排得越靠前";
-        const falseRejectHint = stats ? `${stats.falseRejectQuestions} / ${stats.answerableQuestions} 道有答案的题没拿到资料` : "—";
-        const falseAcceptHint = stats ? `${stats.falseAcceptQuestions} / ${stats.unanswerableQuestions} 道无答案的题仍拿到资料` : "—";
+        // 指标卡片下面的一句说明，和详情页总览同一套（metricSentence）；旧记录没有逐题统计时退回通用说明。
+        const sentence = (key: string) => metricSentence(key, stats, item.config) ?? METRIC_HINTS[key] ?? FLOW_METRIC_EXPLANATIONS[key] ?? "—";
         return <Fragment key={item.id}>
           <tr className={`ev-history-main-row ${picked.includes(item.id) ? "is-current" : ""}`} tabIndex={0} aria-expanded={metricsExpanded} aria-controls={`history-metrics-${item.id}`} title="点击展开或收起指标" onClick={() => toggleMetrics(item.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleMetrics(item.id); } }}>
             <td><input type="checkbox" aria-label={`选择 ${item.id}`} checked={picked.includes(item.id)} disabled={item.status !== "completed"} onClick={(event) => event.stopPropagation()} onChange={() => toggle(item.id)} /></td>
@@ -1506,18 +1501,18 @@ function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: 
           </tr>}
           {metricsExpanded && item.kind !== "special" && <tr id={`history-metrics-${item.id}`} className="ev-history-metrics-row">
             <td colSpan={9}><div className="ev-history-metrics-panel"><div className="ev-history-metrics-heading">本条记录指标</div><div className="ev-history-metrics-grid">
-              {runModes(item).includes("agent") && <HistoryMetric label="Agent 资料命中率" value={formatPercent(item.summary?.agent_recall)} hint="Agent 找到资料，包含题目的证据的比例" />}
+              {runModes(item).includes("agent") && <HistoryMetric label="Agent 资料命中率" value={formatPercent(item.summary?.agent_recall)} hint={metricSentence("agent_recall", stats, item.config) ?? "Agent 找到资料，包含题目的证据的比例"} />}
               {runModes(item).includes("fixed") && <>
               {/* 完整检索流程的新记录：最终交给模型的命中率（结果列显示的就是它）和误清空率。 */}
-              {item.config.flow?.name === "full" && <HistoryMetric label="固定流程资料命中率" value={formatPercent(item.summary?.recall_given)} hint="最后交给大模型写答案的资料里，包含题目的证据的比例" />}
-              {item.config.flow?.name === "full" && <HistoryMetric label="误清空率" value={formatPercent(item.summary?.wrong_clear_rate)} hint="有答案的题被判资料不足、清空" />}
-              <HistoryMetric label="候选池 Recall" value={formatPercent(item.summary?.recall_pool)} hint={poolHint} />
+              {item.config.flow?.name === "full" && <HistoryMetric label="固定流程资料命中率" value={formatPercent(item.summary?.recall_given)} hint={sentence("recall_given")} />}
+              {item.config.flow?.name === "full" && <HistoryMetric label="误清空率" value={formatPercent(item.summary?.wrong_clear_rate)} hint={sentence("wrong_clear_rate")} />}
+              <HistoryMetric label="候选池 Recall" value={formatPercent(item.summary?.recall_pool)} hint={sentence("recall_pool")} />
               {/* 补齐召回、重排、阈值过滤三个阶段，避免只看首尾指标而定位不到重排损失。 */}
-              <HistoryMetric label="重排 Recall" value={formatPercent(item.summary?.recall_top)} hint={topHint} />
-              <HistoryMetric label="最终 Recall" value={formatPercent(item.summary?.recall_final)} hint={finalHint} />
-              <HistoryMetric label="候选池 MRR" value={formatMetric("mrr_pool", item.summary?.mrr_pool)} hint={mrrHint} />
-              <HistoryMetric label="误杀率" value={formatPercent(item.summary?.false_reject_rate)} hint={falseRejectHint} />
-              <HistoryMetric label="漏放率" value={formatPercent(item.summary?.false_accept_rate)} hint={falseAcceptHint} />
+              <HistoryMetric label="重排 Recall" value={formatPercent(item.summary?.recall_top)} hint={sentence("recall_top")} />
+              <HistoryMetric label="最终 Recall" value={formatPercent(item.summary?.recall_final)} hint={sentence("recall_final")} />
+              <HistoryMetric label="候选池 MRR" value={formatMetric("mrr_pool", item.summary?.mrr_pool)} hint={sentence("mrr_pool")} />
+              <HistoryMetric label="误杀率" value={formatPercent(item.summary?.false_reject_rate)} hint={sentence("false_reject_rate")} />
+              <HistoryMetric label="漏放率" value={formatPercent(item.summary?.false_accept_rate)} hint={sentence("false_accept_rate")} />
               </>}
             </div></div></td>
           </tr>}

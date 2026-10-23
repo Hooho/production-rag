@@ -127,13 +127,21 @@ export function ComparePanel({ run }: { run: EvalRun }) {
 export function AgentPanel({ run }: { run: EvalRun }) {
   const summary: EvalSummary = run.summary ?? {};
   const config = run.config.agent;
+  // 卡片说明写成「共 N 条证据，有 X 条……」「N 道……题，有 X 道……」，和固定流程的卡片同一种写法。
+  const agentQuestions = (run.questions ?? []).filter((question) => question.agent);
+  const answerable = agentQuestions.filter((question) => question.answerable);
+  const unanswerable = agentQuestions.filter((question) => !question.answerable);
+  const evidenceTotal = answerable.reduce((sum, question) => sum + (question.agent?.evidence ?? []).length, 0);
+  const evidenceFound = answerable.reduce((sum, question) => sum + (question.agent?.evidence ?? []).filter((item) => item.found).length, 0);
+  const rejected = answerable.filter((question) => (question.agent?.returned ?? 0) === 0).length;
+  const accepted = unanswerable.filter((question) => (question.agent?.returned ?? 0) > 0).length;
   return <div className="ev-overview ag-eval">
     <p className="ev-muted-note">只看 Agent 最后拿到的资料里有没有证据。{config && <> 工具预算 {config.tool_budget} 次 · 超时 {config.timeout} 秒 · 提示词 {config.prompt_version}{config.model ? ` · ${config.model}` : ""}</>}</p>
     <div className="ev-section-title">命中<small>{summary.answerable_count ?? 0} 道能回答 · {summary.unanswerable_count ?? 0} 道无法回答</small></div>
     <div className="ev-cards">
-      <Card label="资料命中率" value={percent(summary.agent_recall)} note="Agent 找到资料，包含题目的证据的比例" />
-      <Card label="误杀率" value={percent(summary.agent_false_reject_rate)} note="能回答的题里一段资料都没拿到的比例" />
-      <Card label="漏放率" value={percent(summary.agent_false_accept_rate)} note="无法回答的题里拿到了资料的比例" />
+      <Card label="资料命中率" value={percent(summary.agent_recall)} note={agentQuestions.length ? `共 ${evidenceTotal} 条证据，Agent 找到的资料里有 ${evidenceFound} 条` : "Agent 找到资料，包含题目的证据的比例"} />
+      <Card label="误杀率" value={percent(summary.agent_false_reject_rate)} note={agentQuestions.length ? `${answerable.length} 道有答案的题，有 ${rejected} 道一段资料都没拿到` : "有答案却没拿到资料"} />
+      <Card label="漏放率" value={percent(summary.agent_false_accept_rate)} note={agentQuestions.length ? `${unanswerable.length} 道没答案的题，有 ${accepted} 道还拿到了资料` : "没答案却拿到资料"} />
       {summary.agent_failed ? <Card label="运行失败" value={`${summary.agent_failed} 题`} note="模型调用失败等，点逐题看原因" /> : null}
     </div>
     <div className="ev-section-title">检索过程<small>每题平均</small></div>

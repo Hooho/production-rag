@@ -775,6 +775,10 @@ export type EvalHistoryMetrics = {
   final_hits: number;
   false_reject_questions: number;
   false_accept_questions: number;
+  // 最后交给模型的资料、Agent 拿到的资料里各有几条证据，被清空的有答案题数（旧记录没有）。
+  given_hits?: number | null;
+  agent_hits?: number | null;
+  cleared_questions?: number | null;
 };
 export type EvalConfig = { split: string | null; suites: string[]; special?: { suites: { id: string; name: string }[]; compare_memory?: boolean }; dataset_size?: number; rrf_k?: number; pool_size?: number; return_limit?: number; min_score?: number | null; reranked?: boolean; fusion?: string; methods?: string[]; model_mode?: string; embedding_mode?: string; embedding_model?: string; rerank_model?: string; rerank_mode?: string; query_source?: string[];
   // 检索评测跑了哪些模式（旧记录没有，都是只跑固定流程）；agent 是 Agent 的运行配置。
