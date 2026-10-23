@@ -330,6 +330,7 @@ function RunChip({ run, selected, onClick }: { run: EvalSuiteRunEntry; selected:
 // 添加或编辑一道题，字段随评测方式不同；证据每行一条，必须是评测语料里的原文。
 function ItemForm({ suiteId, method, initial, types, onToast, onDone }: { suiteId: string; method: EvalSuiteMethod; initial?: EvalSuiteItem; types: string[]; onToast: ShowToast; onDone: (value: EvalSuiteFull | null) => void }) {
   const [type, setType] = useState(initial?.type ?? "");
+  const hues = typeHues(types);
   const [question, setQuestion] = useState(initial?.question ?? "");
   const [evidence, setEvidence] = useState((initial?.evidence ?? []).join("\n"));
   const [reference, setReference] = useState(initial?.reference_answer ?? "");
@@ -356,8 +357,11 @@ function ItemForm({ suiteId, method, initial, types, onToast, onDone }: { suiteI
     {method === "dialogue" && <label className="rg-field is-top"><span>前面的提问</span><textarea value={turns} rows={4} onChange={(event) => setTurns(event.target.value)} placeholder="每行一轮，按顺序问" autoFocus /></label>}
     <label className="rg-field"><span>{method === "dialogue" ? "最后一问" : "问题"}</span><input value={question} maxLength={500} onChange={(event) => setQuestion(event.target.value)} placeholder={method === "dialogue" ? "要用到前面内容的问题，例如「回到我最开始问的那个」" : "完整的问题"} autoFocus={method !== "dialogue"} /></label>
     {method !== "dialogue" && <label className="rg-field is-top"><span>证据原文</span><textarea value={evidence} rows={3} onChange={(event) => setEvidence(event.target.value)} placeholder={method === "retrieval" ? "每行一条，必须是评测语料里的原文" : "可选：每行一条，必须是评测语料里的原文"} /></label>}
-    <label className="rg-field"><span>类型</span><input value={type} maxLength={20} list={`sp-types-${suiteId}`} onChange={(event) => setType(event.target.value)} placeholder={types.length ? `可选，已有：${types.join("、")}` : "可选，例如多跳、比较；结果会按类型统计"} />
-      <datalist id={`sp-types-${suiteId}`}>{types.map((item) => <option key={item} value={item} />)}</datalist></label>
+    {/* 类型：普通文本框，可以输入新类型；下面列出这个专项已经用过的类型，点一下填进去（同一类别写成同一个名字）。 */}
+    <div className="rg-field is-top"><span>类型</span><div className="sp-type-input">
+      <input value={type} maxLength={20} onChange={(event) => setType(event.target.value)} placeholder="可选，例如多跳、比较；结果会按类型统计" />
+      {types.length > 0 && <div className="tag-row"><small>已有：</small>{types.map((item) => <Tag key={item} size="sm" hue={hues.get(item)} outline={item !== type.trim()} onClick={() => setType(item)}>{item}</Tag>)}</div>}
+    </div></div>
     <label className="rg-field is-top"><span>参考答案</span><textarea value={reference} maxLength={2000} rows={2} onChange={(event) => setReference(event.target.value)} placeholder={method === "retrieval" ? "可选" : "评审模型拿回答和它比对"} /></label>
     <div className="rg-buttons">
       <button type="button" className="secondary-button" onClick={() => onDone(null)} disabled={busy}>取消</button>

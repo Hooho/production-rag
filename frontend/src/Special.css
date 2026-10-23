@@ -244,3 +244,14 @@
    line-height: 1.6;
 }
 
+
+/* 题目类型：文本框下面是已有类型的标签，点一下填进去；当前选中的那个是实心的。 */
+.sp-type-input {
+   display: grid;
+   gap: 6px;
+}
+
+.sp-type-input .tag-row small {
+   color: var(--t-7d95ac);
+   font-size: 12px;
+}
