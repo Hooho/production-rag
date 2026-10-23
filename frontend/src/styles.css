@@ -7958,3 +7958,17 @@ input:focus {
 .ev-root .ag-evidence-list {
    gap: 10px;
 }
+
+/* 检索参数和耗时用小标签：混合检索、Top K 5、耗时 1.2 秒。 */
+.ag-tag {
+   display: inline-flex;
+   align-items: center;
+   padding: 2px 8px;
+   border: 1px solid var(--ev-line);
+   border-radius: 999px;
+   background: rgba(255, 255, 255, .9);
+   color: var(--t-536d86);
+   font-size: 12px;
+   line-height: 1.6;
+   white-space: nowrap;
+}

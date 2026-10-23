@@ -677,6 +677,8 @@ export type EvalAgentCall = {
   arguments: Record<string, unknown>;
   // ok / error 是执行了的调用；duplicate（和之前完全相同，没执行）、skipped（预算用完）只有说明。
   status: string;
+  // 这次工具调用的耗时（旧记录没有）。
+  duration_ms?: number | null;
   chunk_ids: string[];
   hits: number[];
   query?: string;

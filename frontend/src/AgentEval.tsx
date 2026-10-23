@@ -31,6 +31,7 @@ const STOP_LABELS: Record<string, string> = {
 const TOOL_LABELS: Record<string, string> = {
   search_knowledge: "检索知识库", read_context: "读前后文", lookup_order: "查订单", query_data: "查业务数据",
 };
+const SEARCH_MODE_LABELS: Record<string, string> = { hybrid: "混合检索", vector: "向量检索", keyword: "关键词检索" };
 const CALL_STATUS: Record<string, string> = { ok: "", error: "出错", duplicate: "和之前的调用相同，没有执行", skipped: "预算用完，没有执行" };
 
 function percent(value: number | null | undefined) {
@@ -267,7 +268,8 @@ function FixedLog({ question }: { question: EvalQuestion }) {
   return <section className="ag-log">
     <div className="ag-log-title">固定流程<small>检索 1 次 · 耗时 {formatMs(question.latency_ms)}</small></div>
     <div className="ag-call">
-      <div className="ag-call-head"><span className="ag-tool">检索</span>{question.queries.map((query) => <code key={query}>{query}</code>)}{hitSources.size > 0 && <span className="ag-hit">命中</span>}</div>
+      <div className="ag-call-head"><span className="ag-tool">检索</span>{question.queries.map((query) => <code key={query}>{query}</code>)}
+        <span className="ag-tag">混合检索</span><span className="ag-tag">耗时 {formatMs(question.latency_ms)}</span>{hitSources.size > 0 && <span className="ag-hit">命中</span>}</div>
       <ChunkTabs items={items} empty="过滤后没有分块。" />
     </div>
   </section>;
@@ -294,9 +296,11 @@ function AgentCall({ call }: { call: EvalAgentCall }) {
   return <div className={`ag-call ${call.status !== "ok" ? "is-off" : ""} ${hit ? "is-hit" : ""}`}>
     <div className="ag-call-head">
       <span className="ag-tool">第 {call.call} 次 · {TOOL_LABELS[call.name] ?? call.name}</span>
-      {call.name === "search_knowledge" && call.query !== undefined ? <><code>{call.query}</code><small className="ag-muted">{call.mode} · top_k {call.top_k}</small></>
+      {call.name === "search_knowledge" && call.query !== undefined ? <><code>{call.query}</code>
+        <span className="ag-tag">{SEARCH_MODE_LABELS[call.mode ?? ""] ?? call.mode}</span><span className="ag-tag">Top K {call.top_k}</span></>
         : call.name === "read_context" && call.source_id ? <span>{call.source_id} 的{call.direction === "before" ? "前文" : "后文"}</span>
           : <code>{JSON.stringify(call.arguments)}</code>}
+      {call.duration_ms !== undefined && call.duration_ms !== null && <span className="ag-tag">耗时 {formatMs(call.duration_ms)}</span>}
       {hit && <span className="ag-hit">命中证据 {call.hits.map((index) => index + 1).join("、")}</span>}
     </div>
     {status && <div className="ag-call-meta">{status}{call.error ? `：${call.error}` : ""}</div>}

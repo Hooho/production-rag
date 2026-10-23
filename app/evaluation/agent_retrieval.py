@@ -52,7 +52,7 @@ def call_log(number, round_no, call, evidence, chunk_texts):
     name = call.get("name") or ""
     trace = call.get("trace") or {}
     entry = {"call": number, "round": round_no, "name": name, "arguments": parse_arguments(call.get("arguments")),
-        "status": call.get("status"), "chunk_ids": [], "hits": []}
+        "status": call.get("status"), "duration_ms": call.get("duration_ms"), "chunk_ids": [], "hits": []}
     if call.get("status") not in ("ok", "error"):
         # duplicate（和之前的调用完全相同，没有执行）、skipped（预算用完）：只记状态和给模型的说明。
         entry["note"] = (call.get("content") or "")[:200]

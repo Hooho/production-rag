@@ -43,6 +43,7 @@ def test_agent_retrieval_runs_with_fixed(setup, eval_dir, monkeypatch):
     assert agent["queries"] == ["耳机签收后几天内可以退货"]
     call = agent["calls"][0]
     assert call["name"] == "search_knowledge" and call["arguments"]["query"] == "耳机签收后几天内可以退货"
+    assert isinstance(call["duration_ms"], int)
     assert call["results"][0]["evidence_id"] == "S1" and call["results"][0]["hits"] == [0] and call["hits"] == [0]
     assert agent["evidence"][0] == {"text": "耳机签收后七天内可以无理由退货", "found": True,
         "where": [{"call": 1, "evidence_id": "S1"}]}
