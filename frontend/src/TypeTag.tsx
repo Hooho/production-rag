@@ -1,10 +1,15 @@
 import type { CSSProperties } from "react";
-import { hueMap } from "./hues";
+import { hueMap, labelHue } from "./hues";
+
+// 通用的彩色标签：hue 不传时按名字从固定标签的预设里取色（评测类型、运行模式等）。
+export function HueTag({ label, hue }: { label: string; hue?: number }) {
+  return <span className="hue-tag" style={{ "--tag-h": hue ?? labelHue(label) } as CSSProperties}>{label}</span>;
+}
 
 // 题目类型标签：颜色按类型在这一组题里第一次出现的顺序取预设色相（hues.ts，和 Agent 执行链的工具颜色同一套）。
 export function TypeTag({ type, hues }: { type: string | null | undefined; hues: Map<string, number> }) {
   if (!type) return null;
-  return <span className="hue-tag" style={{ "--tag-h": hues.get(type) ?? 215 } as CSSProperties}>{type}</span>;
+  return <HueTag label={type} hue={hues.get(type) ?? 215} />;
 }
 
 export { hueMap as typeHues };

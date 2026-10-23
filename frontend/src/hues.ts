@@ -19,3 +19,6 @@ export function hueMap(names: (string | null | undefined)[]) {
   for (const name of names) if (name && !result.has(name)) result.set(name, pick(name));
   return result;
 }
+
+// 评测记录里的固定标签（评测类型、运行模式）：先占好位置，颜色固定不变，新名字依次往后排。
+export const labelHue = huePicker(["检索", "生成", "专项", "多轮对话", "固定流程", "Agent"]);

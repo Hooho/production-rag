@@ -8324,3 +8324,10 @@ input:focus {
 .rg-item-meta .hue-tag {
    flex: none;
 }
+
+/* 评测记录的类型列：评测类型和运行模式都用统一的彩色标签（颜色固定，见 hues.ts 的 labelHue）。 */
+.ev-history-tags {
+   display: inline-flex;
+   flex-wrap: wrap;
+   gap: 4px 6px;
+}
