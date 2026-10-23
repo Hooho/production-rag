@@ -15,15 +15,15 @@ type Props = { suiteId: string | null; onNavigate: (path: string) => void; onToa
 
 const METHOD_LABELS: Record<EvalSuiteMethod, string> = { retrieval: "检索", answer: "回答", dialogue: "多轮对话" };
 const METHOD_HINTS: Record<EvalSuiteMethod, string> = {
-  retrieval: "和线上检索一致：改写 → 检索 → 充分性判断 → 补充检索，会调用大模型。最终交给模型的资料里证据全在算通过；逐题显示向量检索、关键词检索各排第几，看是谁找到的。题目要有问题和证据原文，可以标类型。",
-  answer: "检索后完整回答，再由评审模型和参考答案比对，要点一致算通过。需要真实大模型。题目要有问题和参考答案，证据可选。",
-  dialogue: "按顺序问完一段对话，最后一问要用到前面的内容，评审模型判定要点一致算通过。需要真实大模型。题目是前面几轮提问、最后一问和参考答案。",
+  retrieval: "和线上一样检索，证据全交给模型算通过。题目要有证据原文。",
+  answer: "检索后回答，和参考答案要点一致算通过。题目要有参考答案。",
+  dialogue: "按顺序问完一段对话，最后一问答对算通过。",
 };
 const SEARCH_LABELS: Record<EvalSuiteSearchMode, string> = { hybrid: "混合检索", dense: "只用向量", keyword: "只用关键词" };
 const SEARCH_HINTS: Record<EvalSuiteSearchMode, string> = {
-  hybrid: "向量 + 关键词两路一起找，和线上一样。看整条链路能不能把证据交给回答模型。",
-  dense: "只用向量检索。看向量本身找不找得到，比如分片被截断的影响不会被关键词检索兜回来。",
-  keyword: "只用关键词检索（BM25）。看字面匹配找不找得到，和「只用向量」对照着看。",
+  hybrid: "向量 + 关键词，和线上一样。",
+  dense: "只用向量，看向量本身找不找得到。",
+  keyword: "只用关键词（BM25），看字面匹配找不找得到。",
 };
 // 证据最后的去向（检索诊断里的状态）。
 const EVIDENCE_STATUS: Record<string, string> = {
@@ -89,8 +89,7 @@ function SuiteList({ onOpen, onToast }: { onOpen: (id: string) => void; onToast:
 
   return <div className="rg-root">
     <div className="rg-intro">
-      <p>每个专项针对一个方向检查有没有问题，比如分片太长被截断、多轮对话记不记得前面的内容。专项题专门挑难题，分数低是正常的，不计入调参分数。</p>
-      <p>在这里运行单个专项，也可以在「历史评测记录」里选「专项」，一次勾选几个一起跑。</p>
+      <p>每个专项盯一个方向的难题，分数低正常，不计入调参分数。</p>
       {!creating && <button type="button" className="primary-button" onClick={() => setCreating(true)}>新建专项</button>}
     </div>
     {creating && <div className="rg-form">
@@ -264,7 +263,7 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
       </div>
       {data.method === "dialogue" && <div className="sp-switch-line">
         <button type="button" role="switch" aria-checked={compareMemory} className={`sp-switch ${compareMemory ? "is-on" : ""}`} onClick={() => setCompareMemory(!compareMemory)}><span /></button>
-        <span>对比记忆参数：除了当前设置，再把压缩阈值、保留条数各调大调小跑一遍（共 5 组），给「系统管理 › RAG 配置」的「对话记忆」提供依据。调用大模型次数是 5 倍。</span>
+        <span>对比记忆参数：压缩阈值、保留条数各调大调小再跑，共 5 组，大模型调用是 5 倍。</span>
       </div>}
       {running && <div className="rg-progress">正在运行…</div>}
     </div>
@@ -388,10 +387,9 @@ export function SpecialSection({ section }: { section: EvalSpecialSection }) {
     <div className="rg-summary">
       <span><strong>{section.passed} / {section.count} 通过</strong>（{section.count ? Math.round((section.passed / section.count) * 100) : 0}%）</span>
       {section.search_mode_label && <Tag size="sm" outline plain>{section.search_mode_label}</Tag>}
-      {section.evidence_total ? <span>{section.evidence_total} 条证据：{[section.search_mode !== "keyword" ? `含证据的分片进了向量检索前 12 名的 ${section.dense_found ?? 0} 条` : "", section.search_mode !== "dense" ? `进了关键词检索前 30 名的 ${section.keyword_found ?? 0} 条` : ""].filter(Boolean).join("，")}</span> : null}
-      {section.previous ? <span>和上次（{formatTime(section.previous.created)}，{section.previous.passed} / {section.previous.count}）比：新通过 {fixed}，新失败 <strong className={regressed ? "is-fail" : ""}>{regressed}</strong></span> : <span className="rg-muted">这是第一次运行这个专项</span>}
+      {section.evidence_total ? <span>{section.evidence_total} 条证据：{[section.search_mode !== "keyword" ? `向量找到 ${section.dense_found ?? 0}` : "", section.search_mode !== "dense" ? `关键词找到 ${section.keyword_found ?? 0}` : ""].filter(Boolean).join(" · ")}</span> : null}
+      {section.previous ? <span title={formatTime(section.previous.created)}>上次 {section.previous.passed} / {section.previous.count} · 新通过 {fixed} · 新失败 <strong className={regressed ? "is-fail" : ""}>{regressed}</strong></span> : <span className="rg-muted">第一次跑</span>}
     </div>
-    {section.evidence_total ? <p className="rg-muted sp-legend">每条证据下面：含这条证据的分片在向量检索（按意思相近，取前 12 个分片）和关键词检索（按字面匹配，取前 30 个分片）里各排第几；两路结果合并后交给重排模型打分，「最后」是它有没有交给回答模型。</p> : null}
     {section.variants && <ul className="sp-variants">
       {section.variants.map((variant, index) => <li key={variant.name} className={index === 0 ? "is-current" : ""}>
         <strong>{variant.label}</strong>
@@ -424,7 +422,7 @@ function SpecialQuestion({ question, hues, method, searchMode }: { question: Eva
     {question.evidence && question.evidence.length > 0 && <ul className="sp-evidence">
       {question.evidence.map((item, index) => <li key={index}>
         <span className="sp-evidence-text">{item.text}</span>
-        <span className="sp-evidence-ranks" title="含这条证据的分片，在向量检索（按意思相近，取前 12 个分片）和关键词检索（按字面匹配，取前 30 个分片）的结果里各排第几；最后一项是它最终有没有交给回答模型">
+        <span className="sp-evidence-ranks" title="向量取前 12，关键词取前 30">
           <span className="sp-evidence-label">含证据的分片</span>
           {searchMode === "keyword" ? <span>向量检索：这次没用</span> : <span className={item.dense_rank === null ? "is-miss" : ""}>{rankText("向量", item.dense_rank, 12)}</span>}
           {searchMode === "dense" ? <span>关键词检索：这次没用</span> : <span className={item.keyword_rank === null ? "is-miss" : ""}>{rankText("关键词", item.keyword_rank, 30)}</span>}

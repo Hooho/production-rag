@@ -18,11 +18,11 @@ export function EvidenceChunks({ texts }: { texts: string[] }) {
   if (error) return <p className="evc-note is-warn">{error}</p>;
   if (!data) return <p className="evc-note">正在查找所在分片…</p>;
   return <div className="evc-root">
-    {!data.imported && <p className="evc-note">评测语料还没导入（还没跑过评测），这里按当前分片规则临时切分，没有 token 数。</p>}
-    {data.imported && !data.cuts_available && <p className="evc-note">当前不是本地向量模型，拿不到截断位置，没法标出哪部分没参与向量计算。</p>}
+    {!data.imported && <p className="evc-note">语料还没导入，按当前规则临时切分，没有 token 数。</p>}
+    {data.imported && !data.cuts_available && <p className="evc-note">不是本地向量模型，标不出截断位置。</p>}
     {data.items.map((item, index) => <div key={index} className="evc-item">
       {data.items.length > 1 && <div className="evc-evidence">证据 {index + 1}：{item.text}</div>}
-      {item.chunks.length === 0 ? <p className="evc-note is-warn">当前分片里找不到这条证据：可能正好跨在两个分片中间，或者语料改过。这道题需要改短证据或重新标注。</p>
+      {item.chunks.length === 0 ? <p className="evc-note is-warn">分片里找不到这条证据，可能跨了两个分片或语料改过，请改短证据。</p>
         : item.chunks.map((chunk, chunkIndex) => <ChunkView key={chunkIndex} chunk={chunk} />)}
     </div>)}
   </div>;

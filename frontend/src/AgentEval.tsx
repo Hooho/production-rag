@@ -22,10 +22,10 @@ const COMPARE_LABELS: Record<EvalCompareKey, string> = {
   agent_only: "只有 Agent 命中", fixed_only: "只有固定流程命中", neither: "都没命中", both: "都命中",
 };
 const COMPARE_HINTS: Record<EvalCompareKey, string> = {
-  agent_only: "Agent 多查几次或换词找到了，固定流程没找到",
-  fixed_only: "固定流程找到了，Agent 没找到：重点看这一类",
-  neither: "两边都没拿到全部证据",
-  both: "两边都拿到了全部证据",
+  agent_only: "Agent 找到，固定流程没有",
+  fixed_only: "固定流程找到，Agent 没有：重点看",
+  neither: "两边都没拿全",
+  both: "两边都拿全了",
 };
 const STOP_LABELS: Record<string, string> = {
   answered: "正常回答", budget: "工具预算用完，强制回答", timeout: "超时，强制回答", demo: "演示模式",
@@ -90,18 +90,18 @@ function Card({ label, value, note }: { label: string; value: string; note?: str
 export function ComparePanel({ run }: { run: EvalRun }) {
   const summary: EvalSummary = run.summary ?? {};
   const rows: [string, string, string, string][] = [
-    ["资料命中率", percent(summary.recall_given ?? summary.recall_final), percent(summary.agent_recall), "能回答的题里，最后交给模型的资料包含的证据比例。两边都算父块扩展拼进来的相邻分片：固定流程是充分性判断之后最终交给模型的（可能用了补充检索，被判资料不足就清空），Agent 是所有检索结果加上读前后文读到的"],
-    ["误杀率", percent(summary.false_reject_rate), percent(summary.agent_false_reject_rate), "能回答的题里，一段资料都没拿到的比例（越低越好）"],
-    ["漏放率", percent(summary.false_accept_rate), percent(summary.agent_false_accept_rate), "无法回答的题里，仍然拿到了资料的比例（越低越好）"],
-    ["平均检索次数", summary.retry_rate !== undefined && summary.retry_rate !== null ? number(1 + summary.retry_rate) : "1", number(summary.agent_avg_searches), "固定流程每题检索一次，充分性判断觉得不够时再补充检索一次；Agent 自己决定查几次"],
-    ["平均无新增检索", "—", number(summary.agent_avg_wasted_searches), `Agent 的检索里，一个新分块都没拿到的次数（反复拿回同一批分块，越低越好）；占全部检索 ${percent(summary.agent_wasted_rate)}`],
+    ["资料命中率", percent(summary.recall_given ?? summary.recall_final), percent(summary.agent_recall), "最后交给模型的资料里证据的比例"],
+    ["误杀率", percent(summary.false_reject_rate), percent(summary.agent_false_reject_rate), "有答案却没拿到资料，越低越好"],
+    ["漏放率", percent(summary.false_accept_rate), percent(summary.agent_false_accept_rate), "没答案却拿到资料，越低越好"],
+    ["平均检索次数", summary.retry_rate !== undefined && summary.retry_rate !== null ? number(1 + summary.retry_rate) : "1", number(summary.agent_avg_searches), "固定流程不够时补查一次；Agent 自己定"],
+    ["平均无新增检索", "—", number(summary.agent_avg_wasted_searches), `没拿到新分块的检索，占 ${percent(summary.agent_wasted_rate)}`],
     summary.flow_latency_avg_ms !== undefined && summary.flow_latency_avg_ms !== null
-      ? ["平均耗时", formatMs(summary.flow_latency_avg_ms), formatMs(summary.agent_latency_avg_ms), "固定流程算改写、检索、充分性判断和补充检索（改写用了缓存时按当时实际花的时间）；Agent 包括它所有轮次的模型调用和写回答，固定流程没算写回答那一次"]
-      : ["平均耗时", formatMs(summary.latency_avg_ms), formatMs(summary.agent_latency_avg_ms), "口径不同：这次固定流程只算检索（召回 + 重排，旧口径），没算意图识别、充分性判断和写回答；Agent 包括它所有轮次的模型调用和写回答"],
-    ["平均输入 token", "—", number(summary.agent_avg_prompt_tokens, 0), "固定流程改写和充分性判断的 token 没有记录（每题 1～3 次大模型调用）；Agent 是所有轮次加起来的"],
+      ? ["平均耗时", formatMs(summary.flow_latency_avg_ms), formatMs(summary.agent_latency_avg_ms), "固定流程不含写回答，Agent 含"]
+      : ["平均耗时", formatMs(summary.latency_avg_ms), formatMs(summary.agent_latency_avg_ms), "旧记录：固定流程只算检索"],
+    ["平均输入 token", "—", number(summary.agent_avg_prompt_tokens, 0), "固定流程没记录"],
   ];
   return <div className="ev-overview ag-eval">
-    <p className="ev-muted-note">同一套题，固定流程和 Agent 各跑一遍，比较的是<strong>最后交给模型的资料里有没有题目预设的证据</strong>，判断方法相同（都算父块扩展拼进来的相邻分片）。{summary.answerable_count ?? 0} 道能回答 · {summary.unanswerable_count ?? 0} 道无法回答。</p>
+    <p className="ev-muted-note">{summary.answerable_count ?? 0} 道能回答 · {summary.unanswerable_count ?? 0} 道无法回答，比的是最后交给模型的资料里有没有证据。</p>
     <div className="diag-table-wrap"><table className="diag-table ev-table ag-compare-table">
       <thead><tr><th>指标</th><th className="num">固定流程</th><th className="num">Agent</th><th>说明</th></tr></thead>
       <tbody>{rows.map(([label, fixed, agent, hint]) => <tr key={label}><td>{label}</td><td className="num">{fixed}</td><td className="num">{agent}</td><td className="ag-muted">{hint}</td></tr>)}</tbody>
@@ -128,7 +128,7 @@ export function AgentPanel({ run }: { run: EvalRun }) {
   const summary: EvalSummary = run.summary ?? {};
   const config = run.config.agent;
   return <div className="ev-overview ag-eval">
-    <p className="ev-muted-note">Agent 每道题用一个新会话跑一遍，自己决定查几次、用什么词。这里只看它<strong>最后拿到的资料</strong>里有没有题目预设的证据（所有检索结果和读到的前后文合在一起）。{config && <> 本次配置：工具预算 {config.tool_budget} 次 · 超时 {config.timeout} 秒 · 提示词版本 {config.prompt_version}{config.model ? ` · ${config.model}` : ""}。</>}</p>
+    <p className="ev-muted-note">只看 Agent 最后拿到的资料里有没有证据。{config && <> 工具预算 {config.tool_budget} 次 · 超时 {config.timeout} 秒 · 提示词 {config.prompt_version}{config.model ? ` · ${config.model}` : ""}</>}</p>
     <div className="ev-section-title">命中<small>{summary.answerable_count ?? 0} 道能回答 · {summary.unanswerable_count ?? 0} 道无法回答</small></div>
     <div className="ev-cards">
       <Card label="资料命中率" value={percent(summary.agent_recall)} note="能回答的题里，拿到的证据比例" />
@@ -328,8 +328,8 @@ function QuestionDetail({ question, hasFixed }: { question: EvalQuestion; hasFix
         {hasFixed && <span className={fixedFound ? "is-hit" : "is-miss"}>固定流程：{fixedFound ? `拿到了${fixed?.first_given === false ? "（补充检索拿到的）" : fixed?.source_id ? `（本次检索的 ${fixed.source_id}）` : "（在父块拼进来的相邻分片里）"}` : question.cleared && fixed?.first_given ? "第一次检索拿到了，但被充分性判断清空了" : "没拿到"}</span>}
         <span className={evidence.found ? "is-hit" : "is-miss"}>Agent：{evidence.found ? `拿到了（${evidence.where.map((item) => `第 ${item.call} 次调用的 ${item.evidence_id ?? "—"}`).join("、")}）` : "没拿到"}</span>
       </div>;
-    })}</div> : <p className="ev-muted-note">这道题知识库里没有答案，没有预设证据；拿到的资料越少越好（拿到了模型可能硬凑答案）。</p>}
-    <p className="ag-muted ag-numbering-note">「第 N 片」是分块在文档里的编号，固定不变；小字的 S1、S2 是某一次检索返回结果的顺序（每次检索都从 S1 开始），只在那一次检索里有意义。绿色的分块包含证据；Agent 那边红框的分块是这次调用新拿到的（前面的调用没拿到过）。标了「+扩展 N 片」的分块，父块扩展还把相邻的几片一起拼进来交给了模型，点开能看到哪几片是扩展的、证据在哪一片。</p>
+    })}</div> : <p className="ev-muted-note">没有答案的题，拿到的资料越少越好。</p>}
+    <p className="ag-muted ag-numbering-note">绿底：含证据　红框：新拿到的　+扩展：父块拼进了相邻分片　S1、S2：这次检索的结果顺序</p>
     <div className={`ag-columns ${hasFixed ? "" : "is-single"}`}>
       {hasFixed && <FixedLog question={question} />}
       {agent && <AgentLog question={question} />}
@@ -379,7 +379,7 @@ function FixedLog({ question }: { question: EvalQuestion }) {
         <Tag outline plain>{usedRetry ? "采用了" : "没变好，沿用第一次的"}</Tag></div>
       {retry.sources ? <ChunkTabs items={retryItems} empty="补充检索没有返回分块。" /> : <p className="ag-muted">这次评测没有保存补充检索的分块。</p>}
     </div>}
-    {question.cleared && <div className="ag-flow-cleared">判断为资料不足，来源已清空：线上这道题会直接拒答，模型什么资料都拿不到。</div>}
+    {question.cleared && <div className="ag-flow-cleared">判断资料不足，已清空：线上会直接拒答。</div>}
   </section>;
 }
 
@@ -388,7 +388,7 @@ const VERDICT_LABELS: Record<string, string> = { sufficient: "够了", partial: 
 // 充分性判断：每次判断的结论和缺什么（补充检索后会再判断一次）。
 function SufficiencySteps({ question }: { question: EvalQuestion }) {
   const sufficiency = question.sufficiency!;
-  if (!sufficiency.checked) return <div className="ag-flow-step"><span className="ag-tool">充分性判断</span><span className="ag-muted">{question.returned === 0 ? "第一次检索没有来源，不用判断" : "没有做（需要真实大模型，并打开「检索充分性判断」开关）"}</span></div>;
+  if (!sufficiency.checked) return <div className="ag-flow-step"><span className="ag-tool">充分性判断</span><span className="ag-muted">{question.returned === 0 ? "第一次检索没有来源，不用判断" : "没做（要真实大模型并打开充分性判断）"}</span></div>;
   const judgements = sufficiency.judgements?.length ? sufficiency.judgements : [{ verdict: sufficiency.verdict ?? "", missing: typeof sufficiency.missing === "string" ? sufficiency.missing : "", rewrite_query: sufficiency.retry_query ?? "" }];
   return <>{judgements.map((judgement, index) => <div key={index} className={`ag-flow-step is-judge is-${judgement.verdict}`}>
     <span className="ag-tool">{judgements.length > 1 ? `第 ${index + 1} 次判断` : "充分性判断"}</span>
@@ -493,13 +493,13 @@ export function SpecialAgentResults({ section }: { section: EvalSpecialSection }
   const agentChange = newly("previous_agent_passed", "agent_passed");
   const run = { questions, config: { split: null, suites: [], modes } } as unknown as EvalRun;
   return <div className="ev-overview ag-eval ag-special">
-    {hasFixed && section.search_mode && section.search_mode !== "hybrid" && <p className="ev-settings-diff">这个专项设置了「{section.search_mode_label}」：固定流程按这个设置检索，Agent 每次检索自己选方式，两边比的不是同一件事。比较两种模式时，专项请用混合检索。</p>}
+    {hasFixed && section.search_mode && section.search_mode !== "hybrid" && <p className="ev-settings-diff">这个专项设置了「{section.search_mode_label}」，和 Agent 比不公平，请用混合检索。</p>}
     <div className="ev-cards">
-      {hasFixed && <Card label="固定流程通过" value={`${fixedPassed} / ${section.count}`} note={section.previous ? `和上次（${section.previous.passed} / ${section.previous.count}）比：新通过 ${fixedChange.better}，新失败 ${fixedChange.worse}` : "这是第一次用固定流程跑这个专项"} />}
-      <Card label="Agent 通过" value={`${agentPassed} / ${section.count}`} note={section.previous_agent ? `和上次（${section.previous_agent.passed ?? "—"} / ${section.previous_agent.count}）比：新通过 ${agentChange.better}，新失败 ${agentChange.worse}` : "这是第一次用 Agent 跑这个专项"} />
+      {hasFixed && <Card label="固定流程通过" value={`${fixedPassed} / ${section.count}`} note={section.previous ? `上次 ${section.previous.passed} / ${section.previous.count} · 新通过 ${fixedChange.better} · 新失败 ${fixedChange.worse}` : "第一次跑"} />}
+      <Card label="Agent 通过" value={`${agentPassed} / ${section.count}`} note={section.previous_agent ? `上次 ${section.previous_agent.passed ?? "—"} / ${section.previous_agent.count} · 新通过 ${agentChange.better} · 新失败 ${agentChange.worse}` : "第一次跑"} />
       {hasFixed && (Object.keys(COMPARE_LABELS) as EvalCompareKey[]).map((key) => <Card key={key} label={COMPARE_LABELS[key]} value={`${counts[key]} 题`} note={COMPARE_HINTS[key]} />)}
     </div>
-    <p className="ev-muted-note">证据全部拿到算通过：固定流程看过滤后交给回答模型的来源，Agent 看它所有检索结果和读前后文读到的；两边都算父块扩展拼进来的相邻分片。{section.agent && <> Agent 配置：工具预算 {section.agent.tool_budget} 次 · 超时 {section.agent.timeout} 秒 · 提示词版本 {section.agent.prompt_version}。</>}</p>
+    <p className="ev-muted-note">证据全拿到算通过。{section.agent && <> Agent：工具预算 {section.agent.tool_budget} 次 · 超时 {section.agent.timeout} 秒 · 提示词 {section.agent.prompt_version}</>}</p>
     {section.by_type && <><div className="ev-section-title">按类型<small>哪类题 Agent 更强、哪类固定流程就够了</small></div>
       <TypeStats stats={section.by_type} hues={typeHues(section.questions.map((question) => question.type))} both={hasFixed} /></>}
     <AgentQuestionList run={run} hasFixed={hasFixed} />

@@ -52,9 +52,9 @@ const DETAIL_TAB_LABELS: Record<DetailTab, string> = {
 const SPLIT_LABELS: Record<string, string> = { dev: "开发集", holdout: "留出集", all: "全部题目" };
 // 丢失阶段的说明：告诉读者该去优化哪一环。
 const LOST_LABELS: Record<string, { label: string; hint: string }> = {
-  recall: { label: "未进候选池", hint: "证据所在分片没有进入 RRF 前 N 名，重排没机会看到它：检查检索词、分块或召回路数" },
-  rerank: { label: "重排后掉出前列", hint: "证据进了候选池，但重排把它排到了返回数量之外：检查重排问题或模型" },
-  threshold: { label: "被阈值误杀", hint: "证据排在前列，但重排概率低于相关性阈值被丢弃：阈值可能偏高" },
+  recall: { label: "未进候选池", hint: "证据没进候选池：查检索词、分块或召回" },
+  rerank: { label: "重排后掉出前列", hint: "重排把证据排到了返回数量之外" },
+  threshold: { label: "被阈值误杀", hint: "重排分数低于阈值被丢弃，阈值可能偏高" },
 };
 const EVIDENCE_STATUS: Record<string, string> = {
   returned: "已返回", beyond_limit: "超出返回数", filtered_low_score: "低于阈值", in_pool: "候选池", not_in_pool: "未进重排", not_recalled: "未召回",
@@ -67,20 +67,20 @@ const SUITE_DESCRIPTIONS: Record<string, string> = {
 };
 // 题型筛选说明跟随当前选项变化，帮助用户在题目卡片前理解这一组题检验的能力。
 const DATASET_TYPE_DESCRIPTIONS: Record<string, string> = {
-  all: "当前展示全部题型，用于查看评测集整体分布。",
-  事实: "这类题直接询问语料中的明确事实，主要检验系统能否准确找回原文证据。",
-  同义改写: "这类题用不同说法询问同一事实，主要检验检索是否能覆盖自然语言变化。",
-  关键词: "这类题使用较短的关键词式问题，主要检验关键词检索和混合召回。",
-  多轮追问: "这类题依赖上一轮问题继续追问，主要检验历史上下文和问题改写。",
-  无法回答: "这类题在语料中没有答案，主要检验系统能否正确拒答而不是编造内容。",
+  all: "全部题型。",
+  事实: "直接问语料里的事实，看能不能找回原文。",
+  同义改写: "换个说法问同一件事，看检索能不能认出来。",
+  关键词: "短的关键词式问题，看关键词检索。",
+  多轮追问: "接着上一轮追问，看能不能补全问题。",
+  无法回答: "语料里没有答案，看能不能正确拒答。",
 };
 // 题目卡片补充每道题的评测目标，避免用户只能看到类型名称却不知道这道题具体在测什么。
 const DATASET_TYPE_CARD_DETAILS: Record<string, string> = {
-  事实: "直接核对语料中的明确事实，观察系统能否找回对应证据。",
-  同义改写: "问题换了一种说法，但仍在询问证据中的同一事实，检验语义改写后的召回。",
-  关键词: "问题依赖人名、专有名词、指标或概念等关键词，检验关键词是否帮助召回正确证据。",
-  多轮追问: "当前问题依赖上一轮上下文，检验系统能否理解省略信息并继续检索。",
-  无法回答: "语料中没有足够答案，预期行为是拒答且不返回误导性来源。",
+  事实: "能不能找回原文证据。",
+  同义改写: "换了说法还能不能找到。",
+  关键词: "靠专有名词能不能找到。",
+  多轮追问: "能不能接上上一轮补全问题。",
+  无法回答: "应该拒答，不返回误导性来源。",
 };
 
 // 根据已完成和总检索次数计算进度百分比。
@@ -287,34 +287,34 @@ function metricLabel(key: string, run: EvalRunBrief) {
 
 // 生成指标的卡片说明和表格提示统一使用确认后的文案，避免同一指标在不同位置出现两套解释。
 const GENERATION_METRIC_EXPLANATIONS: Record<string, string> = {
-  faithfulness: "评审大模型判断，回答中的内容都能在 chunk 中找到依据。",
-  correctness: "评审大模型判断，回答与标准答案的关键要点基本一致。",
+  faithfulness: "回答的内容都有资料依据。",
+  correctness: "和标准答案要点一致。",
   refusal_accuracy: "系统判断所有题目的回答/拒答决定都正确。",
-  citation_validity: "评审大模型判断，回答中的引用chunk都能支持对应内容。",
+  citation_validity: "引用的资料能支撑对应内容。",
 };
 
 // 完整检索流程（改写 → 检索 → 充分性判断 → 补充检索）的指标说明，和线上用户实际拿到的资料一致。
 const FLOW_METRIC_EXPLANATIONS: Record<string, string> = {
-  recall_given_first: "第一次检索（还没判断、没补充）交给模型的资料里，包含的证据比例；含父块扩展拼进来的相邻分片。",
-  recall_given: "充分性判断之后，最终交给模型的资料里包含的证据比例：用了补充检索就按补充的算，被判成资料不足清空了就是 0。和 Agent 对比用这个。",
-  rescued_count: "第一次检索没拿全证据、补充检索后拿到更多的题数。",
-  wrong_clear_rate: "有答案的题被判成「资料不足」、来源被清空的比例。清空后回答阶段直接拒答，是判断带来的损失（越低越好）。",
-  right_clear_rate: "没有答案的题被清空的比例。清空后模型拿不到资料，不会硬凑答案（越高越好）。",
-  retry_rate: "做了判断的题里，触发补充检索的比例；每次补充都多一次检索和一次判断。",
-  avg_judge_calls: "每道做了判断的题平均调用判断模型几次（补充检索后会再判断一次）。",
-  flow_latency_avg_ms: "改写 + 第一次检索 + 判断 + 补充检索的平均耗时；改写用了缓存时按当时实际花的时间算。",
+  recall_given_first: "判断之前，第一次检索的资料里有证据的比例。",
+  recall_given: "判断之后最终交给模型的资料；被清空算 0。和 Agent 比用这个。",
+  rescued_count: "补充检索后拿到更多证据的题。",
+  wrong_clear_rate: "有答案却被判资料不足、清空的比例，越低越好。",
+  right_clear_rate: "没答案、被清空的比例，越高越好。",
+  retry_rate: "触发补充检索的比例。",
+  avg_judge_calls: "每题平均判断几次。",
+  flow_latency_avg_ms: "改写 + 检索 + 判断 + 补充检索。",
 };
 
 const METRIC_HINTS: Record<string, string> = {
-  recall_pool: "证据是否进入交给重排的候选池（RRF 前 N 名）；多条证据按找到的比例计分",
-  recall_top: "重排后前几名（不考虑阈值）里找到的证据比例",
-  recall_final: "阈值过滤后真正交给回答模型的来源里找到的证据比例",
-  mrr_pool: "第一个包含证据的分片名次的倒数，名次越靠前越接近 1",
-  mrr_top: "重排后第一个包含证据的分片名次的倒数",
-  mrr_final: "最终来源里第一个包含证据的来源序号的倒数",
-  false_reject_rate: "能回答的题里，来源被阈值全部过滤、直接拒答的比例（越低越好）",
-  false_accept_rate: "无法回答的题里，仍然留下来源、模型可能硬凑答案的比例（越低越好）",
-  latency_avg_ms: "单题检索（召回 + 重排）平均耗时",
+  recall_pool: "证据进了候选池的比例",
+  recall_top: "重排后前几名里证据的比例",
+  recall_final: "阈值过滤后证据的比例",
+  mrr_pool: "越接近 1，证据排得越靠前",
+  mrr_top: "越接近 1，证据排得越靠前",
+  mrr_final: "越接近 1，证据排得越靠前",
+  false_reject_rate: "有答案的题一段资料都没拿到，越低越好",
+  false_accept_rate: "没答案的题仍拿到资料，越低越好",
+  latency_avg_ms: "召回 + 重排",
   ...GENERATION_METRIC_EXPLANATIONS,
 };
 
@@ -326,29 +326,29 @@ function metricCardDetails(metricKey: string, run: EvalRun, value: number | null
   const stats = summarizeHistoryEvidence(run);
   if (stats) {
     if (metricKey === "recall_pool") {
-      return [`${stats.answerableQuestions} 道可回答题预设有 ${stats.evidenceTotal} 个正确 chunk，候选池返回 ${stats.poolChunks} 个 chunk，包含 ${stats.poolHits} 个正确 chunk。`];
+      return [`候选池 ${stats.poolChunks} 段，含 ${stats.poolHits} / ${stats.evidenceTotal} 条证据`];
     }
     if (metricKey === "recall_top") {
       const returnLimit = run.config.return_limit ?? 6;
-      return [`${stats.answerableQuestions} 道可回答题预设有 ${stats.evidenceTotal} 个正确 chunk，重排后取前 ${returnLimit} 条，共保留 ${stats.topChunks} 个 chunk，包含 ${stats.topHits} 个正确 chunk。`];
+      return [`每题取前 ${returnLimit}，共 ${stats.topChunks} 段，含 ${stats.topHits} / ${stats.evidenceTotal} 条证据`];
     }
     if (metricKey === "recall_final") {
-      return [`${stats.answerableQuestions} 道可回答题预设有 ${stats.evidenceTotal} 个正确 chunk，阈值过滤后剩余 ${stats.finalAnswerableChunks} 个 chunk，包含 ${stats.finalHits} 个正确 chunk。`];
+      return [`过滤后剩 ${stats.finalAnswerableChunks} 段，含 ${stats.finalHits} / ${stats.evidenceTotal} 条证据`];
     }
     if (metricKey === "mrr_pool") {
-      return [`${stats.answerableQuestions} 道可回答题中，候选池第一条正确 chunk 的排名倒数平均为 ${formatScore(value)}。`];
+      return ["越接近 1，证据排得越靠前"];
     }
     if (metricKey === "mrr_top") {
-      return [`${stats.answerableQuestions} 道可回答题中，重排后第一条正确 chunk 的排名倒数平均为 ${formatScore(value)}。`];
+      return ["越接近 1，证据排得越靠前"];
     }
     if (metricKey === "mrr_final") {
-      return [`${stats.answerableQuestions} 道可回答题中，阈值过滤后第一条正确 chunk 的排名倒数平均为 ${formatScore(value)}。`];
+      return ["越接近 1，证据排得越靠前"];
     }
     if (metricKey === "false_reject_rate") {
-      return [`${stats.answerableQuestions} 道可回答题中，有 ${stats.falseRejectQuestions} 道被过滤掉全部来源而拒答。`];
+      return [`${stats.falseRejectQuestions} / ${stats.answerableQuestions} 道有答案的题没拿到资料`];
     }
     if (metricKey === "false_accept_rate") {
-      return [`${stats.unanswerableQuestions} 道无法回答题中，有 ${stats.falseAcceptQuestions} 道仍返回了 chunk，可能导致 AI 引用错误来源。`];
+      return [`${stats.falseAcceptQuestions} / ${stats.unanswerableQuestions} 道无答案的题仍拿到资料`];
     }
   }
 
@@ -364,10 +364,10 @@ function metricCardDetails(metricKey: string, run: EvalRun, value: number | null
         const shouldRefuse = !question.answerable;
         if (question.judgement?.refused === shouldRefuse) correctDecisions += 1;
       }
-      return [`${judgedQuestions.length} 道题中，有 ${correctDecisions} 道的回答/拒答判断正确，准确率为 ${formatPercent(value)}。`];
+      return [`${correctDecisions} / ${judgedQuestions.length} 道判断正确`];
     }
     if (["faithfulness", "correctness", "citation_validity"].includes(metricKey)) {
-      return [`${judgedQuestions.length} 道题中，大模型评审的${metricLabel(metricKey, run)}平均得分为 ${formatPercent(value)}。`];
+      return [`${judgedQuestions.length} 道题的平均分`];
     }
   }
   if (["faithfulness", "correctness", "refusal_accuracy", "citation_validity"].includes(metricKey)) {
@@ -548,7 +548,7 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
 
   return <section className="ev-root">
     <div className="ev-heading">
-      <div><h2>评测</h2><p>用固定的评测集衡量检索和回答质量：每次改动后跑一遍，看指标是变好还是变差。</p></div>
+      <div><h2>评测</h2><p>改动后跑一遍，看指标变好还是变差。</p></div>
     </div>
     <div className="document-detail-tabs ev-tabs ev-top-tabs" role="tablist">
       {(Object.keys(TOP_TAB_LABELS) as TopTab[]).map((key) => <button key={key} role="tab" aria-selected={section === key} className={section === key ? "active" : ""} onClick={() => onNavigate(TAB_PATHS[key])}>{TOP_TAB_LABELS[key]}{(key === "history" || key === "dataset") && <span>{key === "history" ? runs.length : dataset?.reviewed_count ?? dataset?.items.filter((item) => item.reviewed === true).length ?? ""}</span>}</button>)}
@@ -737,7 +737,7 @@ function RunDetailView({ onBack, run, running, detailTab, setDetailTab, detailCo
 function SpecialRunResults({ run }: { run: EvalRun }) {
   const sections = run.special ?? [];
   return <div className="sp-run-sections">
-    <p className="ev-muted-note">专项题专门挑某个方向的难题，分数低是正常的，不计入调参分数。检索方式：证据全部被返回算通过；回答和多轮对话方式：评审模型判定和参考答案要点一致（正确性 = 1）算通过。</p>
+    <p className="ev-muted-note">专项题是难题，分数低正常，不计入调参分数。</p>
     {sections.map((section) => <section key={section.suite_id} className="sp-run-section">
       <h3>{section.name}<Tag size="sm" hue className="is-after">{section.method_label}</Tag></h3>
       {section.description && <p>{section.description}</p>}
@@ -750,7 +750,7 @@ function SpecialRunResults({ run }: { run: EvalRun }) {
 function MemoryResults({ run }: { run: EvalRun }) {
   const variants = run.memory ?? [];
   return <div className="ev-memory">
-    <p className="ev-muted-note">每段对话按顺序问完，最后一问要用到开头几轮的内容。和线上一样，意图识别只看最近 3 轮问答和滚动摘要，开头的内容只能靠摘要带过来。正确性由评审大模型打分（1 = 要点一致，0.5 = 部分正确，0 = 错误）。共 {run.config.dataset_size ?? "—"} 段对话。</p>
+    <p className="ev-muted-note">共 {run.config.dataset_size ?? "—"} 段对话，最后一问要用到开头的内容。正确性：1 一致，0.5 部分，0 错误。</p>
     <div className="diag-table-wrap"><table className="diag-table ev-table">
       <thead><tr><th>参数</th><th className="num">最后一问正确性</th><th className="num">忠实度</th><th className="num">触发了压缩</th><th className="num">最后一问平均输入</th></tr></thead>
       <tbody>{variants.map((variant, index) => <tr key={variant.name} className={index === 0 ? "is-current" : ""}>
@@ -799,7 +799,7 @@ function flowRewriteLabel(config: EvalRunBrief["config"]) {
 }
 
 function EmptyRuns({ hasRuns }: { hasRuns: boolean }) {
-  return <div className="ev-empty"><h3>{hasRuns ? "请选择一次评测" : "还没有评测记录"}</h3><p>在上方操作栏选择“检索评测”或“生成评测”后点击“开始评测”即可运行；生成评测需要真实大模型并会产生少量费用。</p></div>;
+  return <div className="ev-empty"><h3>{hasRuns ? "请选择一次评测" : "还没有评测记录"}</h3><p>在上方选好后点「开始评测」。</p></div>;
 }
 
 function RunStatus({ run, live }: { run: EvalRun; live: boolean }) {
@@ -838,12 +838,10 @@ function Overview({ run, comparison }: { run: EvalRun; comparison: EvalCompariso
     {hasGeneration && <><div className="ev-section-title">生成指标<small>大模型评审，温度 0；评审理由见逐题明细</small></div>
       <div className="ev-cards">{generationKeys.map((key) => <MetricCard key={key} metricKey={key} run={run} value={summary[key]} />)}</div></>}
     {(hasGeneration || hasFlow) && <SufficiencySummary run={run} />}
-    {!hasGeneration && <p className="ev-muted-note">本次是检索评测，没有生成指标。生成评测（忠实度、正确性、拒答正确率、引用有效性）需要调用大模型，请在上方操作栏选择“生成评测”。</p>}
     <div className="ev-overview-grid">
       <div className="ev-panel"><div className="ev-section-title">chunk 命中对比<small>预设证据与各阶段实际返回 chunk</small></div><ChunkStageComparison run={run} /></div>
       <div className="ev-panel"><div className="ev-section-title">耗时<small>单题召回 + 重排</small></div>
         <div className="ev-latency"><div><span>平均</span><strong>{formatMs(summary.latency_avg_ms)}</strong><ChangeTag row={changes.latency_avg_ms} metricKey="latency_avg_ms" /></div><div><span>P95</span><strong>{formatMs(summary.latency_p95_ms)}</strong></div><div><span>重排最慢</span><strong>{formatMs(summary.rerank_max_ms)}</strong></div>{hasFlow && <div><span>完整检索平均</span><strong>{formatMs(summary.flow_latency_avg_ms)}</strong><small>含改写、判断和补充检索</small></div>}</div>
-        <p className="ev-muted-note">重排调用本地交叉编码器，是最慢的一步；冷启动时可能接近超时，P95 比平均值更容易暴露这个问题。</p>
       </div>
     </div>
     <div className="ev-section-title">按题目类型<small>整体分数可能掩盖某一类题特别差</small></div>
@@ -868,7 +866,7 @@ function MetricCard({ metricKey, run, value }: { metricKey: string; run: EvalRun
 // 生成评测总览展示资料充分性判断，补充检索后的最终 chunk 单独计数，避免误读为首次检索结果。
 function SufficiencySummary({ run }: { run: EvalRun }) {
   const stats = summarizeSufficiency(run);
-  if (!stats) return <div className="ev-sufficiency-panel"><div className="ev-section-title">资料充分性<small>本次评测没有保存充分性结果</small></div><p className="ev-muted-note">重新运行生成评测后，这里会显示资料充分、补充检索和最终 chunk 数。</p></div>;
+  if (!stats) return <div className="ev-sufficiency-panel"><div className="ev-section-title">资料充分性<small>本次评测没有保存充分性结果</small></div><p className="ev-muted-note">重新跑一次才有。</p></div>;
   const average = stats.retryQuestions > 0 ? (stats.retryFinalChunks / stats.retryQuestions).toFixed(1) : "—";
   return <section className="ev-sufficiency-panel" aria-labelledby="ev-sufficiency-title">
     <div className="ev-section-title" id="ev-sufficiency-title">资料充分性<small>{stats.checked} / {stats.observed} 道题完成判断</small></div>
@@ -879,7 +877,7 @@ function SufficiencySummary({ run }: { run: EvalRun }) {
       <div className="ev-sufficiency-stat is-retry"><span>触发补充检索</span><strong>{stats.retried}</strong><small>道题追加检索</small></div>
       <div className="ev-sufficiency-stat is-chunks"><span>补检后最终返回 chunk</span><strong>{stats.retryFinalChunks}</strong><small>{stats.retryQuestions > 0 ? `${stats.retryQuestions} 道题合计 · 平均 ${average} 条` : "没有可统计的补检结果"}</small></div>
     </div>
-    {stats.observed > stats.checked && <p className="ev-sufficiency-note">有 {stats.observed - stats.checked} 道题未完成判断，通常是未启用模型或充分性检查开关关闭。</p>}
+    {stats.observed > stats.checked && <p className="ev-sufficiency-note">有 {stats.observed - stats.checked} 道题没做判断（没开大模型或充分性判断）。</p>}
   </section>;
 }
 
@@ -896,7 +894,7 @@ function ChunkStageComparison({ run }: { run: EvalRun }) {
         <span>{row.label}</span>{row.enabled ? <><strong>{row.returned}</strong><strong className="is-hit">{row.hits} / {stats.expectedChunks}</strong><strong className="is-other">{Math.max(0, row.returned - row.hits)}</strong></> : <strong className="ev-chunk-disabled">未启用</strong>}
       </div>)}
     </div>
-    <p className="ev-chunk-comparison-note">“包含证据”表示该阶段返回的 chunk 中能找到预设证据；向量和关键词是各自去重后的召回结果，融合召回是进入重排前的全部候选。</p>
+    <p className="ev-chunk-comparison-note">融合召回 = 进重排前的全部候选。</p>
   </div>;
 }
 
@@ -955,7 +953,7 @@ function stageCandidates(question: EvalQuestion, stage: ChunkStage, poolSize: nu
 
 // 逐题展示预设证据、各阶段返回的 chunk 以及命中/其他状态，帮助用户直接判断丢失发生在哪一环。
 function QuestionChunkComparison({ question, run }: { question: EvalQuestion; run: EvalRun }) {
-  if (!question.diagnostics) return <p className="ev-muted-note">本次评测没有保存 chunk 明细；重新运行评测后可以查看逐阶段对比。</p>;
+  if (!question.diagnostics) return <p className="ev-muted-note">这次没保存分块明细。</p>;
   const poolSize = run.config.pool_size ?? question.diagnostics.config.rerank_candidates ?? 20;
   const returnLimit = run.config.return_limit ?? question.diagnostics.config.return_limit ?? 6;
   const stages: { key: ChunkStage; label: string }[] = [
@@ -1140,7 +1138,7 @@ function QuestionList({ run, Diagnostics }: { run: EvalRun; Diagnostics: Props["
           </div>
           {!question.answerable && <div className={`ev-leak-panel ${question.returned > 0 ? "is-leak" : "is-safe"}`}>
             <div className="ev-section-title">漏放来源<small>{question.returned > 0 ? `这道题返回了 ${question.returned} 条来源，以下 chunk 被放行给回答模型` : "没有返回来源，系统正确拒答"}</small></div>
-            {question.returned === 0 ? <p className="ev-leak-note">这道题没有来源被交给回答模型，因此不属于漏放。</p> : leakedChunks.length === 0 ? <p className="ev-leak-note">本次评测只记录了返回数量，没有保存 chunk 明细；请重新运行评测以查看具体内容。</p> : <div className="ev-leak-list">{leakedChunks.map(({ candidate, source }) => {
+            {question.returned === 0 ? <p className="ev-leak-note">这道题没有来源被交给回答模型，因此不属于漏放。</p> : leakedChunks.length === 0 ? <p className="ev-leak-note">这次没保存分块明细。</p> : <div className="ev-leak-list">{leakedChunks.map(({ candidate, source }) => {
               const chunkKey = `${question.id}:${candidate.chunk_id}`;
               const chunkExpanded = expandedLeaks[chunkKey] ?? false;
               const chunkText = source?.text ?? candidate.preview;
@@ -1204,7 +1202,7 @@ function FilterChips({ value, options, onChange }: { value: string; options: [st
 // 阈值扫描：同一批重排概率在不同阈值下的误杀率、漏放率和过滤后召回率。
 function SweepPanel({ run }: { run: EvalRun }) {
   const sweep = run.sweep ?? [];
-  if (sweep.length === 0) return <div className="ev-empty"><h3>这次评测没有阈值扫描</h3><p>阈值只作用在重排概率上；本次没有启用重排（EMBEDDING_MODE 不是 local，或「系统管理 › RAG 配置」里关闭了重排），所以无法扫描。</p></div>;
+  if (sweep.length === 0) return <div className="ev-empty"><h3>这次评测没有阈值扫描</h3><p>这次没启用重排，没有分数可扫。</p></div>;
   const current = run.config.min_score ?? null;
   let best: EvalSweepPoint | null = null;
   for (const point of sweep) {
@@ -1212,7 +1210,7 @@ function SweepPanel({ run }: { run: EvalRun }) {
     if (!best || cost < (best.false_reject_rate ?? 0) + (best.false_accept_rate ?? 0)) best = point;
   }
   return <div>
-    <p className="ev-muted-note">阈值越高，无关来源越容易被挡住（漏放率下降），但相关来源也更容易被误杀（误杀率上升）。这张图由本次评测记录的重排概率离线重算，不需要重新检索。{best && <> 误杀率 + 漏放率最小的阈值是 <strong>{best.threshold.toFixed(2)}</strong>（误杀 {formatPercent(best.false_reject_rate)}，漏放 {formatPercent(best.false_accept_rate)}）；题目较少时这只是参考，改阈值前请在留出集上验证。</>}</p>
+    <p className="ev-muted-note">阈值越高，漏放越少、误杀越多。{best && <> 两者之和最小在 <strong>{best.threshold.toFixed(2)}</strong>（误杀 {formatPercent(best.false_reject_rate)}，漏放 {formatPercent(best.false_accept_rate)}），改之前先用留出集验证。</>}</p>
     <SweepChart sweep={sweep} current={current} />
     <details className="ev-table-view"><summary>表格视图</summary><div className="diag-table-wrap"><table className="diag-table ev-table">
       <thead><tr><th className="num">阈值</th><th className="num">误杀率</th><th className="num">漏放率</th><th className="num">过滤后 Recall</th></tr></thead>
@@ -1230,7 +1228,7 @@ function LimitSweep({ points, current }: { points: EvalLimitPoint[]; current: nu
   const enough = points.find((point) => (point.recall_final ?? 0) >= top);
   return <div className="ev-limit-sweep">
     <div className="ev-section-title">交给模型的段数<small>在当前阈值下离线重算，不需要重新检索</small></div>
-    <p className="ev-muted-note">{enough && <>段数达到 <strong>{enough.return_limit}</strong> 时召回已经是最高的 {formatPercent(top)}，再多给也找不到更多证据，只会让输入更长。</>}现在设置的是 {current ?? "—"} 段。多证据题如果很少，或证据都在同一个分片里，这张表区分不出段数的好坏。</p>
+    <p className="ev-muted-note">{enough && <>段数达到 <strong>{enough.return_limit}</strong> 时召回已到最高 {formatPercent(top)}，再多只会让输入更长。</>}现在是 {current ?? "—"} 段。</p>
     <div className="diag-table-wrap"><table className="diag-table ev-table">
       <thead><tr><th className="num">段数</th><th className="num">证据召回</th><th className="num">证据全部命中</th><th className="num">多证据题召回</th><th className="num">平均实际交给模型</th><th className="num">被段数截断的题</th></tr></thead>
       <tbody>{points.map((point) => <tr key={point.return_limit} className={point.return_limit === current ? "is-current" : ""}>
@@ -1332,7 +1330,7 @@ function SweepChart({ sweep, current }: { sweep: EvalSweepPoint[]; current: numb
 // 消融实验与参数对比：每一组只改一个因素，和基线逐项比较，差值标出变好或变差。
 function VariantPanel({ run }: { run: EvalRun }) {
   const variants = run.variants ?? [];
-  if (variants.length === 0) return <div className="ev-empty"><h3>这次评测没有包含实验组</h3><p>发起评测时勾选“消融实验”或“参数对比”，会在同一批题目上额外跑这些变体：仅向量、仅 BM25、混合不重排、候选池 12 / 30、多查询取最好名次。</p></div>;
+  if (variants.length === 0) return <div className="ev-empty"><h3>这次评测没有包含实验组</h3><p>发起时勾选「消融实验」或「参数对比」才有。</p></div>;
   const keys = ["recall_pool", "recall_top", "recall_final", "mrr_top", "false_reject_rate", "false_accept_rate", "latency_avg_ms"];
   const lower = new Set(["false_reject_rate", "false_accept_rate", "latency_avg_ms"]);
   const baseline = run.summary ?? {};
@@ -1350,7 +1348,7 @@ function VariantPanel({ run }: { run: EvalRun }) {
   const groups: Record<string, typeof variants> = {};
   for (const variant of variants) (groups[variant.suite] ??= []).push(variant);
   return <div>
-    <p className="ev-muted-note">基线是当前线上配置（混合召回 + 重排 + 阈值）。差值以基线为准：召回率越高越好，误杀率、漏放率和耗时越低越好。注意“仅向量”“仅 BM25”“混合（不重排）”没有重排，也就没有阈值过滤，漏放率会明显升高。</p>
+    <p className="ev-muted-note">差值相对基线。没有重排的几组也没有阈值过滤，漏放率会偏高。</p>
     <div className="diag-table-wrap"><table className="diag-table ev-table">
       <thead><tr><th>配置</th>{keys.map((key) => <th key={key} className="num" title={METRIC_HINTS[key]}>{metricLabel(key, run)}</th>)}</tr></thead>
       <tbody>
@@ -1526,7 +1524,6 @@ function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: 
         </Fragment>;
       })}</tbody>
     </table></div>
-    <p className="ev-history-help">指标说明：候选池 Recall 表示证据是否进入重排候选池；最终 Recall 表示阈值过滤后是否仍保留证据；候选池 MRR 越接近 1 代表证据越靠前；误杀率是有答案却被过滤的比例；漏放率是无答案却保留来源的比例。</p>
     {comparison && <div className="ev-add-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setComparison(null); }}>
       <div className="ev-add-modal ev-compare-modal" role="dialog" aria-modal="true" aria-labelledby="ev-compare-title">
         <div className="ev-add-modal-header"><h3 id="ev-compare-title">对比结果</h3><button type="button" className="ev-modal-close" aria-label="关闭" onClick={() => setComparison(null)}>×</button></div>
@@ -1683,7 +1680,7 @@ function DatasetBrowser({ dataset, onToast, onSaved }: { dataset: EvalDataset | 
   return <div>
     <div className="ev-dataset-toolbar">
       {/* 只说明这个评测集是干什么的；题数、审核状态在下面的筛选里已经有了。 */}
-      <p className="ev-muted-note">系统里有很多参数（相关度阈值、候选池大小、交给模型的段数、父子分块……），默认值是按常规经验定的，放到这份资料上效果好不好并不知道。调参评测集用一组固定的题来衡量：改了参数跑一遍，看找资料和回答的分数是变好还是变差，再决定保留还是改回去。平时只看开发集；参数定下来后再跑一次留出集，确认不是只对这几道题有效。</p>
+      <p className="ev-muted-note">改了参数跑一遍，看分数变好还是变差。平时用开发集，定下来后再用留出集确认。</p>
       <button className="primary-button ev-add-question-button" type="button" onClick={openAddDialog}>添加题目</button>
     </div>
     {addMode && <div className="ev-add-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeAddDialog(); }}>
@@ -1700,7 +1697,7 @@ function DatasetBrowser({ dataset, onToast, onSaved }: { dataset: EvalDataset | 
               <label className="ev-form-field">题目范围<select value={questionSplit} onChange={(event) => setQuestionSplit(event.target.value)}><option value="dev">开发集</option><option value="holdout">留出集</option></select></label>
             </div>
             {questionType === "同义改写" ? <>
-              <p className="ev-form-note ev-paraphrase-form-note">保存后会生成两条独立题目；两题共享下面的标准答案和证据，并自动关联同一个题对编号。</p>
+              <p className="ev-form-note ev-paraphrase-form-note">保存为两道题，共用答案和证据。</p>
               <label className="ev-form-field ev-form-wide">问题 1（原问题）<input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="填写原始问法" required /></label>
               <label className="ev-form-field ev-form-wide">问题 2（同义改写）<input value={paraphraseQuestion} onChange={(event) => setParaphraseQuestion(event.target.value)} placeholder="换一种说法询问同一事实" required /></label>
             </> : <label className="ev-form-field ev-form-wide">问题<input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="例如：耳机保修多久？" required /></label>}
@@ -1710,7 +1707,7 @@ function DatasetBrowser({ dataset, onToast, onSaved }: { dataset: EvalDataset | 
             <label className="ev-form-field ev-form-wide">多轮追问历史 <small>可选，每行一条</small><textarea value={history} onChange={(event) => setHistory(event.target.value)} disabled={questionType !== "多轮追问"} rows={2} /></label>
             <button className="primary-button ev-form-submit" type="submit" disabled={saving}>{saving ? "保存中…" : "加入评测集"}</button>
           </form> : <form className="ev-dataset-form ev-modal-form" onSubmit={(event) => void submitAi(event)}>
-            <p className="ev-form-note">基于当前语料起草题目、证据和标准答案；会产生少量大模型费用，生成后必须人工审核。</p>
+            <p className="ev-form-note">按语料起草题目、证据和答案，生成后要人工审核。</p>
             <div className="ev-form-grid">
               <label className="ev-form-field">生成数量<input type="number" min={1} max={10} value={aiCount} onChange={(event) => setAiCount(Number(event.target.value))} /></label>
               <label className="ev-form-field">题型<select value={aiType} onChange={(event) => setAiType(event.target.value)}><option value="">混合题型</option>{dataset.types.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
