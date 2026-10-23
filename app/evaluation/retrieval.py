@@ -11,6 +11,7 @@ from ..mysql.store import chunks, document_chunks, document_heads
 from ..runtime_config import snapshot as runtime_snapshot
 from ..tools.search import DocumentSearchTool
 from .dataset import QUESTION_TYPES, corpus_files, normalize, select_split
+from .flow import apply_sufficiency, given_chunk_ids, rewrite_item
 
 
 # 评测语料导入到专门的评测用户下，和 alice、bob 的真实知识库完全隔离：
@@ -79,7 +80,8 @@ def current_chunk_texts(store):
     return texts
 
 
-# 评测不调用查询改写模型，避免每次运行的随机改写影响指标。多轮追问按规则补全指代。
+# 按规则补全指代、用原问题检索（不调用模型）。固定流程现在和线上一样用大模型改写（见 app/evaluation/flow.py），
+# 这里只剩 Agent 评测用它算"实际提问"：Agent 收到的是按规则补全的问题。
 def plan_queries(item):
     history = []
     for question in item.get("history", []):
@@ -198,13 +200,7 @@ def score_question(item, retrieval, chunk_texts, pool_size):
     # 交给回答模型的资料（given）：最终来源经过父块扩展，正文里拼进了相邻分片；这些分片里的证据模型也看得到。
     # 上面三个阶段只认命中的那一个分片（用来调召回、重排、阈值），这里把父块里的分片都算上，
     # 和 Agent 比较时用它，两边口径一致（Agent 那边同样算父块里的分片，再加上 read_context 读到的）。
-    given_ids = []
-    for source in retrieval.get("sources") or []:
-        for chunk_id in source.get("parent_chunk_ids") or [source.get("chunk_id")]:
-            if chunk_id is not None and str(chunk_id) not in given_ids:
-                given_ids.append(str(chunk_id))
-    given_hits = evidence_hits([{"chunk_id": chunk_id} for chunk_id in given_ids], evidence, chunk_texts)
-    given_found = sorted({index for indexes in given_hits.values() for index in indexes})
+    given_found = sorted(evidence_found(retrieval.get("sources"), evidence, chunk_texts))
     for index, row in enumerate(evidence_rows):
         row["given"] = index in given_found
     # 候选池的精简记录（按重排顺序的概率和包含的证据），用于离线阈值扫描。
@@ -222,6 +218,12 @@ def score_question(item, retrieval, chunk_texts, pool_size):
         "returned": stats["returned"], "pool": pool,
         "max_probability": max((row["p"] for row in pool if row["p"] is not None), default=None),
         "recall_ms": stats.get("recall_ms"), "rerank_ms": stats.get("rerank_ms")}
+
+
+# 一批来源交给模型的分片（含父块扩展拼进来的）里找到了哪几条证据，返回证据序号集合。
+def evidence_found(sources, evidence, chunk_texts):
+    hits = evidence_hits([{"chunk_id": chunk_id} for chunk_id in given_chunk_ids(sources)], evidence, chunk_texts)
+    return {index for indexes in hits.values() for index in indexes}
 
 
 # 求平均，空列表返回 None（表示这一组没有可统计的题），避免除零。
@@ -262,6 +264,7 @@ def summarize(rows):
         summary[f"mrr_{stage}"] = mean(reciprocals)
     given = [row["given_recall"] for row in answerable if row.get("given_recall") is not None]
     summary["recall_given"] = mean(given)
+    summary.update(summarize_flow(rows, answerable, unanswerable))
     rejected = 0
     for row in answerable:
         if row["returned"] == 0:
@@ -282,6 +285,38 @@ def summarize(rows):
     summary["latency_p95_ms"] = percentile(latencies, 0.95)
     summary["rerank_max_ms"] = max(rerank_times) if rerank_times else None
     return summary
+
+
+# 完整检索流程（改写 → 检索 → 充分性判断 → 补充检索）的统计；旧记录没有这些字段时都是 None。
+#   recall_given_first：第一次检索交给模型的资料命中率（recall_given 是判断之后最终交给模型的）；
+#   rescued_count：补充检索救回来的题（最终命中比第一次高）；
+#   wrong_clear_rate：有答案的题被判成资料不足、来源被清空的比例（新的一种损失）；
+#   right_clear_rate：没有答案的题被清空的比例（越高越好，模型拿不到资料就不会硬凑）；
+#   retry_rate、avg_judge_calls：补充检索比例、平均判断次数，看成本；
+#   rewrite_cache_rate：大模型改写里用了缓存的比例；flow_latency_avg_ms：改写 + 检索 + 判断的平均耗时。
+def summarize_flow(rows, answerable, unanswerable):
+    checked = [row for row in rows if (row.get("sufficiency") or {}).get("checked")]
+    first = [row["first_given_recall"] for row in answerable if row.get("first_given_recall") is not None]
+    rescued = sum(1 for row in answerable if row.get("first_given_recall") is not None and row.get("given_recall") is not None
+        and row["given_recall"] > row["first_given_recall"])
+    checked_ids = {id(row) for row in checked}
+    answerable_checked = [row for row in answerable if id(row) in checked_ids]
+    unanswerable_checked = [row for row in unanswerable if id(row) in checked_ids]
+    llm = [row for row in rows if (row.get("rewrite") or {}).get("classifier") == "llm"]
+    flow_latencies = [row["flow_latency_ms"] for row in rows if row.get("flow_latency_ms") is not None]
+    return {
+        "recall_given_first": mean(first),
+        "sufficiency_checked": len(checked) if any("sufficiency" in row for row in rows) else None,
+        "rescued_count": rescued if checked else None,
+        "wrong_clear_rate": round(sum(1 for row in answerable_checked if row.get("cleared")) / len(answerable), 4)
+            if answerable_checked else None,
+        "right_clear_rate": round(sum(1 for row in unanswerable_checked if row.get("cleared")) / len(unanswerable), 4)
+            if unanswerable_checked else None,
+        "retry_rate": round(sum(1 for row in checked if row["sufficiency"].get("retried")) / len(checked), 4) if checked else None,
+        "avg_judge_calls": mean([row["sufficiency"].get("calls", 0) for row in checked]),
+        "rewrite_cache_rate": round(sum(1 for row in llm if row["rewrite"].get("cached")) / len(llm), 4) if llm else None,
+        "flow_latency_avg_ms": round(sum(flow_latencies) / len(flow_latencies)) if flow_latencies else None,
+    }
 
 
 # 检索漏斗：能回答的题里，每个阶段证据全部找到的题数。从左到右只会减少，哪一步掉得最多就先优化哪一步。
@@ -449,18 +484,41 @@ def return_limit_sweep(rows, threshold, pool_size):
 
 
 # 对一组题执行一次检索并打分；options 是传给 DocumentSearchTool 的变体参数。
-def evaluate_items(store, models, items, chunk_texts, options, keep_diagnostics, on_item=None):
+# 逐题跑固定流程并打分（见 app/evaluation/flow.py）：改写 → 第一次检索 →（judge=True 时）充分性判断 + 补充检索。
+# rewrites：题目编号 → 改写结果。基线跑的时候填进去，参数变体复用同一批检索词，只换检索参数、不做判断，
+# 这样变体和基线的差别只来自参数。refresh=True 时不用改写缓存。
+# 耗时：latency_ms 只算第一次检索（调参看这个，和旧记录可比）；flow_latency_ms 是改写 + 检索 + 判断的总耗时
+# （用了改写缓存时，改写按当时实际花的时间算），和 Agent 比耗时用它。
+def evaluate_items(store, models, items, chunk_texts, options, keep_diagnostics, on_item=None, rewrites=None,
+        refresh=False, judge=False):
     tool = DocumentSearchTool()
     pool_size = options.get("pool_size") or runtime_snapshot()["rerank_candidates"]
     rows = []
     for item in items:
-        queries, rerank_query, query_source = plan_queries(item)
+        rewrite = (rewrites or {}).get(item["id"])
+        if rewrite is None:
+            rewrite = rewrite_item(store, models, item, refresh)
+            if rewrites is not None:
+                rewrites[item["id"]] = rewrite
+        queries, rerank_query = rewrite["queries"], rewrite["standalone_query"]
         started = time.monotonic()
         retrieval = tool.execute(store, models, EVAL_OWNER, queries, rerank_query, **options)
         latency_ms = round((time.monotonic() - started) * 1000)
         row = score_question(item, retrieval, chunk_texts, pool_size)
         row.update({"latency_ms": latency_ms, "queries": queries, "rerank_query": rerank_query,
-            "query_source": query_source})
+            "query_source": rewrite["classifier"],
+            "rewrite": {key: rewrite.get(key) for key in ("classifier", "route", "intent", "cached", "duration_ms")}})
+        if judge:
+            evidence = item.get("evidence") or []
+            started = time.monotonic()
+            check = tool.check_sufficiency(store, models, EVAL_OWNER, queries, rerank_query, retrieval, **options)
+            check_ms = round((time.monotonic() - started) * 1000)
+            apply_sufficiency(row, check, lambda sources: evidence_found(sources, evidence, chunk_texts),
+                retrieval["sources"], len(evidence), keep_diagnostics)
+            row["check_ms"] = check_ms
+            row["flow_latency_ms"] = rewrite["duration_ms"] + latency_ms + check_ms
+            # 生成评测接着回答时直接用这次的判断结果，不再判断一次（见 results.answer_hook）。
+            retrieval["sufficiency_check"] = check
         if keep_diagnostics:
             row["diagnostics"] = retrieval["diagnostics"]
             row["sources"] = retrieval["sources"]
@@ -470,9 +528,20 @@ def evaluate_items(store, models, items, chunk_texts, options, keep_diagnostics,
     return rows
 
 
+# 这次固定流程怎么跑的：完整检索（改写 + 判断）、改写用了几题缓存、意图提示词版本、模型、充分性判断是否启用。
+# 对比两次评测时据此提示"检索口径不同"（旧记录没有 flow，是规则检索词、只检索）。
+def flow_config(models, rows, refresh):
+    from .. import prompts
+    rewrites = [row.get("rewrite") or {} for row in rows]
+    llm = [item for item in rewrites if item.get("classifier") == "llm"]
+    return {"name": "full", "intent_prompt": prompts.tag("intent"), "model": models.llm_model, "refresh": bool(refresh),
+        "rewrite_cached": sum(1 for item in llm if item.get("cached")), "rewrite_fresh": sum(1 for item in llm if not item.get("cached")),
+        "sufficiency": models.mode == "openai" and bool(runtime_snapshot()["sufficiency_check"])}
+
+
 # 运行一次完整的检索评测：导入语料 → 基线逐题评测 → 汇总、分组、漏斗、阈值扫描 → 可选的消融与参数对比。
 # on_progress(已完成, 总数) 用于把进度写回结果文件，前端据此显示进度条。
-def run_retrieval(store, models, items, split, suites=(), on_progress=None, on_item=None):
+def run_retrieval(store, models, items, split, suites=(), on_progress=None, on_item=None, refresh=False):
     corpus = import_corpus(store, models)
     chunk_texts = current_chunk_texts(store)
     selected = select_split(items, split)
@@ -494,7 +563,8 @@ def run_retrieval(store, models, items, split, suites=(), on_progress=None, on_i
             on_item(item, row, retrieval)
         advance()
 
-    rows = evaluate_items(store, models, selected, chunk_texts, {}, True, advance_baseline)
+    rewrites = {}
+    rows = evaluate_items(store, models, selected, chunk_texts, {}, True, advance_baseline, rewrites, refresh, True)
     # 重排关闭或调用失败时没有相关性阈值，也无法做阈值扫描；配置里如实记录，避免把"未过滤"误读成"阈值很低"。
     min_score = None
     reranked = False
@@ -510,7 +580,7 @@ def run_retrieval(store, models, items, split, suites=(), on_progress=None, on_i
     for name in variant_names:
         variant = VARIANTS[name]
         variant_rows = evaluate_items(store, models, selected, chunk_texts, variant["options"], False,
-            advance)
+            advance, rewrites)
         variants.append({"name": name, "label": variant["label"], "suite": variant["suite"],
             "options": variant["options"], "summary": summarize(variant_rows), "funnel": funnel(variant_rows),
             "by_type": summarize_by_type(variant_rows)})
@@ -522,6 +592,7 @@ def run_retrieval(store, models, items, split, suites=(), on_progress=None, on_i
         "model_mode": models.mode, "embedding_mode": models.embedding_mode,
         "embedding_model": models.embedding_model, "rerank_model": models.rerank_model,
         "rerank_mode": "local" if settings["rerank_enabled"] else "off", "query_source": sorted(query_sources),
+        "flow": flow_config(models, rows, refresh),
         "corpus": corpus, "settings": settings}
     return {"config": config, "summary": summarize(rows), "by_type": summarize_by_type(rows),
         "funnel": funnel(rows), "sweep": threshold_sweep(rows, settings["return_limit"]) if reranked else [],

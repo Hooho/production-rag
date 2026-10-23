@@ -461,6 +461,21 @@ eval_runs = Table("eval_runs", metadata,
     Column("updated", String(40), nullable=False),
 )
 
+# 评测用的查询改写缓存：评测的固定流程和线上一样先让大模型改写（补全问题、生成检索词），
+# 但每次改写结果可能不同，两次评测的第一次检索就没法比。这里按"题目 + 追问历史 + 意图提示词版本 + 模型"存下第一次改写，
+# 以后同样的键直接复用；改了提示词或换了模型，键就变了，自动重新改写。只缓存大模型的改写（规则和小模型本来就稳定）。
+eval_query_cache = Table("eval_query_cache", metadata,
+    Column("cache_key", String(64), primary_key=True),
+    Column("question", Text, nullable=False),
+    Column("prompt_tag", String(64), nullable=False),
+    Column("model", String(128), nullable=False),
+    # 改写结果：queries、standalone_query、route、intent、classifier
+    Column("data", JSON, nullable=False),
+    # 当时改写花的时间：用缓存时耗时按这个算，和 Agent 比耗时才公平
+    Column("duration_ms", Integer, nullable=False),
+    Column("created", String(40), nullable=False),
+)
+
 # 提示词版本（见 app/prompts.py）：每次在「提示词」页保存生成一个新版本，只增不改；
 # 当前使用哪个版本存在 settings 表（key = prompts），回滚只改那里。内置版本（v0）在代码里，不存这张表。
 prompt_versions = Table("prompt_versions", metadata,

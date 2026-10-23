@@ -55,10 +55,21 @@ function agentVerdict(question: EvalQuestion) {
   return { key: "bad", label: "未命中" };
 }
 
+// 一道题的检索词是谁给的。
+export function rewriteLabel(question: { rewrite?: EvalQuestion["rewrite"]; query_source?: string }) {
+  const classifier = question.rewrite?.classifier ?? question.query_source;
+  if (classifier === "llm") return question.rewrite?.cached ? "大模型改写（来自改写缓存）" : "大模型改写";
+  if (classifier === "small_model") return "本地小模型只分类不改写，用原问题检索";
+  if (classifier === "rewrite_cache") return "来自改写缓存";
+  return "规则（未调用大模型）";
+}
+
 function fixedVerdict(question: EvalQuestion) {
   if (!question.stages) return { key: "none", label: "—" };
-  if (!question.answerable) return question.returned === 0 ? { key: "good", label: "没拿到资料" } : { key: "warn", label: `拿到 ${question.returned} 段` };
-  // 和 Agent 比较时按「交给模型的资料」（含父块扩展）算；旧记录没有，用过滤后 Recall。
+  if (!question.answerable) return question.returned === 0 || question.cleared ? { key: "good", label: question.cleared ? "被清空，没拿到资料" : "没拿到资料" } : { key: "warn", label: `拿到 ${question.sufficiency?.source_count ?? question.returned} 段` };
+  // 被充分性判断清空：模型什么资料都拿不到。
+  if (question.cleared) return { key: "bad", label: "被清空" };
+  // 和 Agent 比较时按「最终交给模型的资料」（含父块扩展、补充检索）算；旧记录没有，用过滤后 Recall。
   const recall = question.given_recall ?? question.stages.final.recall ?? 0;
   if (recall >= 1) return { key: "good", label: "命中" };
   if (recall > 0) return { key: "warn", label: `部分 ${percent(recall)}` };
@@ -78,13 +89,15 @@ function Card({ label, value, note }: { label: string; value: string; note?: str
 export function ComparePanel({ run }: { run: EvalRun }) {
   const summary: EvalSummary = run.summary ?? {};
   const rows: [string, string, string, string][] = [
-    ["资料命中率", percent(summary.recall_given ?? summary.recall_final), percent(summary.agent_recall), "能回答的题里，最后交给模型的资料包含的证据比例。两边都算父块扩展拼进来的相邻分片：固定流程是过滤后的来源，Agent 是所有检索结果加上读前后文读到的"],
+    ["资料命中率", percent(summary.recall_given ?? summary.recall_final), percent(summary.agent_recall), "能回答的题里，最后交给模型的资料包含的证据比例。两边都算父块扩展拼进来的相邻分片：固定流程是充分性判断之后最终交给模型的（可能用了补充检索，被判资料不足就清空），Agent 是所有检索结果加上读前后文读到的"],
     ["误杀率", percent(summary.false_reject_rate), percent(summary.agent_false_reject_rate), "能回答的题里，一段资料都没拿到的比例（越低越好）"],
     ["漏放率", percent(summary.false_accept_rate), percent(summary.agent_false_accept_rate), "无法回答的题里，仍然拿到了资料的比例（越低越好）"],
-    ["平均检索次数", "1", number(summary.agent_avg_searches), "固定流程每题检索一次；Agent 自己决定查几次"],
+    ["平均检索次数", summary.retry_rate !== undefined && summary.retry_rate !== null ? number(1 + summary.retry_rate) : "1", number(summary.agent_avg_searches), "固定流程每题检索一次，充分性判断觉得不够时再补充检索一次；Agent 自己决定查几次"],
     ["平均无新增检索", "—", number(summary.agent_avg_wasted_searches), `Agent 的检索里，一个新分块都没拿到的次数（反复拿回同一批分块，越低越好）；占全部检索 ${percent(summary.agent_wasted_rate)}`],
-    ["平均耗时", formatMs(summary.latency_avg_ms), formatMs(summary.agent_latency_avg_ms), "口径不同：固定流程这里只算检索（召回 + 重排），没算线上还有的意图识别、充分性判断和写回答（各调一次大模型）；Agent 包括它所有轮次的模型调用和写回答"],
-    ["平均输入 token", "0", number(summary.agent_avg_prompt_tokens, 0), "口径不同：评测里固定流程的检索不调用大模型；线上固定流程每题还要调 3 次（意图识别、充分性判断、写回答）"],
+    summary.flow_latency_avg_ms !== undefined && summary.flow_latency_avg_ms !== null
+      ? ["平均耗时", formatMs(summary.flow_latency_avg_ms), formatMs(summary.agent_latency_avg_ms), "固定流程算改写、检索、充分性判断和补充检索（改写用了缓存时按当时实际花的时间）；Agent 包括它所有轮次的模型调用和写回答，固定流程没算写回答那一次"]
+      : ["平均耗时", formatMs(summary.latency_avg_ms), formatMs(summary.agent_latency_avg_ms), "口径不同：这次固定流程只算检索（召回 + 重排，旧口径），没算意图识别、充分性判断和写回答；Agent 包括它所有轮次的模型调用和写回答"],
+    ["平均输入 token", "—", number(summary.agent_avg_prompt_tokens, 0), "固定流程改写和充分性判断的 token 没有记录（每题 1～3 次大模型调用）；Agent 是所有轮次加起来的"],
   ];
   return <div className="ev-overview ag-eval">
     <p className="ev-muted-note">同一套题，固定流程和 Agent 各跑一遍，比较的是<strong>最后交给模型的资料里有没有题目预设的证据</strong>，判断方法相同（都算父块扩展拼进来的相邻分片）。{summary.answerable_count ?? 0} 道能回答 · {summary.unanswerable_count ?? 0} 道无法回答。</p>
@@ -225,7 +238,7 @@ function AgentQuestionList({ run, hasFixed }: { run: EvalRun; hasFixed: boolean 
         <button className={`ag-q-head ${layout}`} aria-expanded={open} onClick={() => setExpanded(open ? null : question.id)}>
           <span className="ev-qid">{question.id}</span>
           <span className="ev-question-text">{question.question}<small>{question.type}{question.evidence_count > 1 ? ` · ${question.evidence_count} 条证据` : ""}{question.compare ? ` · ${COMPARE_LABELS[question.compare]}` : ""}{question.note ? ` · ${question.note}` : ""}</small></span>
-          {hasFixed && <><Verdict verdict={fixedVerdict(question)} /><span className="ag-num">{formatMs(question.latency_ms)}</span></>}
+          {hasFixed && <><Verdict verdict={fixedVerdict(question)} /><span className="ag-num">{formatMs(question.flow_latency_ms ?? question.latency_ms)}</span></>}
           <span className="ag-verdict-cell"><Verdict verdict={agentVerdict(question)} />{hitCalls.length > 0 && <small>第 {hitCalls.join("、")} 次调用命中</small>}</span>
           <span className="ag-num ag-search-cell">{agent ? `${agent.searches} 次` : "—"}{agent && freshness(question).wasted > 0 && <small>{freshness(question).wasted} 次无新增</small>}</span>
           <span className="ag-num">{agent ? formatMs(agent.latency_ms) : "—"}</span>
@@ -310,7 +323,7 @@ function QuestionDetail({ question, hasFixed }: { question: EvalQuestion; hasFix
       return <div className="ag-evidence" key={index}>
         <p>证据 {index + 1}：“{evidence.text}”</p>
         <span className="ag-evidence-chunk">所在分块 {chunkIds.length ? chunkIds.map((chunkId, order) => <code key={chunkId} title={chunkId}>{chunkLabel(evidence.positions?.[order], chunkId)}</code>) : "知识库里没找到"}</span>
-        {hasFixed && <span className={fixedFound ? "is-hit" : "is-miss"}>固定流程：{fixedFound ? `拿到了${fixed?.source_id ? `（本次检索的 ${fixed.source_id}）` : "（在父块拼进来的相邻分片里）"}` : "没拿到"}</span>}
+        {hasFixed && <span className={fixedFound ? "is-hit" : "is-miss"}>固定流程：{fixedFound ? `拿到了${fixed?.first_given === false ? "（补充检索拿到的）" : fixed?.source_id ? `（本次检索的 ${fixed.source_id}）` : "（在父块拼进来的相邻分片里）"}` : question.cleared && fixed?.first_given ? "第一次检索拿到了，但被充分性判断清空了" : "没拿到"}</span>}
         <span className={evidence.found ? "is-hit" : "is-miss"}>Agent：{evidence.found ? `拿到了（${evidence.where.map((item) => `第 ${item.call} 次调用的 ${item.evidence_id ?? "—"}`).join("、")}）` : "没拿到"}</span>
       </div>;
     })}</div> : <p className="ev-muted-note">这道题知识库里没有答案，没有预设证据；拿到的资料越少越好（拿到了模型可能硬凑答案）。</p>}
@@ -335,14 +348,52 @@ function FixedLog({ question }: { question: EvalQuestion }) {
       heading: source.heading ?? null, text: source.text, evidenceParts: new Set(parts.filter((chunkId) => evidenceChunks.has(chunkId))),
       hit: hitSources.has(source.id) || parts.some((chunkId) => evidenceChunks.has(chunkId)) };
   });
+  // 补充检索的来源：父块里任何一片含证据都算命中。
+  const retry = question.retry;
+  const retryItems: ChunkItem[] = (retry?.sources ?? []).map((source) => {
+    const parts = source.parent_chunk_ids ?? (source.chunk_id ? [source.chunk_id] : []);
+    return { key: `retry-${source.id}`, id: source.id, chunkId: source.chunk_id ?? null, position: source.position ?? null, parts, title: source.title,
+      heading: source.heading ?? null, text: source.text, evidenceParts: new Set(parts.filter((chunkId) => evidenceChunks.has(chunkId))),
+      hit: parts.some((chunkId) => evidenceChunks.has(chunkId)) };
+  });
+  const sufficiency = question.sufficiency;
+  const searches = 1 + (sufficiency?.retried ? 1 : 0);
+  const usedRetry = Boolean(sufficiency?.retry_used);
   return <section className="ag-log">
-    <div className="ag-log-title">固定流程<small>检索 1 次 · 耗时 {formatMs(question.latency_ms)}</small></div>
-    <div className="ag-call">
-      <div className="ag-call-head"><span className="ag-tool">检索</span>{question.queries.map((query) => <code key={query}>{query}</code>)}
-        <span className="ag-tag">混合检索</span><span className="ag-tag">耗时 {formatMs(question.latency_ms)}</span>{items.some((item) => item.hit) && <span className="ag-hit">命中</span>}</div>
+    <div className="ag-log-title">固定流程<small>检索 {searches} 次{sufficiency?.checked ? ` · 判断 ${sufficiency.calls ?? 1} 次` : ""} · 耗时 {formatMs(question.flow_latency_ms ?? question.latency_ms)}</small></div>
+    {question.rewrite && <div className="ag-flow-step"><span className="ag-tool">改写</span><span>{rewriteLabel(question)}</span>
+      {question.rewrite.duration_ms !== undefined && question.rewrite.classifier === "llm" && <span className="ag-tag">耗时 {formatMs(question.rewrite.duration_ms)}{question.rewrite.cached ? "（缓存，当时）" : ""}</span>}
+      {question.rerank_query && question.rerank_query !== question.question && <span>补全后的问题 <code>{question.rerank_query}</code></span>}</div>}
+    <div className={`ag-call ${usedRetry ? "is-unused" : ""}`}>
+      <div className="ag-call-head"><span className="ag-tool">{sufficiency?.retried ? "第 1 次 · " : ""}检索</span>{question.queries.map((query) => <code key={query}>{query}</code>)}
+        <span className="ag-tag">混合检索</span><span className="ag-tag">耗时 {formatMs(question.latency_ms)}</span>{items.some((item) => item.hit) && <span className="ag-hit">命中</span>}
+        {usedRetry && <span className="ag-tag">没采用（换成了补充检索的结果）</span>}</div>
       <ChunkTabs items={items} empty="过滤后没有分块。" />
     </div>
+    {sufficiency && <SufficiencySteps question={question} />}
+    {retry && <div className={`ag-call ${usedRetry ? "" : "is-unused"}`}>
+      <div className="ag-call-head"><span className="ag-tool">第 2 次 · 补充检索</span>{question.queries.map((query) => <code key={query}>{query}</code>)}{sufficiency?.retry_query && <code>+ {sufficiency.retry_query}</code>}
+        <span className="ag-tag">返回 {retry.returned} 段</span>{retryItems.some((item) => item.hit) && <span className="ag-hit">命中</span>}
+        <span className="ag-tag">{usedRetry ? "采用了" : "没变好，沿用第一次的"}</span></div>
+      {retry.sources ? <ChunkTabs items={retryItems} empty="补充检索没有返回分块。" /> : <p className="ag-muted">这次评测没有保存补充检索的分块。</p>}
+    </div>}
+    {question.cleared && <div className="ag-flow-cleared">判断为资料不足，来源已清空：线上这道题会直接拒答，模型什么资料都拿不到。</div>}
   </section>;
+}
+
+const VERDICT_LABELS: Record<string, string> = { sufficient: "够了", partial: "只够一部分", insufficient: "不够" };
+
+// 充分性判断：每次判断的结论和缺什么（补充检索后会再判断一次）。
+function SufficiencySteps({ question }: { question: EvalQuestion }) {
+  const sufficiency = question.sufficiency!;
+  if (!sufficiency.checked) return <div className="ag-flow-step"><span className="ag-tool">充分性判断</span><span className="ag-muted">{question.returned === 0 ? "第一次检索没有来源，不用判断" : "没有做（需要真实大模型，并打开「检索充分性判断」开关）"}</span></div>;
+  const judgements = sufficiency.judgements?.length ? sufficiency.judgements : [{ verdict: sufficiency.verdict ?? "", missing: typeof sufficiency.missing === "string" ? sufficiency.missing : "", rewrite_query: sufficiency.retry_query ?? "" }];
+  return <>{judgements.map((judgement, index) => <div key={index} className={`ag-flow-step is-judge is-${judgement.verdict}`}>
+    <span className="ag-tool">{judgements.length > 1 ? `第 ${index + 1} 次判断` : "充分性判断"}</span>
+    <strong>{VERDICT_LABELS[judgement.verdict] ?? judgement.verdict}</strong>
+    {judgement.missing && <span>缺：{judgement.missing}</span>}
+    {index === 0 && judgement.rewrite_query && judgement.verdict !== "sufficient" && <span>补充检索词 <code>{judgement.rewrite_query}</code></span>}
+  </div>)}</>;
 }
 
 function AgentLog({ question }: { question: EvalQuestion }) {
@@ -411,7 +462,9 @@ function fromSpecial(question: EvalSpecialQuestion, hasFixed: boolean): EvalQues
     evidence: (question.fixed_evidence ?? []).map((item) => ({ ...item, rrf_rank: null, rerank_rank: null, rerank_probability: null, status: item.status ?? "not_recalled" })),
     given_recall: question.given_recall,
     returned: question.returned ?? 0, max_probability: null, latency_ms: question.latency_ms ?? 0,
-    queries: question.queries ?? [], rerank_query: question.rerank_query ?? "", query_source: "rule",
+    queries: question.queries ?? [], rerank_query: question.rerank_query ?? "", query_source: question.rewrite?.classifier ?? "rule",
+    first_given_recall: question.first_given_recall, rewrite: question.rewrite, retry: question.retry, cleared: question.cleared,
+    flow_latency_ms: question.flow_latency_ms, sufficiency: question.sufficiency ?? undefined,
     sources: question.sources, agent: question.agent, compare: question.compare, note: notes.join(" · ") || undefined,
   };
 }

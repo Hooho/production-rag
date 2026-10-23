@@ -31,7 +31,15 @@ METRICS = [
     ("recall_top", "重排 Recall@返回数", "higher"),
     ("recall_final", "过滤后 Recall", "higher"),
     # 交给回答模型的资料（含父块扩展拼进来的相邻分片）里的证据比例；和 Agent 资料命中率口径一致。
-    ("recall_given", "交给模型的资料命中率", "higher"),
+    # 固定流程现在和线上一样做充分性判断和补充检索（见 app/evaluation/flow.py），这是判断之后最终交给模型的。
+    ("recall_given", "最终交给模型的资料命中率", "higher"),
+    ("recall_given_first", "第一次检索交给模型的资料命中率", "higher"),
+    ("rescued_count", "补充检索救回的题数", "higher"),
+    ("wrong_clear_rate", "误清空率（有答案被清空）", "lower"),
+    ("right_clear_rate", "正确清空率（无答案被清空）", "higher"),
+    ("retry_rate", "补充检索比例", "lower"),
+    ("avg_judge_calls", "平均充分性判断次数", "lower"),
+    ("flow_latency_avg_ms", "完整检索平均耗时（毫秒）", "lower"),
     ("mrr_pool", "召回 MRR", "higher"),
     ("mrr_top", "重排 MRR", "higher"),
     ("mrr_final", "过滤后 MRR", "higher"),
@@ -294,6 +302,16 @@ def compare_runs(base, target):
     # 跑的模式、Agent 提示词版本和模型不在设置页参数里，单独比较：改提示词后对比评测，最需要看到这一项。
     base_config = base.get("config") or {}
     target_config = target.get("config") or {}
+    # 检索口径：旧记录（没有 flow）是规则检索词、只检索；新记录是改写 + 检索 + 充分性判断 + 补充检索。
+    base_flow = flow_label(base_config)
+    target_flow = flow_label(target_config)
+    if base_flow and target_flow and base_flow != target_flow:
+        settings_diff.append({"key": "检索口径", "base": base_flow, "target": target_flow})
+    for key, label in (("intent_prompt", "意图（改写）提示词版本"), ("model", "改写模型"), ("sufficiency", "充分性判断")):
+        before = (base_config.get("flow") or {}).get(key)
+        after = (target_config.get("flow") or {}).get(key)
+        if before is not None and after is not None and before != after:
+            settings_diff.append({"key": label, "base": before, "target": after})
     if run_modes(base) != run_modes(target):
         settings_diff.append({"key": "模式", "base": "+".join(run_modes(base)), "target": "+".join(run_modes(target))})
     base_agent = base_config.get("agent") or {}
@@ -308,6 +326,13 @@ def compare_runs(base, target):
     return {"base": run_brief(base), "target": run_brief(target), "metrics": rows, "settings_diff": settings_diff}
 
 
+# 固定流程的检索口径（只有跑了固定流程才有意义）。
+def flow_label(config):
+    if "fixed" not in (config.get("modes") or ["fixed"]):
+        return None
+    return "完整检索（改写 + 判断）" if (config.get("flow") or {}).get("name") == "full" else "只检索（规则检索词）"
+
+
 # 这次评测跑了哪些模式；旧记录没有这一项，都是只跑固定流程。
 def run_modes(run):
     return list((run.get("config") or {}).get("modes") or ["fixed"])
@@ -315,9 +340,11 @@ def run_modes(run):
 
 # 新建一次评测记录并立即保存为 running，前端马上就能在列表里看到它和进度。
 # modes：检索评测跑哪些模式（fixed 固定流程、agent），可以只跑一个，也可以一起跑。
-def start_run(kind, split, suites, special=None, modes=("fixed",)):
+# refresh_rewrite：固定流程不用改写缓存，重新让大模型改写（想看改写本身的波动时用）。
+def start_run(kind, split, suites, special=None, modes=("fixed",), refresh_rewrite=False):
     commit = git_commit()
-    config = {"split": split, "suites": list(suites), "modes": [mode for mode in MODES if mode in modes]}
+    config = {"split": split, "suites": list(suites), "modes": [mode for mode in MODES if mode in modes],
+        "refresh_rewrite": bool(refresh_rewrite)}
     # 专项评测：要跑的专项（编号和名称）以及多轮对话是否对比记忆参数。
     if special is not None:
         config["special"] = special
@@ -333,14 +360,15 @@ def start_run(kind, split, suites, special=None, modes=("fixed",)):
 # 返回给 run_retrieval 的逐题回调，专项评测集的「回答」方式也用它。
 def answer_hook(store, models, responder, run_id):
     def on_item(item, row, retrieval):
-        check = DocumentSearchTool().check_sufficiency(store, models, EVAL_OWNER, row["queries"],
-            row["rerank_query"], retrieval)
+        # 检索评测已经按线上流程判断过（evaluate_items 的 judge）就直接用，不再判断一次。
+        check = retrieval.get("sufficiency_check") or DocumentSearchTool().check_sufficiency(store, models, EVAL_OWNER,
+            row["queries"], row["rerank_query"], retrieval)
         coverage = {"verdict": check["verdict"], "missing": check["missing"]} if check["checked"] else None
         sources = check["sources"]
         answer = answer_question(models, responder, run_id, item, row["rerank_query"], sources, coverage)
         row["answer"] = answer
         row["cited"] = cited_ids(answer)
-        row["sufficiency"] = {"checked": check["checked"], "verdict": check["verdict"],
+        row["sufficiency"] = row.get("sufficiency") or {"checked": check["checked"], "verdict": check["verdict"],
             "missing": check["missing"], "retried": check["retried"], "retry_query": check["retry_query"], "retry_used": check.get("retry_used", False),
             "refused": check["refused"], "source_count": len(sources)}
         row["judgement"] = judge_answer(models, item, answer, sources)
@@ -371,13 +399,15 @@ def execute_run(store, models, items, run, generate=False, responder=None, agent
             return run
         split = run["config"]["split"]
         suites = run["config"]["suites"]
+        refresh = bool(run["config"].get("refresh_rewrite"))
         modes = run_modes(run)
         if "agent" in modes:
             # 勾选了 Agent：只跑 Agent，或者和固定流程一起跑（见 app/evaluation/agent_retrieval.py）。
             from .agent_retrieval import run_agent_retrieval
-            result = run_agent_retrieval(store, models, agent_mode, items, split, suites, "fixed" in modes, on_progress)
+            result = run_agent_retrieval(store, models, agent_mode, items, split, suites, "fixed" in modes, on_progress,
+                refresh=refresh)
         else:
-            result = run_retrieval(store, models, items, split, suites, on_progress, on_item)
+            result = run_retrieval(store, models, items, split, suites, on_progress, on_item, refresh)
         result["config"]["modes"] = modes
         run.update(result)
         if generate:

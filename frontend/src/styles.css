@@ -8219,3 +8219,56 @@ input:focus {
    border-color: var(--ev-good);
    color: #24684a;
 }
+
+/* 完整检索流程：逐题多了「最终交给模型」一格，格子数不固定，按宽度自动排。被清空的标红。 */
+.ev-stage-row {
+   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.ev-stage-row div.is-cleared {
+   border-color: var(--ev-bad);
+   background: rgba(220, 38, 38, .06);
+}
+
+/* 固定流程日志：改写、判断结论、补充检索、清空提示。 */
+.ag-flow-step {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: baseline;
+   gap: 6px 8px;
+   padding: 8px 10px;
+   font-size: 13px;
+   border: 1px solid var(--ev-line);
+   background: rgb(var(--t-e0eefa-rgb) / .25);
+}
+
+.ag-flow-step code {
+   padding: 1px 6px;
+   border-radius: 4px;
+   background: rgba(255, 255, 255, .9);
+   border: 1px solid var(--ev-line);
+   font-size: 12px;
+}
+
+.ag-flow-step.is-judge.is-sufficient { border-left: 3px solid var(--ev-good); }
+.ag-flow-step.is-judge.is-partial { border-left: 3px solid #d29b2c; }
+.ag-flow-step.is-judge.is-insufficient { border-left: 3px solid var(--ev-bad); }
+
+.ag-flow-cleared {
+   padding: 8px 10px;
+   border: 1px solid var(--ev-bad);
+   background: rgba(220, 38, 38, .06);
+   color: var(--ev-bad);
+   font-size: 13px;
+   font-weight: 600;
+}
+
+.ag-call.is-unused {
+   opacity: .7;
+}
+
+/* 专项逐题：资料被充分性判断清空时标红。 */
+.rg-item-meta .is-miss {
+   color: var(--ev-bad, #c0392b);
+   font-weight: 600;
+}

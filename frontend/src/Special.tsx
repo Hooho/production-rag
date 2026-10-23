@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { SpecialAgentResults } from "./AgentEval";
+import { SpecialAgentResults, rewriteLabel } from "./AgentEval";
 import { addEvalSuiteItem, createEvalSuite, deleteEvalSuite, deleteEvalSuiteItem, getEvalRun, getEvalSuite, listEvalSuites, startSpecialRun, updateEvalSuite, updateEvalSuiteItem, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSuiteBrief, type EvalSuiteFull, type EvalSuiteItem, type EvalSuiteMethod, type EvalSuiteSearchMode, type EvalSuiteRunEntry } from "./api";
 import { EvidenceDetails } from "./EvidenceChunks";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
@@ -393,6 +393,9 @@ export function SpecialSection({ section }: { section: EvalSpecialSection }) {
   </div>;
 }
 
+// 充分性判断结论的简称（完整检索流程，见 app/evaluation/flow.py）。
+const SUFFICIENCY_SHORT: Record<string, string> = { sufficient: "够了", partial: "只够一部分", insufficient: "不够" };
+
 function SpecialQuestion({ question, method, searchMode }: { question: EvalSpecialQuestion; method: EvalSuiteMethod; searchMode: EvalSuiteSearchMode }) {
   const change = question.previous_passed === undefined || question.previous_passed === null || question.previous_passed === question.passed ? null
     : question.passed ? { label: "新通过", tone: "green" } : { label: "新失败", tone: "red" };
@@ -415,6 +418,13 @@ function SpecialQuestion({ question, method, searchMode }: { question: EvalSpeci
       </li>)}
     </ul>}
     {question.evidence && question.evidence.length > 0 && <EvidenceDetails texts={question.evidence.map((item) => item.text)} />}
+    {question.sufficiency && <div className="rg-item-meta">
+      {question.queries && question.queries.length > 0 && <span>检索词：{question.queries.join(" / ")}（{rewriteLabel(question)}）</span>}
+      <span>{question.sufficiency.checked ? `充分性判断：${SUFFICIENCY_SHORT[question.sufficiency.verdict ?? ""] ?? "—"}` : "没做充分性判断"}</span>
+      {question.sufficiency.retried && <span>补充检索「{question.sufficiency.retry_query}」{question.sufficiency.retry_used ? "，采用了" : "，没变好"}</span>}
+      {question.cleared && <span className="is-miss">资料被清空，线上会直接拒答</span>}
+      {!question.cleared && question.first_given_recall !== undefined && question.first_given_recall !== null && question.given_recall !== undefined && question.given_recall !== null && question.given_recall > question.first_given_recall && <span>补充检索把证据补全了</span>}
+    </div>}
     {method !== "retrieval" && <div className="rg-item-meta">
       {judgement?.correctness !== undefined && judgement?.correctness !== null && <span>正确性 {judgement.correctness}</span>}
       {method === "dialogue" && <span>{question.summarized ? "触发了压缩" : "没有压缩"}</span>}

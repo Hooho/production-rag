@@ -236,7 +236,8 @@ class DocumentSearchTool:
     # 演示模式没有聊天模型、或设置页关闭了充分性判断、或来源已为空（重排阈值已过滤光）时不判断。
     VERDICT_RANK = {"insufficient": 0, "partial": 1, "sufficient": 2}
 
-    def check_sufficiency(self, store, models, owner, queries, rerank_query, retrieval):
+    # options 原样传给补充检索（评测的专项可以只用一路检索，补充检索也要用同样的方式）。
+    def check_sufficiency(self, store, models, owner, queries, rerank_query, retrieval, **options):
         result = {"checked": False, "verdict": None, "missing": "", "judgements": [], "retried": False,
             "retry_query": None, "retrieval": retrieval, "sources": retrieval["sources"], "refused": False}
         if models.mode != "openai" or not runtime_snapshot()["sufficiency_check"] or not retrieval["sources"]:
@@ -248,7 +249,7 @@ class DocumentSearchTool:
         if judgement["verdict"] in {"insufficient", "partial"} and rewrite and rewrite not in queries:
             retry_queries = list(queries)
             retry_queries.append(rewrite)
-            retry = self.execute(store, models, owner, retry_queries, rerank_query)
+            retry = self.execute(store, models, owner, retry_queries, rerank_query, **options)
             result.update({"retried": True, "retry_query": rewrite, "retry_retrieval": retry})
             if retry["sources"]:
                 second = models.judge_sufficiency(rerank_query, retry["sources"])

@@ -455,3 +455,58 @@ def test_eval_api_requires_admin(setup):
     assert client.get("/eval/runs", headers=user_headers("alice")).status_code == 403
     assert client.post("/eval/runs", headers=user_headers("alice"), json={}).status_code == 403
     assert client.get("/eval/runs", headers=headers()).status_code == 200
+
+
+# 固定流程和线上检索一致：大模型改写（按题目、提示词版本、模型缓存）→ 检索 → 充分性判断 → 补充检索。
+# 被判成资料不足的题来源被清空，最终交给模型的命中算 0；第一次检索的命中另外记着。
+def test_retrieval_full_flow_rewrite_cache_and_sufficiency(setup, eval_dir, monkeypatch, runtime):
+    client, store = setup
+    models = client.app.state.models
+    monkeypatch.setattr(Models, "rerank", fake_rerank)
+    runtime(rerank_min_score=0.3, contextual_retrieval=False, sufficiency_check=True)
+    monkeypatch.setattr(models, "mode", "openai")
+    rewrites = []
+
+    def analyze(question, history, last_order, **kwargs):
+        rewrites.append(question)
+        return {"route": "knowledge", "intent": "knowledge_qa", "classifier": "llm", "standalone_query": question,
+            "queries": [question, f"耳机 {question}"]}
+
+    def judge(question, sources):
+        if "保修" in question:
+            return {"verdict": "insufficient", "missing": "保修范围", "rewrite_query": "人为损坏"}
+        return {"verdict": "sufficient", "missing": "", "rewrite_query": ""}
+
+    monkeypatch.setattr(models, "analyze_query", analyze)
+    monkeypatch.setattr(models, "judge_sufficiency", judge)
+    run = execute_run(store, models, dataset_module.load_dataset(), start_run("retrieval", "dev", []))
+    assert run["status"] == "completed"
+    rows = {row["id"]: row for row in run["questions"]}
+    first = rows["a1"]
+    assert first["queries"] == ["耳机几天内可以退货？", "耳机 耳机几天内可以退货？"]
+    assert first["rewrite"]["classifier"] == "llm" and first["rewrite"]["cached"] is False
+    assert first["sufficiency"]["verdict"] == "sufficient" and first["given_recall"] == 1
+    assert first["flow_latency_ms"] >= first["latency_ms"]
+    cleared = rows["a2"]
+    assert cleared["first_given_recall"] == 1
+    assert cleared["sufficiency"]["retried"] and cleared["sufficiency"]["retry_query"] == "人为损坏"
+    assert cleared["cleared"] is True and cleared["given_recall"] == 0
+    assert cleared["evidence"][0]["first_given"] is True and cleared["evidence"][0]["given"] is False
+    assert cleared["retry"]["sources"]
+    summary = run["summary"]
+    assert summary["recall_given_first"] == 1.0 and summary["recall_given"] == 0.5
+    assert summary["wrong_clear_rate"] == 0.5
+    assert run["config"]["flow"]["name"] == "full" and run["config"]["flow"]["rewrite_fresh"] == 3
+    # 第二次跑：改写全部用缓存，不再调用模型，检索词不变。
+    called = len(rewrites)
+    again = execute_run(store, models, dataset_module.load_dataset(), start_run("retrieval", "dev", []))
+    assert len(rewrites) == called
+    assert again["config"]["flow"]["rewrite_cached"] == 3 and again["summary"]["rewrite_cache_rate"] == 1.0
+    assert again["questions"][0]["queries"] == first["queries"]
+    # 勾选重新改写：不读缓存，三道题重新调用模型。
+    execute_run(store, models, dataset_module.load_dataset(), start_run("retrieval", "dev", [], refresh_rewrite=True))
+    assert len(rewrites) == called + 3
+    # 和旧记录（规则检索词、只检索）对比时提示检索口径不同。
+    old = {**again, "config": {k: v for k, v in again["config"].items() if k != "flow"}}
+    diff = {item["key"] for item in compare_runs(old, again)["settings_diff"]}
+    assert "检索口径" in diff

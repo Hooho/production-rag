@@ -635,9 +635,18 @@ export type EvalItem = {
 export type EvalSummary = Record<string, number | null>;
 export type EvalStage = { recall: number | null; rr: number; rank: number | null };
 // given：证据在不在交给回答模型的资料里（含父块扩展拼进来的相邻分片，旧记录没有）。
-export type EvalEvidence = { text: string; chunk_id: string | null; rrf_rank: number | null; rerank_rank: number | null; rerank_probability: number | null; source_id: string | null; status: string; given?: boolean };
+export type EvalEvidence = { text: string; chunk_id: string | null; rrf_rank: number | null; rerank_rank: number | null; rerank_probability: number | null; source_id: string | null; status: string; given?: boolean; first_given?: boolean };
 export type EvalJudgement = { refused: boolean; faithfulness: number; correctness: number; citation: number; faithfulness_reason: string; correctness_reason: string; citation_reason: string; judge: string };
-export type EvalSufficiency = { checked: boolean; verdict: "sufficient" | "partial" | "insufficient" | null; missing?: string | string[] | null; retried?: boolean; retry_query?: string | null; refused?: boolean; source_count?: number | null };
+export type EvalSufficiency = { checked: boolean; verdict: "sufficient" | "partial" | "insufficient" | null; missing?: string | string[] | null; retried?: boolean; retry_query?: string | null; refused?: boolean; source_count?: number | null;
+  // 完整检索流程（检索评测也做判断后才有）：每次判断的结论、判断次数、是否用了补充检索的结果。
+  judgements?: { verdict: string; missing: string; rewrite_query: string }[]; calls?: number; retry_used?: boolean };
+// 固定流程的改写（app/evaluation/flow.py）：classifier 是谁改写的（llm 大模型 / small_model 小模型只分类 / rule、fallback 规则），
+// cached 表示用了改写缓存，duration_ms 是改写耗时（用缓存时是当时实际花的时间）。
+export type EvalRewrite = { classifier: string; route?: string | null; intent?: string | null; cached?: boolean; duration_ms?: number };
+// 补充检索：返回几段、是否被采用、补充检索的资料命中率和来源。
+export type EvalRetry = { returned: number; used: boolean; given_recall: number | null; found?: number[]; sources?: (Source & { chunk_id?: string | null; position?: number | null; parent_chunk_ids?: string[] })[] };
+// 和完整检索流程有关的逐题字段，调参评测和专项评测共用。
+export type EvalFlowFields = { first_given_recall?: number | null; rewrite?: EvalRewrite | null; retry?: EvalRetry | null; cleared?: boolean | null; flow_latency_ms?: number | null };
 export type EvalQuestion = {
   id: string;
   question: string;
@@ -670,7 +679,7 @@ export type EvalQuestion = {
   given_recall?: number | null;
   // 列表里题目下方的补充说明（专项里用来显示「Agent 新通过」这类和上次的比较）。
   note?: string;
-};
+} & EvalFlowFields;
 // Agent 检索评测（app/evaluation/agent_retrieval.py）：只看最后命中，口径和固定流程的过滤后 Recall 一致。
 export type EvalMode = "fixed" | "agent";
 export type EvalCompareKey = "both" | "fixed_only" | "agent_only" | "neither";
@@ -769,7 +778,10 @@ export type EvalHistoryMetrics = {
 };
 export type EvalConfig = { split: string | null; suites: string[]; special?: { suites: { id: string; name: string }[]; compare_memory?: boolean }; dataset_size?: number; rrf_k?: number; pool_size?: number; return_limit?: number; min_score?: number | null; reranked?: boolean; fusion?: string; methods?: string[]; model_mode?: string; embedding_mode?: string; embedding_model?: string; rerank_model?: string; rerank_mode?: string; query_source?: string[];
   // 检索评测跑了哪些模式（旧记录没有，都是只跑固定流程）；agent 是 Agent 的运行配置。
-  modes?: EvalMode[]; agent?: { tool_budget: number; timeout: number; prompt_version: string; prompt_identity?: string; model: string | null } };
+  modes?: EvalMode[]; agent?: { tool_budget: number; timeout: number; prompt_version: string; prompt_identity?: string; model: string | null };
+  // 固定流程怎么跑的：name=full 是完整检索（改写 + 判断，旧记录没有，是规则检索词、只检索）。
+  flow?: { name: string; intent_prompt: string; model: string; refresh: boolean; rewrite_cached: number; rewrite_fresh: number; sufficiency: boolean };
+  refresh_rewrite?: boolean };
 export type EvalRunBrief = {
   id: string;
   // memory 是以前单独的多轮对话评测（现在并入专项评测集），旧记录仍然能打开。
@@ -872,19 +884,19 @@ export function compareEvalRuns(base: string, target: string) {
 }
 
 // 在界面上发起一次评测：调参评测按 split 选开发集或留出集；专项评测按 suite_ids 选专项。
-export function startEvalRun(kind: "retrieval" | "generation", split: string, suites: string[], modes: EvalMode[] = ["fixed"]) {
+export function startEvalRun(kind: "retrieval" | "generation", split: string, suites: string[], modes: EvalMode[] = ["fixed"], refreshRewrite = false) {
   return request<{ id: string; status: string }>("/eval/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind, split, suites, modes }),
+    body: JSON.stringify({ kind, split, suites, modes, refresh_rewrite: refreshRewrite }),
   });
 }
 
-export function startSpecialRun(suiteIds: string[], compareMemory = false, modes: EvalMode[] = ["fixed"]) {
+export function startSpecialRun(suiteIds: string[], compareMemory = false, modes: EvalMode[] = ["fixed"], refreshRewrite = false) {
   return request<{ id: string; status: string }>("/eval/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind: "special", suite_ids: suiteIds, compare_memory: compareMemory, modes }),
+    body: JSON.stringify({ kind: "special", suite_ids: suiteIds, compare_memory: compareMemory, modes, refresh_rewrite: refreshRewrite }),
   });
 }
 
@@ -924,12 +936,13 @@ export type EvalSpecialQuestion = {
   agent?: EvalAgentQuestion;
   recall_final?: number;
   given_recall?: number | null;
-  fixed_evidence?: { text: string; chunk_id: string | null; source_id: string | null; status: string | null; given?: boolean }[];
+  fixed_evidence?: { text: string; chunk_id: string | null; source_id: string | null; status: string | null; given?: boolean; first_given?: boolean }[];
   sources?: (Source & { chunk_id?: string | null; position?: number | null; parent_chunk_ids?: string[] })[];
   queries?: string[];
   rerank_query?: string;
   latency_ms?: number;
-};
+  sufficiency?: EvalSufficiency | null;
+} & EvalFlowFields;
 export type EvalSpecialSection = {
   suite_id: string;
   name: string;

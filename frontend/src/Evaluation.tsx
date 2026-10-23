@@ -7,7 +7,7 @@ import { EvidenceDetails } from "./EvidenceChunks";
 import "./Special.css";
 // 耗时格式化移到公共文件，知识库、问答、设置页共用同一套规则。
 import { durationTitle, formatDuration as formatMs, formatDurationDelta } from "./format";
-import { AgentPanel, ComparePanel, modesLabel, runModes } from "./AgentEval";
+import { AgentPanel, ComparePanel, modesLabel, rewriteLabel, runModes } from "./AgentEval";
 
 export type EvaluationSection = "history" | "dataset" | "special" | "regression";
 type TopTab = EvaluationSection;
@@ -263,6 +263,8 @@ function historyEvidenceStats(metrics: EvalHistoryMetrics | null | undefined): H
 // 每个指标的显示方式：比例用百分比，MRR 用小数，耗时用时分秒。
 function formatMetric(key: string, value: number | null | undefined) {
   if (key.startsWith("mrr")) return formatScore(value);
+  if (key === "rescued_count") return value === null || value === undefined ? "—" : `${value} 题`;
+  if (key === "avg_judge_calls") return value === null || value === undefined ? "—" : `${value.toFixed(2)} 次`;
   if (key.includes("_ms")) return formatMs(value);
   return formatPercent(value);
 }
@@ -272,7 +274,9 @@ function metricLabel(key: string, run: EvalRunBrief) {
   const pool = run.config.pool_size ?? 20;
   const top = run.config.return_limit ?? 6;
   const labels: Record<string, string> = {
-    recall_pool: `召回 Recall@${pool}`, recall_top: `重排 Recall@${top}`, recall_final: "过滤后 Recall", recall_given: "交给模型的资料命中率",
+    recall_pool: `召回 Recall@${pool}`, recall_top: `重排 Recall@${top}`, recall_final: "过滤后 Recall", recall_given: "最终交给模型的资料命中率",
+    recall_given_first: "第一次检索交给模型的资料命中率", rescued_count: "补充检索救回", wrong_clear_rate: "误清空率",
+    right_clear_rate: "正确清空率", retry_rate: "补充检索比例", avg_judge_calls: "平均判断次数", flow_latency_avg_ms: "完整检索平均耗时",
     mrr_pool: `召回 MRR@${pool}`, mrr_top: `重排 MRR@${top}`, mrr_final: "过滤后 MRR",
     false_reject_rate: "误杀率", false_accept_rate: "漏放率", latency_avg_ms: "平均耗时", latency_p95_ms: "P95 耗时",
     faithfulness: "忠实度", correctness: "正确性", refusal_accuracy: "拒答正确率", citation_validity: "引用有效性",
@@ -286,6 +290,18 @@ const GENERATION_METRIC_EXPLANATIONS: Record<string, string> = {
   correctness: "评审大模型判断，回答与标准答案的关键要点基本一致。",
   refusal_accuracy: "系统判断所有题目的回答/拒答决定都正确。",
   citation_validity: "评审大模型判断，回答中的引用chunk都能支持对应内容。",
+};
+
+// 完整检索流程（改写 → 检索 → 充分性判断 → 补充检索）的指标说明，和线上用户实际拿到的资料一致。
+const FLOW_METRIC_EXPLANATIONS: Record<string, string> = {
+  recall_given_first: "第一次检索（还没判断、没补充）交给模型的资料里，包含的证据比例；含父块扩展拼进来的相邻分片。",
+  recall_given: "充分性判断之后，最终交给模型的资料里包含的证据比例：用了补充检索就按补充的算，被判成资料不足清空了就是 0。和 Agent 对比用这个。",
+  rescued_count: "第一次检索没拿全证据、补充检索后拿到更多的题数。",
+  wrong_clear_rate: "有答案的题被判成「资料不足」、来源被清空的比例。清空后回答阶段直接拒答，是判断带来的损失（越低越好）。",
+  right_clear_rate: "没有答案的题被清空的比例。清空后模型拿不到资料，不会硬凑答案（越高越好）。",
+  retry_rate: "做了判断的题里，触发补充检索的比例；每次补充都多一次检索和一次判断。",
+  avg_judge_calls: "每道做了判断的题平均调用判断模型几次（补充检索后会再判断一次）。",
+  flow_latency_avg_ms: "改写 + 第一次检索 + 判断 + 补充检索的平均耗时；改写用了缓存时按当时实际花的时间算。",
 };
 
 const METRIC_HINTS: Record<string, string> = {
@@ -303,7 +319,7 @@ const METRIC_HINTS: Record<string, string> = {
 
 // 根据当前评测的逐题结果生成卡片说明，展示真实 chunk 数量而不是固定示例。
 function metricCardDetails(metricKey: string, run: EvalRun, value: number | null | undefined) {
-  const generationExplanation = GENERATION_METRIC_EXPLANATIONS[metricKey];
+  const generationExplanation = GENERATION_METRIC_EXPLANATIONS[metricKey] ?? FLOW_METRIC_EXPLANATIONS[metricKey];
   if (generationExplanation) return [generationExplanation];
 
   const stats = summarizeHistoryEvidence(run);
@@ -385,6 +401,8 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
   const [launchModes, setLaunchModes] = useState<EvalMode[]>(["fixed"]);
   // 专项也能选模式：只对检索方式的专项生效，回答和多轮对话方式照常只跑固定流程。
   const [specialModes, setSpecialModes] = useState<EvalMode[]>(["fixed"]);
+  // 固定流程默认复用改写缓存（两次评测的检索词一样、可比）；勾选后这次重新让大模型改写。
+  const [refreshRewrite, setRefreshRewrite] = useState(false);
   const [launching, setLaunching] = useState(false);
 
   // 刷新评测列表时不再自动打开某条记录，让页面首次进入先展示历史表格。
@@ -456,7 +474,7 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
     setError("");
     try {
       if (launchMode === "special") {
-        const started = await startSpecialRun(pickedSuites, compareMemory, specialModes);
+        const started = await startSpecialRun(pickedSuites, compareMemory, specialModes, refreshRewrite);
         setSelectedId(started.id);
         await refreshRuns();
         onToast("success", "专项评测已启动。");
@@ -464,7 +482,7 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
       }
       const modes: EvalMode[] = launchKind === "retrieval" ? launchModes : ["fixed"];
       const suites = launchKind !== "retrieval" || !modes.includes("fixed") ? [] : launchSuites;
-      const started = await startEvalRun(launchKind, launchSplit, suites, modes);
+      const started = await startEvalRun(launchKind, launchSplit, suites, modes, refreshRewrite);
       setSelectedId(started.id);
       setDetailTab("overview");
       await refreshRuns();
@@ -561,6 +579,7 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
               <label className={`ev-radio-option ${specialModes.includes("agent") ? "is-selected" : ""}`}><input type="checkbox" checked={specialModes.includes("agent")} onChange={() => setSpecialModes((items) => items.includes("agent") ? items.filter((item) => item !== "agent") : [...items, "agent"])} />Agent</label>
               <span className="ev-option-description">只对检索方式的专项生效。勾 Agent 会调用大模型，每题几轮。{specialModes.includes("agent") && specialSuites.some((suite) => suite.method === "retrieval" && suite.search_mode !== "hybrid" && pickedSuites.includes(suite.id)) ? "选中的专项里有不是混合检索的：固定流程按专项的设置检索，Agent 自己选检索方式，两边比的不是同一件事。" : ""}</span>
             </div>}
+            {specialModes.includes("fixed") && <RefreshRewriteOption checked={refreshRewrite} onChange={setRefreshRewrite} />}
             {specialSuites?.some((suite) => suite.method === "dialogue" && pickedSuites.includes(suite.id)) && <div className="sp-switch-line">
               <button type="button" role="switch" aria-checked={compareMemory} className={`sp-switch ${compareMemory ? "is-on" : ""}`} onClick={() => setCompareMemory(!compareMemory)}><span /></button>
               <span>对比记忆参数：多轮对话专项除了当前设置，再把压缩阈值、保留条数各调大调小跑一遍（共 5 组），给「系统管理 › RAG 配置」的「对话记忆」提供依据。调用大模型次数是 5 倍。</span>
@@ -568,7 +587,7 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
           </div> : <>
           <div className="ev-launch-option is-stacked">
             <fieldset className="ev-radio-field">
-              <legend><span className="ev-option-title">评测类型</span><span className="ev-option-description"><span className="ev-description-label"><span className="ev-info-icon" aria-hidden="true">i</span>说明</span>：{launchKind === "generation" ? "调用回答模型生成答案，再调用评审模型检查忠实度、正确性、拒答和引用。" : "只验证召回、重排和阈值过滤，不调用大模型，适合修改检索参数后反复运行。"}</span></legend>
+              <legend><span className="ev-option-title">评测类型</span><span className="ev-option-description"><span className="ev-description-label"><span className="ev-info-icon" aria-hidden="true">i</span>说明</span>：{launchKind === "generation" ? "调用回答模型生成答案，再调用评审模型检查忠实度、正确性、拒答和引用。" : "和线上检索一致：改写 → 检索 → 充分性判断 → 补充检索。改写有缓存，召回、重排、阈值的指标按第一次检索算，适合修改检索参数后反复运行。"}</span></legend>
               <div className="ev-radio-options" role="radiogroup" aria-label="评测类型">
                 <label className={`ev-radio-option ${launchKind === "retrieval" ? "is-selected" : ""}`}><input type="radio" name="eval-kind" value="retrieval" checked={launchKind === "retrieval"} onChange={() => changeLaunchKind("retrieval")} />检索评测</label>
                 <label className={`ev-radio-option ${launchKind === "generation" ? "is-selected" : ""}`}><input type="radio" name="eval-kind" value="generation" checked={launchKind === "generation"} onChange={() => changeLaunchKind("generation")} />生成评测</label>
@@ -577,7 +596,7 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
           </div>
           {launchKind === "retrieval" && <div className="ev-launch-option is-stacked">
             <fieldset className="ev-radio-field">
-              <legend><span className="ev-option-title">运行模式</span><span className="ev-option-description"><span className="ev-description-label"><span className="ev-info-icon" aria-hidden="true">i</span>说明</span>：{launchModes.length === 0 ? "至少勾选一个。" : launchModes.length === 2 ? "两个一起跑：每道题先跑固定流程，再让 Agent 跑一遍，结果在「Agent 对比」里逐题对比，点开看两边的检索日志。" : launchModes.includes("agent") ? "只跑 Agent：每道题让 Agent 自己检索，只看它最后拿到的资料里有没有证据。消融和参数对比只对固定流程，这次不跑。" : "只跑固定流程：和原来一样，看召回、重排、阈值三个阶段。"}</span></legend>
+              <legend><span className="ev-option-title">运行模式</span><span className="ev-option-description"><span className="ev-description-label"><span className="ev-info-icon" aria-hidden="true">i</span>说明</span>：{launchModes.length === 0 ? "至少勾选一个。" : launchModes.length === 2 ? "两个一起跑：每道题先跑固定流程，再让 Agent 跑一遍，结果在「Agent 对比」里逐题对比，点开看两边的检索日志。" : launchModes.includes("agent") ? "只跑 Agent：每道题让 Agent 自己检索，只看它最后拿到的资料里有没有证据。消融和参数对比只对固定流程，这次不跑。" : "只跑固定流程：改写 → 检索 → 充分性判断 → 补充检索，和线上一致。"}</span></legend>
               <div className="ev-radio-options" role="group" aria-label="运行模式">
                 <label className={`ev-radio-option ${launchModes.includes("fixed") ? "is-selected" : ""}`}><input type="checkbox" checked={launchModes.includes("fixed")} onChange={() => toggleMode("fixed")} />固定流程</label>
                 <label className={`ev-radio-option ${launchModes.includes("agent") ? "is-selected" : ""}`}><input type="checkbox" checked={launchModes.includes("agent")} onChange={() => toggleMode("agent")} />Agent</label>
@@ -594,6 +613,7 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
               </div>
             </fieldset>
           </div>
+          {(launchKind === "generation" || launchModes.includes("fixed")) && <RefreshRewriteOption checked={refreshRewrite} onChange={setRefreshRewrite} />}
           {/* 生成评测只跑基线，先在界面层禁用检索实验组选项，避免用户提交无效组合。 */}
           {suites.map((suite) => {
             const suiteOff = launchKind !== "retrieval" || !launchModes.includes("fixed");
@@ -631,6 +651,14 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
 }
 
 // 历史评测首次读取时保持表格骨架，避免接口还没返回就显示“还没有评测记录”。
+// 固定流程的改写缓存开关：默认同一道题复用第一次的改写，勾选后重新改写（看改写本身的波动）。
+function RefreshRewriteOption({ checked, onChange }: { checked: boolean; onChange: (value: boolean) => void }) {
+  return <div className="ev-launch-option">
+    <label className="ev-check"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />重新改写</label>
+    <span className="ev-option-description"><span className="ev-description-label"><span className="ev-info-icon" aria-hidden="true">i</span>说明</span>：固定流程和线上一样先让大模型改写检索词。默认同一道题复用上次的改写（提示词或模型变了会自动重新改写），两次评测的检索词一样才好比；勾选后这次全部重新改写，用来看改写本身稳不稳定。</span>
+  </div>;
+}
+
 function RunHistorySkeleton() {
   return <LoadingSkeleton className="ev-loading-panel" label="正在加载评测记录">
     <div className="ev-skeleton-toolbar"><SkeletonBlock className="skeleton-title" /><SkeletonBlock className="skeleton-button" /></div>
@@ -757,9 +785,20 @@ function RunConfig({ run }: { run: EvalRunBrief }) {
     ["相关性阈值", config.reranked === false ? "未启用（没有重排）" : formatScore(config.min_score ?? null, 2)],
     ["向量模型", `${config.embedding_mode ?? "—"} · ${config.embedding_model ?? "—"}`],
     ["重排模型", config.reranked ? config.rerank_model ?? "—" : config.reranked === false ? "未启用" : "—"],
-    ["检索词", (config.query_source ?? []).map((item) => (item === "rewrite_cache" ? "改写缓存" : "规则改写")).join("、") || "—"],
+    ["检索词", flowRewriteLabel(config)],
+    ...(config.flow ? [["充分性判断", config.flow.sufficiency ? "启用（和线上一样，可能补充检索或清空来源）" : "未启用"] as [string, string]] : []),
   ];
   return <div className="diag-config ev-config">{items.map(([label, value]) => <span key={label}>{label}<strong>{value}</strong></span>)}</div>;
+}
+
+// 检索词从哪来：完整检索是大模型改写（带缓存），旧记录是规则检索词（原问题，不调用模型）。
+function flowRewriteLabel(config: EvalRunBrief["config"]) {
+  const flow = config.flow;
+  if (!flow) return (config.query_source ?? []).map((item) => (item === "rewrite_cache" ? "改写缓存" : "规则改写（旧口径）")).join("、") || "—";
+  const parts = [`${flow.model} 改写 · 提示词 ${flow.intent_prompt}`];
+  if (flow.rewrite_cached || flow.rewrite_fresh) parts.push(`缓存 ${flow.rewrite_cached} 题 · 新改写 ${flow.rewrite_fresh} 题`);
+  if (flow.refresh) parts.push("本次不用缓存");
+  return parts.join(" · ");
 }
 
 function EmptyRuns({ hasRuns }: { hasRuns: boolean }) {
@@ -789,19 +828,24 @@ function Overview({ run, comparison }: { run: EvalRun; comparison: EvalCompariso
   const retrievalKeys = ["recall_pool", "recall_top", "recall_final", "mrr_top", "false_reject_rate", "false_accept_rate"];
   const generationKeys = ["faithfulness", "correctness", "refusal_accuracy", "citation_validity"];
   const hasGeneration = run.kind === "generation";
+  // 完整检索流程（新记录才有）：第一次检索之后还有充分性判断和补充检索，最终交给模型的资料可能不同。
+  const hasFlow = run.config.flow?.name === "full";
+  const flowKeys = ["recall_given_first", "recall_given", "rescued_count", "wrong_clear_rate", "right_clear_rate", "retry_rate"];
   return <div className="ev-overview">
     {/* 顶部总览只展示本次评测结果，移除重复的历史对比提示；历史对比仍用于耗时变化和历史页。 */}
     {comparison?.settings_diff && comparison.settings_diff.length > 0 && <div className="ev-settings-diff">和上一次评测相比，系统参数改过 {comparison.settings_diff.length} 项：{comparison.settings_diff.map((item) => `${item.key} ${String(item.base)} → ${String(item.target)}`).join("；")}。分数变化可能来自参数，而不是代码。</div>}
-    <div className="ev-section-title">检索指标<small>{summary.answerable_count ?? 0} 道能回答 · {summary.unanswerable_count ?? 0} 道无法回答</small></div>
+    <div className="ev-section-title">{hasFlow ? "第一次检索" : "检索指标"}<small>{summary.answerable_count ?? 0} 道能回答 · {summary.unanswerable_count ?? 0} 道无法回答{hasFlow ? " · 调参看这里：召回、重排、阈值三个阶段" : ""}</small></div>
     <div className="ev-cards">{retrievalKeys.map((key) => <MetricCard key={key} metricKey={key} run={run} value={summary[key]} />)}</div>
+    {hasFlow && <><div className="ev-section-title">完整检索流程<small>和线上一致：改写 → 检索 → 充分性判断 → 补充检索{run.config.flow?.sufficiency ? "" : " · 充分性判断未启用，最终就是第一次检索的结果"}</small></div>
+      <div className="ev-cards">{flowKeys.map((key) => <MetricCard key={key} metricKey={key} run={run} value={summary[key]} />)}</div></>}
     {hasGeneration && <><div className="ev-section-title">生成指标<small>大模型评审，温度 0；评审理由见逐题明细</small></div>
       <div className="ev-cards">{generationKeys.map((key) => <MetricCard key={key} metricKey={key} run={run} value={summary[key]} />)}</div></>}
-    {hasGeneration && <SufficiencySummary run={run} />}
+    {(hasGeneration || hasFlow) && <SufficiencySummary run={run} />}
     {!hasGeneration && <p className="ev-muted-note">本次是检索评测，没有生成指标。生成评测（忠实度、正确性、拒答正确率、引用有效性）需要调用大模型，请在上方操作栏选择“生成评测”。</p>}
     <div className="ev-overview-grid">
       <div className="ev-panel"><div className="ev-section-title">chunk 命中对比<small>预设证据与各阶段实际返回 chunk</small></div><ChunkStageComparison run={run} /></div>
       <div className="ev-panel"><div className="ev-section-title">耗时<small>单题召回 + 重排</small></div>
-        <div className="ev-latency"><div><span>平均</span><strong>{formatMs(summary.latency_avg_ms)}</strong><ChangeTag row={changes.latency_avg_ms} metricKey="latency_avg_ms" /></div><div><span>P95</span><strong>{formatMs(summary.latency_p95_ms)}</strong></div><div><span>重排最慢</span><strong>{formatMs(summary.rerank_max_ms)}</strong></div></div>
+        <div className="ev-latency"><div><span>平均</span><strong>{formatMs(summary.latency_avg_ms)}</strong><ChangeTag row={changes.latency_avg_ms} metricKey="latency_avg_ms" /></div><div><span>P95</span><strong>{formatMs(summary.latency_p95_ms)}</strong></div><div><span>重排最慢</span><strong>{formatMs(summary.rerank_max_ms)}</strong></div>{hasFlow && <div><span>完整检索平均</span><strong>{formatMs(summary.flow_latency_avg_ms)}</strong><small>含改写、判断和补充检索</small></div>}</div>
         <p className="ev-muted-note">重排调用本地交叉编码器，是最慢的一步；冷启动时可能接近超时，P95 比平均值更容易暴露这个问题。</p>
       </div>
     </div>
@@ -827,7 +871,7 @@ function MetricCard({ metricKey, run, value }: { metricKey: string; run: EvalRun
 // 生成评测总览展示资料充分性判断，补充检索后的最终 chunk 单独计数，避免误读为首次检索结果。
 function SufficiencySummary({ run }: { run: EvalRun }) {
   const stats = summarizeSufficiency(run);
-  if (!stats) return <div className="ev-sufficiency-panel"><div className="ev-section-title">资料充分性<small>本次生成评测没有保存充分性结果</small></div><p className="ev-muted-note">重新运行生成评测后，这里会显示资料充分、补充检索和最终 chunk 数。</p></div>;
+  if (!stats) return <div className="ev-sufficiency-panel"><div className="ev-section-title">资料充分性<small>本次评测没有保存充分性结果</small></div><p className="ev-muted-note">重新运行生成评测后，这里会显示资料充分、补充检索和最终 chunk 数。</p></div>;
   const average = stats.retryQuestions > 0 ? (stats.retryFinalChunks / stats.retryQuestions).toFixed(1) : "—";
   return <section className="ev-sufficiency-panel" aria-labelledby="ev-sufficiency-title">
     <div className="ev-section-title" id="ev-sufficiency-title">资料充分性<small>{stats.checked} / {stats.observed} 道题完成判断</small></div>
@@ -1027,8 +1071,10 @@ function ParaphraseAnalysis({ run, analysis }: { run: EvalRun; analysis: EvalPar
 
 // 一道题的检索结论：能回答的题看证据是否全部出现在最终来源里；无法回答的题看是否正确地没有返回来源。
 function questionVerdict(question: EvalQuestion) {
-  if (!question.answerable) return question.returned === 0 ? { key: "good", label: "正确拒绝" } : { key: "bad", label: "漏放" };
-  const recall = question.stages.final.recall ?? 0;
+  if (!question.answerable) return question.returned === 0 ? { key: "good", label: "正确拒绝" } : question.cleared ? { key: "good", label: "正确清空" } : { key: "bad", label: "漏放" };
+  // 完整检索流程：按最终交给模型的资料算；被充分性判断清空的单独标出来。
+  if (question.cleared) return { key: "bad", label: "被清空" };
+  const recall = (question.sufficiency ? question.given_recall : null) ?? question.stages.final.recall ?? 0;
   if (recall >= 1) return { key: "good", label: "命中" };
   if (recall > 0) return { key: "warn", label: "部分命中" };
   return { key: "bad", label: "未命中" };
@@ -1090,7 +1136,10 @@ function QuestionList({ run, Diagnostics }: { run: EvalRun; Diagnostics: Props["
                 <small>{question.answerable ? (question.stages[stage].rank ? `第 ${question.stages[stage].rank} 名` : "未找到") : "无标准证据，无法计算 Recall"}</small>
               </div>;
             })}
-            <div><span>耗时</span><strong>{formatMs(question.latency_ms)}</strong><small>返回 {question.returned} 条来源</small></div>
+            {question.sufficiency && <div className={question.cleared ? "is-cleared" : ""}><span>最终交给模型</span>
+              <strong>{question.answerable ? formatPercent(question.given_recall) : question.cleared ? "已清空" : `${question.sufficiency.source_count ?? question.returned} 段`}</strong>
+              <small>{question.cleared ? "判断为资料不足，来源已清空" : question.sufficiency.retry_used ? "用了补充检索的结果" : question.sufficiency.checked ? "用第一次检索的结果" : "未做充分性判断"}{question.answerable && question.first_given_recall !== undefined && question.first_given_recall !== null && question.first_given_recall !== question.given_recall ? ` · 第一次 ${formatPercent(question.first_given_recall)}` : ""}</small></div>}
+            <div><span>耗时</span><strong>{formatMs(question.flow_latency_ms ?? question.latency_ms)}</strong><small>{question.flow_latency_ms !== undefined && question.flow_latency_ms !== null ? `检索 ${formatMs(question.latency_ms)} · ` : ""}返回 {question.returned} 条来源</small></div>
           </div>
           {!question.answerable && <div className={`ev-leak-panel ${question.returned > 0 ? "is-leak" : "is-safe"}`}>
             <div className="ev-section-title">漏放来源<small>{question.returned > 0 ? `这道题返回了 ${question.returned} 条来源，以下 chunk 被放行给回答模型` : "没有返回来源，系统正确拒答"}</small></div>
@@ -1111,8 +1160,8 @@ function QuestionList({ run, Diagnostics }: { run: EvalRun; Diagnostics: Props["
             <p>“{evidence.text}”</p>
             <span>{EVIDENCE_STATUS[evidence.status] ?? evidence.status}</span><span>RRF 第 {evidence.rrf_rank ?? "—"} 名</span><span>重排第 {evidence.rerank_rank ?? "—"} 名</span><span>概率 {formatScore(evidence.rerank_probability, 3)}</span><span>来源 {evidence.source_id ?? "—"}</span>
           </div>)}</div>}
-          <div className="ev-queries"><span>检索词</span>{question.queries.map((query) => <code key={query}>{query}</code>)}<span>重排问题</span><code>{question.rerank_query}</code><small>{question.query_source === "rewrite_cache" ? "来自改写缓存" : "规则改写（未调用大模型）"}</small></div>
-          {question.sufficiency && <SufficiencyReview result={question.sufficiency} />}
+          <div className="ev-queries"><span>检索词</span>{question.queries.map((query) => <code key={query}>{query}</code>)}<span>重排问题</span><code>{question.rerank_query}</code><small>{rewriteLabel(question)}</small></div>
+          {question.sufficiency && <SufficiencyReview result={question.sufficiency} question={question} />}
           {question.answer !== undefined && <AnswerReview question={question} />}
           {question.diagnostics && <details className="ev-diagnostics"><summary>检索诊断：每张排名表、RRF 贡献、重排概率和最终去向</summary><Diagnostics data={question.diagnostics} /></details>}
         </div>}
@@ -1122,15 +1171,15 @@ function QuestionList({ run, Diagnostics }: { run: EvalRun; Diagnostics: Props["
 }
 
 // 逐题展示充分性判断的原始结论，重点标明是否补检以及补检后实际交给回答模型的 chunk 数。
-function SufficiencyReview({ result }: { result: EvalSufficiency }) {
+function SufficiencyReview({ result, question }: { result: EvalSufficiency; question?: EvalQuestion }) {
   if (!result.checked) return <div className="ev-sufficiency-detail is-unchecked"><div className="ev-section-title">资料充分性<small>未调用判断模型</small></div><p>本题未执行资料充分性判断，沿用检索结果。</p></div>;
   const verdict = result.verdict;
   const missing = sufficiencyMissingText(result.missing);
   return <div className={`ev-sufficiency-detail is-${verdict ?? "unchecked"}`}>
-    <div className="ev-section-title">资料充分性<small>生成评测保存的判断结果</small></div>
+    <div className="ev-section-title">资料充分性<small>和线上同一套判断{result.calls ? ` · 判断 ${result.calls} 次` : ""}</small></div>
     <div className="ev-sufficiency-detail-grid">
       <div><span>判断结论</span><strong>{verdict ? SUFFICIENCY_LABELS[verdict] : "未判定"}</strong></div>
-      <div><span>补充检索</span><strong>{result.retried ? "已触发" : "未触发"}</strong><small>{result.retry_query ? `检索词：${result.retry_query}` : "第一次检索后未追加检索"}</small></div>
+      <div><span>补充检索</span><strong>{result.retried ? "已触发" : "未触发"}</strong><small>{result.retry_query ? `检索词：${result.retry_query}` : "第一次检索后未追加检索"}{question?.retry ? ` · 返回 ${question.retry.returned} 段${question.answerable ? `，命中 ${formatPercent(question.retry.given_recall)}` : ""} · ${question.retry.used ? "采用了" : "没变好，沿用第一次的"}` : ""}</small></div>
       <div><span>最终返回 chunk</span><strong>{result.source_count ?? "—"}</strong><small>{result.refused ? "资料不足，来源已清空并拒答" : "交给回答模型的最终来源数量"}</small></div>
     </div>
     {missing && <p className="ev-sufficiency-missing">缺少：{missing}</p>}
