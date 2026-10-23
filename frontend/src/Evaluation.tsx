@@ -1477,27 +1477,14 @@ function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: 
         // 指标说明所需统计已随历史列表返回，展开行只做本地渲染，不再触发逐条详情请求。
         const stats = historyEvidenceStats(item.history_metrics);
         const evidenceTotal = stats?.evidenceTotal ?? 0;
-        const poolHint = stats
-          ? `找到 ${stats.poolHits} 条证据；${stats.answerableQuestions} 道可回答题共标注 ${evidenceTotal} 条正确证据，${stats.poolHits === evidenceTotal ? "全部进入候选池" : `有 ${stats.poolHits} 条进入候选池`}。`
-          : "暂缺本次评测的证据统计";
+        // 指标卡片下面只写一句实际数字，解释性的长句放在详情页。
+        const poolHint = stats ? `${stats.poolHits} / ${evidenceTotal} 条证据进了候选池` : "—";
         const returnLimit = item.config.return_limit ?? 6;
-        const topHint = stats
-          ? `每道题的候选 chunk 重排后取前 ${returnLimit} 条，共 ${stats.topTotal} 条；仍找到 ${stats.topHits} 条正确证据。`
-          : "暂缺本次评测的证据统计";
-        // 最终 Recall 同时展示过滤后的 chunk 总数和命中的正确证据数，避免只看到百分比而不知道它对应的真实数量。
-        const finalHint = stats
-          ? `阈值过滤后剩余 ${stats.finalRemaining} 个 chunk，仍找到设置的 ${stats.finalHits} 条正确证据。`
-          : "暂缺本次评测的证据统计";
-        const mrrHint = stats
-          ? <>{stats.answerableQuestions} 道可回答题中，第一条正确证据排名倒数的平均值为 {formatScore(item.summary?.mrr_pool)}。<br />看正确证据排得靠不靠前。越接近 1，说明证据越靠前。</>
-          : "暂缺本次评测的排名统计";
-        const falseRejectHint = stats
-          ? `${stats.answerableQuestions} 道可回答题中，有 ${stats.falseRejectQuestions} 道被拒答，过滤了所有资料。`
-          : "暂缺本次评测的题目统计";
-        // 漏放率说明改为强调实际返回的 chunk 及其错误引用风险，避免把指标误解成 AI 已经完成回答。
-        const falseAcceptHint = stats
-          ? `${stats.unanswerableQuestions} 道无法回答题中，有 ${stats.falseAcceptQuestions} 道仍返回了 chunk，可能导致 AI 引用错误来源。`
-          : "暂缺本次评测的题目统计";
+        const topHint = stats ? `重排后前 ${returnLimit} 条里有 ${stats.topHits} / ${evidenceTotal} 条` : "—";
+        const finalHint = stats ? `过滤后剩 ${stats.finalRemaining} 段，含 ${stats.finalHits} / ${evidenceTotal} 条证据` : "—";
+        const mrrHint = "越接近 1，证据排得越靠前";
+        const falseRejectHint = stats ? `${stats.falseRejectQuestions} / ${stats.answerableQuestions} 道有答案的题没拿到资料` : "—";
+        const falseAcceptHint = stats ? `${stats.falseAcceptQuestions} / ${stats.unanswerableQuestions} 道无答案的题仍拿到资料` : "—";
         return <Fragment key={item.id}>
           <tr className={`ev-history-main-row ${picked.includes(item.id) ? "is-current" : ""}`} tabIndex={0} aria-expanded={metricsExpanded} aria-controls={`history-metrics-${item.id}`} title="点击展开或收起指标" onClick={() => toggleMetrics(item.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleMetrics(item.id); } }}>
             <td><input type="checkbox" aria-label={`选择 ${item.id}`} checked={picked.includes(item.id)} disabled={item.status !== "completed"} onClick={(event) => event.stopPropagation()} onChange={() => toggle(item.id)} /></td>
@@ -1514,15 +1501,18 @@ function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: 
                 const agentOnly = (entry.modes ?? []).length === 1 && entry.modes?.[0] === "agent";
                 const both = (entry.modes ?? []).includes("agent") && !agentOnly;
                 return <HistoryMetric key={key} label={entry.name} value={both ? `${entry.passed} / ${entry.count} · Agent ${entry.agent_passed ?? 0} / ${entry.count}` : `${entry.passed} / ${entry.count}`}
-                  hint={both ? `固定流程 ${entry.passed} 道通过，Agent ${entry.agent_passed ?? 0} 道通过（共 ${entry.count} 道）。点「查看」看逐题对比。` : `${entry.count} 道题中${agentOnly ? " Agent " : " "}${entry.passed} 道通过。点「查看」看逐题结果。`} />;
+                  hint={both ? "固定流程 · Agent 各自通过数" : agentOnly ? "Agent 通过数" : "通过数"} />;
               })}
               {item.status !== "completed" && <span className="ev-muted-note">{runStatus(item.status).label}</span>}
             </div></div></td>
           </tr>}
           {metricsExpanded && item.kind !== "special" && <tr id={`history-metrics-${item.id}`} className="ev-history-metrics-row">
             <td colSpan={9}><div className="ev-history-metrics-panel"><div className="ev-history-metrics-heading">本条记录指标</div><div className="ev-history-metrics-grid">
-              {runModes(item).includes("agent") && <HistoryMetric label="Agent 资料命中率" value={formatPercent(item.summary?.agent_recall)} hint={`能回答的题里，Agent 最后拿到的资料（所有检索结果和读到的前后文）包含的证据比例；和固定流程的「交给模型的资料命中率」口径相同（都算父块扩展拼进来的相邻分片）。平均每题检索 ${typeof item.summary?.agent_avg_searches === "number" ? item.summary.agent_avg_searches.toFixed(1) : "—"} 次。`} />}
+              {runModes(item).includes("agent") && <HistoryMetric label="Agent 资料命中率" value={formatPercent(item.summary?.agent_recall)} hint={`平均每题检索 ${typeof item.summary?.agent_avg_searches === "number" ? item.summary.agent_avg_searches.toFixed(1) : "—"} 次`} />}
               {runModes(item).includes("fixed") && <>
+              {/* 完整检索流程的新记录：最终交给模型的命中率（结果列显示的就是它）和误清空率。 */}
+              {item.config.flow?.name === "full" && <HistoryMetric label="最终交给模型命中率" value={formatPercent(item.summary?.recall_given)} hint={`第一次检索 ${formatPercent(item.summary?.recall_given_first)}`} />}
+              {item.config.flow?.name === "full" && <HistoryMetric label="误清空率" value={formatPercent(item.summary?.wrong_clear_rate)} hint="有答案的题被判资料不足、清空" />}
               <HistoryMetric label="候选池 Recall" value={formatPercent(item.summary?.recall_pool)} hint={poolHint} />
               {/* 补齐召回、重排、阈值过滤三个阶段，避免只看首尾指标而定位不到重排损失。 */}
               <HistoryMetric label="重排 Recall" value={formatPercent(item.summary?.recall_top)} hint={topHint} />
