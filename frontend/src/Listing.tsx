@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { Tag } from "./Tag";
 import { getDocumentProblems, listDocument, submitDocumentReview, unlistDocument, type DocumentProblems, type DocumentStatus, type ProblemChunk } from "./api";
 import { formatShortTime } from "./format";
 import "./Listing.css";
@@ -57,7 +58,7 @@ export function ListingPanel({ document, isAdmin, onToast, onChanged, onUploadVe
   const versionState = document.is_current ? "" : status.startsWith("staged:") ? "待上架" : status.startsWith("flagged:") ? "扫描有问题" : status.startsWith("review:") ? "待管理员审核" : status === "rejected" ? "审核未通过" : "";
   const tone = status.startsWith("flagged:") || status === "rejected" ? "is-danger" : status.startsWith("staged:") || status.startsWith("review:") ? "is-waiting" : listing === "listed" ? "is-listed" : "is-unlisted";
   return <section className={`lt-panel ${tone}`}>
-    <header><strong>上架状态</strong><span className={`lt-badge is-${listing}`}>文档{LISTING_LABELS[listing]}</span>{versionState && <span className={`lt-badge is-version ${tone}`}>这一版：{versionState}</span>}</header>
+    <header><strong>上架状态</strong><Tag size="sm" dot tone={listing === "listed" ? "success" : "neutral"}>文档{LISTING_LABELS[listing]}</Tag>{versionState && <Tag size="sm" dot tone={tone === "is-danger" ? "danger" : "warning"}>这一版：{versionState}</Tag>}</header>
     {body}
     {waiting && <p className="lt-waiting">v{waiting.version} {waiting.status.startsWith("flagged:") ? "安全扫描有问题，需要处理" : waiting.status.startsWith("review:") ? "正在等管理员审核" : "已处理完，等待上架"}。<button type="button" className="link-text" onClick={() => onSelectVersion(waiting.document_id)}>去查看</button></p>}
   </section>;
@@ -106,7 +107,7 @@ export function ProblemChunks({ chunks }: { chunks: ProblemChunk[] }) {
   return <div className="lt-problems">{chunks.map((chunk) => <article key={chunk.chunk_id} className={`lt-chunk ${chunk.model_score !== null && chunk.model_score !== undefined && chunk.spans.length === 0 ? "is-whole" : ""}`}>
     <header>
       <span>第 {chunk.position} 片{chunk.heading_path.length > 0 && ` · ${chunk.heading_path.join(" / ")}`}{chunk.page_start ? ` · 第 ${chunk.page_start} 页` : ""}</span>
-      <span className="lt-tags">{[...new Set(chunk.spans.map((span) => span.label))].map((label) => <em key={label}>规则：{label}</em>)}{chunk.model_score !== null && chunk.model_score !== undefined && <em className="is-model">模型判断为攻击 {chunk.model_score.toFixed(2)}</em>}</span>
+      <span className="tag-row">{[...new Set(chunk.spans.map((span) => span.label))].map((label) => <Tag key={label} size="sm" plain tone="danger">规则：{label}</Tag>)}{chunk.model_score !== null && chunk.model_score !== undefined && <Tag size="sm" plain tone="accent">模型判断为攻击 {chunk.model_score.toFixed(2)}</Tag>}</span>
     </header>
     <p><HighlightedText text={chunk.content} spans={chunk.spans} /></p>
   </article>)}</div>;

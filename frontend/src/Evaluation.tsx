@@ -8,7 +8,8 @@ import "./Special.css";
 // 耗时格式化移到公共文件，知识库、问答、设置页共用同一套规则。
 import { durationTitle, formatDuration as formatMs, formatDurationDelta } from "./format";
 import { AgentPanel, ComparePanel, modesLabel, rewriteLabel, runModes } from "./AgentEval";
-import { HueTag } from "./TypeTag";
+import { HueTag, Tag } from "./Tag";
+import { runStatus } from "./tags";
 
 export type EvaluationSection = "history" | "dataset" | "special" | "regression";
 type TopTab = EvaluationSection;
@@ -48,9 +49,6 @@ const DETAIL_TAB_LABELS: Record<DetailTab, string> = {
   variants: "消融与参数",
 };
 const SPLIT_LABELS: Record<string, string> = { dev: "开发集", holdout: "留出集", all: "全部题目" };
-const STATUS_LABELS: Record<string, string> = { running: "运行中", completed: "已完成", failed: "失败", interrupted: "已中断" };
-// 运行状态改成胶囊标签：以前只有失败和运行中有颜色，已完成是普通文字，列表里不好区分。
-const STATUS_TONES: Record<string, string> = { running: "blue", completed: "green", failed: "red", interrupted: "orange" };
 // 丢失阶段的说明：告诉读者该去优化哪一环。
 const LOST_LABELS: Record<string, { label: string; hint: string }> = {
   recall: { label: "未进候选池", hint: "证据所在分片没有进入 RRF 前 N 名，重排没机会看到它：检查检索词、分块或召回路数" },
@@ -570,7 +568,7 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
               : specialSuites.length === 0 ? <span className="ev-muted-note">还没有专项，先到「专项评测集」新建。</span>
               : <ul className="sp-pick-list">{specialSuites.map((suite) => <li key={suite.id}>
                 <label><input type="checkbox" checked={pickedSuites.includes(suite.id)} disabled={suite.item_count === 0} onChange={() => setPickedSuites((items) => items.includes(suite.id) ? items.filter((item) => item !== suite.id) : [...items, suite.id])} />
-                  <span className="sp-pick-text"><span className="sp-pick-name">{suite.name}<span className={`sp-method is-${suite.method}`}>{suite.method_label}</span>{suite.method !== "dialogue" && <span className="sp-search">{suite.search_mode_label}</span>}<em>{suite.item_count} 题</em></span>{suite.description && <small>{suite.description}</small>}</span></label>
+                  <span className="sp-pick-text"><span className="sp-pick-name">{suite.name}<HueTag size="sm" label={suite.method_label} />{suite.method !== "dialogue" && <Tag size="sm" outline plain>{suite.search_mode_label}</Tag>}<em>{suite.item_count} 题</em></span>{suite.description && <small>{suite.description}</small>}</span></label>
               </li>)}</ul>}
             {specialSuites?.some((suite) => suite.method === "retrieval" && pickedSuites.includes(suite.id)) && <div className="sp-mode-line">
               <span className="ev-option-title">运行模式</span>
@@ -733,7 +731,7 @@ function SpecialRunResults({ run }: { run: EvalRun }) {
   return <div className="sp-run-sections">
     <p className="ev-muted-note">专项题专门挑某个方向的难题，分数低是正常的，不计入调参分数。检索方式：证据全部被返回算通过；回答和多轮对话方式：评审模型判定和参考答案要点一致（正确性 = 1）算通过。</p>
     {sections.map((section) => <section key={section.suite_id} className="sp-run-section">
-      <h3>{section.name}<span className={`sp-method is-${section.method}`}>{section.method_label}</span></h3>
+      <h3>{section.name}<Tag size="sm" hue className="is-after">{section.method_label}</Tag></h3>
       {section.description && <p>{section.description}</p>}
       <SpecialSection section={section} />
     </section>)}
@@ -798,7 +796,7 @@ function EmptyRuns({ hasRuns }: { hasRuns: boolean }) {
 
 function RunStatus({ run, live }: { run: EvalRun; live: boolean }) {
   if (run.status === "running" && live) return <div className="ev-empty"><h3>评测进行中</h3><p>已完成 {run.progress?.done ?? 0} / {run.progress?.total || "…"} 次检索，完成后自动显示结果。</p></div>;
-  return <div className="ev-empty"><h3>{STATUS_LABELS[run.status] ?? run.status}</h3><p>{run.error ?? "这次评测没有正常结束（进程可能中途退出），请重新运行。"}</p></div>;
+  return <div className="ev-empty"><h3>{runStatus(run.status).label}</h3><p>{run.error ?? "这次评测没有正常结束（进程可能中途退出），请重新运行。"}</p></div>;
 }
 
 // 与上一次对比的变化标记：箭头 + 文字，不只靠颜色区分变好变差。
@@ -1452,10 +1450,10 @@ function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: 
         return <Fragment key={item.id}>
           <tr className={`ev-history-main-row ${picked.includes(item.id) ? "is-current" : ""}`} tabIndex={0} aria-expanded={metricsExpanded} aria-controls={`history-metrics-${item.id}`} title="点击展开或收起指标" onClick={() => toggleMetrics(item.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleMetrics(item.id); } }}>
             <td><input type="checkbox" aria-label={`选择 ${item.id}`} checked={picked.includes(item.id)} disabled={item.status !== "completed"} onClick={(event) => event.stopPropagation()} onChange={() => toggle(item.id)} /></td>
-            <td className="ev-history-time">{formatTime(item.created)}</td><td><span className="ev-history-tags"><HueTag label={KIND_LABELS[item.kind]} />{(item.kind === "retrieval" || item.kind === "special") && runModes(item).includes("agent") && runModes(item).map((mode) => <HueTag key={mode} label={mode === "agent" ? "Agent" : "固定流程"} />)}</span></td><td>{item.kind === "special" ? (item.config.special?.suites ?? []).map((suite) => suite.name).join("、") : SPLIT_LABELS[item.config.split ?? ""] ?? item.config.split}</td><td className="num ev-history-number">{item.kind === "special" ? item.summary?.count ?? "—" : item.config.dataset_size ?? "—"}</td>
+            <td className="ev-history-time">{formatTime(item.created)}</td><td><span className="tag-row"><HueTag label={KIND_LABELS[item.kind]} />{(item.kind === "retrieval" || item.kind === "special") && runModes(item).includes("agent") && runModes(item).map((mode) => <HueTag key={mode} label={mode === "agent" ? "Agent" : "固定流程"} />)}</span></td><td>{item.kind === "special" ? (item.config.special?.suites ?? []).map((suite) => suite.name).join("、") : SPLIT_LABELS[item.config.split ?? ""] ?? item.config.split}</td><td className="num ev-history-number">{item.kind === "special" ? item.summary?.count ?? "—" : item.config.dataset_size ?? "—"}</td>
             {item.kind === "special" ? <td className="ev-config-cell">{item.status === "completed" && item.summary ? `通过 ${item.summary.passed ?? 0} / ${item.summary.count ?? 0}` : "—"}{item.config.special?.compare_memory ? " · 对比记忆参数" : ""}<span className="ev-history-expand-hint">{metricsExpanded ? "▼ 各专项" : "▶ 各专项"}</span></td> : <td className="ev-config-cell">候选池 {item.config.pool_size ?? "—"} · 阈值 {item.config.reranked === false ? "未启用" : formatScore(item.config.min_score ?? null, 2)}{item.config.suites.length ? ` · 含${item.config.suites.map((suite) => (suite === "ablation" ? "消融" : "参数")).join("、")}` : ""}<span className="ev-history-expand-hint">{metricsExpanded ? "▼ 指标" : "▶ 指标"}</span></td>}
             <td className="num ev-history-latency" title={durationTitle(item.summary?.latency_avg_ms ?? item.summary?.agent_latency_avg_ms)}>{formatMs(item.summary?.latency_avg_ms ?? item.summary?.agent_latency_avg_ms)}</td>
-            <td><span className={`status-tag is-${STATUS_TONES[item.status] ?? "gray"}`}>{STATUS_LABELS[item.status] ?? item.status}{item.status === "running" ? ` ${progressPercent(item)}%` : ""}</span></td>
+            <td><Tag dot tone={runStatus(item.status).tone}>{runStatus(item.status).label}{item.status === "running" ? ` ${progressPercent(item)}%` : ""}</Tag></td>
             <td><div className="ev-history-actions"><button className="ev-link" onClick={(event) => { event.stopPropagation(); onOpen(item.id); }}>查看</button><button className="ev-delete-link" disabled={item.status === "running" || deletingId === item.id} title={item.status === "running" ? "评测运行中，不能删除" : "删除这条评测记录"} onClick={(event) => { event.stopPropagation(); void remove(item); }}>{deletingId === item.id ? "删除中…" : "删除"}</button></div></td>
           </tr>
           {metricsExpanded && item.kind === "special" && <tr id={`history-metrics-${item.id}`} className="ev-history-metrics-row">
@@ -1466,7 +1464,7 @@ function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: 
                 return <HistoryMetric key={key} label={entry.name} value={both ? `${entry.passed} / ${entry.count} · Agent ${entry.agent_passed ?? 0} / ${entry.count}` : `${entry.passed} / ${entry.count}`}
                   hint={both ? `固定流程 ${entry.passed} 道通过，Agent ${entry.agent_passed ?? 0} 道通过（共 ${entry.count} 道）。点「查看」看逐题对比。` : `${entry.count} 道题中${agentOnly ? " Agent " : " "}${entry.passed} 道通过。点「查看」看逐题结果。`} />;
               })}
-              {item.status !== "completed" && <span className="ev-muted-note">{STATUS_LABELS[item.status] ?? item.status}</span>}
+              {item.status !== "completed" && <span className="ev-muted-note">{runStatus(item.status).label}</span>}
             </div></div></td>
           </tr>}
           {metricsExpanded && item.kind !== "special" && <tr id={`history-metrics-${item.id}`} className="ev-history-metrics-row">
@@ -1699,7 +1697,7 @@ function DatasetBrowser({ dataset, onToast, onSaved }: { dataset: EvalDataset | 
     </div>
     <p className="ev-filter-help"><span className="ev-info-icon" role="img" aria-label="说明">i</span><span>{DATASET_TYPE_DESCRIPTIONS[typeFilter] ?? DATASET_TYPE_DESCRIPTIONS.all}</span></p>
     <div className="ev-dataset">{visible.map((item) => <article className="ev-item" key={item.id}>
-      <div className="ev-item-head"><span className="ev-qid">{item.id}</span><span className="ev-tag">{item.type}</span>{item.pair_id && <span className="ev-tag is-pair">{item.pair_id} · {item.pair_role === "original" ? "原问题" : "改写问题"}</span>}<span className={`ev-tag ${item.answerable ? "" : "is-muted"}`}>{item.answerable ? "可回答" : "无法回答"}</span><span className="ev-tag is-muted">{SPLIT_LABELS[item.split] ?? item.split}</span>{item.reviewed !== true ? <span className="ev-tag is-warn">待人工审核</span> : <span className="ev-tag is-approved">已审核</span>}</div>
+      <div className="ev-item-head"><span className="ev-qid">{item.id}</span><span className="tag-row"><HueTag label={item.type} size="sm" />{item.pair_id && <Tag size="sm" tone="info" outline>{item.pair_id} · {item.pair_role === "original" ? "原问题" : "改写问题"}</Tag>}<Tag size="sm" outline plain>{item.answerable ? "可回答" : "无法回答"}</Tag><Tag size="sm" outline plain>{SPLIT_LABELS[item.split] ?? item.split}</Tag>{item.reviewed !== true ? <Tag size="sm" dot tone="warning">待人工审核</Tag> : <Tag size="sm" dot tone="success">已审核</Tag>}</span></div>
       <div className="ev-item-purpose"><span>评测目标</span><p>{DATASET_TYPE_CARD_DETAILS[item.type] ?? "检验系统能否从语料中找回与问题相关的证据。"}</p></div>
       {item.history && item.history.length > 0 && <div className="ev-item-context"><span>对话上下文 · 第 {item.history.length + 1} 轮</span><p>{item.history.join(" → ")}</p></div>}
       <h4>问题：{item.question}</h4>

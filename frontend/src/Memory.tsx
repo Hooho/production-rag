@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Tag } from "./Tag";
+import type { Tone } from "./tags";
 import { createPortal } from "react-dom";
 import { clearLongMemory, deleteLongMemory, getLongMemory, getMemorySession, listMemorySessions, setLongMemoryEnabled, type LongMemoryItem, type LongMemoryLog, type LongMemoryView, type MemorySessionDetail, type MemorySessionList, type MemoryTimelineTurn, type MemoryTurnText } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
@@ -198,11 +200,11 @@ function ClampText({ label, text }: { label: string; text: string }) {
 function TimelineRow({ turn }: { turn: MemoryTimelineTurn }) {
   const [open, setOpen] = useState(false);
   let change: ReactNode;
-  const toggle = (label: string, className: string) => <button type="button" className={`mem-tag ${className}`} onClick={() => setOpen(!open)} aria-expanded={open}>{label} {open ? "▴" : "▾"}</button>;
-  if (turn.entered === null) change = <span className="mem-tag is-muted" title="这一轮的记录里没有保存记忆信息（早期格式），无法判断有没有写入记忆、有没有压缩">未记录</span>;
-  else if (!turn.entered) change = <><span className="mem-tag is-muted">未写入记忆</span>{turn.skip_reason && <small className="mem-skip">{turn.skip_reason}，这一轮不写进对话记忆</small>}</>;
-  else if (turn.compressed) change = toggle("压缩", "is-compress");
-  else change = toggle("追加", "is-append");
+  const toggle = (label: string, tone: Tone) => <Tag plain tone={tone} onClick={() => setOpen(!open)} expanded={open}>{label} {open ? "▴" : "▾"}</Tag>;
+  if (turn.entered === null) change = <Tag plain outline className="is-dashed" title="这一轮的记录里没有保存记忆信息（早期格式），无法判断有没有写入记忆、有没有压缩">未记录</Tag>;
+  else if (!turn.entered) change = <><Tag plain outline className="is-dashed">未写入记忆</Tag>{turn.skip_reason && <small className="mem-skip">{turn.skip_reason}，这一轮不写进对话记忆</small>}</>;
+  else if (turn.compressed) change = toggle("压缩", "info");
+  else change = toggle("追加", "neutral");
   return <>
     <tr className={open ? "is-open" : ""}>
       <td className="num">{turn.index}</td>
@@ -345,12 +347,12 @@ function isPending(log: LongMemoryLog) {
   return log.status === "pending" && Date.now() - new Date(log.updated ?? log.created).getTime() < PENDING_TIMEOUT;
 }
 
-const LOG_STATUS: Record<LongMemoryLog["status"], { label: string; className: string }> = {
-  pending: { label: "提取中", className: "is-pending" },
-  changed: { label: "有变化", className: "is-changed" },
-  none: { label: "没有新内容", className: "is-muted" },
-  skipped: { label: "跳过", className: "is-muted" },
-  failed: { label: "失败", className: "is-failed" },
+const LOG_STATUS: Record<LongMemoryLog["status"], { label: string; tone: Tone }> = {
+  pending: { label: "提取中", tone: "info" },
+  changed: { label: "有变化", tone: "success" },
+  none: { label: "没有新内容", tone: "neutral" },
+  skipped: { label: "跳过", tone: "neutral" },
+  failed: { label: "失败", tone: "danger" },
 };
 
 // 提取记录：每轮回答之后后台提取的过程和结果。多数问答里没有值得记的个人信息，「没有新内容」是正常结果。
@@ -365,7 +367,7 @@ function LongMemoryLogs({ logs, limit, onNavigate }: { logs: LongMemoryLog[]; li
 function LongMemoryLogRow({ log, onNavigate }: { log: LongMemoryLog; onNavigate: (path: string) => void }) {
   const [open, setOpen] = useState(false);
   const stale = log.status === "pending" && !isPending(log);
-  const status = stale ? { label: "未完成", className: "is-failed" } : LOG_STATUS[log.status];
+  const status = stale ? { label: "未完成", tone: "danger" as Tone } : LOG_STATUS[log.status];
   const changes = log.changes;
   const counts = changes ? [["新增", changes.added.length], ["修改", changes.updated.length], ["删除", changes.deleted.length]].filter(([, count]) => count) : [];
   const ignored = changes?.ignored ?? [];
@@ -377,7 +379,7 @@ function LongMemoryLogRow({ log, onNavigate }: { log: LongMemoryLog; onNavigate:
   const expandable = Boolean(changes || (log.status === "failed" && log.reason));
   return <li className={open ? "is-open" : ""}>
     <div className="long-log-head">
-      <span className={`mem-tag long-status ${status.className}`}>{status.label}</span>
+      <Tag dot tone={status.tone}>{status.label}</Tag>
       <span className="long-log-question">{log.question || "—"}</span>
       <span className="long-meta">{formatTime(log.created)}{log.session_id && <> · <button type="button" className="link-text" onClick={() => onNavigate(`/memory/${encodeURIComponent(log.session_id ?? "")}`)}>查看会话</button></>}</span>
     </div>

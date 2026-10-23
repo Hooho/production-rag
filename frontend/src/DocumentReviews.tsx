@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { Tag } from "./Tag";
+import type { Tone } from "./tags";
 import { approveDocumentReview, getDocumentReview, getDocumentReviews, rejectDocumentReview, type DocumentReviewDetail, type DocumentReviewList, type DocumentVisibility } from "./api";
 import { formatShortTime } from "./format";
 import { ProblemChunks } from "./Listing";
@@ -17,6 +19,8 @@ const VISIBILITY_LABELS: Record<DocumentVisibility, string> = { private: "仅自
 
 // 列表里标题右侧的类型标签（简短）；完整说明在详情里。
 const KIND_TAGS: Record<string, string> = { publish: "申请公开", version: "公开文档新版本", flagged: "扫描有问题", share: "共享文档可疑" };
+// 审核类型的颜色：扫描有问题、共享可疑是要注意的，其余按普通申请。
+const KIND_TONES: Record<string, Tone> = { publish: "success", version: "accent", flagged: "danger", share: "warning" };
 
 // reviewId 为空时显示列表，点一条进入详情页（/maintenance/reviews/<id>），详情页可以返回列表。
 export default function DocumentReviews({ reviewId, onNavigate, onToast }: { reviewId: string | null; onNavigate: (path: string) => void; onToast: ShowToast }) {
@@ -49,10 +53,10 @@ function ReviewList({ onOpen }: { onOpen: (id: string) => void }) {
       {list && (list.items.length === 0 ? <div className="dr-empty">{status === "pending" ? "没有待审核的文档" : "还没有处理过的审核"}</div> : <div className="dr-list">
         {list.items.map((item) => <button type="button" key={item.id} className="dr-item" onClick={() => onOpen(item.id)}>
           <span className="dr-item-copy">
-            <strong>{item.title}<em>v{item.version ?? 1}</em><span className={`dr-kind is-${item.kind}`}>{KIND_TAGS[item.kind] ?? item.kind_label}</span></strong>
+            <strong>{item.title}<Tag size="sm" outline plain mono className="is-after">v{item.version ?? 1}</Tag><Tag size="sm" plain className="is-after" tone={KIND_TONES[item.kind] ?? "neutral"}>{KIND_TAGS[item.kind] ?? item.kind_label}</Tag></strong>
             <small>{item.owner} 上传 · {formatShortTime(item.created)} 提交 · 现在{VISIBILITY_LABELS[item.visibility] ?? item.visibility}可见{item.chunk_count ? ` · ${item.chunk_count} 段` : ""}{item.request_note ? ` · 说明：${item.request_note}` : ""}</small>
           </span>
-          {status === "done" && <span className={`dr-status is-${item.status}`} title={item.request_note ?? item.note ?? ""}>{item.requested_by === item.reviewed_by && item.status === "approved" ? "管理员直接上架" : item.status_label}{item.reviewed_by ? ` · ${item.reviewed_by}` : ""}</span>}
+          {status === "done" && <Tag dot tone={item.status === "approved" ? "success" : item.status === "rejected" ? "danger" : "neutral"} title={item.request_note ?? item.note ?? ""}>{item.requested_by === item.reviewed_by && item.status === "approved" ? "管理员直接上架" : item.status_label}{item.reviewed_by ? ` · ${item.reviewed_by}` : ""}</Tag>}
           <span className="dr-arrow">›</span>
         </button>)}
       </div>)}

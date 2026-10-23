@@ -55,27 +55,6 @@
    font-size: 14px;
 }
 
-/* 影响范围用方角描边标签，和右侧圆角的来源标签区分开。 */
-.sys-impact {
-   border: 1px solid currentColor;
-   border-radius: 2px;
-   padding: 0 6px;
-   font-size: 11px;
-   font-weight: 400;
-}
-
-.sys-impact.is-now {
-   color: #15803d;
-}
-
-.sys-impact.is-new {
-   color: #b45309;
-}
-
-.sys-impact.is-judge {
-   color: #7c3aed;
-}
-
 .sys-what {
    margin: 6px 0;
    color: var(--t-334e68);

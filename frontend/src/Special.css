@@ -1,31 +1,5 @@
 /* 专项评测集：布局沿用巡检复测集（Regression.css），这里只补专项特有的部分。 */
 
-/* 评测方式：浅底方角小标签，三种方式各一个颜色。 */
-.sp-method {
-   display: inline-block;
-   margin-left: 8px;
-   border-radius: 3px;
-   padding: 1px 6px;
-   font-size: 11px;
-   font-weight: 400;
-   vertical-align: middle;
-}
-
-.sp-method.is-retrieval {
-   background: #e6f4f1;
-   color: #0f766e;
-}
-
-.sp-method.is-answer {
-   background: #eaf1ff;
-   color: #1d4ed8;
-}
-
-.sp-method.is-dialogue {
-   background: #f3e8ff;
-   color: #7c3aed;
-}
-
 .sp-method-field {
    display: flex;
    flex-direction: column;
@@ -260,10 +234,6 @@
    gap: 10px;
 }
 
-.sp-pick-list li label .sp-method {
-   margin-left: 0;
-}
-
 .sp-evidence-label {
    color: var(--t-7d95ac);
 }
@@ -274,15 +244,3 @@
    line-height: 1.6;
 }
 
-/* 检索方式：描边小标签，和实心底色的评测方式标签区分开。 */
-.sp-search {
-   display: inline-block;
-   margin-left: 6px;
-   border: 1px solid var(--t-cedfec);
-   border-radius: 3px;
-   padding: 0 6px;
-   color: var(--t-5e7a95);
-   font-size: 11px;
-   font-weight: 400;
-   vertical-align: middle;
-}

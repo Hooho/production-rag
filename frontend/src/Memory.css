@@ -307,29 +307,6 @@
    color: var(--t-7d95ac);
 }
 
-.mem-tag {
-   display: inline-block;
-   border: 1px solid var(--t-cedfec);
-   border-radius: 3px;
-   background: #fff;
-   padding: 0 6px;
-   color: var(--t-5e7a95);
-   font-size: 12px;
-   white-space: nowrap;
-}
-
-.mem-tag.is-muted {
-   border-style: dashed;
-   color: var(--t-7d95ac);
-}
-
-.mem-tag.is-compress {
-   border-color: var(--t-2563eb);
-   background: var(--t-eaf1ff);
-   color: var(--t-1d4ed8);
-   cursor: pointer;
-}
-
 .mem-skip {
    display: block;
    max-width: 220px;
@@ -338,15 +315,6 @@
    font-size: 12px;
    line-height: 1.5;
    white-space: normal;
-}
-
-.mem-tag.is-append {
-   cursor: pointer;
-}
-
-.mem-tag.is-append:hover {
-   border-color: var(--t-2563eb);
-   color: var(--t-1d4ed8);
 }
 
 .mem-compare-row td {
@@ -672,24 +640,6 @@
    margin-top: 4px;
    color: var(--t-5e7a95);
    font-size: 12px;
-}
-
-.mem-tag.long-status.is-changed {
-   border-color: #16a34a;
-   background: #f0fdf4;
-   color: #166534;
-}
-
-.mem-tag.long-status.is-pending {
-   border-color: var(--t-2563eb);
-   background: var(--t-eaf1ff);
-   color: var(--t-1d4ed8);
-}
-
-.mem-tag.long-status.is-failed {
-   border-color: #dc2626;
-   background: #fef2f2;
-   color: #991b1b;
 }
 
 .long-log-detail {

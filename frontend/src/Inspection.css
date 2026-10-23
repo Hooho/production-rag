@@ -375,11 +375,6 @@
    font-size: 12px;
 }
 
-.inspection-source-tag.is-hidden {
-   background: #fdecec;
-   color: #b42318;
-}
-
 .inspection-diagnosis-sentence {
    margin: 4px 0 0;
    color: var(--t-1d3550);
@@ -543,18 +538,6 @@
 .inspection-source-head strong {
    color: var(--t-2563eb);
    font-family: 'DM Mono', monospace;
-}
-
-.inspection-source-tag {
-   border-radius: 4px;
-   background: var(--t-f0f5fa);
-   padding: 0 6px;
-   font-size: 11px;
-}
-
-.inspection-source-tag.is-cited {
-   background: #e8f7ef;
-   color: #1f7a4a;
 }
 
 .inspection-source-text {
@@ -1062,16 +1045,6 @@
 .inspection-parse-list summary {
    color: var(--t-334e68);
    cursor: pointer;
-}
-
-.inspection-parse-tag {
-   display: inline-block;
-   margin-right: 8px;
-   border-radius: 3px;
-   background: #e6f4f1;
-   padding: 0 6px;
-   color: #0f766e;
-   font-size: 12px;
 }
 
 .inspection-parse-examples {

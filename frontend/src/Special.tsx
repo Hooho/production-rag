@@ -3,7 +3,8 @@ import { SpecialAgentResults, rewriteLabel } from "./AgentEval";
 import { addEvalSuiteItem, createEvalSuite, deleteEvalSuite, deleteEvalSuiteItem, getEvalRun, getEvalSuite, listEvalSuites, startSpecialRun, updateEvalSuite, updateEvalSuiteItem, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSuiteBrief, type EvalSuiteFull, type EvalSuiteItem, type EvalSuiteMethod, type EvalSuiteSearchMode, type EvalSuiteRunEntry } from "./api";
 import { EvidenceDetails } from "./EvidenceChunks";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
-import { TypeStats, TypeTag, typeHues } from "./TypeTag";
+import { Tag, TypeStats, TypeTag, typeHues } from "./Tag";
+import { CHANGE_TONES, passTone, runStatus } from "./tags";
 import "./Regression.css";
 import "./Special.css";
 
@@ -23,10 +24,6 @@ const SEARCH_HINTS: Record<EvalSuiteSearchMode, string> = {
   hybrid: "向量 + 关键词两路一起找，和线上一样。看整条链路能不能把证据交给回答模型。",
   dense: "只用向量检索。看向量本身找不找得到，比如分片被截断的影响不会被关键词检索兜回来。",
   keyword: "只用关键词检索（BM25）。看字面匹配找不找得到，和「只用向量」对照着看。",
-};
-const RUN_STATUS: Record<string, { label: string; tone: string }> = {
-  running: { label: "运行中", tone: "blue" }, completed: { label: "已完成", tone: "green" },
-  failed: { label: "失败", tone: "red" }, interrupted: { label: "已中断", tone: "orange" },
 };
 // 证据最后的去向（检索诊断里的状态）。
 const EVIDENCE_STATUS: Record<string, string> = {
@@ -118,7 +115,7 @@ function SuiteList({ onOpen, onToast }: { onOpen: (id: string) => void; onToast:
       : <ul className="rg-sets">
         {suites.map((item) => <li key={item.id}>
           <button type="button" className="rg-set" onClick={() => onOpen(item.id)}>
-            <span className="rg-set-name">{item.name}<span className={`sp-method is-${item.method}`}>{item.method_label}</span>{item.method !== "dialogue" && <span className="sp-search">{item.search_mode_label}</span>}</span>
+            <span className="rg-set-name">{item.name}<Tag size="sm" hue className="is-after">{item.method_label}</Tag>{item.method !== "dialogue" && <Tag size="sm" outline plain className="is-after">{item.search_mode_label}</Tag>}</span>
             {item.description && <span className="rg-set-description">{item.description}</span>}
             <span className="rg-set-meta">
               <span>{item.item_count} 题</span>
@@ -249,7 +246,7 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
       </div>
     </div> : <div className="rg-title">
       <div>
-        <h3>{data.name}<span className={`sp-method is-${data.method}`}>{data.method_label}</span>{data.method !== "dialogue" && <span className="sp-search">{data.search_mode_label}</span>}</h3>
+        <h3>{data.name}<Tag size="sm" hue className="is-after">{data.method_label}</Tag>{data.method !== "dialogue" && <Tag size="sm" outline plain className="is-after">{data.search_mode_label}</Tag>}</h3>
         {data.description && <p>{data.description}</p>}
       </div>
       <div className="rg-buttons">
@@ -323,10 +320,10 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
 }
 
 function RunChip({ run, selected, onClick }: { run: EvalSuiteRunEntry; selected: boolean; onClick: () => void }) {
-  const status = RUN_STATUS[run.status] ?? { label: run.status, tone: "gray" };
+  const status = runStatus(run.status);
   return <button type="button" role="tab" aria-selected={selected} className={`rg-run ${selected ? "is-selected" : ""}`} onClick={onClick}>
     <span className="rg-muted">{formatTime(run.created)}</span>
-    {run.status === "completed" && run.summary ? <strong className={run.summary.passed === run.summary.count ? "is-pass" : "is-fail"}>{run.summary.passed} / {run.summary.count} 通过</strong> : <span className={`status-tag is-${status.tone}`}>{status.label}</span>}
+    {run.status === "completed" && run.summary ? <strong className={run.summary.passed === run.summary.count ? "is-pass" : "is-fail"}>{run.summary.passed} / {run.summary.count} 通过</strong> : <Tag dot tone={status.tone}>{status.label}</Tag>}
   </button>;
 }
 
@@ -386,7 +383,7 @@ export function SpecialSection({ section }: { section: EvalSpecialSection }) {
   return <div className="rg-results">
     <div className="rg-summary">
       <span><strong>{section.passed} / {section.count} 通过</strong>（{section.count ? Math.round((section.passed / section.count) * 100) : 0}%）</span>
-      {section.search_mode_label && <span className="sp-search">{section.search_mode_label}</span>}
+      {section.search_mode_label && <Tag size="sm" outline plain>{section.search_mode_label}</Tag>}
       {section.evidence_total ? <span>{section.evidence_total} 条证据：{[section.search_mode !== "keyword" ? `含证据的分片进了向量检索前 12 名的 ${section.dense_found ?? 0} 条` : "", section.search_mode !== "dense" ? `进了关键词检索前 30 名的 ${section.keyword_found ?? 0} 条` : ""].filter(Boolean).join("，")}</span> : null}
       {section.previous ? <span>和上次（{formatTime(section.previous.created)}，{section.previous.passed} / {section.previous.count}）比：新通过 {fixed}，新失败 <strong className={regressed ? "is-fail" : ""}>{regressed}</strong></span> : <span className="rg-muted">这是第一次运行这个专项</span>}
     </div>
@@ -411,12 +408,12 @@ const SUFFICIENCY_SHORT: Record<string, string> = { sufficient: "够了", partia
 
 function SpecialQuestion({ question, hues, method, searchMode }: { question: EvalSpecialQuestion; hues: Map<string, number>; method: EvalSuiteMethod; searchMode: EvalSuiteSearchMode }) {
   const change = question.previous_passed === undefined || question.previous_passed === null || question.previous_passed === question.passed ? null
-    : question.passed ? { label: "新通过", tone: "green" } : { label: "新失败", tone: "red" };
+    : question.passed ? { label: "新通过", tone: CHANGE_TONES.fixed } : { label: "新失败", tone: CHANGE_TONES.regressed };
   const judgement = question.judgement;
   return <li className={`rg-result ${question.passed ? "is-ok" : "is-bad"}`}>
     <div className="rg-result-head">
-      <span className={`status-tag is-${question.passed ? "green" : "red"}`}>{question.passed ? "通过" : "没通过"}</span>
-      {change && <span className={`rg-change is-${change.tone}`}>{change.label}</span>}
+      <Tag dot tone={passTone(question.passed)}>{question.passed ? "通过" : "没通过"}</Tag>
+      {change && <Tag outline tone={change.tone}>{change.label}</Tag>}
       <TypeTag type={question.type} hues={hues} />
       <span className="rg-result-question">{question.question}</span>
     </div>

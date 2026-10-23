@@ -1,0 +1,138 @@
+/* 公共标签样式（组件见 Tag.tsx，含义和颜色的对应见 tags.ts）。
+   全站的标签以前各写各的（status-tag、ag-tag、lt-badge、dr-status……二十多套），圆角、字号、颜色都不统一，
+   同样表示"成功"就有三种绿。现在统一成 .tag，颜色只有两种来源：
+   - 语义色 tone-*：有好坏含义的状态（成功、失败、警告、信息、中性、强调），颜色固定，不随主题变；
+     gold、silver、slate 是业务数据里用的等级色（会员等级、物流状态），也放在这里。
+   - 分类色 is-hue：只为区分类别、没有好坏（题目类型、评测类型、工具），色相来自 hues.ts 的预设（--tag-h），避开红色。 */
+:root {
+   --tone-success-text: #1f7a4a;
+   --tone-success-bg: #e8f7ef;
+   --tone-success-border: #bfe6cf;
+   --tone-danger-text: #c93a4b;
+   --tone-danger-bg: #fdecee;
+   --tone-danger-border: #f5c4ca;
+   --tone-warning-text: #a86208;
+   --tone-warning-bg: #fff4e5;
+   --tone-warning-border: #f6d9a8;
+   --tone-info-text: #2563eb;
+   --tone-info-bg: #eaf1ff;
+   --tone-info-border: #c3d5fb;
+   --tone-accent-text: #7045d6;
+   --tone-accent-bg: #f3edff;
+   --tone-accent-border: #d9c9fb;
+   --tone-neutral-text: var(--t-5e7a95);
+   --tone-neutral-bg: var(--t-f1f4f7);
+   --tone-neutral-border: var(--t-dbe2ea);
+   --tone-gold-text: #946b00;
+   --tone-gold-bg: #fdf6e0;
+   --tone-gold-border: #ecd899;
+   --tone-silver-text: var(--t-56657a);
+   --tone-silver-bg: #f4f6f8;
+   --tone-silver-border: var(--t-cfd6de);
+   --tone-slate-text: var(--t-3f6a8a);
+   --tone-slate-bg: var(--t-eef4f8);
+   --tone-slate-border: var(--t-c9d9e5);
+}
+
+.tag {
+   --tag-text: var(--tone-neutral-text);
+   --tag-bg: var(--tone-neutral-bg);
+   --tag-border: var(--tone-neutral-border);
+   display: inline-flex;
+   align-items: center;
+   gap: 5px;
+   padding: 1px 8px;
+   border: 1px solid var(--tag-border);
+   border-radius: 999px;
+   background: var(--tag-bg);
+   color: var(--tag-text);
+   font-family: inherit;
+   font-size: 12px;
+   font-style: normal;
+   font-weight: 600;
+   line-height: 1.6;
+   letter-spacing: 0;
+   white-space: nowrap;
+   vertical-align: middle;
+}
+
+/* 小号：嵌在标题、表格里的标签。 */
+.tag.is-sm {
+   padding: 0 7px;
+   font-size: 11px;
+}
+
+/* 前面带圆点：表示"状态"（运行中、已完成、通过）。 */
+.tag.is-dot::before {
+   content: "";
+   width: 6px;
+   height: 6px;
+   flex: none;
+   border-radius: 50%;
+   background: currentColor;
+}
+
+/* 只描边：次要的说明性标签（耗时、检索方式），不抢眼。 */
+.tag.is-outline {
+   background: transparent;
+}
+
+/* 普通字重：一行里标签很多时用，避免一片粗体。 */
+.tag.is-plain {
+   font-weight: 400;
+}
+
+/* 等宽字体：版本号、编号这类。 */
+.tag.is-mono {
+   font-family: 'DM Mono', monospace;
+}
+
+.tag.tone-success { --tag-text: var(--tone-success-text); --tag-bg: var(--tone-success-bg); --tag-border: var(--tone-success-border); }
+.tag.tone-danger { --tag-text: var(--tone-danger-text); --tag-bg: var(--tone-danger-bg); --tag-border: var(--tone-danger-border); }
+.tag.tone-warning { --tag-text: var(--tone-warning-text); --tag-bg: var(--tone-warning-bg); --tag-border: var(--tone-warning-border); }
+.tag.tone-info { --tag-text: var(--tone-info-text); --tag-bg: var(--tone-info-bg); --tag-border: var(--tone-info-border); }
+.tag.tone-accent { --tag-text: var(--tone-accent-text); --tag-bg: var(--tone-accent-bg); --tag-border: var(--tone-accent-border); }
+.tag.tone-neutral { --tag-text: var(--tone-neutral-text); --tag-bg: var(--tone-neutral-bg); --tag-border: var(--tone-neutral-border); }
+.tag.tone-gold { --tag-text: var(--tone-gold-text); --tag-bg: var(--tone-gold-bg); --tag-border: var(--tone-gold-border); }
+.tag.tone-silver { --tag-text: var(--tone-silver-text); --tag-bg: var(--tone-silver-bg); --tag-border: var(--tone-silver-border); }
+.tag.tone-slate { --tag-text: var(--tone-slate-text); --tag-bg: var(--tone-slate-bg); --tag-border: var(--tone-slate-border); }
+
+/* 分类色：色相由 hues.ts 分配（--tag-h），配色公式和 Agent 执行链的工具卡片一致。 */
+.tag.is-hue {
+   --tag-text: hsl(var(--tag-h) 62% 30%);
+   --tag-bg: hsl(var(--tag-h) 80% 96%);
+   --tag-border: hsl(var(--tag-h) 45% 78%);
+}
+
+/* 一组标签排在一起。 */
+.tag-row {
+   display: inline-flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: 4px 6px;
+}
+
+/* 紧跟在标题文字后面的标签，和文字隔开一点。 */
+.tag.is-after {
+   margin-left: 6px;
+}
+
+/* 放在一段文字前面的标签。 */
+.tag.is-before {
+   margin-right: 8px;
+}
+
+/* 可以点的标签（按钮）：鼠标移上去描边加深。 */
+.tag.is-button {
+   margin: 0;
+   cursor: pointer;
+}
+
+.tag.is-button:hover {
+   border-color: currentColor;
+}
+
+/* 虚线框：表示"没有记录 / 不适用"这类空状态。 */
+.tag.is-dashed {
+   border-style: dashed;
+}

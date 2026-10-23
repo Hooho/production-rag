@@ -48,21 +48,6 @@
    color: var(--t-1d3550);
 }
 
-.evc-tag {
-   border: 1px solid currentColor;
-   border-radius: 3px;
-   padding: 0 6px;
-   font-size: 11px;
-}
-
-.evc-tag.is-cut {
-   color: #b45309;
-}
-
-.evc-tag.is-ok {
-   color: #15803d;
-}
-
 .evc-prefix {
    margin-bottom: 6px;
    color: var(--t-7d95ac);
@@ -91,7 +76,6 @@
    background: #fde68a;
    color: var(--t-1d3550);
 }
-
 
 .evc-details {
    margin-top: 4px;

@@ -32,33 +32,6 @@
    margin: 0 0 8px;
 }
 
-.lt-badge {
-   border-radius: 999px;
-   padding: 1px 9px;
-   font-size: 11px;
-}
-
-.lt-badge.is-listed {
-   background: #e7f6ee;
-   color: #217a4b;
-}
-
-.lt-badge.is-unlisted,
-.lt-badge.is-never {
-   background: var(--t-eef3f8);
-   color: var(--t-5e7a95);
-}
-
-.lt-badge.is-version {
-   background: #fff4e5;
-   color: #a86208;
-}
-
-.lt-badge.is-version.is-danger {
-   background: #fdecee;
-   color: #c93a4b;
-}
-
 .lt-actions {
    display: flex;
    gap: 8px;
@@ -129,25 +102,6 @@
    margin-bottom: 4px;
    color: var(--t-7d95ac);
    font-size: 11px;
-}
-
-.lt-tags {
-   display: flex;
-   flex-wrap: wrap;
-   gap: 4px;
-}
-
-.lt-tags em {
-   border-radius: 999px;
-   background: #fdecee;
-   padding: 0 8px;
-   color: #c93a4b;
-   font-style: normal;
-}
-
-.lt-tags em.is-model {
-   background: #f3edff;
-   color: #7045d6;
 }
 
 .lt-chunk p {

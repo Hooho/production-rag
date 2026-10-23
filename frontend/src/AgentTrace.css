@@ -33,11 +33,6 @@
 .agent-legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
 .dot.in { background: var(--series-agent-in); } .dot.out { background: var(--series-agent-out); } .dot.prog { background: var(--series-agent-prog); } .dot.ret { background: var(--series-agent-ret); }
 
-.agent-tag { display: inline-block; padding: 1px 6px; border-radius: 4px; border: 1px solid; font-family: 'DM Mono', monospace; font-size: 10px; margin-right: 4px; }
-.agent-tag.search { color: var(--series-agent-s); background: var(--series-agent-s-bg); border-color: var(--series-agent-s-line); }
-.agent-tag.order { color: #92400e; background: #fdf6ec; border-color: #ecd0a6; }
-.agent-tag.data { color: #166534; background: #eff8f2; border-color: #bfdfca; }
-.agent-tag.reply, .agent-tag.other { color: var(--t-475569); background: #f3f4f6; border-color: var(--t-d4d8de); }
 .agent-rid { display: inline-block; margin: 1px 3px 1px 0; padding: 0 5px; border-radius: 3px; border: 1px solid; font-family: 'DM Mono', monospace; font-size: 10px; }
 .agent-rid.s { color: var(--series-agent-s); border-color: var(--series-agent-s-line); }
 .agent-rid.o { color: #92400e; border-color: #ecd0a6; }
@@ -98,14 +93,12 @@
 .agent-prog-item, .agent-ret-item { display: grid; gap: 6px; padding: 8px 10px; border-radius: 6px; background: #fdfaf4; }
 .agent-ret-item { background: #f7fbf9; }
 .agent-prog-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 11px; color: var(--t-536d86); }
-.agent-status { font-size: 10px; padding: 0 6px; border-radius: 4px; background: #eff8f2; color: #166534; }
-.agent-status.error, .agent-status.duplicate, .agent-status.skipped { background: #fff1f0; color: #b42318; }
+
 .agent-prog-list { margin: 0; padding-left: 18px; font-size: 11px; color: #5c4a2c; }
 .agent-prog-list li { margin: 2px 0; }
 .agent-citation { display: grid; gap: 6px; }
-.agent-ret-item > .agent-tag { justify-self: start; }
+.agent-ret-item > .tag { justify-self: start; }
 
-.message-mode-tag { margin-left: 8px; padding: 0 6px; border-radius: 4px; background: var(--t-eef2ff); color: var(--t-4338ca); font-size: 10px; font-weight: 600; }
 .chat-mode-switch { display: inline-flex; gap: 2px; padding: 2px; border-radius: 6px; background: var(--t-eef5fb); }
 .chat-mode-switch button { border: 0; background: transparent; padding: 4px 10px; border-radius: 4px; font: inherit; font-size: 12px; color: var(--t-536d86); cursor: pointer; }
 .chat-mode-switch button.active { background: #ffffff; color: var(--t-1d4ed8); font-weight: 600; box-shadow: 0 1px 2px rgb(15 23 42 / .08); }
@@ -152,9 +145,6 @@
 .agent-role { padding: 1px 6px; border-radius: 4px; background: var(--t-e8eff8); color: var(--t-1d3550); font-family: 'DM Mono', monospace; font-size: 10px; }
 .agent-msg-group:target > summary, .agent-message.agent-jumped > summary, .agent-msg-group.agent-jumped > summary { background: #fef3c7; border-radius: 4px; }
 
-/* 工具颜色：色相由 TOOL_HUES 按出现顺序分配（--tool-h），同一个工具在整页颜色一致。 */
-.agent-tag.tool { color: hsl(var(--tool-h) 62% 30%); background: hsl(var(--tool-h) 80% 96%); border-color: hsl(var(--tool-h) 45% 78%); }
-
 /* 组里第一条消息不要再画上边框，组标题下面已经有一条线。 */
 .agent-msg-group-body > .agent-message:first-child { border-top: 0; padding-top: 0; }
 
@@ -173,13 +163,6 @@ details.agent-ret-item[open] { gap: 6px; }
 .agent-same-row b { margin-right: 0; }
 .agent-same-row small { font-family: 'DM Mono', monospace; color: var(--t-8aa0b5); }
 .agent-same-row a { margin-left: 2px; }
-.agent-kind-tag { display: inline-block; min-width: 52px; text-align: center; padding: 0 6px; border-radius: 4px; font-size: 10px; font-weight: 600; }
-.agent-kind-tag.system { background: #fdecec; color: #c0392b; }
-.agent-kind-tag.memory { background: #ecf6ef; color: #1f6b3a; }
-.agent-kind-tag.question { background: #e8f0fd; color: #1d4ed8; }
-.agent-kind-tag.model { background: #f3effd; color: #5b3fb5; }
-.agent-kind-tag.tool { background: #fdf3e6; color: #9a4b0b; }
-.agent-kind-tag.prompt { background: #fbeaf6; color: #a3237f; }
 
 /* 检索漏斗（和设计稿一致）。 */
 .agent-funnel-wrap { display: grid; gap: 4px; padding: 4px 0 2px; }
@@ -256,9 +239,7 @@ details.agent-ret-item[open] { gap: 6px; }
 /* 引用检查：结果放成标签，不挤在列表里；可以引用的编号中被回答引用的用深色底。 */
 .agent-citation-result { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .agent-citation-result small { font-size: 11px; color: var(--t-6f8ba4); }
-.agent-result-tag { display: inline-flex; align-items: center; padding: 1px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
-.agent-result-tag.ok { background: #e7f6ec; color: #15803d; border: 1px solid #b7e2c4; }
-.agent-result-tag.fail { background: #fdecec; color: #b42318; border: 1px solid #f3c2bd; }
+
 .agent-rid.cited.s { background: var(--series-agent-s); border-color: var(--series-agent-s); color: #ffffff; }
 .agent-rid.cited.o { background: #92400e; border-color: #92400e; color: #ffffff; }
 .agent-rid.cited.d { background: #166534; border-color: #166534; color: #ffffff; }
@@ -317,7 +298,7 @@ details.agent-ret-item[open] { gap: 6px; }
 .agent-input-head code { font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 600; color: var(--t-173b5b); }
 .agent-input-head small { margin-left: auto; font-family: 'DM Mono', monospace; color: var(--t-8aa0b5); }
 .agent-input-tools { display: flex; flex-wrap: wrap; gap: 6px; }
-.agent-input-tools .agent-tag { margin: 0; }
+.agent-input-tools .tag { margin: 0; }
 .agent-input-rows { display: grid; }
 .agent-input-row { border-top: 1px solid var(--t-eef2f6, #eef2f6); }
 .agent-input-rows > .agent-input-row:first-child { border-top: 0; }
@@ -325,7 +306,7 @@ details.agent-ret-item[open] { gap: 6px; }
 .agent-input-row > summary { cursor: pointer; }
 .agent-input-row > summary::-webkit-details-marker { display: none; }
 .agent-input-row strong { font-weight: 600; display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-.agent-input-row strong .agent-tag { margin: 0; }
+.agent-input-row strong .tag { margin: 0; }
 .agent-input-no { flex: none; min-width: 52px; font-family: 'DM Mono', monospace; font-size: 11px; color: var(--t-8aa0b5); }
 .agent-input-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--t-8aa0b5); }
 .agent-input-row small { margin-left: auto; flex: none; font-family: 'DM Mono', monospace; font-size: 11px; color: var(--t-8aa0b5); }
@@ -390,13 +371,10 @@ details.agent-prog-item[open] { gap: 6px; }
   border-right: 1.5px solid hsl(var(--tool-h, 210) 30% 45%); border-bottom: 1.5px solid hsl(var(--tool-h, 210) 30% 45%); transform: rotate(45deg); transition: transform .18s ease; }
 .agent-prog-item[open] > summary::after { transform: rotate(-135deg); top: 1px; }
 
-/* 循环历史：本次问答前面几轮 Agent 循环的消息，用青色，和工具（橙）、模型输出（紫）区分。 */
-.agent-kind-tag.loop { background: #e3f4f7; color: #0e6a7a; }
-
 /* ② 输出里的 tool_calls：先列工具名，原文点「详情」展开。 */
 .agent-calls { display: grid; gap: 6px; }
 .agent-calls-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 11px; color: var(--t-536d86); }
-.agent-calls-tools .agent-tag { margin: 0; }
+.agent-calls-tools .tag { margin: 0; }
 .agent-calls-raw > summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; font-size: 11px; color: var(--t-1d4ed8); }
 .agent-calls-raw > summary::-webkit-details-marker { display: none; }
 .agent-calls-raw > summary::after { content: ""; width: 5px; height: 5px; position: relative; top: -2px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); transition: transform .18s ease; }
@@ -423,3 +401,6 @@ details.agent-prog-item[open] { gap: 6px; }
 /* 消息里模型输出的各个字段（reasoning_content / content / tool_calls）上方的标注。 */
 .agent-msg-field { display: flex; align-items: baseline; gap: 6px; font-size: 11px; color: var(--t-5b6690); }
 .agent-msg-field b { font-family: 'DM Mono', monospace; color: var(--t-2b3570); }
+
+/* 消息类型标签（系统、记忆、问题……）：宽度统一，竖着排时对齐。 */
+.tag.agent-kind { min-width: 52px; justify-content: center; }

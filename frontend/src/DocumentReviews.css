@@ -114,12 +114,6 @@
    font-size: 12px;
 }
 
-.dr-item-copy strong .dr-kind {
-   margin-left: 8px;
-   vertical-align: middle;
-   font-weight: 400;
-}
-
 .dr-back {
    margin-bottom: 12px;
    border: 0;
@@ -128,50 +122,6 @@
    color: var(--t-2563eb);
    font-size: 13px;
    cursor: pointer;
-}
-
-.dr-kind,
-.dr-status {
-   flex: 0 0 auto;
-   border-radius: 999px;
-   padding: 2px 9px;
-   font-size: 11px;
-   white-space: nowrap;
-}
-
-.dr-kind.is-publish {
-   background: #e7f6ee;
-   color: #217a4b;
-}
-
-.dr-kind.is-version {
-   background: #f3edff;
-   color: #7045d6;
-}
-
-.dr-kind.is-flagged {
-   background: #fdecee;
-   color: #c93a4b;
-}
-
-.dr-kind.is-share {
-   background: #fff4e5;
-   color: #a86208;
-}
-
-.dr-status {
-   background: var(--t-eef3f8);
-   color: var(--t-5e7a95);
-}
-
-.dr-status.is-approved {
-   background: #e7f6ee;
-   color: #217a4b;
-}
-
-.dr-status.is-rejected {
-   background: #fdecee;
-   color: #c93a4b;
 }
 
 .dr-arrow {

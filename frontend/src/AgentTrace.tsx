@@ -6,6 +6,7 @@ import React, { Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, us
 import { getAgentRun, type AgentCitation, type AgentMessage, type AgentRound, type AgentToolCall, type AgentToolResult, type TraceStep } from "./api";
 import { formatDuration } from "./format";
 import { huePicker } from "./hues";
+import { Tag } from "./Tag";
 import "./AgentTrace.css";
 
 const TOOL_LABELS: Record<string, string> = { search_knowledge: "知识库检索", read_context: "读前后文", lookup_order: "订单查询", query_data: "业务数据" };
@@ -98,7 +99,7 @@ function JsonView({ value }: { value: unknown }) {
 }
 
 function ToolTag({ name }: { name: string }) {
-  return <span className="agent-tag tool" style={{ "--tool-h": toolHue(name) } as React.CSSProperties} title={TOOL_LABELS[name]}>{name}</span>;
+  return <Tag size="sm" mono hue={toolHue(name)} title={TOOL_LABELS[name]}>{name}</Tag>;
 }
 
 // 工具返回消息里只有 tool_call_id，按同一组里模型的 tool_calls 找回工具名。
@@ -169,7 +170,7 @@ function Overview({ rounds }: { rounds: AgentRound[] }) {
       const results = round.tool_results ?? [];
       if (results.length === 0) {
         const label = round.error ? "调用失败" : round.kind === "forced" ? "强制回答" : round.kind === "citation_retry" ? "重写回答" : "直接回答";
-        return <tr key={round.round} className="round-start"><td>第 {round.round} 轮</td><td><span className="agent-tag reply">{label}</span></td><td><span className="agent-muted">无（没有调用工具）</span></td>
+        return <tr key={round.round} className="round-start"><td>第 {round.round} 轮</td><td><Tag size="sm" mono outline>{label}</Tag></td><td><span className="agent-muted">无（没有调用工具）</span></td>
           <td>{round.citation_check ? <>{round.citation_check.passed ? "引用 " : "引用检查没通过 "}{round.citation_check.cited.map((id) => <EvidenceId key={id} id={id} />)}</> : round.error ? <span className="agent-warn">{round.error}</span> : ""}</td><td>{formatDuration(round.duration_ms)}</td></tr>;
       }
       return results.map((result, index) => {
@@ -231,6 +232,8 @@ type GroupKind = "system" | "memory" | "question" | "model" | "tool" | "prompt" 
 // loop：本次问答前面几轮 Agent 循环留下的消息（模型的工具调用决策 + 工具返回结果，或模型的回答 + 程序追加的提示），
 // 整组算作循环历史，和“历史问答”（之前的提问）区分开。
 const KIND_TEXT: Record<GroupKind, string> = { system: "系统", memory: "记忆", question: "问题", model: "模型输出", tool: "工具", prompt: "程序提示", loop: "循环历史" };
+// 消息类型的颜色：分类色，按上面的顺序固定取色（hues.ts）。
+const kindHue = huePicker(Object.keys(KIND_TEXT));
 // 模型调用叫“第 N 轮”；带上的之前的提问按离本轮多远命名（上一次提问、前 2 次提问……），
 // 不写成 1、2、3：带上的只是最近几次（更早的已压进摘要），编号容易被当成会话里的第几次提问。
 function earlierLabel(number: number, total: number) {
@@ -357,7 +360,7 @@ function InputRow({ no, kind, label, note, size, id, link, children, hue }: {
 }) {
   const head = <>
     <span className="agent-input-no">{no}</span>
-    <span className={`agent-kind-tag ${kind}`}>{KIND_TEXT[kind]}</span>
+    <Tag size="sm" hue={kindHue(kind)} className="agent-kind">{KIND_TEXT[kind]}</Tag>
     <strong>{label}</strong>
     {note && <span className="agent-input-note">{note}</span>}
     <small>{size}</small>
@@ -472,7 +475,7 @@ function ProgramItem({ result }: { result: AgentToolResult }) {
   const ids = evidenceIds(result);
   // 每次工具调用一张可折叠的卡片，默认展开；标题行写工具、执行状态、耗时、剩余预算和返回了几条资料，收起后也能看个大概。
   return <details className="agent-prog-item tool-tinted" open style={{ "--tool-h": toolHue(result.name) } as React.CSSProperties}>
-    <summary className="agent-prog-head"><ToolTag name={result.name} /><span className={`agent-status ${result.status}`}>{STATUS_LABELS[result.status] ?? result.status}</span>
+    <summary className="agent-prog-head"><ToolTag name={result.name} /><Tag size="sm" plain tone={result.status === "ok" ? "success" : "danger"}>{STATUS_LABELS[result.status] ?? result.status}</Tag>
       {typeof result.duration_ms === "number" && <small>{formatDuration(result.duration_ms)}</small>}
       {typeof result.budget_left === "number" && <small>剩余预算 {result.budget_left} 次</small>}
       {ids.length > 0 && <small>返回 {ids.length} 条资料</small>}</summary>
@@ -536,8 +539,8 @@ function CitationView({ check, prompt }: { check: AgentCitation; prompt?: string
   const unused = check.allowed.filter((id) => !cited.has(id));
   return <div className="agent-citation">
     <div className="agent-citation-result">{check.passed
-      ? <span className="agent-result-tag ok">✓ 通过</span>
-      : <span className="agent-result-tag fail">✕ 没通过：{REASON_LABELS[String(check.reason)] ?? check.reason}</span>}
+      ? <Tag dot tone="success">通过</Tag>
+      : <Tag dot tone="danger">没通过：{REASON_LABELS[String(check.reason)] ?? check.reason}</Tag>}
       <small>引用 {check.cited.length} / 可用 {check.allowed.length}{unused.length ? `，没用到 ${unused.join("、")}` : ""}</small></div>
     <div className="agent-citation-ids">
       <small>可以引用的编号（深色是回答引用了的）</small>

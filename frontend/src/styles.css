@@ -2223,7 +2223,6 @@ input:focus {
    white-space: nowrap;
 }
 
-
 .document-list-info small {
    display: block;
    margin-top: 5px;
@@ -3494,45 +3493,13 @@ input:focus {
    }
 }
 
-/* 文档版本：列表版本号、处理中的新版本、详情页版本角标、版本历史和同名上传选择。 */
-.version-tag {
-   margin-left: 8px;
-   padding: 1px 6px;
-   border: 1px solid var(--t-abc4dc);
-   border-radius: 4px;
-   color: var(--t-7793ad);
-   font-family: 'DM Mono', monospace;
-   font-size: 10px;
-   font-style: normal;
-   font-weight: 400;
-   vertical-align: middle;
-}
-
+/* 文档版本：处理中的新版本、版本历史和同名上传选择（版本号和版本角标改用公共标签，见 tag.css）。 */
 .document-list-copy small.version-pending {
    color: #b1771b;
 }
 
 .document-list-copy small.version-pending.is-failed {
    color: #d45160;
-}
-
-.version-badge {
-   display: inline-block;
-   margin-left: 10px;
-   padding: 3px 8px;
-   border: 1px solid #d09aa1;
-   border-radius: 5px;
-   color: #c44e5e;
-   font-family: 'DM Mono', monospace;
-   font-size: 11px;
-   font-style: normal;
-   font-weight: 400;
-   vertical-align: middle;
-}
-
-.version-badge.is-current {
-   border-color: var(--t-5a8fdb);
-   color: var(--t-2563eb);
 }
 
 .document-detail-heading p.version-hint {
@@ -3594,7 +3561,6 @@ input:focus {
    color: var(--t-173b5b);
    font-family: 'DM Mono', monospace;
 }
-
 
 .version-meta {
    overflow: hidden;
@@ -4603,11 +4569,6 @@ input:focus {
    font-variant-numeric: tabular-nums;
 }
 
-.ev-history-table .ev-history-kind {
-   color: var(--t-315c7c);
-   font-weight: 600;
-}
-
 .ev-history-table .ev-config-cell {
    line-height: 1.5;
    white-space: nowrap;
@@ -5397,7 +5358,6 @@ input:focus {
    margin-top: 16px;
 }
 
-
 .ev-link {
    border: 1px solid var(--t-abc4dc);
    background: transparent;
@@ -5706,28 +5666,6 @@ input:focus {
    flex-wrap: wrap;
 }
 
-.ev-tag {
-   font-size: 10px;
-   padding: 3px 7px;
-   border: 1px solid var(--t-abc4dc);
-   color: var(--t-315c7c);
-   border-radius: 10px;
-}
-
-.ev-tag.is-muted {
-   color: var(--ev-muted);
-}
-
-.ev-tag.is-pair {
-   border-color: var(--t-8ab4e6);
-   color: var(--t-2563eb);
-}
-
-.ev-tag.is-warn {
-   border-color: #d9b46a;
-   color: var(--ev-warn);
-}
-
 /* 审核按钮独立放在题目底部操作栏，和状态标签使用不同视觉语义，避免用户误以为标签可以点击。 */
 .ev-review-button {
    border: 1px solid var(--t-2563eb);
@@ -5765,11 +5703,6 @@ input:focus {
    color: var(--ev-muted);
    font-size: 10px;
    letter-spacing: .08em;
-}
-
-.ev-tag.is-approved {
-   border-color: #8fc3aa;
-   color: #2f7653;
 }
 
 .ev-item h4 {
@@ -5819,8 +5752,6 @@ input:focus {
    display: grid;
    gap: 5px;
 }
-
-
 
 .ev-item-evidence>span,
 .ev-item-answer>span {
@@ -5984,30 +5915,7 @@ input:focus {
    display: none;
 }
 
-/* 文档可见范围：列表角标、上传弹窗与详情页里的选择器。 */
-.visibility-tag {
-   margin-left: 6px;
-   padding: 1px 8px;
-   /* 统一成胶囊形状，和状态标签保持一致；原来 4px 圆角是方角标签。 */
-   border-radius: 999px;
-   background: var(--t-eef3f8);
-   color: var(--t-5e7a95);
-   font-size: 10px;
-   font-style: normal;
-   font-weight: 400;
-   vertical-align: middle;
-}
-
-.visibility-tag.is-shared {
-   background: #fff4e0;
-   color: #9a6511;
-}
-
-.visibility-tag.is-public {
-   background: #e7f6ee;
-   color: #217a4b;
-}
-
+/* 文档可见范围：上传弹窗与详情页里的选择器（列表里的可见范围角标改用公共标签，见 tag.css）。 */
 .permission-picker {
    margin: 16px 0 0;
    padding: 0;
@@ -6159,21 +6067,6 @@ input:focus {
    cursor: not-allowed;
 }
 
-.visibility-tag.is-review.is-pending {
-   background: #f3edff;
-   color: #7045d6;
-}
-
-.visibility-tag.is-unlisted {
-   background: #f1f3f5;
-   color: #6b7280;
-}
-
-.visibility-tag.is-review.is-rejected {
-   background: #fdecee;
-   color: #c93a4b;
-}
-
 @media (max-width: 640px) {
    .permission-options {
       grid-template-columns: 1fr;
@@ -6207,92 +6100,8 @@ input:focus {
    }
 }
 
-/* 通用状态标签：以前各页面的状态有的是纯文字、有的是彩色字、有的是方角标签，样式各不相同；
-   统一成带圆点的胶囊，颜色表达状态含义（绿=完成/正常，蓝=进行中，橙=待处理，红=失败/拒绝，灰=结束/停用）。 */
-.status-tag {
-   display: inline-flex;
-   align-items: center;
-   gap: 5px;
-   padding: 2px 9px;
-   border: 1px solid var(--tag-border);
-   border-radius: 999px;
-   background: var(--tag-bg);
-   color: var(--tag-text);
-   font-size: 11px;
-   font-style: normal;
-   font-weight: 600;
-   line-height: 1.5;
-   white-space: nowrap;
-   --tag-bg: var(--t-f1f5f9);
-   --tag-border: var(--t-dbe3ec);
-   --tag-text: var(--t-5e7a95);
-}
-
-.status-tag::before {
-   content: "";
-   width: 6px;
-   height: 6px;
-   flex: none;
-   border-radius: 50%;
-   background: currentColor;
-}
-
-.status-tag.is-green {
-   --tag-bg: #e8f7ef;
-   --tag-border: #bfe6cf;
-   --tag-text: #1f7a4a;
-}
-
-.status-tag.is-blue {
-   --tag-bg: #eaf1ff;
-   --tag-border: #c3d5fb;
-   --tag-text: #2563eb;
-}
-
-.status-tag.is-orange {
-   --tag-bg: #fff4e5;
-   --tag-border: #f6d9a8;
-   --tag-text: #a86208;
-}
-
-.status-tag.is-red {
-   --tag-bg: #fdecee;
-   --tag-border: #f5c4ca;
-   --tag-text: #c93a4b;
-}
-
-.status-tag.is-purple {
-   --tag-bg: #f3edff;
-   --tag-border: #d9c9fb;
-   --tag-text: #7045d6;
-}
-
-.status-tag.is-gray {
-   --tag-bg: var(--t-f1f4f7);
-   --tag-border: var(--t-dbe2ea);
-   --tag-text: var(--t-6b7f93);
-}
-
-.status-tag.is-gold {
-   --tag-bg: #fdf6e0;
-   --tag-border: #ecd899;
-   --tag-text: #946b00;
-}
-
-.status-tag.is-silver {
-   --tag-bg: #f4f6f8;
-   --tag-border: var(--t-cfd6de);
-   --tag-text: var(--t-56657a);
-}
-
-.status-tag.is-slate {
-   --tag-bg: var(--t-eef4f8);
-   --tag-border: var(--t-c9d9e5);
-   --tag-text: var(--t-3f6a8a);
-}
-
 /* 文档列表右侧状态标签下面还有分段数说明，标签本身保持行内，靠右对齐。 */
-.document-list-info .status-tag {
+.document-list-info .tag {
    margin-left: auto;
 }
 
@@ -6459,7 +6268,7 @@ input:focus {
 }
 
 /* 识别过程里的"采纳 / 未采纳"只是附注，比通用状态标签再小一号，不抢正文。 */
-.intent-trace .status-tag {
+.intent-trace .tag {
    margin-left: 6px;
    padding: 0 6px;
    gap: 3px;
@@ -6469,7 +6278,7 @@ input:focus {
    vertical-align: baseline;
 }
 
-.intent-trace .status-tag::before {
+.intent-trace .tag::before {
    width: 4px;
    height: 4px;
 }
@@ -6518,7 +6327,6 @@ input:focus {
    margin: 4px 0 0;
    white-space: pre-wrap;
 }
-
 
 /* 回答模型收到的对话历史：组成说明直接显示，展开后按时间顺序分三段。 */
 .answer-history>strong {
@@ -7199,28 +7007,6 @@ input:focus {
    color: var(--t-2563eb);
 }
 
-.chunk-source-tag {
-   display: inline-block;
-   margin-left: 8px;
-   padding: 0 7px;
-   border-radius: 8px;
-   font-size: 10px;
-   font-style: normal;
-   font-weight: 500;
-   line-height: 1.7;
-   vertical-align: middle;
-}
-
-.chunk-source-tag.is-reused {
-   background: var(--t-edf1f5);
-   color: var(--t-6b7f93);
-}
-
-.chunk-source-tag.is-computed {
-   background: var(--t-e3eefc);
-   color: var(--t-2563eb);
-}
-
 /* 技术信息每项：值在上，解释在下。 */
 .chunk-tech-value {
    display: grid;
@@ -7639,12 +7425,6 @@ input:focus {
    color: var(--ev-muted);
 }
 
-.ag-hit {
-   font-size: 11px;
-   font-weight: 700;
-   color: var(--ev-good);
-}
-
 .ag-result {
    border-left: 2px solid var(--ev-line);
    padding: 2px 0 2px 8px;
@@ -7959,20 +7739,6 @@ input:focus {
    gap: 10px;
 }
 
-/* 检索参数和耗时用小标签：混合检索、Top K 5、耗时 1.2 秒。 */
-.ag-tag {
-   display: inline-flex;
-   align-items: center;
-   padding: 2px 8px;
-   border: 1px solid var(--ev-line);
-   border-radius: 999px;
-   background: rgba(255, 255, 255, .9);
-   color: var(--t-536d86);
-   font-size: 12px;
-   line-height: 1.6;
-   white-space: nowrap;
-}
-
 .ag-evidence-chunk {
    display: inline-flex;
    align-items: center;
@@ -8053,19 +7819,6 @@ input:focus {
 .ev-root .ev-history-metric-item small {
    font-size: 12px;
    line-height: 1.7;
-}
-
-/* 每次调用的新增分块：「新增 N 片」红色，和新分块的红框对应；无新增是橙色（白查了）。 */
-.ag-tag.is-new {
-   border-color: var(--ev-bad);
-   color: #a8323f;
-   background: #fdecee;
-}
-
-.ag-tag.is-waste {
-   border-color: var(--ev-warn);
-   color: #8a5f12;
-   background: #fff6e3;
 }
 
 /* 这次调用新拿到的分块：红色边框（和是否含证据的绿色底色可以同时出现）。 */
@@ -8291,21 +8044,6 @@ input:focus {
    flex: 1 1 100%;
 }
 
-/* 类型标签：色相由 hues.ts 的预设按出现顺序分配（--tag-h），配色公式和 Agent 执行链的工具标签一致。 */
-.hue-tag {
-   display: inline-flex;
-   align-items: center;
-   padding: 1px 8px;
-   border: 1px solid hsl(var(--tag-h) 45% 78%);
-   border-radius: 999px;
-   background: hsl(var(--tag-h) 80% 96%);
-   color: hsl(var(--tag-h) 62% 30%);
-   font-size: 12px;
-   font-weight: 600;
-   line-height: 1.6;
-   white-space: nowrap;
-}
-
 .type-stats {
    max-width: 560px;
 }
@@ -8320,14 +8058,3 @@ input:focus {
    color: var(--ev-muted);
 }
 
-.rg-result-head .hue-tag,
-.rg-item-meta .hue-tag {
-   flex: none;
-}
-
-/* 评测记录的类型列：评测类型和运行模式都用统一的彩色标签（颜色固定，见 hues.ts 的 labelHue）。 */
-.ev-history-tags {
-   display: inline-flex;
-   flex-wrap: wrap;
-   gap: 4px 6px;
-}

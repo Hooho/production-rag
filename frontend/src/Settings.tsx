@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Tag } from "./Tag";
 import { createGroup, createUser, deleteGroup, getDataPermissions, getLLMSettings, saveDataPermission, listGroups, listUsers, saveLLMSettings, testLLMSettings, updateGroup, updateUser, type AuthUser, type Group, type DataPermissionRow, type LLMSettings, type LLMSettingsInput } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import { formatDuration } from "./format";
@@ -264,7 +265,7 @@ function UserSettings({ currentUser, onToast }: { currentUser: string; onToast: 
       </div>
       <div className="user-table">
         {loading ? <SettingsLoadingSkeleton kind="list" /> : users.map((item) => <div className={`user-row ${item.disabled ? "is-disabled" : ""}`} key={item.username}>
-          <div className="user-name"><strong>{item.username}</strong><span className="user-tags"><span className={`status-tag is-${item.is_admin ? "purple" : "gray"}`}>{item.is_admin ? "管理员" : "普通用户"}</span>{item.disabled && <span className="status-tag is-red">已停用</span>}</span></div>
+          <div className="user-name"><strong>{item.username}</strong><span className="user-tags"><Tag dot tone={item.is_admin ? "accent" : "neutral"}>{item.is_admin ? "管理员" : "普通用户"}</Tag>{item.disabled && <Tag dot tone="danger">已停用</Tag>}</span></div>
           <div className="user-checks">{groups.length === 0 ? <small className="settings-hint">无部门</small> : groups.map((group) => <label key={group.id}><input type="checkbox" disabled={busy} checked={item.groups.includes(group.id)} onChange={() => void run(() => updateUser(item.username, { groups: toggle(item.groups, group.id) }), `已更新 ${item.username} 的部门`)} />{groupLabel(group.id)}</label>)}</div>
           <div className="user-actions">
             <button type="button" className="secondary-button" disabled={busy} onClick={() => void resetPassword(item.username)}>重置密码</button>

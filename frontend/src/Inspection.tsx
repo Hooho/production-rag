@@ -1,4 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Tag } from "./Tag";
+import { INSPECTION_STATUS_TONES, passTone, type Tone } from "./tags";
 import { addEvalSetItems, createEvalSet, getInspectionEvalCandidates, listEvalSets, replayInspectionEvent, verifyInspectionIssue, getInspectionIssue, getInspectionSchedule, listInspectionIssues, saveInspectionSchedule, startInspection, updateInspectionIssue, type EvalCandidates, type EvalSetBrief, type EvalSetExpect, type InspectionCloseReason, type InspectionFixType, type InspectionRecheck, type InspectionReplay, type InspectionGapSummary, type InspectionDiagnosis, type InspectionDiagnosisCategory, type InspectionDiagnosisChunk, type InspectionEvent, type InspectionSchedule, type InspectionScheduleView, type InspectionIssue, type InspectionIssueFull, type InspectionIssuePage, type InspectionKind, type InspectionStatus } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./Inspection.css";
@@ -14,7 +16,6 @@ const STATUS_TABS: { key: InspectionStatus | null; label: string }[] = [
 ];
 // 诊断结论筛选的顺序：越靠前越需要管理员动手。
 const DIAGNOSIS_ORDER: InspectionDiagnosisCategory[] = ["permission", "routing", "retrieval", "content", "out_of_scope", "answerable", "unknown"];
-const STATUS_TONES: Record<InspectionStatus, string> = { open: "orange", handled: "blue", resolved: "green", ignored: "gray" };
 const FEEDBACK_REASONS: Record<string, string> = { wrong: "答错了", incomplete: "没答全", missed: "资料里有却说找不到", citation: "引用不对", other: "其他" };
 const TRIGGERS: Record<string, string> = { cli: "命令行", api: "手动", schedule: "定时" };
 
@@ -382,10 +383,10 @@ function IssueRow({ issue, signals, open, onToggle, onChanged, onToast }: { issu
       <div className="inspection-item-main">
         <div className="inspection-item-tags">
           <span className={`inspection-kind is-${issue.kind}`}>{issue.kind_label}</span>
-          <span className={`status-tag is-${STATUS_TONES[issue.status]}`}>{issue.status_label}{(issue.close_reason_label || (issue.status !== "open" && issue.fix_type_label)) && ` · ${issue.close_reason_label || issue.fix_type_label}`}</span>
+          <Tag dot tone={INSPECTION_STATUS_TONES[issue.status] ?? "neutral"}>{issue.status_label}{(issue.close_reason_label || (issue.status !== "open" && issue.fix_type_label)) && ` · ${issue.close_reason_label || issue.fix_type_label}`}</Tag>
           {issue.detail.diagnosis && issue.status !== "resolved" && <span className={`inspection-category is-${issue.detail.diagnosis.category}`} title="离线重跑检索得出的拒答原因">{issue.detail.diagnosis.label}</span>}
-          {issue.status === "open" && issue.detail.reopened && <span className="status-tag is-red">处理后再次出现</span>}
-          {issue.status === "open" && issue.detail.verification && <span className="status-tag is-red">验证未通过</span>}
+          {issue.status === "open" && issue.detail.reopened && <Tag dot tone="danger">处理后再次出现</Tag>}
+          {issue.status === "open" && issue.detail.verification && <Tag dot tone="danger">验证未通过</Tag>}
         </div>
         <div className="inspection-item-title">{issue.title}</div>
         <SignalChips counts={issue.detail.signals} labels={signals} />
@@ -568,13 +569,13 @@ function EventItem({ issueId, event, signals, replay, onReplayed, onToast }: { i
 
 // 重新提问的结果：现在是回答了、拒答了还是出错，回答原文（可折叠）和用到的资料。
 function ReplayResult({ replay, event }: { replay: InspectionReplay; event: InspectionEvent }) {
-  const outcome = replay.error ? { label: "出错", tone: "red" } : replay.refused ? { label: "拒答", tone: "orange" }
-    : replay.route && replay.route !== "knowledge" ? { label: "走了其他工具", tone: "orange" } : { label: "回答了", tone: "green" };
+  const outcome: { label: string; tone: Tone } = replay.error ? { label: "出错", tone: "danger" } : replay.refused ? { label: "拒答", tone: "warning" }
+    : replay.route && replay.route !== "knowledge" ? { label: "走了其他工具", tone: "warning" } : { label: "回答了", tone: "success" };
   const sources = replay.sources ?? [];
   return <div className="inspection-replay">
     <div className="inspection-replay-head">
       <span className="inspection-explain-title">重新提问</span>
-      <span className={`status-tag is-${outcome.tone}`}>{outcome.label}</span>
+      <Tag dot tone={outcome.tone}>{outcome.label}</Tag>
       <span className="inspection-diagnosis-time">{replay.by}（{formatTime(replay.at)}）：以 {replay.owner} 的身份完整再问一遍</span>
     </div>
     {event.question && replay.question !== event.question && <div className="inspection-event-line">多轮追问，用补全后的问题提问：{replay.question}</div>}
@@ -746,7 +747,7 @@ function SourceList({ event }: { event: InspectionEvent }) {
           <strong>{source.id}</strong>
           <span>《{source.title}》{source.version ? ` v${source.version}` : ""}{source.page_start ? ` · 第 ${source.page_start} 页` : ""}{source.heading ? ` · ${source.heading}` : ""}</span>
           {typeof source.score === "number" && <span className="inspection-score" title="这段资料和问题的相关度得分，满分 1">得分 {source.score.toFixed(2)}</span>}
-          {event.citation && <span className={`inspection-source-tag ${cited.has(source.id) ? "is-cited" : ""}`}>{cited.has(source.id) ? "模型引用了" : "模型没有引用"}</span>}
+          {event.citation && <Tag size="sm" plain tone={cited.has(source.id) ? "success" : "neutral"}>{cited.has(source.id) ? "模型引用了" : "模型没有引用"}</Tag>}
         </div>
         <SourceText text={source.text} truncated={source.truncated} open={openId === source.id} onToggle={() => setOpenId(openId === source.id ? null : source.id)} />
       </li>)}
@@ -765,7 +766,7 @@ function FilteredList({ event }: { event: InspectionEvent }) {
       <li>
         <div className="inspection-source-head">
           <span>《{chunk.title}》{chunk.version ? ` v${chunk.version}` : ""}{chunk.page_start ? ` · 第 ${chunk.page_start} 页` : ""}{chunk.heading ? ` · ${chunk.heading}` : ""}</span>
-          <span className="inspection-source-tag" title="检索时相关度得分要达到这个值，资料才会交给模型回答（设置 → RAG 配置 → 相关度阈值）">{chunk.score.toFixed(2)} 分，低于回答要求{typeof chunk.min_score === "number" ? `的 ${chunk.min_score.toFixed(2)} 分` : ""}，没有交给模型</span>
+          <Tag size="sm" plain title="检索时相关度得分要达到这个值，资料才会交给模型回答（设置 → RAG 配置 → 相关度阈值）">{chunk.score.toFixed(2)} 分，低于回答要求{typeof chunk.min_score === "number" ? `的 ${chunk.min_score.toFixed(2)} 分` : ""}，没有交给模型</Tag>
         </div>
         <SourceText text={chunk.text} truncated={chunk.truncated} />
       </li>
@@ -880,7 +881,7 @@ function SystemRecheck({ recheck, verifying, onVerify }: { recheck?: InspectionR
       {button}
     </div>
     <div className="inspection-diagnosis-line">
-      <span className={`status-tag is-${recheck.passed ? "green" : "red"}`}>{recheck.passed ? "已恢复" : "未恢复"}</span>
+      <Tag dot tone={passTone(recheck.passed)}>{recheck.passed ? "已恢复" : "未恢复"}</Tag>
       <span className="inspection-diagnosis-question">{recheck.question}</span>
     </div>
     <p className="inspection-diagnosis-sentence">{recheck.message}。</p>
@@ -937,8 +938,8 @@ function DiagnosisChunks({ chunks, owner, minScore }: { chunks?: InspectionDiagn
       <li>
         <div className="inspection-source-head">
           <span>《{chunk.title}》{chunk.version ? ` v${chunk.version}` : ""}{chunk.page_start ? ` · 第 ${chunk.page_start} 页` : ""}{chunk.heading ? ` · ${chunk.heading}` : ""}</span>
-          <span className={`inspection-source-tag ${chunk.passed ? "is-cited" : ""}`} title="检索时相关度得分要达到这个值，资料才会交给模型回答（设置 → RAG 配置 → 相关度阈值）">{chunk.score.toFixed(2)} 分，{chunk.passed ? "达到" : "低于"}回答要求的 {minScore.toFixed(2)} 分</span>
-          <span className={`inspection-source-tag ${chunk.visible ? "" : "is-hidden"}`}>{chunk.visible ? `${owner} 能看到` : `${owner} 看不到`}</span>
+          <Tag size="sm" plain tone={chunk.passed ? "success" : "neutral"} title="检索时相关度得分要达到这个值，资料才会交给模型回答（设置 → RAG 配置 → 相关度阈值）">{chunk.score.toFixed(2)} 分，{chunk.passed ? "达到" : "低于"}回答要求的 {minScore.toFixed(2)} 分</Tag>
+          <Tag size="sm" plain tone={chunk.visible ? "neutral" : "danger"}>{chunk.visible ? `${owner} 能看到` : `${owner} 看不到`}</Tag>
         </div>
         <SourceText text={chunk.text} truncated={chunk.truncated} />
       </li>
@@ -959,7 +960,7 @@ function ParseQuality({ detail, verifying, onVerify }: { detail: InspectionIssue
     {problems.length === 0 ? <p className="inspection-hint">当前版本没有发现解析问题。</p> : <ul className="inspection-parse-list">
       {problems.map((problem) => <li key={problem.code}>
         <details>
-          <summary><span className={`inspection-parse-tag is-${problem.code}`}>{problem.label}</span>{problem.message}</summary>
+          <summary><Tag size="sm" hue={true} className="is-before">{problem.label}</Tag>{problem.message}</summary>
           <ul className="inspection-parse-examples">{problem.examples.map((text, index) => <li key={index}><code>{text}</code></li>)}</ul>
         </details>
       </li>)}

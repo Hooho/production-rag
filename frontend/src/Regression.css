@@ -445,25 +445,6 @@
    color: var(--t-475569);
 }
 
-.rg-change {
-   border: 1px solid currentColor;
-   border-radius: 2px;
-   padding: 0 6px;
-   font-size: 11px;
-}
-
-.rg-change.is-green {
-   color: #15803d;
-}
-
-.rg-change.is-red {
-   color: #b42318;
-}
-
-.rg-change.is-gray {
-   color: var(--t-64748b);
-}
-
 .rg-details summary {
    color: var(--t-2563eb);
    font-size: 12px;

@@ -8,6 +8,8 @@ import { ListingPanel } from "./Listing";
 import Memory from "./Memory";
 import { clearLiveChat, finishedRoundsFor, getLiveChat, saveFinishedRounds, startLiveChat, updateLiveChat, useLiveChat } from "./liveChat";
 import "./guard.css";
+import { Tag } from "./Tag";
+import { documentStatusTone, VISIBILITY_TONES, type Tone } from "./tags";
 import Settings from "./Settings";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import { AgentLiveRounds, AgentStepView } from "./AgentTrace";
@@ -515,7 +517,7 @@ function Chat({ sessionId, initialMessages, historyRuns, onNewChat, onOpenHistor
     onOpenHistory(session);
   }
 
-  return <section className="chat-layout"><HistoryRail runs={localHistory} activeSessionId={sessionId} onSelect={selectHistory} onNewChat={onNewChat} busy={busy} /><div className="chat-column"><div className="messages" ref={messagesRef} onScroll={handleScroll}>{messages.length === 0 && !busy && !pendingQuestion && <div className="empty-state"><div className="empty-orbit">✦</div><h2>从一个问题开始</h2><p>试试“退货政策是什么？”或“查询订单 A1001”。</p></div>}{messages.map((message, index) => { const requestId = message.request_id || `message-${index}`; const questionText = message.steps.find((step) => step.id === "request")?.result?.question as string ?? "本轮问题"; const collapsed = collapsedMessages[requestId] ?? false; return <article className={`message-card ${collapsed ? "is-collapsed" : ""}`} key={requestId}><div className="message-index">{String(index + 1).padStart(2, "0")}</div><div className="message-content"><button className="message-toggle" onClick={() => toggleMessage(requestId)} aria-expanded={!collapsed}><span className="question-line">{questionText}{message.mode === "agent" && <span className="message-mode-tag">Agent</span>}</span><span className="collapse-icon">{collapsed ? "＋" : "−"}</span></button>{!collapsed && <div className="message-body"><TraceTimeline steps={message.steps} answer={message.answer} sources={message.sources} traceId={message.trace_id} requestId={message.request_id} rounds={roundsByRequest[message.request_id] ?? finishedRoundsFor(message.request_id)} /><div className="answer"><MarkdownAnswer content={message.answer} /></div>{message.request_id && <AnswerFeedback requestId={message.request_id} initial={message.feedback} onSaved={saveFeedback} />}{message.sources.length > 0 && <details className="sources-panel"><summary><span>来源</span><strong>{message.sources.length} 条检索结果</strong><span className="panel-chevron">⌄</span></summary><div className="sources">{/* 每条来源默认只显示一行正文，点击展开查看全文；以前长文本超出面板被截断，又没法看到完整内容。 */}{message.sources.map((source) => <details className="source" key={source.id}><summary><span>{source.id}</span><div><strong>{source.title}<small className="source-location">{sourceLocation(source.version, source.page_start, source.heading)}</small></strong><p>{source.text}</p></div><span className="source-toggle" aria-hidden="true">⌄</span></summary></details>)}</div></details>}<div className="trace">链路编号：{message.trace_id}</div></div>}</div></article>; })}{pendingQuestion && <article className="message-card pending-message"><div className="message-index">{String(messages.length + 1).padStart(2, "0")}</div><div className="message-content"><div className="pending-question"><span className="question-line">{pendingQuestion}</span>{busy && <span className="pending-indicator"><span className="pulse-dot" />处理中</span>}</div><div className="message-body"><TraceTimeline steps={streamSteps} live={busy} /><AgentLiveRounds rounds={streamRounds} busy={busy} />{streamAnswer ? <div className="answer"><MarkdownAnswer content={streamAnswer} streaming={busy} /></div> : busy ? <ChatAnswerSkeleton /> : null}{pendingError && <div className="pending-error"><span>本次处理未完成，已保留收到的阶段记录：{pendingError}</span>{!busy && <button type="button" className="pending-retry" onClick={() => void submit(pendingQuestion)}>重试</button>}</div>}</div></div></article>}</div><div className="composer"><div className="chat-mode-row"><div className="chat-mode-switch" role="group" aria-label="问答模式"><button type="button" className={mode === "fixed" ? "active" : ""} onClick={() => chooseMode("fixed")} disabled={busy}>固定流程</button><button type="button" className={mode === "agent" ? "active" : ""} onClick={() => chooseMode("agent")} disabled={busy}>Agent</button></div><span>{mode === "agent" ? "模型自己决定调用哪些工具、调用几次，资料齐了再回答" : "意图识别 → 路由 → 检索 → 回答，每个问题只走一条路"}</span></div><textarea value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submit(); } }} placeholder="询问知识库，或调用业务工具…" rows={3} /><button className="send-button" onClick={() => void submit()} disabled={busy || !sessionId}>{busy ? "处理中…" : "发送 ↑"}</button></div>{error && <div className="field-error">{error}</div>}</div></section>;
+  return <section className="chat-layout"><HistoryRail runs={localHistory} activeSessionId={sessionId} onSelect={selectHistory} onNewChat={onNewChat} busy={busy} /><div className="chat-column"><div className="messages" ref={messagesRef} onScroll={handleScroll}>{messages.length === 0 && !busy && !pendingQuestion && <div className="empty-state"><div className="empty-orbit">✦</div><h2>从一个问题开始</h2><p>试试“退货政策是什么？”或“查询订单 A1001”。</p></div>}{messages.map((message, index) => { const requestId = message.request_id || `message-${index}`; const questionText = message.steps.find((step) => step.id === "request")?.result?.question as string ?? "本轮问题"; const collapsed = collapsedMessages[requestId] ?? false; return <article className={`message-card ${collapsed ? "is-collapsed" : ""}`} key={requestId}><div className="message-index">{String(index + 1).padStart(2, "0")}</div><div className="message-content"><button className="message-toggle" onClick={() => toggleMessage(requestId)} aria-expanded={!collapsed}><span className="question-line">{questionText}{message.mode === "agent" && <Tag size="sm" className="is-after" hue={true}>Agent</Tag>}</span><span className="collapse-icon">{collapsed ? "＋" : "−"}</span></button>{!collapsed && <div className="message-body"><TraceTimeline steps={message.steps} answer={message.answer} sources={message.sources} traceId={message.trace_id} requestId={message.request_id} rounds={roundsByRequest[message.request_id] ?? finishedRoundsFor(message.request_id)} /><div className="answer"><MarkdownAnswer content={message.answer} /></div>{message.request_id && <AnswerFeedback requestId={message.request_id} initial={message.feedback} onSaved={saveFeedback} />}{message.sources.length > 0 && <details className="sources-panel"><summary><span>来源</span><strong>{message.sources.length} 条检索结果</strong><span className="panel-chevron">⌄</span></summary><div className="sources">{/* 每条来源默认只显示一行正文，点击展开查看全文；以前长文本超出面板被截断，又没法看到完整内容。 */}{message.sources.map((source) => <details className="source" key={source.id}><summary><span>{source.id}</span><div><strong>{source.title}<small className="source-location">{sourceLocation(source.version, source.page_start, source.heading)}</small></strong><p>{source.text}</p></div><span className="source-toggle" aria-hidden="true">⌄</span></summary></details>)}</div></details>}<div className="trace">链路编号：{message.trace_id}</div></div>}</div></article>; })}{pendingQuestion && <article className="message-card pending-message"><div className="message-index">{String(messages.length + 1).padStart(2, "0")}</div><div className="message-content"><div className="pending-question"><span className="question-line">{pendingQuestion}</span>{busy && <span className="pending-indicator"><span className="pulse-dot" />处理中</span>}</div><div className="message-body"><TraceTimeline steps={streamSteps} live={busy} /><AgentLiveRounds rounds={streamRounds} busy={busy} />{streamAnswer ? <div className="answer"><MarkdownAnswer content={streamAnswer} streaming={busy} /></div> : busy ? <ChatAnswerSkeleton /> : null}{pendingError && <div className="pending-error"><span>本次处理未完成，已保留收到的阶段记录：{pendingError}</span>{!busy && <button type="button" className="pending-retry" onClick={() => void submit(pendingQuestion)}>重试</button>}</div>}</div></div></article>}</div><div className="composer"><div className="chat-mode-row"><div className="chat-mode-switch" role="group" aria-label="问答模式"><button type="button" className={mode === "fixed" ? "active" : ""} onClick={() => chooseMode("fixed")} disabled={busy}>固定流程</button><button type="button" className={mode === "agent" ? "active" : ""} onClick={() => chooseMode("agent")} disabled={busy}>Agent</button></div><span>{mode === "agent" ? "模型自己决定调用哪些工具、调用几次，资料齐了再回答" : "意图识别 → 路由 → 检索 → 回答，每个问题只走一条路"}</span></div><textarea value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submit(); } }} placeholder="询问知识库，或调用业务工具…" rows={3} /><button className="send-button" onClick={() => void submit()} disabled={busy || !sessionId}>{busy ? "处理中…" : "发送 ↑"}</button></div>{error && <div className="field-error">{error}</div>}</div></section>;
 }
 
 // 回答流首个文字片段到达前使用内容骨架；原来只有阶段圆点，回答区域会显得空白且不稳定。
@@ -1232,7 +1234,7 @@ function IntentTrace({ items }: { items: unknown[] }) {
     return <li key={index} className={accepted ? "is-accepted" : ""}>
       <span className="intent-trace-mark"><b>{index + 1}</b></span>
       <div><IntentStageTitle stage={String(step.stage ?? "")} title={String(step.title ?? "")} />：{String(step.result ?? "")}
-        <em className={`status-tag is-${accepted ? "green" : "gray"}`}>{accepted ? "采纳" : last ? "未采纳" : "未采纳，交给下一环"}</em>
+        <Tag dot tone={accepted ? "success" : "neutral"}>{accepted ? "采纳" : last ? "未采纳" : "未采纳，交给下一环"}</Tag>
         {candidateText.length > 0 && <small>候选：{candidateText.join(" · ")}</small>}
         <IntentContext context={step.context} /></div>
     </li>;
@@ -1417,12 +1419,12 @@ function VectorRule({ entry, blocked }: { entry: GuardRule & { vector?: VectorCh
 // 第二、三层各只有一项：写明分数、阈值和处置（命中拦截 / 超过阈值只记录 / 未命中 / 跳过）。
 function LayerRule({ label, description, check, blocked }: { label: string; description?: string; check: { score?: number | null; action?: string | null; error?: string; skipped?: string }; blocked: boolean }) {
   const skipped = Boolean(check.error || check.skipped) || check.score === null || check.score === undefined;
-  const [tag, color] = blocked ? ["命中，已拦截", "red"] : check.action === "log" ? ["超过阈值，只记录", "orange"] : skipped ? ["跳过", "gray"] : ["未命中", "green"];
+  const [tag, tone]: [string, Tone] = blocked ? ["命中，已拦截", "danger"] : check.action === "log" ? ["超过阈值，只记录", "warning"] : skipped ? ["跳过", "neutral"] : ["未命中", "success"];
   return <ol className="intent-trace guard-rules">
     <li className={blocked ? "is-accepted" : ""}>
       <span className="intent-trace-mark"><b>1</b></span>
       <div><strong>{label}</strong>
-        <em className={`status-tag is-${color}`}>{tag}</em>
+        <Tag dot tone={tone}>{tag}</Tag>
         {description && <small>{description}</small>}</div>
     </li>
   </ol>;
@@ -1434,7 +1436,7 @@ function GuardRuleList({ catalog, hits }: { catalog: GuardRule[]; hits: GuardHit
     return <li key={item.rule} className={matched.length > 0 ? "is-accepted" : ""}>
       <span className="intent-trace-mark"><b>{index + 1}</b></span>
       <div><strong>{item.label ?? item.rule}</strong>
-        <em className={`status-tag is-${matched.length > 0 ? "red" : "green"}`}>{matched.length > 0 ? "命中" : "未命中"}</em>
+        <Tag dot tone={matched.length > 0 ? "danger" : "success"}>{matched.length > 0 ? "命中" : "未命中"}</Tag>
         {item.description && <small>{item.description}</small>}
         {item.examples && item.examples.length > 0 && <small>例如：{item.examples.map((example) => `「${example}」`).join(" ")}</small>}
         {item.action && <small>处理：{item.action}</small>}
@@ -2307,17 +2309,7 @@ function pendingVersionHint(status: string) {
   return "，完成后自动替换";
 }
 
-// 文档处理状态对应的标签颜色；以前只是彩色粗体字，排队和处理中都是同一种黄色，扫一眼分不清。
-function documentStatusTone(status: string) {
-  if (status.startsWith("ready")) return "green";
-  if (status.startsWith("processing")) return "blue";
-  if (status === "queued") return "orange";
-  if (status === "failed" || status === "rejected") return "red";
-  if (status.startsWith("review:")) return "purple";
-  if (status.startsWith("staged:")) return "orange";
-  if (status.startsWith("flagged:")) return "red";
-  return "gray";
-}
+// 文档处理状态对应的标签颜色见 tags.ts 的 documentStatusTone。
 
 // 版本角标：当前版本、处理中的新版本或已被取代的旧版本。
 function versionBadge(document: DocumentStatus) {
@@ -2397,11 +2389,11 @@ function DocumentList({ documents, username, allGroups, onSelect, onUpload }: { 
     {documents.length === 0 ? <div className="empty-docs">还没有导入文档</div> : <div className="document-list-items">{documents.map((document) => <button className="document-list-item" key={document.document_id} onClick={() => onSelect(document.document_id)}>
       <span className="document-file-icon">▤</span>
       <span className="document-list-copy">
-        <strong>{document.title}<em className="version-tag">v{document.version ?? 1}</em><em className={`visibility-tag is-${document.visibility ?? "private"}`}>{visibilityLabel(document.visibility, document.groups, allGroups)}</em>{document.publish_review && <em className={`visibility-tag is-review is-${document.publish_review.status}`}>{document.publish_review.status === "pending" ? "公开审核中" : "公开未通过"}</em>}{document.listing === "unlisted" && <em className="visibility-tag is-unlisted">已下架</em>}</strong>
+        <strong>{document.title}<Tag size="sm" outline plain mono className="is-after">v{document.version ?? 1}</Tag><Tag size="sm" plain className="is-after" tone={VISIBILITY_TONES[document.visibility ?? "private"] ?? "neutral"}>{visibilityLabel(document.visibility, document.groups, allGroups)}</Tag>{document.publish_review && <Tag size="sm" plain className="is-after" tone={document.publish_review.status === "pending" ? "accent" : "danger"}>{document.publish_review.status === "pending" ? "公开审核中" : "公开未通过"}</Tag>}{document.listing === "unlisted" && <Tag size="sm" plain className="is-after" tone="neutral">已下架</Tag>}</strong>
         <small>{document.owner && document.owner !== username ? `${document.owner} 共享 · ` : ""}{document.filename}{document.error ? ` · ${document.error}` : ""}</small>
         {document.pending && <small className={`version-pending ${document.pending.status === "failed" || document.pending.status === "rejected" || document.pending.status.startsWith("flagged:") ? "is-failed" : ""}`}>v{document.pending.version} {documentStatusLabel(document.pending)}{pendingVersionHint(document.pending.status)}</small>}
       </span>
-      <span className="document-list-info"><span className={`status-tag is-${documentStatusTone(document.status)}`}>{documentStatusLabel(document)}</span><small>{documentChunkCount(document) > 0 ? `${documentChunkCount(document)} 段` : "等待处理"}{(document.version_count ?? 1) > 1 ? ` · 共 ${document.version_count} 个版本` : ""}</small></span>
+      <span className="document-list-info"><Tag dot tone={documentStatusTone(document.status)}>{documentStatusLabel(document)}</Tag><small>{documentChunkCount(document) > 0 ? `${documentChunkCount(document)} 段` : "等待处理"}{(document.version_count ?? 1) > 1 ? ` · 共 ${document.version_count} 个版本` : ""}</small></span>
       <span className="document-list-arrow">›</span>
     </button>)}</div>}
   </div>;
@@ -2413,7 +2405,7 @@ function VersionHistory({ document, onSelect }: { document: DocumentStatus; onSe
   if (versions.length === 0) return <div className="document-panel-empty">没有版本记录</div>;
   return <div className="version-history">{versions.map((version) => <button className={`version-row ${version.document_id === document.document_id ? "is-viewing" : ""}`} key={version.document_id} onClick={() => onSelect(version.document_id)}>
     <strong>v{version.version}</strong>
-    <span className={`status-tag is-${version.is_current ? "green" : documentStatusTone(version.status)}`}>{version.is_current ? "当前版本" : documentStatusLabel(version)}</span>
+    <Tag dot tone={version.is_current ? "success" : documentStatusTone(version.status)}>{version.is_current ? "当前版本" : documentStatusLabel(version)}</Tag>
     <span className="version-meta">{version.filename}{version.created ? ` · ${formatHistoryDate(version.created, true)}` : ""}</span>
     <span className="version-note">{version.version_note || "无版本说明"}</span>
     {version.error && <span className="version-error" title={version.error}>{version.error}</span>}
@@ -2541,7 +2533,7 @@ function DocumentChunkCard({ chunk, expanded, onToggle }: { chunk: DocumentChunk
   // 文件名去掉扩展名后和标题一样时只写一次。
   const sameName = chunk.source.replace(/\.[^.]+$/, "") === chunk.document_title;
   return <article className={`document-chunk-card ${expanded ? "expanded" : ""}`}>
-    <div className="document-chunk-summary"><div className="document-chunk-copy"><strong>第 {String(chunk.position).padStart(3, "0")} 段 · {chunk.char_count} 字 · {pages}{chunk.context && !chunk.context.includes("<think") ? "" : " · 无上下文说明"}{chunk.vector_source && <em className={`chunk-source-tag is-${chunk.vector_source}`}>{chunk.vector_source === "reused" ? "复用" : "新计算"}</em>}</strong><small>{heading}</small></div><button className="chunk-toggle-button" onClick={onToggle}>{expanded ? "收起" : "展开"}</button></div>
+    <div className="document-chunk-summary"><div className="document-chunk-copy"><strong>第 {String(chunk.position).padStart(3, "0")} 段 · {chunk.char_count} 字 · {pages}{chunk.context && !chunk.context.includes("<think") ? "" : " · 无上下文说明"}{chunk.vector_source && <Tag size="sm" plain className="is-after" tone={chunk.vector_source === "reused" ? "neutral" : "info"}>{chunk.vector_source === "reused" ? "复用" : "新计算"}</Tag>}</strong><small>{heading}</small></div><button className="chunk-toggle-button" onClick={onToggle}>{expanded ? "收起" : "展开"}</button></div>
     {expanded && <div className="document-chunk-body">
       <section className="chunk-group">
         <h4>位置</h4>
@@ -2615,7 +2607,7 @@ function DocumentDetail({ document, tab, chunkData, chunkLoading, expandedChunks
   const hasNext = totalPages > 0 && page < totalPages;
   const chunkPages = pageNumbers(totalPages, page);
   return <section className="document-detail-page">
-    <div className="document-detail-heading"><div><button className="detail-back-button" onClick={onBack}>‹ 返回文档列表</button><h2>{document.title}<em className={`version-badge ${document.is_current ? "is-current" : ""}`}>{versionBadge(document)}</em></h2><p>{document.filename} · 最后更新 {formatHistoryDate(document.updated ?? document.created ?? "", true)}</p>{!document.is_current && current && <p className="version-hint">检索使用的是 v{current.version}，<button className="link-button" onClick={() => onSelectVersion(current.document_id)}>查看当前版本</button></p>}</div>{document.can_edit !== false && <div className="detail-actions"><button className="secondary-button" onClick={onUploadVersion}>上传新版本</button>{/* 删除不再依赖解析状态，卡住或失败的版本也必须能被上传者清理。 */}<button className="delete-button detail-delete-button" onClick={onDelete}>删除文档（全部版本）</button></div>}</div>
+    <div className="document-detail-heading"><div><button className="detail-back-button" onClick={onBack}>‹ 返回文档列表</button><h2>{document.title}<Tag outline mono className="is-after" tone={document.is_current ? "info" : "danger"}>{versionBadge(document)}</Tag></h2><p>{document.filename} · 最后更新 {formatHistoryDate(document.updated ?? document.created ?? "", true)}</p>{!document.is_current && current && <p className="version-hint">检索使用的是 v{current.version}，<button className="link-button" onClick={() => onSelectVersion(current.document_id)}>查看当前版本</button></p>}</div>{document.can_edit !== false && <div className="detail-actions"><button className="secondary-button" onClick={onUploadVersion}>上传新版本</button>{/* 删除不再依赖解析状态，卡住或失败的版本也必须能被上传者清理。 */}<button className="delete-button detail-delete-button" onClick={onDelete}>删除文档（全部版本）</button></div>}</div>
     {permission}
     <div className="document-detail-body"><DocumentMetadataPanel document={document} />
       <div className="document-detail-tabs"><button className={tab === "chunks" ? "active" : ""} onClick={() => onTabChange("chunks")}>分块 <span>{totalChunks}</span></button><button className={tab === "trace" ? "active" : ""} onClick={() => onTabChange("trace")}>处理流程 <span>{processLabel}</span></button><button className={tab === "versions" ? "active" : ""} onClick={() => onTabChange("versions")}>版本历史 <span>{versions.length}</span></button></div>

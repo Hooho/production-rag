@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Tag } from "./Tag";
 import { createPortal } from "react-dom";
 import { activatePromptVersion, getPrompt, listPrompts, savePromptVersion, type PromptBrief, type PromptDetail, type PromptGroup, type PromptVersion } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
@@ -35,7 +36,7 @@ export default function Prompts({ promptId, onNavigate, onToast }: { promptId: s
           {list.items.filter((item) => item.group === group.key).map((item) =>
             <button type="button" key={item.id} className={item.id === selected ? "pr-item is-active" : "pr-item"} onClick={() => onNavigate(`/maintenance/prompts/${item.id}`)}>
               <strong>{item.label}</strong>
-              <span><b className={item.active_version ? "pr-badge is-custom" : "pr-badge"}>{item.active_label}</b>{item.versions > 0 && ` · 共 ${item.versions} 个版本`}</span>
+              <span><Tag size="sm" plain tone={item.active_version ? "info" : "neutral"}>{item.active_label}</Tag>{item.versions > 0 && ` · 共 ${item.versions} 个版本`}</span>
             </button>)}
         </section>)}
       </nav>
@@ -97,7 +98,7 @@ function PromptEditor({ promptId, onChanged, onToast }: { promptId: string; onCh
     <section className="pr-card">
       <div className="pr-head">
         <h2>{data.label}</h2>
-        <span className="pr-current">当前使用 <b className={data.active_version ? "pr-badge is-custom" : "pr-badge"}>{data.active_label}</b>
+        <span className="pr-current">当前使用 <Tag size="sm" plain tone={data.active_version ? "info" : "neutral"}>{data.active_label}</Tag>
           {data.activated_at && <small>{data.activated_by} · {formatTime(data.activated_at)}</small>}</span>
       </div>
       <p className="pr-where">{data.where}</p>
@@ -147,7 +148,7 @@ function VersionRow({ version, isActive, activeText, onLoad, onActivate }: { ver
   const [confirming, setConfirming] = useState(false);
   return <li className={isActive ? "is-active" : ""}>
     <div className="pr-version-head">
-      <b className={version.version ? "pr-badge is-custom" : "pr-badge"}>{version.label}</b>
+      <Tag size="sm" plain tone={version.version ? "info" : "neutral"}>{version.label}</Tag>
       {isActive && <span className="pr-using">当前使用</span>}
       <span className="pr-version-note">{version.note || "（没有填写说明）"}</span>
       <span className="pr-version-meta">{version.created_by ? `${version.created_by} · ${formatTime(version.created)}` : "代码内置"}</span>

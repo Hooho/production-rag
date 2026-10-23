@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Tag } from "./Tag";
 import { locateEvalEvidence, type EvalEvidenceChunk, type EvalEvidenceLookup } from "./api";
 import "./EvidenceChunks.css";
 
@@ -37,8 +38,8 @@ function ChunkView({ chunk }: { chunk: EvalEvidenceChunk }) {
       <strong>《{chunk.title}》</strong>
       {chunk.heading && <span>{chunk.heading}</span>}
       <span>第 {chunk.position + 1} 段 · {chunk.chars} 字{chunk.token_count !== null ? ` · ${chunk.token_count} token` : ""}</span>
-      {chunk.truncated && <span className="evc-tag is-cut">超过 {chunk.max_tokens ?? 512} token，最后 {cutChars} 字没参与向量计算</span>}
-      {chunk.truncated && <span className={`evc-tag ${inCut ? "is-cut" : "is-ok"}`}>{inCut ? "证据在被截掉的部分" : "证据在保留的部分"}</span>}
+      {chunk.truncated && <Tag size="sm" plain outline tone="warning">超过 {chunk.max_tokens ?? 512} token，最后 {cutChars} 字没参与向量计算</Tag>}
+      {chunk.truncated && <Tag size="sm" plain outline tone={inCut ? "warning" : "success"}>{inCut ? "证据在被截掉的部分" : "证据在保留的部分"}</Tag>}
     </div>
     {chunk.prefix && <details className="evc-prefix"><summary>算向量时正文前面还加了一段</summary><div>{chunk.prefix}</div></details>}
     <div className="evc-content">{pieces(chunk.content, start, end, cut).map((piece, index) => <span key={index} className={`${piece.match ? "evc-match" : ""} ${piece.cut ? "evc-cut" : ""}`}>{piece.text}</span>)}</div>

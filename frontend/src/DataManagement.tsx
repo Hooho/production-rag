@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { Tag } from "./Tag";
+import { colorTone } from "./tags";
 import { DataRequestError, commitDataBatch, createDataRecord, deleteDataBatch, deleteDataRecord, generateDataPreview, listDataOptions, listDataRecords, listDataTypes, updateDataRecord, type DataAction, type DataField, type DataPage, type DataPreview, type DataRow, type DataType, type DataValue } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./DataManagement.css";
@@ -52,7 +54,7 @@ function displayValue(row: DataRow, field: DataField) {
   if (field.type === "text" && text.length > 24) return text.slice(0, 24) + "…";
   // 状态类枚举以前直接输出文字，和普通字段混在一起不好扫读；有颜色配置时渲染成胶囊标签。
   const tone = field.tones?.[text];
-  if (field.type === "enum" && tone) return <span className={`status-tag is-${tone}`}>{text}</span>;
+  if (field.type === "enum" && tone) return <Tag dot tone={colorTone(tone)}>{text}</Tag>;
   return text;
 }
 
@@ -149,7 +151,7 @@ function DataTable({ type, onToast }: { type: DataType; onToast: ShowToast }) {
           {data?.items.map((row) => <tr key={row.id}>
             <td className="data-id">{row.id}</td>
             {columns.map((field) => <td key={field.name} title={row[field.name] === null ? "" : String(row[field.name])}>{displayValue(row, field)}</td>)}
-            <td>{row.source === "ai" ? <span className="data-badge ai" title={`批次 ${row.batch_id}`}>AI</span> : <span className="data-badge">手动</span>}</td>
+            <td>{row.source === "ai" ? <Tag size="sm" tone="info" title={`批次 ${row.batch_id}`}>AI</Tag> : <Tag size="sm" outline plain>手动</Tag>}</td>
             <td className="data-actions">
               {can("update") && <button type="button" className="secondary-button data-mini" onClick={() => setEditing(row)}>编辑</button>}
               {can("delete") && <button type="button" className="delete-button" onClick={() => void remove(row)}>删除</button>}
@@ -377,7 +379,7 @@ function GeneratePanel({ type, onClose, onToast, onCommitted }: { type: DataType
       {busy && !preview && <LoadingSkeleton className="data-preview-skeleton" label="正在生成数据预览"><SkeletonBlock className="skeleton-line-short" /><SkeletonBlock className="data-preview-skeleton-table" /><SkeletonBlock className="data-preview-skeleton-table" /><SkeletonBlock className="data-preview-skeleton-table" /></LoadingSkeleton>}
       {preview && <>
         <div className="data-preview-meta">
-          <span className={`data-badge ${preview.generator === "llm" ? "ai" : ""}`}>{preview.generator === "llm" ? "大模型生成" : "本地模板"}</span>
+          {preview.generator === "llm" ? <Tag size="sm" tone="info">大模型生成</Tag> : <Tag size="sm" outline plain>本地模板</Tag>}
           {preview.note && <span className="data-hint">{preview.note}</span>}
           <span className="data-hint">共 {preview.rows.length} 行，{validCount} 行可写入</span>
         </div>

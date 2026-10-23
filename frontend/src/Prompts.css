@@ -89,23 +89,6 @@
    font-size: 12px;
 }
 
-.pr-badge {
-   display: inline-block;
-   border: 1px solid var(--t-cedfec);
-   border-radius: 3px;
-   background: #fff;
-   padding: 0 5px;
-   color: var(--t-5e7a95);
-   font-size: 12px;
-   font-weight: 500;
-}
-
-.pr-badge.is-custom {
-   border-color: var(--t-2563eb);
-   background: var(--t-eaf1ff);
-   color: var(--t-1d4ed8);
-}
-
 .pr-card {
    margin-bottom: 16px;
    border: 1px solid var(--t-e3edf5);

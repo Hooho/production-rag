@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { type EvalAgentCall, type EvalCompareKey, type EvalMode, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSummary } from "./api";
 import { formatDuration as formatMs } from "./format";
-import { TypeStats, TypeTag, typeHues } from "./TypeTag";
+import { Tag, TypeStats, TypeTag, typeHues } from "./Tag";
 
 // Agent 检索评测的结果页（后端 app/evaluation/agent_retrieval.py）。
 // Agent 每道题用新会话跑一遍，只看它最后拿到的资料里有没有证据（最后命中），口径和固定流程的「交给模型的资料命中率」一致
@@ -306,7 +306,7 @@ function ChunkTabs({ items, empty }: { items: ChunkItem[]; empty: string }) {
         item.fresh ? "这次调用新拿到的（前面的调用没拿到过）" : ""].filter(Boolean).join("；")} onClick={() => setSelected(selected === item.key ? null : item.key)}>
       {chunkLabel(item.position, item.chunkId)}<small>{item.id}</small>{extendedParts(item).length > 0 && <em className="ag-ext-badge">+扩展 {extendedParts(item).length} 片</em>}</button>)}</div>
     {current && <div className={`ag-chunk-body ${current.hit ? "is-hit" : ""}`}>
-      <div className="ag-chunk-meta"><strong>{chunkLabel(current.position, current.chunkId)}</strong><small>本次检索的 {current.id}</small>{current.title ?? "—"}{current.heading ? ` · ${current.heading}` : ""}{current.relevance !== undefined && current.relevance !== null && <small> · 相关性 {current.relevance.toFixed(2)}{current.low ? "（较低）" : ""}</small>}{current.hit && <span className="ag-hit">含证据</span>}</div>
+      <div className="ag-chunk-meta"><strong>{chunkLabel(current.position, current.chunkId)}</strong><small>本次检索的 {current.id}</small>{current.title ?? "—"}{current.heading ? ` · ${current.heading}` : ""}{current.relevance !== undefined && current.relevance !== null && <small> · 相关性 {current.relevance.toFixed(2)}{current.low ? "（较低）" : ""}</small>}{current.hit && <Tag tone="success" dot>含证据</Tag>}</div>
       {extendedParts(current).length > 0 && <PartsRow item={current} />}
       <p>{current.text}</p>
     </div>}
@@ -364,19 +364,19 @@ function FixedLog({ question }: { question: EvalQuestion }) {
   return <section className="ag-log">
     <div className="ag-log-title">固定流程<small>检索 {searches} 次{sufficiency?.checked ? ` · 判断 ${sufficiency.calls ?? 1} 次` : ""} · 耗时 {formatMs(question.flow_latency_ms ?? question.latency_ms)}</small></div>
     {question.rewrite && <div className="ag-flow-step"><span className="ag-tool">改写</span><span>{rewriteLabel(question)}</span>
-      {question.rewrite.duration_ms !== undefined && question.rewrite.classifier === "llm" && <span className="ag-tag">耗时 {formatMs(question.rewrite.duration_ms)}{question.rewrite.cached ? "（缓存，当时）" : ""}</span>}
+      {question.rewrite.duration_ms !== undefined && question.rewrite.classifier === "llm" && <Tag outline plain>耗时 {formatMs(question.rewrite.duration_ms)}{question.rewrite.cached ? "（缓存，当时）" : ""}</Tag>}
       {question.rerank_query && question.rerank_query !== question.question && <span>补全后的问题 <code>{question.rerank_query}</code></span>}</div>}
     <div className={`ag-call ${usedRetry ? "is-unused" : ""}`}>
       <div className="ag-call-head"><span className="ag-tool">{sufficiency?.retried ? "第 1 次 · " : ""}检索</span>{question.queries.map((query) => <code key={query}>{query}</code>)}
-        <span className="ag-tag">混合检索</span><span className="ag-tag">耗时 {formatMs(question.latency_ms)}</span>{items.some((item) => item.hit) && <span className="ag-hit">命中</span>}
-        {usedRetry && <span className="ag-tag">没采用（换成了补充检索的结果）</span>}</div>
+        <Tag outline plain>混合检索</Tag><Tag outline plain>耗时 {formatMs(question.latency_ms)}</Tag>{items.some((item) => item.hit) && <Tag tone="success" dot>命中</Tag>}
+        {usedRetry && <Tag outline plain>没采用（换成了补充检索的结果）</Tag>}</div>
       <ChunkTabs items={items} empty="过滤后没有分块。" />
     </div>
     {sufficiency && <SufficiencySteps question={question} />}
     {retry && <div className={`ag-call ${usedRetry ? "" : "is-unused"}`}>
       <div className="ag-call-head"><span className="ag-tool">第 2 次 · 补充检索</span>{question.queries.map((query) => <code key={query}>{query}</code>)}{sufficiency?.retry_query && <code>+ {sufficiency.retry_query}</code>}
-        <span className="ag-tag">返回 {retry.returned} 段</span>{retryItems.some((item) => item.hit) && <span className="ag-hit">命中</span>}
-        <span className="ag-tag">{usedRetry ? "采用了" : "没变好，沿用第一次的"}</span></div>
+        <Tag outline plain>返回 {retry.returned} 段</Tag>{retryItems.some((item) => item.hit) && <Tag tone="success" dot>命中</Tag>}
+        <Tag outline plain>{usedRetry ? "采用了" : "没变好，沿用第一次的"}</Tag></div>
       {retry.sources ? <ChunkTabs items={retryItems} empty="补充检索没有返回分块。" /> : <p className="ag-muted">这次评测没有保存补充检索的分块。</p>}
     </div>}
     {question.cleared && <div className="ag-flow-cleared">判断为资料不足，来源已清空：线上这道题会直接拒答，模型什么资料都拿不到。</div>}
@@ -428,14 +428,14 @@ function AgentCall({ call, fresh, evidenceChunks }: { call: EvalAgentCall; fresh
     <div className="ag-call-head">
       <span className="ag-tool">第 {call.call} 次 · {TOOL_LABELS[call.name] ?? call.name}</span>
       {call.name === "search_knowledge" && call.query !== undefined ? <><code>{call.query}</code>
-        <span className="ag-tag">{SEARCH_MODE_LABELS[call.mode ?? ""] ?? call.mode}</span><span className="ag-tag">Top K {call.top_k}</span></>
+        <Tag outline plain>{SEARCH_MODE_LABELS[call.mode ?? ""] ?? call.mode}</Tag><Tag outline plain>Top K {call.top_k}</Tag></>
         : call.name === "read_context" && call.source_id ? <span>{call.source_id} 的{call.direction === "before" ? "前文" : "后文"}</span>
           : <code>{JSON.stringify(call.arguments)}</code>}
-      {call.duration_ms !== undefined && call.duration_ms !== null && <span className="ag-tag">耗时 {formatMs(call.duration_ms)}</span>}
+      {call.duration_ms !== undefined && call.duration_ms !== null && <Tag outline plain>耗时 {formatMs(call.duration_ms)}</Tag>}
       {executed && (call.name === "search_knowledge" || call.name === "read_context") && (newCount > 0
-        ? <span className="ag-tag is-new">新增 {newCount} 片</span>
-        : <span className="ag-tag is-waste" title="这次拿回的分块，前面的调用都已经拿到过">无新增</span>)}
-      {hit && <span className="ag-hit">命中证据 {call.hits.map((index) => index + 1).join("、")}</span>}
+        ? <Tag tone="danger">新增 {newCount} 片</Tag>
+        : <Tag tone="warning" title="这次拿回的分块，前面的调用都已经拿到过">无新增</Tag>)}
+      {hit && <Tag tone="success" dot>命中证据 {call.hits.map((index) => index + 1).join("、")}</Tag>}
     </div>
     {status && <div className="ag-call-meta">{status}{call.error ? `：${call.error}` : ""}</div>}
     {call.note && call.status !== "ok" && <div className="ag-call-meta">{call.note}</div>}

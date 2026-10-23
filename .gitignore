@@ -18,3 +18,4 @@ Claude outputs/
 
 # 静态演示快照的导出结果（scripts/export_static_demo.py 的输出），复制到 next-pages 后就不用了
 /snapshot.new.json
+_to_delete/

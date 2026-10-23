@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { Tag } from "./Tag";
+import type { Tone } from "./tags";
 import { getRuntimeSettings, saveRuntimeSettings, type RuntimeSettingItem, type RuntimeSettingValue, type RuntimeSettingsView } from "./api";
 import { applyTheme } from "./theme";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
@@ -176,10 +178,10 @@ const META: Record<string, Meta> = {
     effect: "调小，推理模型可能没写完就被截断，生成失败；调大，每个分片可能更贵。", when: "之后上传或补全的分片。" },
 };
 
-const IMPACT_TAGS: Record<Impact, { label: string; tone: string }> = {
-  now: { label: "即时生效", tone: "now" },
-  new_docs: { label: "只影响新文档", tone: "new" },
-  judgement: { label: "影响评测与巡检判断", tone: "judge" },
+const IMPACT_TAGS: Record<Impact, { label: string; tone: Tone }> = {
+  now: { label: "即时生效", tone: "success" },
+  new_docs: { label: "只影响新文档", tone: "warning" },
+  judgement: { label: "影响评测与巡检判断", tone: "accent" },
 };
 const THEME_LABELS: Record<string, string> = { blue: "蓝调", green: "绿调（青绿）", log: "只记录", block: "拦截" };
 const TIMEZONE_LABELS: Record<string, string> = { "Asia/Shanghai": "北京时间", "Asia/Hong_Kong": "香港", "Asia/Taipei": "台北", "Asia/Tokyo": "东京", "Asia/Singapore": "新加坡", "Europe/London": "伦敦", "Europe/Berlin": "柏林", "America/New_York": "纽约", "America/Los_Angeles": "洛杉矶", UTC: "UTC" };
@@ -324,7 +326,7 @@ function SettingRow({ item, value, dirty, disabled, onChange }: { item: RuntimeS
     <div className="sys-item-main">
       <div className="sys-item-title">
         <strong>{meta.label}</strong>
-        <span className={`sys-impact is-${tag.tone}`}>{tag.label}</span>
+        <Tag size="sm" plain outline tone={tag.tone}>{tag.label}</Tag>
       </div>
       <p className="sys-what">{meta.what}</p>
       {(meta.why || meta.effect || meta.when) && <dl className="sys-notes">

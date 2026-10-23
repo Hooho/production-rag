@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Tag } from "./Tag";
+import { CHANGE_TONES, passTone, runStatus, type Tone } from "./tags";
 import { listGroups, listUsers, type AuthUser, addEvalSetItems, createEvalSet, deleteEvalSet, deleteEvalSetItem, getEvalSet, getEvalSetRun, listEvalDocuments, listEvalSets, startEvalSetRun, updateEvalSet, updateEvalSetItem, type EvalSetBrief, type EvalSetDocument, type EvalSetExpect, type EvalSetFull, type EvalSetItem, type EvalSetKind, type EvalSetLatest, type EvalSetResult, type EvalSetRun, type EvalSetRunFull } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import "./Regression.css";
@@ -12,10 +14,6 @@ const KIND_LABELS: Record<EvalSetKind, string> = { retrieval: "检索评测", ge
 const KIND_HINTS: Record<EvalSetKind, string> = {
   retrieval: "按提问人的权限检索一遍，看能不能找到资料。不调用大模型，几秒钟。",
   generation: "以提问人的身份完整问一遍，看实际怎么回答。会调用大模型，每题十几秒。",
-};
-const RUN_STATUS: Record<string, { label: string; tone: string }> = {
-  running: { label: "运行中", tone: "blue" }, completed: { label: "已完成", tone: "green" },
-  failed: { label: "失败", tone: "red" }, interrupted: { label: "已中断", tone: "orange" },
 };
 
 function formatTime(value: string | null | undefined) {
@@ -93,7 +91,7 @@ function SetList({ onOpen, onToast }: { onOpen: (id: string) => void; onToast: S
 
 function LatestTag({ kind, latest }: { kind: EvalSetKind; latest?: EvalSetLatest }) {
   if (!latest) return <span className="rg-muted">{KIND_LABELS[kind]}：还没跑过</span>;
-  if (latest.status !== "completed") return <span>{KIND_LABELS[kind]}：{RUN_STATUS[latest.status]?.label ?? latest.status}</span>;
+  if (latest.status !== "completed") return <span>{KIND_LABELS[kind]}：{runStatus(latest.status).label}</span>;
   const all = latest.summary.passed === latest.summary.total;
   return <span>{KIND_LABELS[kind]}：<strong className={all ? "is-pass" : "is-fail"}>{passText(latest.summary)}</strong>（{formatTime(latest.finished)}）</span>;
 }
@@ -263,16 +261,16 @@ function SetDetail({ setId, onBack, onToast }: { setId: string; onBack: () => vo
 }
 
 function RunChip({ run, selected, onClick }: { run: EvalSetRun; selected: boolean; onClick: () => void }) {
-  const status = RUN_STATUS[run.status] ?? { label: run.status, tone: "gray" };
+  const status = runStatus(run.status);
   return <button type="button" role="tab" aria-selected={selected} className={`rg-run ${selected ? "is-selected" : ""}`} onClick={onClick}>
     <span>{run.kind_label}</span>
     <span className="rg-muted">{formatTime(run.started)}</span>
-    {run.status === "completed" ? <strong className={run.summary.passed === run.summary.total ? "is-pass" : "is-fail"}>{passText(run.summary)}</strong> : <span className={`status-tag is-${status.tone}`}>{status.label}</span>}
+    {run.status === "completed" ? <strong className={run.summary.passed === run.summary.total ? "is-pass" : "is-fail"}>{passText(run.summary)}</strong> : <Tag dot tone={status.tone}>{status.label}</Tag>}
   </button>;
 }
 
-const CHANGE_LABELS: Record<string, { label: string; tone: string }> = {
-  fixed: { label: "新通过", tone: "green" }, regressed: { label: "新失败", tone: "red" }, new: { label: "新加入", tone: "gray" },
+const CHANGE_LABELS: Record<string, { label: string; tone: Tone }> = {
+  fixed: { label: "新通过", tone: CHANGE_TONES.fixed }, regressed: { label: "新失败", tone: CHANGE_TONES.regressed }, new: { label: "新加入", tone: CHANGE_TONES.new },
 };
 
 // 一次运行的结果：先看总数和与上次相比的变化，没通过的排在前面。
@@ -299,8 +297,8 @@ function ResultItem({ result }: { result: EvalSetResult }) {
   const hasDetail = (result.documents?.length ?? 0) > 0 || Boolean(result.answer) || Boolean(result.judge?.correctness_reason);
   return <li className={`rg-result ${result.passed ? "is-ok" : "is-bad"}`}>
     <div className="rg-result-head">
-      <span className={`status-tag is-${result.passed ? "green" : "red"}`}>{result.passed ? "通过" : "没通过"}</span>
-      {change && <span className={`rg-change is-${change.tone}`}>{change.label}</span>}
+      <Tag dot tone={passTone(result.passed)}>{result.passed ? "通过" : "没通过"}</Tag>
+      {change && <Tag outline tone={change.tone}>{change.label}</Tag>}
       <span className="rg-result-question">{result.question}</span>
     </div>
     <div className="rg-item-meta">
