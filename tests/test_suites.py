@@ -14,6 +14,27 @@ def test_seeded_suites(setup):
     assert by_name["多轮对话"]["method"] == "dialogue" and by_name["多轮对话"]["item_count"] == 3
     assert listed["methods"] == {"retrieval": "检索", "answer": "回答", "dialogue": "多轮对话"}
     assert client.get("/eval/suites", headers=headers("alice")).status_code == 403
+    # 后来新增的初始专项：新库直接带上；24 道题，证据都在评测语料里（检索方式的校验规则）。
+    late = by_name["Agent 区分题"]
+    assert late["method"] == "retrieval" and late["search_mode"] == "hybrid" and late["item_count"] == 24
+
+
+# 已经初始化过的库：启动时补加后来新增的初始专项，只加一次；用户删掉后不会再加回来。
+def test_late_seed_suites(setup):
+    from app.evaluation.dataset import seed_late_suites, seed_suites
+    from app.evaluation.suites import check_item
+    client, store = setup
+    for suite in seed_suites():
+        if suite.get("late"):
+            for item in suite["items"]:
+                check_item(suite["method"], item)
+    listed = client.get("/eval/suites", headers=headers()).json()["items"]
+    late = next(suite for suite in listed if suite["name"] == "Agent 区分题")
+    assert seed_late_suites(store.engine) == []
+    assert client.delete(f"/eval/suites/{late['id']}", headers=headers()).status_code == 200
+    assert seed_late_suites(store.engine) == []
+    names = [suite["name"] for suite in client.get("/eval/suites", headers=headers()).json()["items"]]
+    assert "Agent 区分题" not in names
 
 
 # 新建、编辑专项和题目：证据必须在评测语料里；同名不行；有题目后不能改评测方式；回答方式必须有参考答案。
@@ -190,3 +211,19 @@ def test_special_retrieval_with_agent(setup, eval_dir, monkeypatch):
     response = client.post("/eval/runs", headers=headers(), json={"kind": "special", "suite_ids": [suite["id"]],
         "modes": ["agent"]})
     assert response.status_code == 422 and "MODEL_MODE=openai" in response.json()["detail"]
+
+
+# 旧库（初始化时还没有这个专项、也没有补加记录）：启动时补加一次。
+def test_late_seed_adds_to_existing_database(setup):
+    from sqlalchemy import delete
+    from app.evaluation.dataset import LATE_SEED_KEY, seed_late_suites
+    from app.mysql.store import settings as settings_table
+    client, store = setup
+    late = next(suite for suite in client.get("/eval/suites", headers=headers()).json()["items"] if suite["name"] == "Agent 区分题")
+    client.delete(f"/eval/suites/{late['id']}", headers=headers())
+    with store.engine.begin() as connection:
+        connection.execute(delete(settings_table).where(settings_table.c.key == LATE_SEED_KEY))
+    assert seed_late_suites(store.engine) == ["Agent 区分题"]
+    assert seed_late_suites(store.engine) == []
+    names = [suite["name"] for suite in client.get("/eval/suites", headers=headers()).json()["items"]]
+    assert names.count("Agent 区分题") == 1

@@ -32,7 +32,7 @@ from ..business.service import (DataError, can_pick, create_batch, create_record
     permission_matrix, ref_options, require, save_permission, update_record, user_permissions)
 from ..auth import (authenticate, check_groups, create_user, decode_access_token, hash_password, issue_tokens,
     load_user, revoke_refresh_token, revoke_user_tokens, rotate_refresh_token, seed_users, set_user_groups)
-from ..evaluation.dataset import QUESTION_TYPES, append_items, corpus_files, corpus_text, generate_items, load_dataset, mark_reviewed, next_item_id, next_pair_id, seed_eval_data, select_split, validate_dataset
+from ..evaluation.dataset import QUESTION_TYPES, append_items, corpus_files, corpus_text, generate_items, load_dataset, mark_reviewed, next_item_id, next_pair_id, seed_eval_data, seed_late_suites, select_split, validate_dataset
 from ..evaluation.results import compare_runs, delete_run, execute_run, import_result_files, list_runs, load_run, previous_run, start_run
 from ..evaluation.retrieval import SUITES, VARIANTS
 from ..evaluation import regression, suites as special_suites
@@ -471,6 +471,8 @@ def create_app(store=None, models=None, jwt_secret=None):
         seed_users(app.state.store.engine)
         # 评测题目存数据库：第一次启动时从 eval/seed 导入初始的调参题和专项。
         seed_eval_data(app.state.store.engine)
+        # 已经初始化过的库：补加后来新增的初始专项（例如「Agent 区分题」），每个只加一次。
+        seed_late_suites(app.state.store.engine)
         # 评测结果也存数据库：第一次启动时把 eval/results 下的旧结果文件导入。
         import_result_files(app.state.store.engine)
         # 设置页保存过模型配置时优先使用它，必须在创建 Agent 之前应用，回答 Agent 才会绑定到这个模型。

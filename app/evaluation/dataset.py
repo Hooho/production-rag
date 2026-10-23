@@ -83,6 +83,48 @@ def seed_eval_data(engine):
     return True
 
 
+# 后来新增的初始专项（suites.json 里标了 "late": true）：已经初始化过的库不会再走 seed_eval_data，
+# 所以每次启动检查一遍，没加过的补加一次；加过的记在 settings 里（key = eval_seeded_late_suites），
+# 之后用户删掉也不会再加回来。库里已有同名专项时只记录、不重复加。返回这次补加的专项名称。
+LATE_SEED_KEY = "eval_seeded_late_suites"
+
+
+def seed_late_suites(engine):
+    late = [suite for suite in seed_suites() if suite.get("late")]
+    if not late:
+        return []
+    from uuid import uuid4
+    added = []
+    with engine.begin() as connection:
+        row = connection.execute(select(settings_table.c.value).where(settings_table.c.key == LATE_SEED_KEY)).first()
+        done = list(((row[0] if row else None) or {}).get("names") or [])
+        now = now_text()
+        changed = False
+        for suite in late:
+            if suite["name"] in done:
+                continue
+            exists = connection.execute(select(eval_suites.c.id).where(eval_suites.c.name == suite["name"])).first()
+            if not exists:
+                suite_id = str(uuid4())
+                connection.execute(eval_suites.insert().values(id=suite_id, name=suite["name"],
+                    description=suite.get("description"), method=suite["method"],
+                    search_mode=suite.get("search_mode", "hybrid"), created_by="system", created=now, updated=now))
+                for position, data in enumerate(suite["items"]):
+                    connection.execute(eval_suite_items.insert().values(id=str(uuid4()), suite_id=suite_id,
+                        position=position, data=data, created_by="system", created=now, updated=now))
+                added.append(suite["name"])
+            done.append(suite["name"])
+            changed = True
+        if changed:
+            value = {"names": done, "at": now}
+            if row:
+                connection.execute(settings_table.update().where(settings_table.c.key == LATE_SEED_KEY).values(
+                    value=value, updated=now))
+            else:
+                connection.execute(settings_table.insert().values(key=LATE_SEED_KEY, value=value, updated=now))
+    return added
+
+
 # 读取调参评测集的全部题目，按加入顺序排列。engine 不传时用系统参数绑定的同一个库。
 def load_dataset(engine=None):
     target = engine or bound_engine()
