@@ -3,6 +3,7 @@ import { SpecialAgentResults, rewriteLabel } from "./AgentEval";
 import { addEvalSuiteItem, createEvalSuite, deleteEvalSuite, deleteEvalSuiteItem, getEvalRun, getEvalSuite, listEvalSuites, startSpecialRun, updateEvalSuite, updateEvalSuiteItem, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSuiteBrief, type EvalSuiteFull, type EvalSuiteItem, type EvalSuiteMethod, type EvalSuiteSearchMode, type EvalSuiteRunEntry } from "./api";
 import { EvidenceDetails } from "./EvidenceChunks";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
+import { TypeStats, TypeTag, typeHues } from "./TypeTag";
 import "./Regression.css";
 import "./Special.css";
 
@@ -13,7 +14,7 @@ type Props = { suiteId: string | null; onNavigate: (path: string) => void; onToa
 
 const METHOD_LABELS: Record<EvalSuiteMethod, string> = { retrieval: "检索", answer: "回答", dialogue: "多轮对话" };
 const METHOD_HINTS: Record<EvalSuiteMethod, string> = {
-  retrieval: "只检索，不调用大模型。证据全部被返回算通过；逐题显示向量检索、关键词检索各排第几，看是谁找到的。题目要有问题和证据原文。",
+  retrieval: "和线上检索一致：改写 → 检索 → 充分性判断 → 补充检索，会调用大模型。最终交给模型的资料里证据全在算通过；逐题显示向量检索、关键词检索各排第几，看是谁找到的。题目要有问题和证据原文，可以标类型。",
   answer: "检索后完整回答，再由评审模型和参考答案比对，要点一致算通过。需要真实大模型。题目要有问题和参考答案，证据可选。",
   dialogue: "按顺序问完一段对话，最后一问要用到前面的内容，评审模型判定要点一致算通过。需要真实大模型。题目是前面几轮提问、最后一问和参考答案。",
 };
@@ -224,6 +225,10 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
   }
 
   if (!data) return <div className="rg-root"><LoadingSkeleton label="正在加载专项"><SkeletonBlock className="skeleton-line" /><SkeletonBlock className="skeleton-line-short" /></LoadingSkeleton></div>;
+  // 题目类型：颜色按第一次出现的顺序取；表单里提示已有的类型，避免同一类写成两种名字。
+  const hues = typeHues(data.items.map((item) => item.type));
+  const types = [...hues.keys()];
+  const typeCounts = types.map((type): [string, number] => [type, data.items.filter((item) => item.type === type).length]);
   return <div className="rg-root">
     <button type="button" className="rg-back" onClick={onBack}>← 全部专项</button>
     {renaming ? <div className="rg-form">
@@ -283,17 +288,19 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
     </section>}
 
     {tab === "items" && <section className="rg-section">
+      {typeCounts.length > 0 && <div className="sp-type-line">{typeCounts.map(([type, count]) => <span key={type}><TypeTag type={type} hues={hues} /> {count} 题</span>)}</div>}
       <div className="rg-section-head">
         <span className="rg-muted">{data.items.length} 题</span>
         {!adding && <button type="button" className="secondary-button" onClick={() => { setEditing(null); setAdding(true); }}>添加题目</button>}
       </div>
-      {adding && <ItemForm suiteId={suiteId} method={data.method} onToast={onToast} onDone={(value) => { setAdding(false); if (value) setData(value); }} />}
+      {adding && <ItemForm suiteId={suiteId} method={data.method} types={types} onToast={onToast} onDone={(value) => { setAdding(false); if (value) setData(value); }} />}
       {data.items.length === 0 && !adding && <p className="rg-muted">还没有题目，点「添加题目」。</p>}
       <ul className="rg-items">
-        {data.items.map((item) => editing === item.id ? <li key={item.id}><ItemForm suiteId={suiteId} method={data.method} initial={item} onToast={onToast} onDone={(value) => { setEditing(null); if (value) setData(value); }} /></li> : <li key={item.id} className="rg-item">
+        {data.items.map((item) => editing === item.id ? <li key={item.id}><ItemForm suiteId={suiteId} method={data.method} initial={item} types={types} onToast={onToast} onDone={(value) => { setEditing(null); if (value) setData(value); }} /></li> : <li key={item.id} className="rg-item">
           <div className="rg-item-main">
             <div className="rg-item-question">{item.question}</div>
             <div className="rg-item-meta">
+              <TypeTag type={item.type} hues={hues} />
               {item.turns && item.turns.length > 0 && <span>前面 {item.turns.length} 轮提问</span>}
               {item.evidence && item.evidence.length > 0 && <span>{item.evidence.length} 条证据</span>}
               {item.reference_answer && <span>有参考答案</span>}
@@ -324,7 +331,8 @@ function RunChip({ run, selected, onClick }: { run: EvalSuiteRunEntry; selected:
 }
 
 // 添加或编辑一道题，字段随评测方式不同；证据每行一条，必须是评测语料里的原文。
-function ItemForm({ suiteId, method, initial, onToast, onDone }: { suiteId: string; method: EvalSuiteMethod; initial?: EvalSuiteItem; onToast: ShowToast; onDone: (value: EvalSuiteFull | null) => void }) {
+function ItemForm({ suiteId, method, initial, types, onToast, onDone }: { suiteId: string; method: EvalSuiteMethod; initial?: EvalSuiteItem; types: string[]; onToast: ShowToast; onDone: (value: EvalSuiteFull | null) => void }) {
+  const [type, setType] = useState(initial?.type ?? "");
   const [question, setQuestion] = useState(initial?.question ?? "");
   const [evidence, setEvidence] = useState((initial?.evidence ?? []).join("\n"));
   const [reference, setReference] = useState(initial?.reference_answer ?? "");
@@ -334,7 +342,7 @@ function ItemForm({ suiteId, method, initial, onToast, onDone }: { suiteId: stri
   async function submit() {
     setBusy(true);
     const payload = { question: question.trim(), evidence: method === "dialogue" ? [] : lines(evidence),
-      reference_answer: reference.trim() || null, turns: method === "dialogue" ? lines(turns) : [] };
+      reference_answer: reference.trim() || null, turns: method === "dialogue" ? lines(turns) : [], type: type.trim() || null };
     try {
       onDone(initial ? await updateEvalSuiteItem(suiteId, initial.id, payload) : await addEvalSuiteItem(suiteId, payload));
     } catch (reason) {
@@ -351,6 +359,8 @@ function ItemForm({ suiteId, method, initial, onToast, onDone }: { suiteId: stri
     {method === "dialogue" && <label className="rg-field is-top"><span>前面的提问</span><textarea value={turns} rows={4} onChange={(event) => setTurns(event.target.value)} placeholder="每行一轮，按顺序问" autoFocus /></label>}
     <label className="rg-field"><span>{method === "dialogue" ? "最后一问" : "问题"}</span><input value={question} maxLength={500} onChange={(event) => setQuestion(event.target.value)} placeholder={method === "dialogue" ? "要用到前面内容的问题，例如「回到我最开始问的那个」" : "完整的问题"} autoFocus={method !== "dialogue"} /></label>
     {method !== "dialogue" && <label className="rg-field is-top"><span>证据原文</span><textarea value={evidence} rows={3} onChange={(event) => setEvidence(event.target.value)} placeholder={method === "retrieval" ? "每行一条，必须是评测语料里的原文" : "可选：每行一条，必须是评测语料里的原文"} /></label>}
+    <label className="rg-field"><span>类型</span><input value={type} maxLength={20} list={`sp-types-${suiteId}`} onChange={(event) => setType(event.target.value)} placeholder={types.length ? `可选，已有：${types.join("、")}` : "可选，例如多跳、比较；结果会按类型统计"} />
+      <datalist id={`sp-types-${suiteId}`}>{types.map((item) => <option key={item} value={item} />)}</datalist></label>
     <label className="rg-field is-top"><span>参考答案</span><textarea value={reference} maxLength={2000} rows={2} onChange={(event) => setReference(event.target.value)} placeholder={method === "retrieval" ? "可选" : "评审模型拿回答和它比对"} /></label>
     <div className="rg-buttons">
       <button type="button" className="secondary-button" onClick={() => onDone(null)} disabled={busy}>取消</button>
@@ -369,6 +379,8 @@ export function SpecialSection({ section }: { section: EvalSpecialSection }) {
   // 检索方式的专项勾了 Agent：换成两种模式的逐题对比（和调参评测的「对比」页同一个列表）。
   if (section.modes?.includes("agent")) return <SpecialAgentResults section={section} />;
   const questions = [...section.questions].sort((a, b) => Number(a.passed) - Number(b.passed));
+  // 类型颜色按题目原来的顺序取，和题目列表里一致（上面排序只是把没通过的放前面）。
+  const hues = typeHues(section.questions.map((question) => question.type));
   const fixed = section.questions.filter((item) => item.passed && item.previous_passed === false).length;
   const regressed = section.questions.filter((item) => !item.passed && item.previous_passed === true).length;
   return <div className="rg-results">
@@ -387,8 +399,9 @@ export function SpecialSection({ section }: { section: EvalSpecialSection }) {
         <span>最后一问平均输入 {variant.input_tokens_avg === null ? "—" : `${Math.round(variant.input_tokens_avg)} Token`}</span>
       </li>)}
     </ul>}
+    {section.by_type && <TypeStats stats={section.by_type} hues={hues} both={false} />}
     <ul className="rg-result-list">
-      {questions.map((question) => <SpecialQuestion key={question.id} question={question} method={section.method} searchMode={section.search_mode ?? "hybrid"} />)}
+      {questions.map((question) => <SpecialQuestion key={question.id} question={question} hues={hues} method={section.method} searchMode={section.search_mode ?? "hybrid"} />)}
     </ul>
   </div>;
 }
@@ -396,7 +409,7 @@ export function SpecialSection({ section }: { section: EvalSpecialSection }) {
 // 充分性判断结论的简称（完整检索流程，见 app/evaluation/flow.py）。
 const SUFFICIENCY_SHORT: Record<string, string> = { sufficient: "够了", partial: "只够一部分", insufficient: "不够" };
 
-function SpecialQuestion({ question, method, searchMode }: { question: EvalSpecialQuestion; method: EvalSuiteMethod; searchMode: EvalSuiteSearchMode }) {
+function SpecialQuestion({ question, hues, method, searchMode }: { question: EvalSpecialQuestion; hues: Map<string, number>; method: EvalSuiteMethod; searchMode: EvalSuiteSearchMode }) {
   const change = question.previous_passed === undefined || question.previous_passed === null || question.previous_passed === question.passed ? null
     : question.passed ? { label: "新通过", tone: "green" } : { label: "新失败", tone: "red" };
   const judgement = question.judgement;
@@ -404,6 +417,7 @@ function SpecialQuestion({ question, method, searchMode }: { question: EvalSpeci
     <div className="rg-result-head">
       <span className={`status-tag is-${question.passed ? "green" : "red"}`}>{question.passed ? "通过" : "没通过"}</span>
       {change && <span className={`rg-change is-${change.tone}`}>{change.label}</span>}
+      <TypeTag type={question.type} hues={hues} />
       <span className="rg-result-question">{question.question}</span>
     </div>
     {question.evidence && question.evidence.length > 0 && <ul className="sp-evidence">

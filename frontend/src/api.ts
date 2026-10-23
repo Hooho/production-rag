@@ -906,13 +906,15 @@ export type EvalSuiteMethod = "retrieval" | "answer" | "dialogue";
 export type EvalSuiteSearchMode = "hybrid" | "dense" | "keyword";
 export type EvalSuiteRunEntry = { id: string; status: "running" | "completed" | "failed" | "interrupted"; created: string; finished: string | null; summary: { name: string; method: EvalSuiteMethod; count: number; passed: number } | null };
 export type EvalSuiteBrief = { id: string; name: string; description: string; method: EvalSuiteMethod; method_label: string; search_mode: EvalSuiteSearchMode; search_mode_label: string; created_by: string; created: string; updated: string; item_count: number; latest: EvalSuiteRunEntry | null };
-export type EvalSuiteItem = { id: string; question: string; evidence?: string[]; reference_answer?: string; turns?: string[]; created_by: string; created: string; updated: string };
+export type EvalSuiteItem = { id: string; question: string; evidence?: string[]; reference_answer?: string; turns?: string[]; type?: string; created_by: string; created: string; updated: string };
 export type EvalSuiteFull = EvalSuiteBrief & { items: EvalSuiteItem[]; runs: EvalSuiteRunEntry[] };
-export type EvalSuiteItemInput = { question: string; evidence?: string[]; reference_answer?: string | null; turns?: string[] };
+export type EvalSuiteItemInput = { question: string; evidence?: string[]; reference_answer?: string | null; turns?: string[]; type?: string | null };
 // 一道专项题的结果。检索 / 回答：每条证据在向量、关键词检索里排第几、最后有没有返回；多轮对话：最后一问的回答和评审。
 export type EvalSpecialQuestion = {
   id: string;
   question: string;
+  // 题目类型（可选，专项里自己起的名字）。
+  type?: string | null;
   passed: boolean;
   previous_passed?: boolean | null;
   reference_answer?: string | null;
@@ -963,6 +965,8 @@ export type EvalSpecialSection = {
   agent_passed?: number;
   previous_agent?: { id: string; created: string; passed: number | null; count: number };
   agent?: { tool_budget: number; timeout: number; prompt_version: string; model: string | null };
+  // 按题目类型的通过数（没有题标类型时没有）。
+  by_type?: { type: string; count: number; passed: number; fixed_passed?: number; agent_passed?: number }[] | null;
 };
 
 export function listEvalSuites() {

@@ -227,3 +227,18 @@ def test_late_seed_adds_to_existing_database(setup):
     assert seed_late_suites(store.engine) == []
     names = [suite["name"] for suite in client.get("/eval/suites", headers=headers()).json()["items"]]
     assert names.count("Agent 区分题") == 1
+
+
+# 题目类型：编辑时保留（以前保存会丢掉），结果按类型统计通过数，两种模式一起跑时各记一列。
+def test_item_type_is_kept_and_counted():
+    from app.evaluation.suites import by_type, check_item
+    corpus = "耳机保修期为一年"
+    cleaned = check_item("retrieval", {"question": "保修多久？", "evidence": ["耳机保修期为一年"], "type": " 多跳 "}, corpus)
+    assert cleaned["type"] == "多跳"
+    assert "type" not in check_item("retrieval", {"question": "保修多久？", "evidence": ["耳机保修期为一年"], "type": ""}, corpus)
+    stats = by_type([{"type": "多跳", "passed": True, "fixed_passed": True, "agent_passed": True},
+        {"type": "比较", "passed": False, "fixed_passed": False, "agent_passed": True},
+        {"type": "多跳", "passed": False, "fixed_passed": False, "agent_passed": False}, {"type": None, "passed": True}])
+    assert stats == [{"type": "多跳", "count": 2, "passed": 1, "fixed_passed": 1, "agent_passed": 1},
+        {"type": "比较", "count": 1, "passed": 0, "fixed_passed": 0, "agent_passed": 1}]
+    assert by_type([{"passed": True}]) is None

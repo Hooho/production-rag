@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { type EvalAgentCall, type EvalCompareKey, type EvalMode, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSummary } from "./api";
 import { formatDuration as formatMs } from "./format";
+import { TypeStats, TypeTag, typeHues } from "./TypeTag";
 
 // Agent 检索评测的结果页（后端 app/evaluation/agent_retrieval.py）。
 // Agent 每道题用新会话跑一遍，只看它最后拿到的资料里有没有证据（最后命中），口径和固定流程的「交给模型的资料命中率」一致
@@ -191,6 +192,7 @@ function AgentQuestionList({ run, hasFixed }: { run: EvalRun; hasFixed: boolean 
   const [expanded, setExpanded] = useState<string | null>(null);
   const types: string[] = [];
   for (const question of questions) if (!types.includes(question.type)) types.push(question.type);
+  const hues = typeHues(types);
   const resultOptions: [string, string][] = hasFixed
     ? [["all", "全部"], ["agent_only", COMPARE_LABELS.agent_only], ["fixed_only", COMPARE_LABELS.fixed_only], ["neither", COMPARE_LABELS.neither], ["both", COMPARE_LABELS.both], ["unanswerable", "无法回答的题"]]
     : [["all", "全部"], ["problem", "只看有问题"], ["good", "只看通过"]];
@@ -237,7 +239,7 @@ function AgentQuestionList({ run, hasFixed }: { run: EvalRun; hasFixed: boolean 
       return <article className={`ev-question ${open ? "is-open" : ""}`} key={question.id}>
         <button className={`ag-q-head ${layout}`} aria-expanded={open} onClick={() => setExpanded(open ? null : question.id)}>
           <span className="ev-qid">{question.id}</span>
-          <span className="ev-question-text">{question.question}<small>{question.type}{question.evidence_count > 1 ? ` · ${question.evidence_count} 条证据` : ""}{question.compare ? ` · ${COMPARE_LABELS[question.compare]}` : ""}{question.note ? ` · ${question.note}` : ""}</small></span>
+          <span className="ev-question-text">{question.question}<small><TypeTag type={question.type} hues={hues} />{question.evidence_count > 1 ? ` ${question.evidence_count} 条证据` : ""}{question.compare ? ` · ${COMPARE_LABELS[question.compare]}` : ""}{question.note ? ` · ${question.note}` : ""}</small></span>
           {hasFixed && <><Verdict verdict={fixedVerdict(question)} /><span className="ag-num">{formatMs(question.flow_latency_ms ?? question.latency_ms)}</span></>}
           <span className="ag-verdict-cell"><Verdict verdict={agentVerdict(question)} />{hitCalls.length > 0 && <small>第 {hitCalls.join("、")} 次调用命中</small>}</span>
           <span className="ag-num ag-search-cell">{agent ? `${agent.searches} 次` : "—"}{agent && freshness(question).wasted > 0 && <small>{freshness(question).wasted} 次无新增</small>}</span>
@@ -455,7 +457,7 @@ function fromSpecial(question: EvalSpecialQuestion, hasFixed: boolean): EvalQues
     change(question.agent_passed, question.previous_agent_passed) && `Agent ${change(question.agent_passed, question.previous_agent_passed)}`].filter(Boolean);
   const recall = question.recall_final ?? (question.fixed_passed ? 1 : 0);
   return {
-    id: question.id, question: question.question, type: "专项", answerable: true,
+    id: question.id, question: question.question, type: question.type ?? "未分类", answerable: true,
     evidence_count: question.evidence_count ?? question.agent?.evidence.length ?? 0,
     stages: (hasFixed ? { pool: { recall, rr: 0, rank: null }, top: { recall, rr: 0, rank: null }, final: { recall, rr: 0, rank: null } } : undefined) as EvalQuestion["stages"],
     lost_stage: question.lost_stage ?? null,
@@ -498,6 +500,8 @@ export function SpecialAgentResults({ section }: { section: EvalSpecialSection }
       {hasFixed && (Object.keys(COMPARE_LABELS) as EvalCompareKey[]).map((key) => <Card key={key} label={COMPARE_LABELS[key]} value={`${counts[key]} 题`} note={COMPARE_HINTS[key]} />)}
     </div>
     <p className="ev-muted-note">证据全部拿到算通过：固定流程看过滤后交给回答模型的来源，Agent 看它所有检索结果和读前后文读到的；两边都算父块扩展拼进来的相邻分片。{section.agent && <> Agent 配置：工具预算 {section.agent.tool_budget} 次 · 超时 {section.agent.timeout} 秒 · 提示词版本 {section.agent.prompt_version}。</>}</p>
+    {section.by_type && <><div className="ev-section-title">按类型<small>哪类题 Agent 更强、哪类固定流程就够了</small></div>
+      <TypeStats stats={section.by_type} hues={typeHues(section.questions.map((question) => question.type))} both={hasFixed} /></>}
     <AgentQuestionList run={run} hasFixed={hasFixed} />
   </div>;
 }

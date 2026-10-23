@@ -179,6 +179,8 @@ class EvalSuiteItemInput(BaseModel):
     evidence: list[str] = Field(default_factory=list, max_length=10)
     reference_answer: str | None = Field(None, max_length=2000)
     turns: list[str] = Field(default_factory=list, max_length=20)
+    # 题目类型（可选，自己起名，例如多跳、比较）：结果按类型统计通过数。
+    type: str | None = Field(None, max_length=20)
 
 
 class EvalSetInput(BaseModel):

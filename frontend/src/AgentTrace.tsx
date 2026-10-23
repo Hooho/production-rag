@@ -5,17 +5,12 @@
 import React, { Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getAgentRun, type AgentCitation, type AgentMessage, type AgentRound, type AgentToolCall, type AgentToolResult, type TraceStep } from "./api";
 import { formatDuration } from "./format";
+import { huePicker } from "./hues";
 import "./AgentTrace.css";
 
 const TOOL_LABELS: Record<string, string> = { search_knowledge: "知识库检索", read_context: "读前后文", lookup_order: "订单查询", query_data: "业务数据" };
-// 工具颜色：按出现顺序分配色相。已有的 4 个工具先占前 4 个，之后新出现的工具依次往后排。
-// 色相用黄金角（137.5°）间隔取 48 个，相邻两个工具的颜色差得足够开；超过 48 个从头循环。
-const TOOL_HUES = Array.from({ length: 48 }, (_, index) => Math.round((215 + index * 137.508) % 360));
-const toolOrder = new Map<string, number>(["search_knowledge", "read_context", "lookup_order", "query_data"].map((name, index) => [name, index]));
-function toolHue(name: string) {
-  if (!toolOrder.has(name)) toolOrder.set(name, toolOrder.size);
-  return TOOL_HUES[toolOrder.get(name)! % TOOL_HUES.length];
-}
+// 工具颜色：按出现顺序分配色相（预设色相见 hues.ts，和专项题目的类型标签共用）。已有的 4 个工具先占前 4 个，之后新出现的工具依次往后排。
+const toolHue = huePicker(["search_knowledge", "read_context", "lookup_order", "query_data"]);
 const KIND_LABELS: Record<string, string> = { forced: "强制回答轮 · 不带工具", citation_retry: "引用重写轮 · 不带工具" };
 const STOP_LABELS: Record<string, string> = {
   answered: "模型认为资料够了，自己结束", budget: "工具调用次数用完，程序要求直接回答",

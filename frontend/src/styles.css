@@ -8290,3 +8290,37 @@ input:focus {
 .sp-mode-line .ev-option-description {
    flex: 1 1 100%;
 }
+
+/* 类型标签：色相由 hues.ts 的预设按出现顺序分配（--tag-h），配色公式和 Agent 执行链的工具标签一致。 */
+.hue-tag {
+   display: inline-flex;
+   align-items: center;
+   padding: 1px 8px;
+   border: 1px solid hsl(var(--tag-h) 45% 78%);
+   border-radius: 999px;
+   background: hsl(var(--tag-h) 80% 96%);
+   color: hsl(var(--tag-h) 62% 30%);
+   font-size: 12px;
+   font-weight: 600;
+   line-height: 1.6;
+   white-space: nowrap;
+}
+
+.type-stats {
+   max-width: 560px;
+}
+
+/* 专项题目列表上方：每种类型几道题。 */
+.sp-type-line {
+   display: flex;
+   flex-wrap: wrap;
+   gap: 6px 16px;
+   margin-bottom: 10px;
+   font-size: 12px;
+   color: var(--ev-muted);
+}
+
+.rg-result-head .hue-tag,
+.rg-item-meta .hue-tag {
+   flex: none;
+}

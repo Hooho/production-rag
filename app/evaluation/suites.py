@@ -30,6 +30,7 @@ DESCRIPTION_LIMIT = 500
 QUESTION_LIMIT = 500
 ANSWER_LIMIT = 2000
 TURN_LIMIT = 20
+TYPE_LIMIT = 20
 
 
 def suite_view(row, count=0, latest=None):
@@ -176,6 +177,10 @@ def check_item(method, data, corpus=None):
     reference = text_value(data.get("reference_answer"), "参考答案", ANSWER_LIMIT, required=method in LLM_METHODS)
     if reference:
         cleaned["reference_answer"] = reference
+    # 题目类型：可选的标签，名字自己起（同一个专项里用同样的写法），结果按类型统计通过数。
+    question_type = text_value(data.get("type"), "类型", TYPE_LIMIT, required=False)
+    if question_type:
+        cleaned["type"] = question_type
     return cleaned
 
 
@@ -286,7 +291,7 @@ def run_search_suite(store, models, suite, responder, run_id, progress, modes=("
         return run_agent_search_suite(store, models, suite, progress, modes, agent_mode)
     items = []
     for item in suite["items"]:
-        items.append({"id": item["id"], "question": item["question"], "type": "事实", "answerable": True,
+        items.append({"id": item["id"], "question": item["question"], "type": item.get("type") or "", "answerable": True,
             "evidence": item.get("evidence") or [], "reference_answer": item.get("reference_answer") or "",
             "split": "dev", "reviewed": True})
     on_item = answer_hook(store, models, responder, run_id) if suite["method"] == "answer" else None
@@ -304,7 +309,7 @@ def run_search_suite(store, models, suite, responder, run_id, progress, modes=("
             dense_found += ranks.get("dense") is not None
             keyword_found += ranks.get("keyword") is not None
         found = ((row.get("stages") or {}).get("final") or {}).get("recall") or 0
-        entry = {"id": item["id"], "question": item["question"], "evidence": evidence, "found": found >= 1,
+        entry = {"id": item["id"], "question": item["question"], "type": item["type"] or None, "evidence": evidence, "found": found >= 1,
             "lost_stage": row.get("lost_stage"), "returned": row.get("returned"),
             "reference_answer": item["reference_answer"] or None,
             # 和 Agent 逐题对比时要用：过滤后的召回、证据去向、交给回答模型的来源、检索词和耗时。
@@ -363,7 +368,7 @@ def run_agent_search_suite(store, models, suite, progress, modes, agent_mode):
         passed_agent = agent["recall"] is not None and agent["recall"] >= 1
         agent_passed += passed_agent
         entry = dict(fixed_by_id.get(item["id"]) or {"id": item["id"], "question": item["question"],
-            "reference_answer": item.get("reference_answer") or None})
+            "type": item.get("type") or None, "reference_answer": item.get("reference_answer") or None})
         entry.update({"evidence_count": len(evidence), "agent": agent, "agent_passed": passed_agent})
         if with_fixed:
             # 和 Agent 对比时，固定流程按“交给模型的资料”（含父块扩展）判断是否通过，两边口径一致。
@@ -399,7 +404,7 @@ def run_dialogue_suite(store, models, suite, run_id, compare, progress):
             judgement = judge_answer(models, {"question": item["question"], "history": item["turns"],
                 "answerable": True, "reference_answer": item["reference_answer"]}, outcome["answer"],
                 outcome["sources"])
-            rows.append({"id": item["id"], "question": item["question"], "turns": item["turns"],
+            rows.append({"id": item["id"], "question": item["question"], "type": item.get("type"), "turns": item["turns"],
                 "reference_answer": item["reference_answer"], "answer": outcome["answer"][:4000],
                 "summarized": outcome["summarized"], "input_tokens": outcome["input_tokens"],
                 "judgement": judgement, "passed": judgement.get("correctness") == 1})
@@ -443,6 +448,7 @@ def run_special(store, models, run, on_progress, responder, agent_mode=None):
             search_config = config or search_config
             offset[0] += len(suite["items"]) * (len(modes) if suite["method"] == "retrieval" else 1)
         passed = sum(1 for question in section["questions"] if question["passed"])
+        section["by_type"] = by_type(section["questions"])
         section.update({"suite_id": suite["id"], "name": suite["name"], "description": suite["description"],
             "method": suite["method"], "method_label": METHODS[suite["method"]], "count": len(suite["items"]),
             "passed": passed})
@@ -463,6 +469,23 @@ def run_special(store, models, run, on_progress, responder, agent_mode=None):
     if any("agent" in (section.get("modes") or []) for section in sections):
         run["summary"]["agent_passed"] = sum(section.get("agent_passed") or 0 for section in sections)
     return run
+
+
+# 按题目类型统计通过数（按类型第一次出现的顺序）；没有任何题标了类型时返回 None。
+# 两种模式一起跑时另外记固定流程、Agent 各通过几道。
+def by_type(questions):
+    groups = {}
+    for question in questions:
+        question_type = question.get("type")
+        if not question_type:
+            continue
+        group = groups.setdefault(question_type, {"type": question_type, "count": 0, "passed": 0})
+        group["count"] += 1
+        group["passed"] += bool(question.get("passed"))
+        for key in ("fixed_passed", "agent_passed"):
+            if key in question:
+                group[key] = group.get(key, 0) + bool(question[key])
+    return list(groups.values()) or None
 
 
 def memory_suites_variants(compare):
