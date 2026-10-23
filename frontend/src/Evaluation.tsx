@@ -1316,25 +1316,39 @@ function HistoryMetric({ label, value, hint }: { label: string; value: string; h
 function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: (id: string) => void; onDelete: (id: string) => Promise<void> }) {
   const [picked, setPicked] = useState<string[]>([]);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  // 指标子项不能跨表格行使用 details；显式记录收起项，保证子项能作为完整下一行渲染且新记录默认展开。
-  const [collapsedMetricRuns, setCollapsedMetricRuns] = useState<string[]>([]);
+  // 指标子项不能跨表格行使用 details；显式记录展开项。记录默认都收起，点一行才展开它的指标。
+  const [expandedMetricRuns, setExpandedMetricRuns] = useState<string[]>([]);
   const [comparison, setComparison] = useState<EvalComparison | null>(null);
+  const [comparing, setComparing] = useState(false);
   const [error, setError] = useState("");
-  useEffect(() => {
-    if (picked.length !== 2) {
-      setComparison(null);
-      return;
-    }
+  // 勾选两条后点「对比」按钮才请求，结果在弹窗里显示（原来勾满两条就自动对比、显示在表格下面，不容易看到）。
+  async function openComparison() {
+    if (picked.length !== 2) return;
     // 较早的一次作为基准，变化方向始终表示"从旧到新"。
     const [first, second] = [...picked].sort();
-    compareEvalRuns(first, second).then(setComparison).catch((reason: Error) => setError(reason.message));
-  }, [picked]);
+    setComparing(true);
+    setError("");
+    try {
+      setComparison(await compareEvalRuns(first, second));
+    } catch (reason) {
+      setError((reason as Error).message);
+    } finally {
+      setComparing(false);
+    }
+  }
+  useEffect(() => {
+    if (!comparison) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setComparison(null);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [comparison]);
   function toggle(id: string) {
     setPicked((items) => (items.includes(id) ? items.filter((item) => item !== id) : [...items.slice(-1), id]));
   }
-  // 只记录用户主动收起的记录，评测完成后新出现的记录自然保持展开。
   function toggleMetrics(id: string) {
-    setCollapsedMetricRuns((items) => (items.includes(id) ? items.filter((item) => item !== id) : [...items, id]));
+    setExpandedMetricRuns((items) => (items.includes(id) ? items.filter((item) => item !== id) : [...items, id]));
   }
 
   // 删除前明确展示时间和状态，避免把误点“删除”当成可逆操作。
@@ -1350,13 +1364,19 @@ function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: 
     }
   }
   if (runs.length === 0) return <EmptyRuns hasRuns={false} />;
+  const pickedRuns = runs.filter((item) => picked.includes(item.id)).sort((a, b) => a.id.localeCompare(b.id));
   return <div>
     {error && <div className="error-banner">{error}</div>}
+    <div className="ev-compare-bar">
+      <span>{picked.length === 0 ? "勾选两条已完成的记录，再点「对比」看指标变化。" : picked.length === 1 ? "已选 1 条，再选 1 条。" : `已选 2 条：${pickedRuns.map((item) => formatTime(item.created)).join(" → ")}`}</span>
+      {picked.length > 0 && <button type="button" className="secondary-button" onClick={() => setPicked([])}>清除选择</button>}
+      <button type="button" className="primary-button" disabled={picked.length !== 2 || comparing} onClick={() => void openComparison()}>{comparing ? "正在对比…" : `对比（${picked.length}/2）`}</button>
+    </div>
     <div className="diag-table-wrap ev-history-table-wrap"><table className="diag-table ev-table ev-history-table">
       {/* 历史记录只保留运行结果相关字段；提交号属于构建元数据，移除后给题数、配置和状态留出空间。 */}
       <thead><tr><th>对比</th><th>时间</th><th>类型</th><th>范围</th><th>题数</th><th>配置</th><th>平均耗时</th><th>状态</th><th /></tr></thead>
       <tbody>{runs.map((item) => {
-        const metricsExpanded = !collapsedMetricRuns.includes(item.id);
+        const metricsExpanded = expandedMetricRuns.includes(item.id);
         // 指标说明所需统计已随历史列表返回，展开行只做本地渲染，不再触发逐条详情请求。
         const stats = historyEvidenceStats(item.history_metrics);
         const evidenceTotal = stats?.evidenceTotal ?? 0;
@@ -1414,12 +1434,20 @@ function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: 
       })}</tbody>
     </table></div>
     <p className="ev-history-help">指标说明：候选池 Recall 表示证据是否进入重排候选池；最终 Recall 表示阈值过滤后是否仍保留证据；候选池 MRR 越接近 1 代表证据越靠前；误杀率是有答案却被过滤的比例；漏放率是无答案却保留来源的比例。</p>
-    {comparison && <div className="ev-panel ev-compare">
-      <div className="ev-section-title">对比结果<small><code>{comparison.base.id}</code> → <code>{comparison.target.id}</code></small></div>
+    {comparison && <div className="ev-add-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setComparison(null); }}>
+      <div className="ev-add-modal ev-compare-modal" role="dialog" aria-modal="true" aria-labelledby="ev-compare-title">
+        <div className="ev-add-modal-header"><h3 id="ev-compare-title">对比结果</h3><button type="button" className="ev-modal-close" aria-label="关闭" onClick={() => setComparison(null)}>×</button></div>
+        <div className="ev-compare-runs">
+          <div><span>基准（较早）</span><strong>{formatTime(comparison.base.created)}</strong><small>{KIND_LABELS[comparison.base.kind]}{comparison.base.kind === "retrieval" ? ` · ${modesLabel(comparison.base)}` : ""} · {SPLIT_LABELS[comparison.base.config.split ?? ""] ?? comparison.base.config.split ?? "—"}</small></div>
+          <span className="ev-compare-arrow" aria-hidden="true">→</span>
+          <div><span>对比（较新）</span><strong>{formatTime(comparison.target.created)}</strong><small>{KIND_LABELS[comparison.target.kind]}{comparison.target.kind === "retrieval" ? ` · ${modesLabel(comparison.target)}` : ""} · {SPLIT_LABELS[comparison.target.config.split ?? ""] ?? comparison.target.config.split ?? "—"}</small></div>
+        </div>
+        {comparison.settings_diff && comparison.settings_diff.length > 0 && <div className="ev-settings-diff">两次评测之间改过 {comparison.settings_diff.length} 项：{comparison.settings_diff.map((item) => `${item.key} ${String(item.base)} → ${String(item.target)}`).join("；")}。分数变化可能来自这些改动。</div>}
       <div className="diag-table-wrap"><table className="diag-table ev-table">
         <thead><tr><th>指标</th><th className="num">基准</th><th className="num">对比</th><th className="num">变化</th><th>结论</th></tr></thead>
         <tbody>{comparison.metrics.map((row) => <tr key={row.key}><td title={METRIC_HINTS[row.key]}>{row.label}<small className="diag-sub">{row.direction === "higher" ? "越高越好" : "越低越好"}</small></td><td className="num">{formatMetric(row.key, row.base)}</td><td className="num">{formatMetric(row.key, row.target)}</td><td className="num">{row.delta === null ? "—" : row.key.includes("_ms") ? formatDurationDelta(row.delta) : row.key.startsWith("mrr") ? `${row.delta > 0 ? "+" : ""}${row.delta.toFixed(3)}` : `${row.delta > 0 ? "+" : ""}${(row.delta * 100).toFixed(1)} 个百分点`}</td><td><ChangeTag row={row} metricKey={row.key} /></td></tr>)}</tbody>
       </table></div>
+      </div>
     </div>}
   </div>;
 }

@@ -289,6 +289,17 @@ def compare_runs(base, target):
     for key in sorted(set(base_settings) & set(target_settings)):
         if base_settings[key] != target_settings[key]:
             settings_diff.append({"key": key, "base": base_settings[key], "target": target_settings[key]})
+    # 跑的模式、Agent 提示词版本和模型不在设置页参数里，单独比较：改提示词后对比评测，最需要看到这一项。
+    base_config = base.get("config") or {}
+    target_config = target.get("config") or {}
+    if run_modes(base) != run_modes(target):
+        settings_diff.append({"key": "模式", "base": "+".join(run_modes(base)), "target": "+".join(run_modes(target))})
+    base_agent = base_config.get("agent") or {}
+    target_agent = target_config.get("agent") or {}
+    if base_agent and target_agent:
+        for key, label in (("prompt_version", "Agent 提示词版本"), ("model", "Agent 模型")):
+            if base_agent.get(key) != target_agent.get(key):
+                settings_diff.append({"key": label, "base": base_agent.get(key), "target": target_agent.get(key)})
     return {"base": run_brief(base), "target": run_brief(target), "metrics": rows, "settings_diff": settings_diff}
 
 

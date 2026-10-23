@@ -8082,3 +8082,69 @@ input:focus {
    color: var(--ev-warn);
    font-size: 11px;
 }
+
+/* 历次记录上方的对比栏：勾选两条后点「对比」，结果在弹窗里。 */
+.ev-compare-bar {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: 10px 14px;
+   margin: 0 0 14px;
+   padding: 12px 16px;
+   border: 1px solid var(--ev-line);
+   border-radius: 6px;
+   background: rgba(255, 255, 255, .96);
+   font-size: 13px;
+   color: var(--t-536d86);
+}
+
+.ev-compare-bar > span {
+   flex: 1 1 260px;
+}
+
+.ev-compare-modal {
+   width: min(980px, 100%);
+   border-radius: 8px;
+   padding: 22px 26px 26px;
+}
+
+.ev-compare-runs {
+   display: grid;
+   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+   align-items: center;
+   gap: 14px;
+   margin-bottom: 16px;
+}
+
+.ev-compare-runs > div {
+   display: grid;
+   gap: 4px;
+   padding: 12px 16px;
+   border: 1px solid var(--ev-line);
+   border-radius: 6px;
+   background: rgb(var(--t-e0eefa-rgb) / .35);
+}
+
+.ev-compare-runs > div span {
+   font-size: 12px;
+   color: var(--ev-muted);
+}
+
+.ev-compare-runs > div strong {
+   font-size: 15px;
+   color: var(--ev-ink);
+}
+
+.ev-compare-runs > div small {
+   font-size: 12px;
+   color: var(--t-536d86);
+}
+
+.ev-compare-arrow {
+   font-size: 20px;
+   color: var(--ev-muted);
+}
+
+.ev-compare-modal .ev-settings-diff {
+   margin-bottom: 14px;
+}

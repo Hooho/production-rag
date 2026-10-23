@@ -122,3 +122,12 @@ def test_agent_retrieval_api(setup, eval_dir, monkeypatch):
         time.sleep(0.05)
     assert run["status"] == "completed", run.get("error")
     assert run["config"]["modes"] == ["fixed", "agent"] and run["summary"]["agent_recall"] == 0.5
+
+
+# 对比两次评测：Agent 提示词版本、跑的模式不同时，列在“改过的项”里。
+def test_compare_lists_agent_prompt_and_modes():
+    from app.evaluation.results import compare_runs
+    base = {"id": "a", "config": {"modes": ["fixed", "agent"], "agent": {"prompt_version": "agent@内置", "model": "m"}}, "summary": {}}
+    target = {"id": "b", "config": {"modes": ["agent"], "agent": {"prompt_version": "agent@v2", "model": "m"}}, "summary": {}}
+    diff = {row["key"]: (row["base"], row["target"]) for row in compare_runs(base, target)["settings_diff"]}
+    assert diff == {"模式": ("fixed+agent", "agent"), "Agent 提示词版本": ("agent@内置", "agent@v2")}
