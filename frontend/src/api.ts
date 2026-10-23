@@ -669,7 +669,7 @@ export type EvalQuestion = {
 // Agent 检索评测（app/evaluation/agent_retrieval.py）：只看最后命中，口径和固定流程的过滤后 Recall 一致。
 export type EvalMode = "fixed" | "agent";
 export type EvalCompareKey = "both" | "fixed_only" | "agent_only" | "neither";
-export type EvalAgentResult = { evidence_id: string; title: string | null; heading?: string | null; chunk_id: string | null; relevance: number | null; low_relevance: boolean; text: string; hits: number[] };
+export type EvalAgentResult = { evidence_id: string; title: string | null; heading?: string | null; chunk_id: string | null; position?: number | null; relevance: number | null; low_relevance: boolean; text: string; hits: number[] };
 export type EvalAgentCall = {
   call: number;
   round: number | null;
@@ -689,6 +689,7 @@ export type EvalAgentCall = {
   direction?: string;
   text?: string;
   read_hits?: number[];
+  positions?: number[];
   note?: string;
   error?: string;
 };
@@ -699,7 +700,8 @@ export type EvalAgentQuestion = {
   latency_ms: number;
   recall: number | null;
   // chunk_ids：证据在知识库里所属的分块（旧记录没有）。
-  evidence: { text: string; chunk_ids?: string[]; found: boolean; where: { call: number; evidence_id: string | null }[] }[];
+  // positions：同一顺序的分块序号（从 0 开始，页面显示「第 N 片」）。
+  evidence: { text: string; chunk_ids?: string[]; positions?: (number | null)[]; found: boolean; where: { call: number; evidence_id: string | null }[] }[];
   calls: EvalAgentCall[];
   returned: number;
   searches: number;

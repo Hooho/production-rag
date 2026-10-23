@@ -46,7 +46,9 @@ def test_agent_retrieval_runs_with_fixed(setup, eval_dir, monkeypatch):
     assert isinstance(call["duration_ms"], int)
     assert call["results"][0]["evidence_id"] == "S1" and call["results"][0]["hits"] == [0] and call["hits"] == [0]
     assert agent["evidence"][0] == {"text": "耳机签收后七天内可以无理由退货", "found": True,
-        "chunk_ids": [call["results"][0]["chunk_id"]], "where": [{"call": 1, "evidence_id": "S1"}]}
+        "chunk_ids": [call["results"][0]["chunk_id"]], "positions": [call["results"][0]["position"]],
+        "where": [{"call": 1, "evidence_id": "S1"}]}
+    assert isinstance(call["results"][0]["position"], int)
     assert agent["rounds"] == 2 and agent["tool_calls"] == 1 and agent["prompt_tokens"] == 200
     assert agent["answer"] == "签收后七天内可以退货 [S1]。"
     assert second["agent"]["recall"] == 0 and second["agent"]["returned"] == 0 and second["agent"]["calls"] == []

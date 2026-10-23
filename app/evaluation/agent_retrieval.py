@@ -22,6 +22,9 @@ from uuid import uuid4
 from .. import prompts
 from ..runtime_config import snapshot as runtime_snapshot
 from .dataset import QUESTION_TYPES, select_split
+from sqlalchemy import select
+
+from ..mysql.store import document_chunks, document_heads
 from .retrieval import (EVAL_OWNER, current_chunk_texts, evidence_hits, import_corpus, mean, percentile, plan_queries,
     run_retrieval)
 
@@ -38,6 +41,16 @@ def parse_arguments(raw):
     except (TypeError, ValueError):
         return {"raw": str(raw)[:300]}
     return value if isinstance(value, dict) else {"raw": str(raw)[:300]}
+
+
+# 评测语料当前版本里每个分块在文档里的序号（从 0 开始，页面显示成「第 N 片」，和知识库页面一致）。
+# S1、S2 只是某一次检索返回结果的顺序编号，每次检索都从 S1 开始；「第 N 片」才是分块固定的编号。
+def chunk_positions(store):
+    joined = document_heads.join(document_chunks, document_chunks.c.document_id == document_heads.c.current_document_id)
+    with store.engine.connect() as connection:
+        rows = connection.execute(select(document_chunks.c.chunk_id, document_chunks.c.position).select_from(joined).where(
+            document_heads.c.owner == EVAL_OWNER)).all()
+    return {str(chunk_id): position for chunk_id, position in rows}
 
 
 # 一组分片各自包含哪几条证据（证据序号）。
@@ -65,7 +78,7 @@ def call_log(number, round_no, call, evidence, chunk_texts):
         results = []
         for evidence_id, source in zip(trace.get("evidence_ids") or [], sources):
             results.append({"evidence_id": evidence_id, "title": source.get("title"), "heading": source.get("heading"),
-                "chunk_id": source.get("chunk_id"), "relevance": source.get("relevance"),
+                "chunk_id": source.get("chunk_id"), "position": source.get("position"), "relevance": source.get("relevance"),
                 "low_relevance": bool(source.get("low_relevance")), "text": (source.get("text") or "")[:TEXT_LIMIT],
                 "hits": hits.get(source.get("chunk_id"), [])})
         entry.update(query=trace.get("query"), mode=trace.get("mode"), top_k=trace.get("top_k"), results=results,
@@ -74,6 +87,7 @@ def call_log(number, round_no, call, evidence, chunk_texts):
         ids = list(trace.get("chunk_ids") or [])
         hits = chunk_hits(ids, evidence, chunk_texts)
         entry.update(source_id=trace.get("source_id"), direction=trace.get("direction"), chunk_ids=ids,
+            positions=list(trace.get("positions") or []),
             text=(call.get("content") or "")[:TEXT_LIMIT])
         entry["read_hits"] = sorted({index for values in hits.values() for index in values})
     else:
@@ -88,7 +102,7 @@ def call_log(number, round_no, call, evidence, chunk_texts):
 
 
 # Agent 跑一道题，返回这道题的 agent 部分。
-def evaluate_agent(agent_mode, store, models, item, chunk_texts):
+def evaluate_agent(agent_mode, store, models, item, chunk_texts, positions=None):
     evidence = item.get("evidence") or []
     # 多轮追问题和固定流程一样，用规则补全后的完整问题（评测没有真实的上一轮对话）。
     _, question, _ = plan_queries(item)
@@ -129,8 +143,9 @@ def evaluate_agent(agent_mode, store, models, item, chunk_texts):
     row.update({
         "recall": len(found) / len(evidence) if evidence else None,
         # chunk_ids：这条证据在知识库里属于哪个（哪些）分块，和检索结果无关，用来对照两边拿到的分块。
-        "evidence": [{"text": text, "chunk_ids": evidence_chunks.get(index, []), "found": index in found, "where": where[index]}
-            for index, text in enumerate(evidence)],
+        "evidence": [{"text": text, "chunk_ids": evidence_chunks.get(index, []),
+            "positions": [(positions or {}).get(str(chunk_id)) for chunk_id in evidence_chunks.get(index, [])],
+            "found": index in found, "where": where[index]} for index, text in enumerate(evidence)],
         "calls": calls, "returned": len(chunks),
         "searches": len(searches), "empty_searches": sum(1 for entry in searches if not entry.get("results")),
         "queries": [entry.get("query") for entry in searches],
@@ -210,12 +225,13 @@ def run_agent_retrieval(store, models, agent_mode, items, split, suites=(), with
     def texts():
         if "chunk_texts" not in state:
             state["chunk_texts"] = current_chunk_texts(store)
+            state["positions"] = chunk_positions(store)
         return state["chunk_texts"]
 
     if with_fixed:
         # 固定流程的语料导入在 run_retrieval 一开始，基线题的回调一定在它之后，这时读分片原文是新的。
         def on_item(item, row, retrieval):
-            row["agent"] = evaluate_agent(agent_mode, store, models, item, texts())
+            row["agent"] = evaluate_agent(agent_mode, store, models, item, texts(), state["positions"])
 
         result = run_retrieval(store, models, items, split, suites, on_progress, on_item)
         rows = result["questions"]
@@ -226,7 +242,7 @@ def run_agent_retrieval(store, models, agent_mode, items, split, suites=(), with
         rows = []
         for index, item in enumerate(selected, start=1):
             row = base_row(item)
-            row["agent"] = evaluate_agent(agent_mode, store, models, item, texts())
+            row["agent"] = evaluate_agent(agent_mode, store, models, item, texts(), state["positions"])
             rows.append(row)
             if on_progress:
                 on_progress(index, len(selected))

@@ -7988,3 +7988,24 @@ input:focus {
    border: 1px solid var(--ev-line);
    font-size: 12px;
 }
+
+/* 分块标签：大字是分块编号（第 N 片），小字是这次检索里的 S 编号。 */
+.ag-chunk-tab {
+   display: inline-flex;
+   align-items: baseline;
+   gap: 6px;
+   font-family: inherit;
+   font-size: 13px;
+   padding: 4px 10px;
+}
+
+.ag-chunk-tab small {
+   font-family: 'DM Mono', monospace;
+   font-size: 11px;
+   color: var(--ev-muted);
+   font-weight: 400;
+}
+
+.ag-numbering-note {
+   margin: 0;
+}
