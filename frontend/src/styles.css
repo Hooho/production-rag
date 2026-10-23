@@ -8272,3 +8272,21 @@ input:focus {
    color: var(--ev-bad, #c0392b);
    font-weight: 600;
 }
+
+/* 所有发起选项统一：标题 → 选项 → 说明（说明放在选项下面，不再挤在标题后面）。 */
+.ev-option-description.is-below {
+   display: block;
+   margin-top: 6px;
+}
+
+.ev-launch-option.is-stacked {
+   gap: 6px;
+}
+
+.ev-launch-option.is-stacked legend {
+   margin-bottom: 6px;
+}
+
+.sp-mode-line .ev-option-description {
+   flex: 1 1 100%;
+}
