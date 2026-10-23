@@ -8066,3 +8066,33 @@ input:focus {
    font-variant-numeric: tabular-nums;
    white-space: nowrap;
 }
+
+/* 证据只在父块扩展拼进来的分片里（检索命中的那一片本身没有）：浅绿底 + 虚线绿框，和直接命中的实心绿区分开。 */
+.ag-chunk-tab.is-hit.is-ext-hit {
+   background: #eef9f3;
+   border-style: dashed;
+   font-weight: 600;
+}
+
+.ag-ext-badge.is-hit {
+   border-color: var(--ev-good);
+   color: #24684a;
+}
+
+/* 分块正文默认显示前 3 行。 */
+.ag-chunk-body p.is-clamped {
+   display: -webkit-box;
+   -webkit-line-clamp: 3;
+   -webkit-box-orient: vertical;
+   overflow: hidden;
+}
+
+.ag-more-link {
+   margin: 4px 0 0;
+   padding: 0;
+   border: 0;
+   background: none;
+   color: var(--t-2563eb);
+   font-size: 12px;
+   cursor: pointer;
+}

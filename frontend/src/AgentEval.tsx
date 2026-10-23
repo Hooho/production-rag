@@ -302,23 +302,38 @@ function PartsRow({ item }: { item: ChunkItem }) {
   </div>;
 }
 
+// 证据是不是只在父块扩展拼进来的分片里（检索命中的那一片本身不含证据）。
+function hitByExtension(item: ChunkItem) {
+  return item.hit && extendedParts(item).some((chunkId) => item.evidenceParts?.has(chunkId)) && !(item.chunkId && item.evidenceParts?.has(item.chunkId));
+}
+
 function ChunkTabs({ items, empty }: { items: ChunkItem[]; empty: string }) {
   const [selected, setSelected] = useState<string | null>(null);
+  // 分块正文默认只显示前 3 行，点「展开更多」看全文；换一个分块时收起。
+  const [fullText, setFullText] = useState(false);
   if (items.length === 0) return <p className="ag-muted">{empty}</p>;
   const current = items.find((item) => item.key === selected) ?? null;
   return <div className="ag-chunks">
     <div className="ag-chunk-tabs" role="tablist">{items.map((item) => <button key={item.key} type="button" role="tab" aria-selected={selected === item.key}
-      className={`ag-chunk-tab ${item.hit ? "is-hit" : ""} ${item.fresh ? "is-new" : ""} ${selected === item.key ? "is-active" : ""}`}
-      title={[item.hit ? (extendedParts(item).some((chunkId) => item.evidenceParts?.has(chunkId)) && !(item.chunkId && item.evidenceParts?.has(item.chunkId)) ? "证据在父块扩展拼进来的分片里" : "这个分块包含证据") : item.title ?? "",
+      className={`ag-chunk-tab ${item.hit ? "is-hit" : ""} ${hitByExtension(item) ? "is-ext-hit" : ""} ${item.fresh ? "is-new" : ""} ${selected === item.key ? "is-active" : ""}`}
+      title={[item.hit ? (hitByExtension(item) ? "证据在父块扩展拼进来的分片里，检索命中的这一片本身没有" : "检索命中的这一片就含证据") : item.title ?? "",
         extendedParts(item).length ? `父块扩展还拼进了 ${extendedParts(item).map((chunkId) => chunkLabel(null, chunkId)).join("、")}` : "",
-        item.fresh ? "这次调用新拿到的（前面的调用没拿到过）" : ""].filter(Boolean).join("；")} onClick={() => setSelected(selected === item.key ? null : item.key)}>
-      {chunkLabel(item.position, item.chunkId)}<small>{item.id}</small>{extendedParts(item).length > 0 && <em className="ag-ext-badge">+扩展 {extendedParts(item).length} 片</em>}</button>)}</div>
+        item.fresh ? "这次调用新拿到的（前面的调用没拿到过）" : ""].filter(Boolean).join("；")} onClick={() => { setSelected(selected === item.key ? null : item.key); setFullText(false); }}>
+      {chunkLabel(item.position, item.chunkId)}<small>{item.id}</small>{extendedParts(item).length > 0 && <em className={`ag-ext-badge ${hitByExtension(item) ? "is-hit" : ""}`}>{hitByExtension(item) ? `证据在扩展的 ${extendedParts(item).length} 片里` : `+扩展 ${extendedParts(item).length} 片`}</em>}</button>)}</div>
     {current && <div className={`ag-chunk-body ${current.hit ? "is-hit" : ""}`}>
-      <div className="ag-chunk-meta"><strong>{chunkLabel(current.position, current.chunkId)}</strong><small>本次检索的 {current.id}</small>{current.title ?? "—"}{current.heading ? ` · ${current.heading}` : ""}{current.relevance !== undefined && current.relevance !== null && <small> · 相关性 {current.relevance.toFixed(2)}{current.low ? "（较低）" : ""}</small>}{current.hit && <Tag tone="success" dot>含证据</Tag>}</div>
+      <div className="ag-chunk-meta"><strong>{chunkLabel(current.position, current.chunkId)}</strong><small>本次检索的 {current.id}</small>{current.title ?? "—"}{current.heading ? ` · ${current.heading}` : ""}{current.relevance !== undefined && current.relevance !== null && <small> · 相关性 {current.relevance.toFixed(2)}{current.low ? "（较低）" : ""}</small>}{current.hit && <Tag tone="success" dot>{hitByExtension(current) ? "证据在扩展的分片里" : "含证据"}</Tag>}</div>
       {extendedParts(current).length > 0 && <PartsRow item={current} />}
-      <p>{current.text}</p>
+      <p className={fullText ? "" : "is-clamped"}>{current.text}</p>
+      <button type="button" className="ag-more-link" onClick={() => setFullText(!fullText)}>{fullText ? "收起" : "展开更多"}</button>
     </div>}
   </div>;
+}
+
+// Agent 某次调用的某个结果是不是靠父块扩展才含这条证据：结果检索命中的分片不在证据所在分片里。
+function viaExtension(agent: EvalQuestion["agent"], where: { call: number; evidence_id: string | null }, chunkIds?: string[]) {
+  if (!chunkIds?.length) return false;
+  const result = agent?.calls.find((call) => call.call === where.call)?.results?.find((item) => item.evidence_id === where.evidence_id);
+  return Boolean(result?.chunk_id) && !chunkIds.includes(result!.chunk_id as string);
 }
 
 // 展开后：先说每条证据在哪个分块（两边各自的编号，Agent 还标第几次调用），下面左右两栏只列分块编号。
@@ -333,11 +348,11 @@ function QuestionDetail({ question, hasFixed }: { question: EvalQuestion; hasFix
       return <div className="ag-evidence" key={index}>
         <p>证据 {index + 1}：“{evidence.text}”</p>
         <span className="ag-evidence-chunk">所在分块 {chunkIds.length ? chunkIds.map((chunkId, order) => <code key={chunkId} title={chunkId}>{chunkLabel(evidence.positions?.[order], chunkId)}</code>) : "知识库里没找到"}</span>
-        {hasFixed && <span className={fixedFound ? "is-hit" : "is-miss"}>固定流程：{fixedFound ? `拿到了${fixed?.first_given === false ? "（补充检索拿到的）" : fixed?.source_id ? `（本次检索的 ${fixed.source_id}）` : "（在父块拼进来的相邻分片里）"}` : question.cleared && fixed?.first_given ? "第一次检索拿到了，但被充分性判断清空了" : "没拿到"}</span>}
-        <span className={evidence.found ? "is-hit" : "is-miss"}>Agent：{evidence.found ? `拿到了（${evidence.where.map((item) => `第 ${item.call} 次调用的 ${item.evidence_id ?? "—"}`).join("、")}）` : "没拿到"}</span>
+        {hasFixed && <span className={fixedFound ? "is-hit" : "is-miss"}>固定流程：{fixedFound ? `拿到了${fixed?.first_given === false ? "（补充检索拿到的）" : fixed?.status === "returned" && fixed?.source_id ? `（${fixed.source_id} 检索命中）` : "（父块扩展拼进来的）"}` : question.cleared && fixed?.first_given ? "第一次检索拿到了，但被充分性判断清空了" : "没拿到"}</span>}
+        <span className={evidence.found ? "is-hit" : "is-miss"}>Agent：{evidence.found ? `拿到了（${evidence.where.map((item) => `第 ${item.call} 次的 ${item.evidence_id ?? "—"}${viaExtension(agent, item, evidence.chunk_ids) ? " 扩展" : ""}`).join("、")}）` : "没拿到"}</span>
       </div>;
     })}</div> : <p className="ev-muted-note">没有答案的题，拿到的资料越少越好。</p>}
-    <p className="ag-muted ag-numbering-note">绿底：含证据　红框：新拿到的　+扩展：父块拼进了相邻分片　S1、S2：这次检索的结果顺序</p>
+    <p className="ag-muted ag-numbering-note">绿底：含证据（虚线绿框 = 证据在扩展的分片里）　红框：新拿到的　+扩展：父块拼进了相邻分片　S1、S2：这次检索的结果顺序</p>
     <div className={`ag-columns ${hasFixed ? "" : "is-single"}`}>
       {hasFixed && <FixedLog question={question} />}
       {agent && <AgentLog question={question} />}
