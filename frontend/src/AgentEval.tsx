@@ -224,10 +224,13 @@ function Chips({ value, options, onChange }: { value: string; options: [string, 
 
 // 分块编号：分块在文档里的序号，显示成「第 N 片」，和知识库页面一致，不随检索变化。
 // S1、S2 只是某一次检索返回结果的顺序编号（交给模型引用用），每次检索都从 S1 开始，不能拿来对照。
-// 旧记录没有序号时，退回显示分块 id 的前 8 位（鼠标悬停看完整 id）。
+// 旧记录没有序号时，从分块 id 取：分块 id 是「文档 id:序号」（app/storage.py），冒号后面就是序号；
+// 原来取 id 的前 8 位，那其实是文档 id，同一份文档的分块全都一样。
 function chunkLabel(position: number | null | undefined, chunkId?: string | null) {
   if (typeof position === "number") return `第 ${position + 1} 片`;
-  return chunkId ? chunkId.slice(0, 8) : "—";
+  const index = chunkId?.match(/:(\d+)$/)?.[1];
+  if (index !== undefined) return `第 ${Number(index) + 1} 片`;
+  return chunkId ?? "—";
 }
 
 // 一个分块：编号做成标签，命中证据的标签有背景色；点标签才显示内容。
