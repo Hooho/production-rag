@@ -8049,9 +8049,15 @@ input:focus {
    color: var(--ev-muted);
 }
 
-/* 选项下面的一句说明：只留图标，不再写「说明：」，文字尽量一句话。 */
-.ev-hint {
+/* 选项下面的一句说明：只留图标，不再写「说明：」，文字尽量一句话。
+   要压过 .ev-option-description.is-below 的 display: block（两个类名），否则 gap 不生效，图标和文字挤在一起、上下不齐。 */
+.ev-option-description.ev-hint {
    display: flex;
    align-items: center;
-   gap: 6px;
+   gap: 8px;
+   line-height: 1.5;
+}
+
+.ev-option-description.ev-hint .ev-info-icon {
+   flex: none;
 }
