@@ -61,6 +61,9 @@ def test_agent_retrieval_runs_with_fixed(setup, eval_dir, monkeypatch):
     assert summary["agent_recall"] == 0.5 and summary["agent_false_reject_rate"] == 0.5
     assert summary["agent_false_accept_rate"] == 0.0 and summary["agent_avg_tool_calls"] == round(2 / 3, 4)
     assert summary["agent_wasted_searches"] == 1 and summary["agent_wasted_rate"] == 0.5
+    # 固定流程按“交给模型的资料”（含父块扩展）计，和 Agent 口径一致。
+    assert summary["recall_given"] is not None and first["given_recall"] is not None
+    assert call["results"][0]["parent_chunk_ids"]
     assert summary["agent_cache_hit_rate"] == 0.8 and summary["agent_failed"] == 0
     assert run["by_type"]["事实"]["agent_recall"] == 1.0 and "recall_final" in run["by_type"]["事实"]
     assert first["compare"] == "both" and second["compare"] == "fixed_only" and "compare" not in third

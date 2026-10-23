@@ -634,7 +634,8 @@ export type EvalItem = {
 };
 export type EvalSummary = Record<string, number | null>;
 export type EvalStage = { recall: number | null; rr: number; rank: number | null };
-export type EvalEvidence = { text: string; chunk_id: string | null; rrf_rank: number | null; rerank_rank: number | null; rerank_probability: number | null; source_id: string | null; status: string };
+// given：证据在不在交给回答模型的资料里（含父块扩展拼进来的相邻分片，旧记录没有）。
+export type EvalEvidence = { text: string; chunk_id: string | null; rrf_rank: number | null; rerank_rank: number | null; rerank_probability: number | null; source_id: string | null; status: string; given?: boolean };
 export type EvalJudgement = { refused: boolean; faithfulness: number; correctness: number; citation: number; faithfulness_reason: string; correctness_reason: string; citation_reason: string; judge: string };
 export type EvalSufficiency = { checked: boolean; verdict: "sufficient" | "partial" | "insufficient" | null; missing?: string | string[] | null; retried?: boolean; retry_query?: string | null; refused?: boolean; source_count?: number | null };
 export type EvalQuestion = {
@@ -665,13 +666,15 @@ export type EvalQuestion = {
   // 勾选了 Agent 时：这道题 Agent 的检索日志和最后命中；compare 是一起跑时的逐题分类（只有能回答的题有）。
   agent?: EvalAgentQuestion;
   compare?: EvalCompareKey;
+  // 交给回答模型的资料（含父块扩展）里的证据比例；和 Agent 比较时用它（旧记录没有，用过滤后 Recall）。
+  given_recall?: number | null;
   // 列表里题目下方的补充说明（专项里用来显示「Agent 新通过」这类和上次的比较）。
   note?: string;
 };
 // Agent 检索评测（app/evaluation/agent_retrieval.py）：只看最后命中，口径和固定流程的过滤后 Recall 一致。
 export type EvalMode = "fixed" | "agent";
 export type EvalCompareKey = "both" | "fixed_only" | "agent_only" | "neither";
-export type EvalAgentResult = { evidence_id: string; title: string | null; heading?: string | null; chunk_id: string | null; position?: number | null; relevance: number | null; low_relevance: boolean; text: string; hits: number[] };
+export type EvalAgentResult = { evidence_id: string; title: string | null; heading?: string | null; chunk_id: string | null; position?: number | null; parent_chunk_ids?: string[]; relevance: number | null; low_relevance: boolean; text: string; hits: number[] };
 export type EvalAgentCall = {
   call: number;
   round: number | null;
@@ -920,8 +923,9 @@ export type EvalSpecialQuestion = {
   compare?: EvalCompareKey;
   agent?: EvalAgentQuestion;
   recall_final?: number;
-  fixed_evidence?: { text: string; chunk_id: string | null; source_id: string | null; status: string | null }[];
-  sources?: (Source & { chunk_id?: string | null; position?: number | null })[];
+  given_recall?: number | null;
+  fixed_evidence?: { text: string; chunk_id: string | null; source_id: string | null; status: string | null; given?: boolean }[];
+  sources?: (Source & { chunk_id?: string | null; position?: number | null; parent_chunk_ids?: string[] })[];
   queries?: string[];
   rerank_query?: string;
   latency_ms?: number;

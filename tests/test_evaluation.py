@@ -270,6 +270,19 @@ def test_score_question_finds_lost_stage():
     assert by_threshold[0.85]["false_reject_rate"] == 1.0
 
 
+# 交给模型的资料：最终来源是父块，拼进了相邻分片；证据在相邻分片里时，过滤后 Recall 不算，交给模型的资料命中率算。
+def test_score_question_counts_parent_parts():
+    retrieval = diagnostics_with([("c1", 1, 1, 0.9, "returned", "S1")])
+    retrieval["sources"] = [{"id": "S1", "chunk_id": "c1", "parent_chunk_ids": ["c1", "c2"]}]
+    texts = {"c1": "退货规则", "c2": "耳机签收后七天内可以无理由退货"}
+    item = {"id": "a1", "question": "q", "type": "事实", "answerable": True, "evidence": ["耳机签收后七天内可以无理由退货"]}
+    row = score_question(item, retrieval, texts, pool_size=2)
+    assert row["stages"]["final"]["recall"] == 0.0 and row["given_recall"] == 1.0 and row["evidence"][0]["given"] is True
+    row["latency_ms"] = 1
+    from app.evaluation.retrieval import summarize
+    assert summarize([row])["recall_given"] == 1.0
+
+
 # 两次评测对比：召回上升算变好，误杀率上升算变差；previous_run 只找同类型、同 split 的更早一次。
 def test_compare_runs_marks_direction():
     base = {"id": "20260101-000000_a", "kind": "retrieval", "status": "completed", "config": {"split": "dev"},

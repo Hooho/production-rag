@@ -30,6 +30,8 @@ METRICS = [
     ("recall_pool", "召回 Recall@候选池", "higher"),
     ("recall_top", "重排 Recall@返回数", "higher"),
     ("recall_final", "过滤后 Recall", "higher"),
+    # 交给回答模型的资料（含父块扩展拼进来的相邻分片）里的证据比例；和 Agent 资料命中率口径一致。
+    ("recall_given", "交给模型的资料命中率", "higher"),
     ("mrr_pool", "召回 MRR", "higher"),
     ("mrr_top", "重排 MRR", "higher"),
     ("mrr_final", "过滤后 MRR", "higher"),

@@ -195,6 +195,18 @@ def score_question(item, retrieval, chunk_texts, pool_size):
             "rerank_probability": best.get("rerank_probability") if best else None,
             "source_id": best.get("source_id") if best else None,
             "status": best["status"] if best else "not_recalled"})
+    # 交给回答模型的资料（given）：最终来源经过父块扩展，正文里拼进了相邻分片；这些分片里的证据模型也看得到。
+    # 上面三个阶段只认命中的那一个分片（用来调召回、重排、阈值），这里把父块里的分片都算上，
+    # 和 Agent 比较时用它，两边口径一致（Agent 那边同样算父块里的分片，再加上 read_context 读到的）。
+    given_ids = []
+    for source in retrieval.get("sources") or []:
+        for chunk_id in source.get("parent_chunk_ids") or [source.get("chunk_id")]:
+            if chunk_id is not None and str(chunk_id) not in given_ids:
+                given_ids.append(str(chunk_id))
+    given_hits = evidence_hits([{"chunk_id": chunk_id} for chunk_id in given_ids], evidence, chunk_texts)
+    given_found = sorted({index for indexes in given_hits.values() for index in indexes})
+    for index, row in enumerate(evidence_rows):
+        row["given"] = index in given_found
     # 候选池的精简记录（按重排顺序的概率和包含的证据），用于离线阈值扫描。
     pool = []
     for row in pool_rows:
@@ -206,6 +218,7 @@ def score_question(item, retrieval, chunk_texts, pool_size):
         "pair_id": item.get("pair_id"), "pair_role": item.get("pair_role"),
         "answerable": bool(item.get("answerable")), "evidence_count": len(evidence),
         "stages": stages, "lost_stage": lost, "evidence": evidence_rows,
+        "given_recall": len(given_found) / len(evidence) if evidence else None,
         "returned": stats["returned"], "pool": pool,
         "max_probability": max((row["p"] for row in pool if row["p"] is not None), default=None),
         "recall_ms": stats.get("recall_ms"), "rerank_ms": stats.get("rerank_ms")}
@@ -247,6 +260,8 @@ def summarize(rows):
             reciprocals.append(row["stages"][stage]["rr"])
         summary[f"recall_{stage}"] = mean(recalls)
         summary[f"mrr_{stage}"] = mean(reciprocals)
+    given = [row["given_recall"] for row in answerable if row.get("given_recall") is not None]
+    summary["recall_given"] = mean(given)
     rejected = 0
     for row in answerable:
         if row["returned"] == 0:

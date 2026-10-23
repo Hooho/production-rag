@@ -272,7 +272,7 @@ function metricLabel(key: string, run: EvalRunBrief) {
   const pool = run.config.pool_size ?? 20;
   const top = run.config.return_limit ?? 6;
   const labels: Record<string, string> = {
-    recall_pool: `召回 Recall@${pool}`, recall_top: `重排 Recall@${top}`, recall_final: "过滤后 Recall",
+    recall_pool: `召回 Recall@${pool}`, recall_top: `重排 Recall@${top}`, recall_final: "过滤后 Recall", recall_given: "交给模型的资料命中率",
     mrr_pool: `召回 MRR@${pool}`, mrr_top: `重排 MRR@${top}`, mrr_final: "过滤后 MRR",
     false_reject_rate: "误杀率", false_accept_rate: "漏放率", latency_avg_ms: "平均耗时", latency_p95_ms: "P95 耗时",
     faithfulness: "忠实度", correctness: "正确性", refusal_accuracy: "拒答正确率", citation_validity: "引用有效性",
@@ -1431,7 +1431,7 @@ function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: 
           </tr>}
           {metricsExpanded && item.kind !== "special" && <tr id={`history-metrics-${item.id}`} className="ev-history-metrics-row">
             <td colSpan={9}><div className="ev-history-metrics-panel"><div className="ev-history-metrics-heading">本条记录指标</div><div className="ev-history-metrics-grid">
-              {runModes(item).includes("agent") && <HistoryMetric label="Agent 资料命中率" value={formatPercent(item.summary?.agent_recall)} hint={`能回答的题里，Agent 最后拿到的资料（所有检索结果和读到的前后文）包含的证据比例；和「最终 Recall」口径相同。平均每题检索 ${typeof item.summary?.agent_avg_searches === "number" ? item.summary.agent_avg_searches.toFixed(1) : "—"} 次。`} />}
+              {runModes(item).includes("agent") && <HistoryMetric label="Agent 资料命中率" value={formatPercent(item.summary?.agent_recall)} hint={`能回答的题里，Agent 最后拿到的资料（所有检索结果和读到的前后文）包含的证据比例；和固定流程的「交给模型的资料命中率」口径相同（都算父块扩展拼进来的相邻分片）。平均每题检索 ${typeof item.summary?.agent_avg_searches === "number" ? item.summary.agent_avg_searches.toFixed(1) : "—"} 次。`} />}
               {runModes(item).includes("fixed") && <>
               <HistoryMetric label="候选池 Recall" value={formatPercent(item.summary?.recall_pool)} hint={poolHint} />
               {/* 补齐召回、重排、阈值过滤三个阶段，避免只看首尾指标而定位不到重排损失。 */}

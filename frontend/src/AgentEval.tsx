@@ -3,7 +3,8 @@ import { type EvalAgentCall, type EvalCompareKey, type EvalMode, type EvalQuesti
 import { formatDuration as formatMs } from "./format";
 
 // Agent 检索评测的结果页（后端 app/evaluation/agent_retrieval.py）。
-// Agent 每道题用新会话跑一遍，只看它最后拿到的资料里有没有证据（最后命中），口径和固定流程的「过滤后 Recall」一致；
+// Agent 每道题用新会话跑一遍，只看它最后拿到的资料里有没有证据（最后命中），口径和固定流程的「交给模型的资料命中率」一致
+// （两边都算父块扩展拼进来的相邻分片，Agent 另外加上读前后文读到的）；
 // 答案照样生成，但这一步不评分。和固定流程一起跑时，逐题对比两边是否命中，点开看两边的检索日志。
 
 export function runModes(run: EvalRunBrief): EvalMode[] {
@@ -57,7 +58,8 @@ function agentVerdict(question: EvalQuestion) {
 function fixedVerdict(question: EvalQuestion) {
   if (!question.stages) return { key: "none", label: "—" };
   if (!question.answerable) return question.returned === 0 ? { key: "good", label: "没拿到资料" } : { key: "warn", label: `拿到 ${question.returned} 段` };
-  const recall = question.stages.final.recall ?? 0;
+  // 和 Agent 比较时按「交给模型的资料」（含父块扩展）算；旧记录没有，用过滤后 Recall。
+  const recall = question.given_recall ?? question.stages.final.recall ?? 0;
   if (recall >= 1) return { key: "good", label: "命中" };
   if (recall > 0) return { key: "warn", label: `部分 ${percent(recall)}` };
   return { key: "bad", label: "未命中" };
@@ -76,7 +78,7 @@ function Card({ label, value, note }: { label: string; value: string; note?: str
 export function ComparePanel({ run }: { run: EvalRun }) {
   const summary: EvalSummary = run.summary ?? {};
   const rows: [string, string, string, string][] = [
-    ["资料命中率", percent(summary.recall_final), percent(summary.agent_recall), "能回答的题里，最后拿到的资料包含的证据比例（固定流程是阈值过滤后的来源，Agent 是所有检索结果和读到的前后文合起来）"],
+    ["资料命中率", percent(summary.recall_given ?? summary.recall_final), percent(summary.agent_recall), "能回答的题里，最后交给模型的资料包含的证据比例。两边都算父块扩展拼进来的相邻分片：固定流程是过滤后的来源，Agent 是所有检索结果加上读前后文读到的"],
     ["误杀率", percent(summary.false_reject_rate), percent(summary.agent_false_reject_rate), "能回答的题里，一段资料都没拿到的比例（越低越好）"],
     ["漏放率", percent(summary.false_accept_rate), percent(summary.agent_false_accept_rate), "无法回答的题里，仍然拿到了资料的比例（越低越好）"],
     ["平均检索次数", "1", number(summary.agent_avg_searches), "固定流程每题检索一次；Agent 自己决定查几次"],
@@ -85,7 +87,7 @@ export function ComparePanel({ run }: { run: EvalRun }) {
     ["平均输入 token", "0", number(summary.agent_avg_prompt_tokens, 0), "口径不同：评测里固定流程的检索不调用大模型；线上固定流程每题还要调 3 次（意图识别、充分性判断、写回答）"],
   ];
   return <div className="ev-overview ag-eval">
-    <p className="ev-muted-note">同一套题，固定流程和 Agent 各跑一遍，比较的是<strong>最后拿到的资料里有没有题目预设的证据</strong>，判断方法相同。{summary.answerable_count ?? 0} 道能回答 · {summary.unanswerable_count ?? 0} 道无法回答。</p>
+    <p className="ev-muted-note">同一套题，固定流程和 Agent 各跑一遍，比较的是<strong>最后交给模型的资料里有没有题目预设的证据</strong>，判断方法相同（都算父块扩展拼进来的相邻分片）。{summary.answerable_count ?? 0} 道能回答 · {summary.unanswerable_count ?? 0} 道无法回答。</p>
     <div className="diag-table-wrap"><table className="diag-table ev-table ag-compare-table">
       <thead><tr><th>指标</th><th className="num">固定流程</th><th className="num">Agent</th><th>说明</th></tr></thead>
       <tbody>{rows.map(([label, fixed, agent, hint]) => <tr key={label}><td>{label}</td><td className="num">{fixed}</td><td className="num">{agent}</td><td className="ag-muted">{hint}</td></tr>)}</tbody>
@@ -98,7 +100,7 @@ export function ComparePanel({ run }: { run: EvalRun }) {
     <div className="diag-table-wrap"><table className="diag-table ev-table">
       <thead><tr><th>题型</th><th className="num">题数</th><th className="num">固定流程</th><th className="num">Agent</th><th className="num">Agent 平均检索次数</th></tr></thead>
       <tbody>{Object.entries(run.by_type ?? {}).map(([type, row]) => <tr key={type}>
-        <td>{type}</td><td className="num">{row.count ?? row.agent_count ?? "—"}</td><td className="num">{percent(row.recall_final)}</td>
+        <td>{type}</td><td className="num">{row.count ?? row.agent_count ?? "—"}</td><td className="num">{percent(row.recall_given ?? row.recall_final)}</td>
         <td className="num">{percent(row.agent_recall)}</td><td className="num">{number(row.agent_avg_searches)}</td>
       </tr>)}</tbody>
     </table></div>
@@ -250,8 +252,15 @@ function chunkLabel(position: number | null | undefined, chunkId?: string | null
   return chunkId ?? "—";
 }
 
+// 父块由哪几片拼成：「第 5～7 片」；分片 id 是「文档 id:序号」，序号从 0 开始。
+function partsLabel(parts: string[]) {
+  const numbers = parts.map((chunkId) => Number(chunkId.match(/:(\d+)$/)?.[1])).filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (!numbers.length) return `${parts.length} 片`;
+  return numbers.length === 1 ? `第 ${numbers[0] + 1} 片` : `第 ${numbers[0] + 1}～${numbers[numbers.length - 1] + 1} 片`;
+}
+
 // 一个分块：编号做成标签，命中证据的标签有背景色；点标签才显示内容。
-type ChunkItem = { key: string; id: string; chunkId?: string | null; position?: number | null; fresh?: boolean; title: string | null; heading: string | null; text: string; relevance?: number | null; low?: boolean; hit: boolean };
+type ChunkItem = { key: string; id: string; chunkId?: string | null; position?: number | null; parts?: string[]; fresh?: boolean; title: string | null; heading: string | null; text: string; relevance?: number | null; low?: boolean; hit: boolean };
 
 function ChunkTabs({ items, empty }: { items: ChunkItem[]; empty: string }) {
   const [selected, setSelected] = useState<string | null>(null);
@@ -263,7 +272,7 @@ function ChunkTabs({ items, empty }: { items: ChunkItem[]; empty: string }) {
       title={[item.hit ? "这个分块包含证据" : item.title ?? "", item.fresh ? "这次调用新拿到的（前面的调用没拿到过）" : ""].filter(Boolean).join("；")} onClick={() => setSelected(selected === item.key ? null : item.key)}>
       {chunkLabel(item.position, item.chunkId)}<small>{item.id}</small></button>)}</div>
     {current && <div className={`ag-chunk-body ${current.hit ? "is-hit" : ""}`}>
-      <div className="ag-chunk-meta"><strong>{chunkLabel(current.position, current.chunkId)}</strong><small>本次检索的 {current.id}</small>{current.title ?? "—"}{current.heading ? ` · ${current.heading}` : ""}{current.relevance !== undefined && current.relevance !== null && <small> · 相关性 {current.relevance.toFixed(2)}{current.low ? "（较低）" : ""}</small>}{current.hit && <span className="ag-hit">含证据</span>}</div>
+      <div className="ag-chunk-meta"><strong>{chunkLabel(current.position, current.chunkId)}</strong><small>本次检索的 {current.id}</small>{current.parts && current.parts.length > 1 && <small>· 父块拼进了{partsLabel(current.parts)}</small>}{current.title ?? "—"}{current.heading ? ` · ${current.heading}` : ""}{current.relevance !== undefined && current.relevance !== null && <small> · 相关性 {current.relevance.toFixed(2)}{current.low ? "（较低）" : ""}</small>}{current.hit && <span className="ag-hit">含证据</span>}</div>
       <p>{current.text}</p>
     </div>}
   </div>;
@@ -276,12 +285,12 @@ function QuestionDetail({ question, hasFixed }: { question: EvalQuestion; hasFix
     {agent?.error && <p className="ev-lost-hint">Agent 运行失败：{agent.error}</p>}
     {question.answerable ? <div className="ag-evidence-list">{(agent?.evidence ?? []).map((evidence, index) => {
       const fixed = question.evidence?.[index];
-      const fixedFound = fixed?.status === "returned";
+      const fixedFound = fixed?.given ?? fixed?.status === "returned";
       const chunkIds = evidence.chunk_ids?.length ? evidence.chunk_ids : fixed?.chunk_id ? [fixed.chunk_id] : [];
       return <div className="ag-evidence" key={index}>
         <p>证据 {index + 1}：“{evidence.text}”</p>
         <span className="ag-evidence-chunk">所在分块 {chunkIds.length ? chunkIds.map((chunkId, order) => <code key={chunkId} title={chunkId}>{chunkLabel(evidence.positions?.[order], chunkId)}</code>) : "知识库里没找到"}</span>
-        {hasFixed && <span className={fixedFound ? "is-hit" : "is-miss"}>固定流程：{fixedFound ? `拿到了（本次检索的 ${fixed?.source_id ?? "—"}）` : "没拿到"}</span>}
+        {hasFixed && <span className={fixedFound ? "is-hit" : "is-miss"}>固定流程：{fixedFound ? `拿到了${fixed?.source_id ? `（本次检索的 ${fixed.source_id}）` : "（在父块拼进来的相邻分片里）"}` : "没拿到"}</span>}
         <span className={evidence.found ? "is-hit" : "is-miss"}>Agent：{evidence.found ? `拿到了（${evidence.where.map((item) => `第 ${item.call} 次调用的 ${item.evidence_id ?? "—"}`).join("、")}）` : "没拿到"}</span>
       </div>;
     })}</div> : <p className="ev-muted-note">这道题知识库里没有答案，没有预设证据；拿到的资料越少越好（拿到了模型可能硬凑答案）。</p>}
@@ -294,15 +303,22 @@ function QuestionDetail({ question, hasFixed }: { question: EvalQuestion; hasFix
 }
 
 function FixedLog({ question }: { question: EvalQuestion }) {
+  // 证据所在的分片（Agent 记的所在分块，或固定流程命中的分片）；来源是父块，父块里任何一片含证据都算命中。
+  const evidenceChunks = new Set<string>();
+  for (const item of question.agent?.evidence ?? []) for (const chunkId of item.chunk_ids ?? []) evidenceChunks.add(chunkId);
+  for (const item of question.evidence ?? []) if (item.chunk_id) evidenceChunks.add(item.chunk_id);
   const hitSources = new Set((question.evidence ?? []).filter((item) => item.status === "returned").map((item) => item.source_id));
-  const items: ChunkItem[] = (question.sources ?? []).map((source) => ({ key: source.id, id: source.id, chunkId: (source as { chunk_id?: string }).chunk_id ?? null,
-    position: (source as { position?: number | null }).position ?? null, title: source.title,
-    heading: source.heading ?? null, text: source.text, hit: hitSources.has(source.id) }));
+  const items: ChunkItem[] = (question.sources ?? []).map((source) => {
+    const extra = source as { chunk_id?: string; position?: number | null; parent_chunk_ids?: string[] };
+    const parts = extra.parent_chunk_ids ?? (extra.chunk_id ? [extra.chunk_id] : []);
+    return { key: source.id, id: source.id, chunkId: extra.chunk_id ?? null, position: extra.position ?? null, parts, title: source.title,
+      heading: source.heading ?? null, text: source.text, hit: hitSources.has(source.id) || parts.some((chunkId) => evidenceChunks.has(chunkId)) };
+  });
   return <section className="ag-log">
     <div className="ag-log-title">固定流程<small>检索 1 次 · 耗时 {formatMs(question.latency_ms)}</small></div>
     <div className="ag-call">
       <div className="ag-call-head"><span className="ag-tool">检索</span>{question.queries.map((query) => <code key={query}>{query}</code>)}
-        <span className="ag-tag">混合检索</span><span className="ag-tag">耗时 {formatMs(question.latency_ms)}</span>{hitSources.size > 0 && <span className="ag-hit">命中</span>}</div>
+        <span className="ag-tag">混合检索</span><span className="ag-tag">耗时 {formatMs(question.latency_ms)}</span>{items.some((item) => item.hit) && <span className="ag-hit">命中</span>}</div>
       <ChunkTabs items={items} empty="过滤后没有分块。" />
     </div>
   </section>;
@@ -325,7 +341,7 @@ function AgentCall({ call, fresh }: { call: EvalAgentCall; fresh: Set<string> })
   const executed = call.status === "ok" || call.status === "error";
   const newCount = call.new_chunks ?? fresh.size;
   let items: ChunkItem[] = [];
-  if (call.results) items = call.results.map((result) => ({ key: `${call.call}-${result.evidence_id}`, id: result.evidence_id, chunkId: result.chunk_id, position: result.position ?? null, title: result.title,
+  if (call.results) items = call.results.map((result) => ({ key: `${call.call}-${result.evidence_id}`, id: result.evidence_id, chunkId: result.chunk_id, position: result.position ?? null, parts: result.parent_chunk_ids, title: result.title,
     heading: result.heading ?? null, text: result.text, relevance: result.relevance, low: result.low_relevance, hit: result.hits.length > 0,
     fresh: Boolean(result.chunk_id) && fresh.has(result.chunk_id as string) }));
   else if (call.name === "read_context" && call.text) items = [{ key: `${call.call}-read`, id: `${call.source_id ?? ""} ${call.direction === "before" ? "前文" : "后文"}`,
@@ -370,6 +386,7 @@ function fromSpecial(question: EvalSpecialQuestion, hasFixed: boolean): EvalQues
     stages: (hasFixed ? { pool: { recall, rr: 0, rank: null }, top: { recall, rr: 0, rank: null }, final: { recall, rr: 0, rank: null } } : undefined) as EvalQuestion["stages"],
     lost_stage: question.lost_stage ?? null,
     evidence: (question.fixed_evidence ?? []).map((item) => ({ ...item, rrf_rank: null, rerank_rank: null, rerank_probability: null, status: item.status ?? "not_recalled" })),
+    given_recall: question.given_recall,
     returned: question.returned ?? 0, max_probability: null, latency_ms: question.latency_ms ?? 0,
     queries: question.queries ?? [], rerank_query: question.rerank_query ?? "", query_source: "rule",
     sources: question.sources, agent: question.agent, compare: question.compare, note: notes.join(" · ") || undefined,
@@ -404,7 +421,7 @@ export function SpecialAgentResults({ section }: { section: EvalSpecialSection }
       <Card label="Agent 通过" value={`${agentPassed} / ${section.count}`} note={section.previous_agent ? `和上次（${section.previous_agent.passed ?? "—"} / ${section.previous_agent.count}）比：新通过 ${agentChange.better}，新失败 ${agentChange.worse}` : "这是第一次用 Agent 跑这个专项"} />
       {hasFixed && (Object.keys(COMPARE_LABELS) as EvalCompareKey[]).map((key) => <Card key={key} label={COMPARE_LABELS[key]} value={`${counts[key]} 题`} note={COMPARE_HINTS[key]} />)}
     </div>
-    <p className="ev-muted-note">证据全部拿到算通过：固定流程看过滤后交给回答模型的分块，Agent 看它所有检索和读前后文拿到的分块。{section.agent && <> Agent 配置：工具预算 {section.agent.tool_budget} 次 · 超时 {section.agent.timeout} 秒 · 提示词版本 {section.agent.prompt_version}。</>}</p>
+    <p className="ev-muted-note">证据全部拿到算通过：固定流程看过滤后交给回答模型的来源，Agent 看它所有检索结果和读前后文读到的；两边都算父块扩展拼进来的相邻分片。{section.agent && <> Agent 配置：工具预算 {section.agent.tool_budget} 次 · 超时 {section.agent.timeout} 秒 · 提示词版本 {section.agent.prompt_version}。</>}</p>
     <AgentQuestionList run={run} hasFixed={hasFixed} />
   </div>;
 }

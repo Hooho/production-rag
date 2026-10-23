@@ -314,10 +314,11 @@ def run_search_suite(store, models, suite, responder, run_id, progress, modes=("
             "lost_stage": row.get("lost_stage"), "returned": row.get("returned"),
             "reference_answer": item["reference_answer"] or None,
             # 和 Agent 逐题对比时要用：过滤后的召回、证据去向、交给回答模型的来源、检索词和耗时。
-            "recall_final": found, "fixed_evidence": [{key: value.get(key) for key in ("text", "chunk_id", "source_id",
-                "status")} for value in row.get("evidence") or []],
-            "sources": [{key: source.get(key) for key in ("id", "title", "heading", "text", "chunk_id", "position")}
-                for source in row.get("sources") or []],
+            "recall_final": found, "given_recall": row.get("given_recall"),
+            "fixed_evidence": [{key: value.get(key) for key in ("text", "chunk_id", "source_id", "status", "given")}
+                for value in row.get("evidence") or []],
+            "sources": [{key: source.get(key) for key in ("id", "title", "heading", "text", "chunk_id", "position",
+                "parent_chunk_ids")} for source in row.get("sources") or []],
             "queries": row.get("queries"), "rerank_query": row.get("rerank_query"), "latency_ms": row.get("latency_ms")}
         if suite["method"] == "answer":
             judgement = row.get("judgement") or {}
@@ -363,6 +364,9 @@ def run_agent_search_suite(store, models, suite, progress, modes, agent_mode):
             "reference_answer": item.get("reference_answer") or None})
         entry.update({"evidence_count": len(evidence), "agent": agent, "agent_passed": passed_agent})
         if with_fixed:
+            # 和 Agent 对比时，固定流程按“交给模型的资料”（含父块扩展）判断是否通过，两边口径一致。
+            given = entry.get("given_recall")
+            entry["passed"] = entry["passed"] if given is None else given >= 1
             entry["fixed_passed"] = entry["passed"]
             entry["compare"] = ("both" if entry["passed"] and passed_agent else "fixed_only" if entry["passed"]
                 else "agent_only" if passed_agent else "neither")

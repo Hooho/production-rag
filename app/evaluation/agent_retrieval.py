@@ -4,7 +4,9 @@
 Agent 每道题可能检索好几次、每次的查询词和参数都由它自己定，没有统一的排名，所以只算一个“最后命中”：
 把它所有 search_knowledge 返回的分片和 read_context 读到的分片合在一起，用和固定流程同样的方法
 （evidence_hits：分片原文标准化后包含证据原文）判断证据有没有拿到。
-口径和固定流程的“过滤后命中”（recall_final）一致：都是按分片原文判断，都是最后交给写答案的模型的资料。
+口径和固定流程的“交给模型的资料命中率”（recall_given）一致：都按分片原文判断，都算父块扩展拼进来的相邻分片
+（检索返回的每条资料是一个父块，正文里拼进了前后几片，模型看得到）；Agent 另外加上 read_context 读到的分片。
+（2026-10-24 前只算命中的那一个分片，前后文类的题对固定流程不公平：答案在相邻分片、已经拼进父块交给了模型，却算没拿到。）
 
 评测页可以勾选只跑固定流程、只跑 Agent 或两个一起跑：
 - 只跑固定流程：不经过这里，和原来完全一样；
@@ -73,14 +75,18 @@ def call_log(number, round_no, call, evidence, chunk_texts):
     if name == "search_knowledge" and "retrieval" in trace:
         sources = (trace.get("retrieval") or {}).get("sources") or []
         sources = sources[:trace.get("top_k") or len(sources)]
-        ids = [source.get("chunk_id") for source in sources]
-        hits = chunk_hits(ids, evidence, chunk_texts)
+        ids = []
         results = []
         for evidence_id, source in zip(trace.get("evidence_ids") or [], sources):
+            # 每条资料是一个父块：命中的分片加上拼进来的相邻分片，都算这条资料给出的分片。
+            parts = [str(chunk_id) for chunk_id in (source.get("parent_chunk_ids") or [source.get("chunk_id")]) if chunk_id is not None]
+            part_hits = chunk_hits(parts, evidence, chunk_texts)
+            ids.extend(chunk_id for chunk_id in parts if chunk_id not in ids)
             results.append({"evidence_id": evidence_id, "title": source.get("title"), "heading": source.get("heading"),
-                "chunk_id": source.get("chunk_id"), "position": source.get("position"), "relevance": source.get("relevance"),
-                "low_relevance": bool(source.get("low_relevance")), "text": (source.get("text") or "")[:TEXT_LIMIT],
-                "hits": hits.get(source.get("chunk_id"), [])})
+                "chunk_id": source.get("chunk_id"), "position": source.get("position"), "parent_chunk_ids": parts,
+                "relevance": source.get("relevance"), "low_relevance": bool(source.get("low_relevance")),
+                "text": (source.get("text") or "")[:TEXT_LIMIT],
+                "hits": sorted({index for indexes in part_hits.values() for index in indexes})})
         entry.update(query=trace.get("query"), mode=trace.get("mode"), top_k=trace.get("top_k"), results=results,
             chunk_ids=ids)
     elif name == "read_context":
@@ -217,7 +223,7 @@ def compare_rows(rows):
     for row in rows:
         if not row["answerable"] or not row.get("agent") or "stages" not in row:
             continue
-        fixed = row["stages"]["final"]["recall"] == 1
+        fixed = (row.get("given_recall") if row.get("given_recall") is not None else row["stages"]["final"]["recall"]) == 1
         agent = row["agent"]["recall"] == 1
         key = "both" if fixed and agent else "fixed_only" if fixed else "agent_only" if agent else "neither"
         row["compare"] = key
