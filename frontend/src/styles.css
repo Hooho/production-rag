@@ -8167,3 +8167,55 @@ input:focus {
 .ag-special {
    margin-top: 6px;
 }
+
+/* 父块扩展：标签上的「+扩展 N 片」，展开后列出拼进来的每一片，扩展的那几片用虚线框。 */
+.ag-ext-badge {
+   font-style: normal;
+   font-size: 11px;
+   padding: 0 5px;
+   border: 1px dashed var(--ev-muted);
+   border-radius: 3px;
+   color: var(--ev-muted);
+   font-weight: 400;
+}
+
+.ag-parts {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: 6px;
+   margin-top: 6px;
+   font-size: 12px;
+   color: var(--ev-muted);
+}
+
+.ag-part {
+   display: inline-flex;
+   align-items: baseline;
+   gap: 4px;
+   padding: 2px 8px;
+   border-radius: 4px;
+   background: rgba(255, 255, 255, .9);
+   color: var(--t-536d86);
+   font-size: 12px;
+}
+
+.ag-part small {
+   font-size: 11px;
+   color: var(--ev-muted);
+}
+
+.ag-part.is-main {
+   border: 1px solid var(--t-536d86);
+   font-weight: 700;
+}
+
+.ag-part.is-ext {
+   border: 1px dashed var(--ev-muted);
+}
+
+.ag-part.is-hit {
+   background: #d8f2e6;
+   border-color: var(--ev-good);
+   color: #24684a;
+}

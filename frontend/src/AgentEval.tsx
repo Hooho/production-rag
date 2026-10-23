@@ -252,15 +252,32 @@ function chunkLabel(position: number | null | undefined, chunkId?: string | null
   return chunkId ?? "—";
 }
 
-// 父块由哪几片拼成：「第 5～7 片」；分片 id 是「文档 id:序号」，序号从 0 开始。
-function partsLabel(parts: string[]) {
-  const numbers = parts.map((chunkId) => Number(chunkId.match(/:(\d+)$/)?.[1])).filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
-  if (!numbers.length) return `${parts.length} 片`;
-  return numbers.length === 1 ? `第 ${numbers[0] + 1} 片` : `第 ${numbers[0] + 1}～${numbers[numbers.length - 1] + 1} 片`;
+// 一个分块：编号做成标签，命中证据的标签有背景色；点标签才显示内容。
+type ChunkItem = { key: string; id: string; chunkId?: string | null; position?: number | null; parts?: string[]; evidenceParts?: Set<string>; fresh?: boolean; title: string | null; heading: string | null; text: string; relevance?: number | null; low?: boolean; hit: boolean };
+
+// 父块扩展：检索命中的是一片，父块扩展会把同一父块里相邻的几片一起拼进来交给模型。
+// 拼进来的那几片标成「扩展」（虚线框），方便看出证据是检索直接命中的，还是靠扩展带进来的。
+function extendedParts(item: ChunkItem) {
+  return (item.parts ?? []).filter((chunkId) => chunkId !== item.chunkId);
 }
 
-// 一个分块：编号做成标签，命中证据的标签有背景色；点标签才显示内容。
-type ChunkItem = { key: string; id: string; chunkId?: string | null; position?: number | null; parts?: string[]; fresh?: boolean; title: string | null; heading: string | null; text: string; relevance?: number | null; low?: boolean; hit: boolean };
+function chunkIndex(chunkId: string) {
+  const index = Number(chunkId.match(/:(\d+)$/)?.[1]);
+  return Number.isFinite(index) ? index : Number.MAX_SAFE_INTEGER;
+}
+
+function PartsRow({ item }: { item: ChunkItem }) {
+  const parts = [...(item.parts ?? [])].sort((a, b) => chunkIndex(a) - chunkIndex(b));
+  return <div className="ag-parts">
+    <span>交给模型的是这几片拼起来的内容：</span>
+    {parts.map((chunkId) => {
+      const extended = chunkId !== item.chunkId;
+      const evidence = item.evidenceParts?.has(chunkId);
+      return <span key={chunkId} title={chunkId} className={`ag-part ${extended ? "is-ext" : "is-main"} ${evidence ? "is-hit" : ""}`}>
+        {chunkLabel(null, chunkId)}<small>{extended ? "扩展" : "检索命中"}{evidence ? " · 含证据" : ""}</small></span>;
+    })}
+  </div>;
+}
 
 function ChunkTabs({ items, empty }: { items: ChunkItem[]; empty: string }) {
   const [selected, setSelected] = useState<string | null>(null);
@@ -269,10 +286,13 @@ function ChunkTabs({ items, empty }: { items: ChunkItem[]; empty: string }) {
   return <div className="ag-chunks">
     <div className="ag-chunk-tabs" role="tablist">{items.map((item) => <button key={item.key} type="button" role="tab" aria-selected={selected === item.key}
       className={`ag-chunk-tab ${item.hit ? "is-hit" : ""} ${item.fresh ? "is-new" : ""} ${selected === item.key ? "is-active" : ""}`}
-      title={[item.hit ? "这个分块包含证据" : item.title ?? "", item.fresh ? "这次调用新拿到的（前面的调用没拿到过）" : ""].filter(Boolean).join("；")} onClick={() => setSelected(selected === item.key ? null : item.key)}>
-      {chunkLabel(item.position, item.chunkId)}<small>{item.id}</small></button>)}</div>
+      title={[item.hit ? (extendedParts(item).some((chunkId) => item.evidenceParts?.has(chunkId)) && !(item.chunkId && item.evidenceParts?.has(item.chunkId)) ? "证据在父块扩展拼进来的分片里" : "这个分块包含证据") : item.title ?? "",
+        extendedParts(item).length ? `父块扩展还拼进了 ${extendedParts(item).map((chunkId) => chunkLabel(null, chunkId)).join("、")}` : "",
+        item.fresh ? "这次调用新拿到的（前面的调用没拿到过）" : ""].filter(Boolean).join("；")} onClick={() => setSelected(selected === item.key ? null : item.key)}>
+      {chunkLabel(item.position, item.chunkId)}<small>{item.id}</small>{extendedParts(item).length > 0 && <em className="ag-ext-badge">+扩展 {extendedParts(item).length} 片</em>}</button>)}</div>
     {current && <div className={`ag-chunk-body ${current.hit ? "is-hit" : ""}`}>
-      <div className="ag-chunk-meta"><strong>{chunkLabel(current.position, current.chunkId)}</strong><small>本次检索的 {current.id}</small>{current.parts && current.parts.length > 1 && <small>· 父块拼进了{partsLabel(current.parts)}</small>}{current.title ?? "—"}{current.heading ? ` · ${current.heading}` : ""}{current.relevance !== undefined && current.relevance !== null && <small> · 相关性 {current.relevance.toFixed(2)}{current.low ? "（较低）" : ""}</small>}{current.hit && <span className="ag-hit">含证据</span>}</div>
+      <div className="ag-chunk-meta"><strong>{chunkLabel(current.position, current.chunkId)}</strong><small>本次检索的 {current.id}</small>{current.title ?? "—"}{current.heading ? ` · ${current.heading}` : ""}{current.relevance !== undefined && current.relevance !== null && <small> · 相关性 {current.relevance.toFixed(2)}{current.low ? "（较低）" : ""}</small>}{current.hit && <span className="ag-hit">含证据</span>}</div>
+      {extendedParts(current).length > 0 && <PartsRow item={current} />}
       <p>{current.text}</p>
     </div>}
   </div>;
@@ -294,7 +314,7 @@ function QuestionDetail({ question, hasFixed }: { question: EvalQuestion; hasFix
         <span className={evidence.found ? "is-hit" : "is-miss"}>Agent：{evidence.found ? `拿到了（${evidence.where.map((item) => `第 ${item.call} 次调用的 ${item.evidence_id ?? "—"}`).join("、")}）` : "没拿到"}</span>
       </div>;
     })}</div> : <p className="ev-muted-note">这道题知识库里没有答案，没有预设证据；拿到的资料越少越好（拿到了模型可能硬凑答案）。</p>}
-    <p className="ag-muted ag-numbering-note">「第 N 片」是分块在文档里的编号，固定不变；小字的 S1、S2 是某一次检索返回结果的顺序（每次检索都从 S1 开始），只在那一次检索里有意义。绿色的分块包含证据；Agent 那边红框的分块是这次调用新拿到的（前面的调用没拿到过）。</p>
+    <p className="ag-muted ag-numbering-note">「第 N 片」是分块在文档里的编号，固定不变；小字的 S1、S2 是某一次检索返回结果的顺序（每次检索都从 S1 开始），只在那一次检索里有意义。绿色的分块包含证据；Agent 那边红框的分块是这次调用新拿到的（前面的调用没拿到过）。标了「+扩展 N 片」的分块，父块扩展还把相邻的几片一起拼进来交给了模型，点开能看到哪几片是扩展的、证据在哪一片。</p>
     <div className={`ag-columns ${hasFixed ? "" : "is-single"}`}>
       {hasFixed && <FixedLog question={question} />}
       {agent && <AgentLog question={question} />}
@@ -312,7 +332,8 @@ function FixedLog({ question }: { question: EvalQuestion }) {
     const extra = source as { chunk_id?: string; position?: number | null; parent_chunk_ids?: string[] };
     const parts = extra.parent_chunk_ids ?? (extra.chunk_id ? [extra.chunk_id] : []);
     return { key: source.id, id: source.id, chunkId: extra.chunk_id ?? null, position: extra.position ?? null, parts, title: source.title,
-      heading: source.heading ?? null, text: source.text, hit: hitSources.has(source.id) || parts.some((chunkId) => evidenceChunks.has(chunkId)) };
+      heading: source.heading ?? null, text: source.text, evidenceParts: new Set(parts.filter((chunkId) => evidenceChunks.has(chunkId))),
+      hit: hitSources.has(source.id) || parts.some((chunkId) => evidenceChunks.has(chunkId)) };
   });
   return <section className="ag-log">
     <div className="ag-log-title">固定流程<small>检索 1 次 · 耗时 {formatMs(question.latency_ms)}</small></div>
@@ -327,21 +348,23 @@ function FixedLog({ question }: { question: EvalQuestion }) {
 function AgentLog({ question }: { question: EvalQuestion }) {
   const agent = question.agent!;
   const fresh = freshness(question);
+  const evidenceChunks = new Set<string>();
+  for (const item of agent.evidence ?? []) for (const chunkId of item.chunk_ids ?? []) evidenceChunks.add(chunkId);
   return <section className="ag-log">
     <div className="ag-log-title">Agent<small>检索 {agent.searches} 次{fresh.wasted > 0 ? `（${fresh.wasted} 次无新增）` : ""} · {agent.rounds} 轮 · {agent.prompt_tokens} token · 耗时 {formatMs(agent.latency_ms)} · {STOP_LABELS[agent.stop_reason ?? ""] ?? agent.stop_reason ?? "—"}</small></div>
     {agent.question_sent !== question.question && <div className="ag-call-meta">实际提问（多轮追问按规则补全）：{agent.question_sent}</div>}
     {agent.calls.length === 0 && <p className="ag-muted">没有调用任何工具，直接回答了。</p>}
-    {agent.calls.map((call) => <AgentCall key={call.call} call={call} fresh={fresh.perCall.get(call.call) ?? new Set()} />)}
+    {agent.calls.map((call) => <AgentCall key={call.call} call={call} fresh={fresh.perCall.get(call.call) ?? new Set()} evidenceChunks={evidenceChunks} />)}
   </section>;
 }
 
-function AgentCall({ call, fresh }: { call: EvalAgentCall; fresh: Set<string> }) {
+function AgentCall({ call, fresh, evidenceChunks }: { call: EvalAgentCall; fresh: Set<string>; evidenceChunks: Set<string> }) {
   const status = CALL_STATUS[call.status] ?? call.status;
   const hit = call.hits.length > 0;
   const executed = call.status === "ok" || call.status === "error";
   const newCount = call.new_chunks ?? fresh.size;
   let items: ChunkItem[] = [];
-  if (call.results) items = call.results.map((result) => ({ key: `${call.call}-${result.evidence_id}`, id: result.evidence_id, chunkId: result.chunk_id, position: result.position ?? null, parts: result.parent_chunk_ids, title: result.title,
+  if (call.results) items = call.results.map((result) => ({ key: `${call.call}-${result.evidence_id}`, id: result.evidence_id, chunkId: result.chunk_id, position: result.position ?? null, parts: result.parent_chunk_ids, evidenceParts: new Set((result.parent_chunk_ids ?? []).filter((chunkId) => evidenceChunks.has(chunkId))), title: result.title,
     heading: result.heading ?? null, text: result.text, relevance: result.relevance, low: result.low_relevance, hit: result.hits.length > 0,
     fresh: Boolean(result.chunk_id) && fresh.has(result.chunk_id as string) }));
   else if (call.name === "read_context" && call.text) items = [{ key: `${call.call}-read`, id: `${call.source_id ?? ""} ${call.direction === "before" ? "前文" : "后文"}`,
