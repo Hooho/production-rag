@@ -182,7 +182,7 @@ def summarize_history_metrics(run):
     false_accept_questions = 0
     # 最后交给模型的资料（固定流程，含补充检索、被清空算 0）、Agent 拿到的资料里各有几条证据，被清空的有答案题数。
     # 旧记录没有这些字段时是 None，前端退回只写比例的说明。
-    given_hits = agent_hits = cleared_questions = None
+    given_hits = agent_hits = cleared_questions = ext_hits = None
 
     for question in questions:
         pool = question.get("pool")
@@ -216,6 +216,8 @@ def summarize_history_metrics(run):
             agent = question.get("agent") or {}
             if agent.get("recall") is not None:
                 agent_hits = (agent_hits or 0) + int(agent["recall"] * evidence_count + 0.5)
+            if "ext_hits" in question:
+                ext_hits = (ext_hits or 0) + question["ext_hits"]
             if "cleared" in question:
                 cleared_questions = (cleared_questions or 0) + bool(question.get("cleared"))
         else:
@@ -240,6 +242,7 @@ def summarize_history_metrics(run):
         "given_hits": given_hits,
         "agent_hits": agent_hits,
         "cleared_questions": cleared_questions,
+        "ext_hits": ext_hits,
     }
 
 

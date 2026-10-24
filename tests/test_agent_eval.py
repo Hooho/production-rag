@@ -50,7 +50,9 @@ def test_agent_retrieval_runs_with_fixed(setup, eval_dir, monkeypatch):
     assert call["results"][0]["evidence_id"] == "S1" and call["results"][0]["hits"] == [0] and call["hits"] == [0]
     assert agent["evidence"][0] == {"text": "耳机签收后七天内可以无理由退货", "found": True,
         "chunk_ids": [call["results"][0]["chunk_id"]], "positions": [call["results"][0]["position"]],
-        "where": [{"call": 1, "evidence_id": "S1"}, {"call": 2, "evidence_id": "S1"}]}
+        "where": [{"call": 1, "evidence_id": "S1"}, {"call": 2, "evidence_id": "S1"}], "via": "direct"}
+    # 证据就在检索命中的那一片里：直接命中，不算扩展命中。
+    assert agent["found_count"] == 1 and agent["ext_hits"] == 0 and call["results"][0]["main_hits"] == [0]
     assert isinstance(call["results"][0]["position"], int)
     assert agent["rounds"] == 3 and agent["tool_calls"] == 2 and agent["prompt_tokens"] == 300
     assert agent["answer"] == "签收后七天内可以退货 [S1]。"

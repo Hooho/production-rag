@@ -190,6 +190,7 @@ type HistoryEvidenceStats = {
   givenHits?: number | null;
   agentHits?: number | null;
   clearedQuestions?: number | null;
+  extHits?: number | null;
 };
 
 // 从完整评测逐题结果统计真实证据数量，说明文字与页面上的汇总百分比使用同一批数据。
@@ -242,7 +243,9 @@ function summarizeHistoryEvidence(run: EvalRun): HistoryEvidenceStats | null {
     falseRejectQuestions: answerable.filter((question) => question.returned === 0).length,
     falseAcceptQuestions: unanswerable.filter((question) => question.returned > 0).length,
     givenHits: answerable.some((question) => question.given_recall !== undefined && question.given_recall !== null)
-      ? answerable.reduce((sum, question) => sum + Math.round((question.given_recall ?? 0) * question.evidence_count), 0) : null,
+      ? answerable.reduce((sum, question) => sum + (question.given_hits ?? Math.round((question.given_recall ?? 0) * question.evidence_count)), 0) : null,
+    extHits: answerable.some((question) => question.ext_hits !== undefined && question.ext_hits !== null)
+      ? answerable.reduce((sum, question) => sum + (question.ext_hits ?? 0), 0) : null,
     agentHits: answerable.some((question) => question.agent) ? answerable.reduce((sum, question) => sum + (question.agent?.evidence ?? []).filter((item) => item.found).length, 0) : null,
     clearedQuestions: answerable.some((question) => question.cleared !== undefined) ? answerable.filter((question) => question.cleared).length : null,
   };
@@ -257,6 +260,11 @@ function metricSentence(key: string, stats: HistoryEvidenceStats | null, config:
   switch (key) {
     case "recall_given": return stats.givenHits === null || stats.givenHits === undefined ? null : `${evidence}，最后交给大模型的资料里有 ${stats.givenHits} 条`;
     case "agent_recall": return stats.agentHits === null || stats.agentHits === undefined ? null : `${evidence}，Agent 找到的资料里有 ${stats.agentHits} 条`;
+    case "ext_hit_rate": {
+      if (stats.extHits === null || stats.extHits === undefined || stats.givenHits === null || stats.givenHits === undefined) return null;
+      const without = stats.evidenceTotal ? formatPercent((stats.givenHits - stats.extHits) / stats.evidenceTotal) : "—";
+      return `拿到的 ${stats.givenHits} 条证据里，有 ${stats.extHits} 条在扩展的分片里；不扩展的话命中率 ${without}`;
+    }
     case "wrong_clear_rate": return stats.clearedQuestions === null || stats.clearedQuestions === undefined ? null : `${stats.answerableQuestions} 道有答案的题，有 ${stats.clearedQuestions} 道被判资料不足、清空了`;
     case "recall_pool": return `${evidence}，有 ${stats.poolHits} 条进了候选池（每题前 ${config.pool_size ?? "—"} 段）`;
     case "recall_top": return `${evidence}，有 ${stats.topHits} 条排进了重排后的前 ${config.return_limit ?? 6} 段`;
@@ -287,6 +295,7 @@ function historyEvidenceStats(metrics: EvalHistoryMetrics | null | undefined): H
     givenHits: metrics.given_hits,
     agentHits: metrics.agent_hits,
     clearedQuestions: metrics.cleared_questions,
+    extHits: metrics.ext_hits,
   };
 }
 
@@ -305,7 +314,7 @@ function metricLabel(key: string, run: EvalRunBrief) {
   const top = run.config.return_limit ?? 6;
   const labels: Record<string, string> = {
     recall_pool: `召回 Recall@${pool}`, recall_top: `重排 Recall@${top}`, recall_final: "过滤后 Recall", recall_given: "固定流程资料命中率",
-    recall_given_first: "第一次检索交给模型的资料命中率", rescued_count: "补充检索救回", wrong_clear_rate: "误清空率",
+    recall_given_first: "第一次检索交给模型的资料命中率", ext_hit_rate: "扩展命中率", rescued_count: "补充检索救回", wrong_clear_rate: "误清空率",
     right_clear_rate: "正确清空率", retry_rate: "补充检索比例", avg_judge_calls: "平均判断次数", flow_latency_avg_ms: "完整检索平均耗时",
     mrr_pool: `召回 MRR@${pool}`, mrr_top: `重排 MRR@${top}`, mrr_final: "过滤后 MRR",
     false_reject_rate: "误杀率", false_accept_rate: "漏放率", latency_avg_ms: "平均耗时", latency_p95_ms: "P95 耗时",
@@ -332,6 +341,7 @@ const FLOW_METRIC_EXPLANATIONS: Record<string, string> = {
   retry_rate: "触发补充检索的比例。",
   avg_judge_calls: "每题平均判断几次。",
   flow_latency_avg_ms: "改写 + 检索 + 判断 + 补充检索。",
+  ext_hit_rate: "拿到的证据里，只在父块扩展拼进来的分片里的比例",
 };
 
 const METRIC_HINTS: Record<string, string> = {
@@ -829,7 +839,7 @@ function Overview({ run, comparison }: { run: EvalRun; comparison: EvalCompariso
   const hasGeneration = run.kind === "generation";
   // 完整检索流程（新记录才有）：第一次检索之后还有充分性判断和补充检索，最终交给模型的资料可能不同。
   const hasFlow = run.config.flow?.name === "full";
-  const flowKeys = ["recall_given_first", "recall_given", "rescued_count", "wrong_clear_rate", "right_clear_rate", "retry_rate"];
+  const flowKeys = ["recall_given_first", "recall_given", "ext_hit_rate", "rescued_count", "wrong_clear_rate", "right_clear_rate", "retry_rate"];
   return <div className="ev-overview">
     {/* 顶部总览只展示本次评测结果，移除重复的历史对比提示；历史对比仍用于耗时变化和历史页。 */}
     {comparison?.settings_diff && comparison.settings_diff.length > 0 && <div className="ev-settings-diff">和上一次评测相比，系统参数改过 {comparison.settings_diff.length} 项：{comparison.settings_diff.map((item) => `${item.key} ${String(item.base)} → ${String(item.target)}`).join("；")}。分数变化可能来自参数，而不是代码。</div>}

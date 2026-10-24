@@ -81,12 +81,15 @@ def call_log(number, round_no, call, evidence, chunk_texts):
             # 每条资料是一个父块：命中的分片加上拼进来的相邻分片，都算这条资料给出的分片。
             parts = [str(chunk_id) for chunk_id in (source.get("parent_chunk_ids") or [source.get("chunk_id")]) if chunk_id is not None]
             part_hits = chunk_hits(parts, evidence, chunk_texts)
+            # 检索命中的那一片本身含哪几条证据；不在这里、只在拼进来的相邻分片里的，算扩展命中。
+            main = str(source.get("chunk_id")) if source.get("chunk_id") is not None else None
+            main_hits = part_hits.get(main, []) if main in part_hits else (chunk_hits([main], evidence, chunk_texts)[main] if main else [])
             ids.extend(chunk_id for chunk_id in parts if chunk_id not in ids)
             results.append({"evidence_id": evidence_id, "title": source.get("title"), "heading": source.get("heading"),
                 "chunk_id": source.get("chunk_id"), "position": source.get("position"), "parent_chunk_ids": parts,
                 "relevance": source.get("relevance"), "low_relevance": bool(source.get("low_relevance")),
                 "text": (source.get("text") or "")[:TEXT_LIMIT],
-                "hits": sorted({index for indexes in part_hits.values() for index in indexes})})
+                "hits": sorted({index for indexes in part_hits.values() for index in indexes}), "main_hits": sorted(main_hits)})
         entry.update(query=trace.get("query"), mode=trace.get("mode"), top_k=trace.get("top_k"), results=results,
             chunk_ids=ids)
     elif name == "read_context":
@@ -136,6 +139,18 @@ def evaluate_agent(agent_mode, store, models, item, chunk_texts, positions=None)
                 where[index].append({"call": entry["call"], "evidence_id": source["evidence_id"]})
         for index in entry.get("read_hits") or []:
             where[index].append({"call": entry["call"], "evidence_id": entry.get("source_id")})
+    # 每条证据是怎么拿到的：direct 检索命中的那一片就含证据；extension 只在父块扩展拼进来的分片里；
+    # context 只靠读前后文拿到。同一条证据有多种拿法时取最直接的（direct > extension > context）。
+    via = {}
+    rank = {"direct": 0, "extension": 1, "context": 2}
+    for entry in calls:
+        for source in entry.get("results") or []:
+            for index in source["hits"]:
+                kind = "direct" if index in (source.get("main_hits") or []) else "extension"
+                if index not in via or rank[kind] < rank[via[index]]:
+                    via[index] = kind
+        for index in entry.get("read_hits") or []:
+            via.setdefault(index, "context")
     evidence_chunks = {}
     for chunk_id, indexes in evidence_hits([{"chunk_id": chunk_id} for chunk_id in chunk_texts], evidence, chunk_texts).items():
         for index in indexes:
@@ -158,7 +173,10 @@ def evaluate_agent(agent_mode, store, models, item, chunk_texts, positions=None)
         # chunk_ids：这条证据在知识库里属于哪个（哪些）分块，和检索结果无关，用来对照两边拿到的分块。
         "evidence": [{"text": text, "chunk_ids": evidence_chunks.get(index, []),
             "positions": [(positions or {}).get(str(chunk_id)) for chunk_id in evidence_chunks.get(index, [])],
-            "found": index in found, "where": where[index]} for index, text in enumerate(evidence)],
+            "found": index in found, "where": where[index], "via": via.get(index) if index in found else None}
+            for index, text in enumerate(evidence)],
+        "found_count": len(found), "ext_hits": sum(1 for index in found if via.get(index) == "extension"),
+        "context_hits": sum(1 for index in found if via.get(index) == "context"),
         "calls": calls, "returned": len(chunks),
         "searches": len(searches), "empty_searches": sum(1 for entry in searches if not entry.get("results")),
         "wasted_searches": sum(1 for entry in searches if entry["new_chunks"] == 0),
@@ -199,6 +217,10 @@ def summarize_agent(rows):
     return {"agent_count": len(agents),
         "agent_recall": mean([agent["recall"] for agent in answerable if agent["recall"] is not None]),
         "agent_false_reject_rate": rate(answerable, lambda agent: agent["returned"] == 0),
+        # 扩展命中率：拿到的证据里，只在父块扩展拼进来的分片里的比例（旧记录没有 ext_hits 时是 None）。
+        "agent_ext_hit_rate": (round(sum(agent["ext_hits"] for agent in answerable if "ext_hits" in agent)
+            / sum(agent["found_count"] for agent in answerable if "ext_hits" in agent), 4)
+            if sum(agent.get("found_count", 0) for agent in answerable if "ext_hits" in agent) else None),
         "agent_false_accept_rate": rate(unanswerable, lambda agent: agent["returned"] > 0),
         "agent_avg_searches": average("searches"), "agent_avg_empty_searches": average("empty_searches"),
         # 无新增检索：一个新分块都没拿到的检索。比例 = 无新增检索次数 / 全部检索次数，越低越好。

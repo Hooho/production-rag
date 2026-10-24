@@ -635,7 +635,9 @@ export type EvalItem = {
 export type EvalSummary = Record<string, number | null>;
 export type EvalStage = { recall: number | null; rr: number; rank: number | null };
 // given：证据在不在交给回答模型的资料里（含父块扩展拼进来的相邻分片，旧记录没有）。
-export type EvalEvidence = { text: string; chunk_id: string | null; rrf_rank: number | null; rerank_rank: number | null; rerank_probability: number | null; source_id: string | null; status: string; given?: boolean; first_given?: boolean };
+export type EvalEvidence = { text: string; chunk_id: string | null; rrf_rank: number | null; rerank_rank: number | null; rerank_probability: number | null; source_id: string | null; status: string; given?: boolean; first_given?: boolean;
+  // 怎么拿到的：direct 检索命中的那一片就含证据，extension 只在父块扩展拼进来的分片里（旧记录没有）。
+  via?: "direct" | "extension" | null };
 export type EvalJudgement = { refused: boolean; faithfulness: number; correctness: number; citation: number; faithfulness_reason: string; correctness_reason: string; citation_reason: string; judge: string };
 export type EvalSufficiency = { checked: boolean; verdict: "sufficient" | "partial" | "insufficient" | null; missing?: string | string[] | null; retried?: boolean; retry_query?: string | null; refused?: boolean; source_count?: number | null;
   // 完整检索流程（检索评测也做判断后才有）：每次判断的结论、判断次数、是否用了补充检索的结果。
@@ -646,7 +648,7 @@ export type EvalRewrite = { classifier: string; route?: string | null; intent?: 
 // 补充检索：返回几段、是否被采用、补充检索的资料命中率和来源。
 export type EvalRetry = { returned: number; used: boolean; given_recall: number | null; found?: number[]; sources?: (Source & { chunk_id?: string | null; position?: number | null; parent_chunk_ids?: string[] })[] };
 // 和完整检索流程有关的逐题字段，调参评测和专项评测共用。
-export type EvalFlowFields = { first_given_recall?: number | null; rewrite?: EvalRewrite | null; retry?: EvalRetry | null; cleared?: boolean | null; flow_latency_ms?: number | null };
+export type EvalFlowFields = { given_hits?: number | null; ext_hits?: number | null; first_given_recall?: number | null; rewrite?: EvalRewrite | null; retry?: EvalRetry | null; cleared?: boolean | null; flow_latency_ms?: number | null };
 export type EvalQuestion = {
   id: string;
   question: string;
@@ -717,7 +719,7 @@ export type EvalAgentQuestion = {
   recall: number | null;
   // chunk_ids：证据在知识库里所属的分块（旧记录没有）。
   // positions：同一顺序的分块序号（从 0 开始，页面显示「第 N 片」）。
-  evidence: { text: string; chunk_ids?: string[]; positions?: (number | null)[]; found: boolean; where: { call: number; evidence_id: string | null }[] }[];
+  evidence: { text: string; chunk_ids?: string[]; positions?: (number | null)[]; found: boolean; where: { call: number; evidence_id: string | null }[]; via?: "direct" | "extension" | "context" | null }[];
   calls: EvalAgentCall[];
   returned: number;
   searches: number;
@@ -779,6 +781,8 @@ export type EvalHistoryMetrics = {
   given_hits?: number | null;
   agent_hits?: number | null;
   cleared_questions?: number | null;
+  // 拿到的证据里，靠父块扩展拿到的条数（旧记录没有）。
+  ext_hits?: number | null;
 };
 export type EvalConfig = { split: string | null; suites: string[]; special?: { suites: { id: string; name: string }[]; compare_memory?: boolean }; dataset_size?: number; rrf_k?: number; pool_size?: number; return_limit?: number; min_score?: number | null; reranked?: boolean; fusion?: string; methods?: string[]; model_mode?: string; embedding_mode?: string; embedding_model?: string; rerank_model?: string; rerank_mode?: string; query_source?: string[];
   // 检索评测跑了哪些模式（旧记录没有，都是只跑固定流程）；agent 是 Agent 的运行配置。

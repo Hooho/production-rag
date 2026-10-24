@@ -226,6 +226,24 @@ def evidence_found(sources, evidence, chunk_texts):
     return {index for indexes in hits.values() for index in indexes}
 
 
+# 一批来源里，检索命中的那一片本身（不算父块扩展拼进来的相邻分片）含哪几条证据。
+def evidence_found_main(sources, evidence, chunk_texts):
+    ids = [str(source["chunk_id"]) for source in sources or [] if source.get("chunk_id") is not None]
+    hits = evidence_hits([{"chunk_id": chunk_id} for chunk_id in ids], evidence, chunk_texts)
+    return {index for indexes in hits.values() for index in indexes}
+
+
+# 扩展命中：最后交给模型的资料里拿到的证据中，不在检索命中的那一片、只在父块扩展拼进来的分片里的。
+# 记在评测行上（given_hits 拿到几条、ext_hits 其中靠扩展的几条），每条证据标 via：direct / extension。
+def mark_extension(row, sources, evidence, chunk_texts):
+    given = evidence_found(sources, evidence, chunk_texts)
+    main = evidence_found_main(sources, evidence, chunk_texts)
+    row["given_hits"] = len(given)
+    row["ext_hits"] = len(given - main)
+    for index, entry in enumerate(row.get("evidence") or []):
+        entry["via"] = None if index not in given else "direct" if index in main else "extension"
+
+
 # 求平均，空列表返回 None（表示这一组没有可统计的题），避免除零。
 def mean(values):
     if not values:
@@ -265,6 +283,10 @@ def summarize(rows):
     given = [row["given_recall"] for row in answerable if row.get("given_recall") is not None]
     summary["recall_given"] = mean(given)
     summary.update(summarize_flow(rows, answerable, unanswerable))
+    # 扩展命中率：拿到的证据里靠父块扩展拿到的比例；不扩展的话，这部分证据就拿不到。
+    counted = [row for row in answerable if "ext_hits" in row]
+    given_total = sum(row["given_hits"] for row in counted)
+    summary["ext_hit_rate"] = round(sum(row["ext_hits"] for row in counted) / given_total, 4) if given_total else None
     rejected = 0
     for row in answerable:
         if row["returned"] == 0:
@@ -516,9 +538,12 @@ def evaluate_items(store, models, items, chunk_texts, options, keep_diagnostics,
             apply_sufficiency(row, check, lambda sources: evidence_found(sources, evidence, chunk_texts),
                 retrieval["sources"], len(evidence), keep_diagnostics)
             row["check_ms"] = check_ms
+            mark_extension(row, check["sources"], evidence, chunk_texts)
             row["flow_latency_ms"] = rewrite["duration_ms"] + latency_ms + check_ms
             # 生成评测接着回答时直接用这次的判断结果，不再判断一次（见 results.answer_hook）。
             retrieval["sufficiency_check"] = check
+        if not judge:
+            mark_extension(row, retrieval["sources"], item.get("evidence") or [], chunk_texts)
         if keep_diagnostics:
             row["diagnostics"] = retrieval["diagnostics"]
             row["sources"] = retrieval["sources"]

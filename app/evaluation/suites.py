@@ -314,7 +314,7 @@ def run_search_suite(store, models, suite, responder, run_id, progress, modes=("
             "reference_answer": item["reference_answer"] or None,
             # 和 Agent 逐题对比时要用：过滤后的召回、证据去向、交给回答模型的来源、检索词和耗时。
             "recall_final": found, "given_recall": row.get("given_recall"),
-            "fixed_evidence": [{key: value.get(key) for key in ("text", "chunk_id", "source_id", "status", "given")}
+            "fixed_evidence": [{key: value.get(key) for key in ("text", "chunk_id", "source_id", "status", "given", "via")}
                 for value in row.get("evidence") or []],
             "sources": [{key: source.get(key) for key in ("id", "title", "heading", "text", "chunk_id", "position",
                 "parent_chunk_ids")} for source in row.get("sources") or []],
