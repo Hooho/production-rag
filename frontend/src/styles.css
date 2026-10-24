@@ -7176,14 +7176,14 @@ input:focus {
 .ag-q-columns,
 .ag-q-head {
    display: grid;
-   grid-template-columns: 40px minmax(0, 1fr) 100px 80px 150px 80px 80px 20px;
+   grid-template-columns: 40px minmax(0, 1fr) 160px 80px 160px 80px 80px 20px;
    gap: 12px;
    align-items: center;
 }
 
 .ag-q-columns.is-agent-only,
 .ag-q-head.is-agent-only {
-   grid-template-columns: 40px minmax(0, 1fr) 150px 80px 80px 20px;
+   grid-template-columns: 40px minmax(0, 1fr) 160px 80px 80px 20px;
 }
 
 /* 表头固定在顶部，往下翻也知道每一列是什么。 */
@@ -8361,7 +8361,18 @@ input:focus {
    margin-right: 4px;
 }
 
-/* 逐题结果带上得分后变长，不换行。 */
+/* 逐题结果带上得分后变长：不换行，图标圆圈不被挤扁（列宽见 .ag-q-head）。 */
 .ag-eval .ev-verdict {
    white-space: nowrap;
+}
+
+.ag-eval .ev-verdict b {
+   flex-shrink: 0;
+}
+
+@media (max-width: 820px) {
+   /* 窄屏列很窄，结果允许换行。 */
+   .ag-eval .ev-verdict {
+      white-space: normal;
+   }
 }
