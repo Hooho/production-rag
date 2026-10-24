@@ -8187,3 +8187,57 @@ input:focus {
    font-size: 13px;
    font-weight: 600;
 }
+
+/* 检索日志的三行：标题行（第几次、耗时、命中、新增）→ 检索的问题 → 参数。 */
+.ag-call-query {
+   margin-top: 6px;
+   color: var(--ev-ink);
+   font-size: 14px;
+   line-height: 1.6;
+}
+
+.ag-call-params {
+   margin: 4px 0 8px;
+   color: var(--ev-muted);
+   font-size: 12px;
+}
+
+/* 改写：补全后的问题、扩展查询各占一行，扩展查询用列表列出来。 */
+.ag-flow-step.is-block {
+   display: grid;
+   gap: 6px;
+}
+
+.ag-step-head {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: 6px 8px;
+}
+
+.ag-step-row {
+   display: grid;
+   grid-template-columns: 7.5em minmax(0, 1fr);
+   gap: 8px;
+   align-items: start;
+}
+
+.ag-row-label {
+   color: var(--ev-muted);
+   font-size: 12px;
+   line-height: 1.8;
+}
+
+.ag-query-list {
+   margin: 4px 0;
+   padding-left: 1.4em;
+   color: var(--ev-ink);
+   font-size: 14px;
+   line-height: 1.7;
+}
+
+.ag-query-list li.is-added small {
+   margin-left: 6px;
+   color: var(--tone-warning-text);
+   font-size: 11px;
+}

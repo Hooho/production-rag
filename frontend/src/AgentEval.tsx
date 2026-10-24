@@ -256,7 +256,7 @@ function AgentQuestionList({ run, hasFixed }: { run: EvalRun; hasFixed: boolean 
           <span className="ag-num">{agent ? formatMs(agent.latency_ms) : "—"}</span>
           <span className="collapse-icon">{open ? "−" : "＋"}</span>
         </button>
-        {open && <QuestionDetail question={question} hasFixed={hasFixed} />}
+        {open && <QuestionDetail question={question} hasFixed={hasFixed} params={fixedParams(run.config)} />}
       </article>;
     })}</div>
   </div>;
@@ -339,7 +339,29 @@ function viaExtension(agent: EvalQuestion["agent"], where: { call: number; evide
 }
 
 // 展开后：先说每条证据在哪个分块（两边各自的编号，Agent 还标第几次调用），下面左右两栏只列分块编号。
-function QuestionDetail({ question, hasFixed }: { question: EvalQuestion; hasFixed: boolean }) {
+// 固定流程的检索参数（一行显示）：检索方式、候选池、返回段数、相关度阈值；专项只知道检索方式。
+function fixedParams(config: EvalRun["config"] & { search_label?: string }) {
+  const parts = [config.search_label ?? "混合检索"];
+  if (config.pool_size) parts.push(`候选池 ${config.pool_size}`);
+  if (config.return_limit) parts.push(`返回 ${config.return_limit} 段`);
+  if (config.reranked === false) parts.push("不重排");
+  else if (typeof config.min_score === "number") parts.push(`阈值 ${config.min_score.toFixed(2)}`);
+  return parts;
+}
+
+// 这批分块命中了第几条证据（从 0 开始）：证据所在的分片出现在某个分块（含父块扩展拼进来的分片）里就算。
+function hitEvidence(items: ChunkItem[], evidenceLists: string[][]) {
+  const given = new Set(items.flatMap((item) => item.parts?.length ? item.parts : item.chunkId ? [item.chunkId] : []));
+  return evidenceLists.flatMap((chunkIds, index) => (chunkIds.some((chunkId) => given.has(chunkId)) ? [index] : []));
+}
+
+// 标题行上的结果：命中了哪几条证据，或者没命中。
+function HitTag({ hits, total }: { hits: number[]; total: number }) {
+  if (total === 0) return null;
+  return hits.length ? <Tag tone="success" dot>命中证据 {hits.map((index) => index + 1).join("、")}</Tag> : <Tag outline plain>没命中证据</Tag>;
+}
+
+function QuestionDetail({ question, hasFixed, params }: { question: EvalQuestion; hasFixed: boolean; params: string[] }) {
   const agent = question.agent;
   return <div className="ev-question-body">
     {agent?.error && <p className="ev-lost-hint">Agent 运行失败：{agent.error}</p>}
@@ -356,13 +378,13 @@ function QuestionDetail({ question, hasFixed }: { question: EvalQuestion; hasFix
     })}</div> : <p className="ev-muted-note">没有答案的题，拿到的资料越少越好。</p>}
     <p className="ag-muted ag-numbering-note">✓ 绿底：含证据　虚线绿框：证据在扩展的分片里　小红点：新拿到　灰色：前面拿到过　+扩展：父块拼进了相邻分片　S1、S2：这次检索的结果顺序</p>
     <div className={`ag-columns ${hasFixed ? "" : "is-single"}`}>
-      {hasFixed && <FixedLog question={question} />}
+      {hasFixed && <FixedLog question={question} params={params} />}
       {agent && <AgentLog question={question} />}
     </div>
   </div>;
 }
 
-function FixedLog({ question }: { question: EvalQuestion }) {
+function FixedLog({ question, params }: { question: EvalQuestion; params: string[] }) {
   // 证据所在的分片（Agent 记的所在分块，或固定流程命中的分片）；来源是父块，父块里任何一片含证据都算命中。
   const evidenceChunks = new Set<string>();
   for (const item of question.agent?.evidence ?? []) for (const chunkId of item.chunk_ids ?? []) evidenceChunks.add(chunkId);
@@ -386,22 +408,36 @@ function FixedLog({ question }: { question: EvalQuestion }) {
   const sufficiency = question.sufficiency;
   const searches = 1 + (sufficiency?.retried ? 1 : 0);
   const usedRetry = Boolean(sufficiency?.retry_used);
+  // 每条证据所在的分片（Agent 记的所在分块，旧记录用固定流程命中的分片），用来算每次检索命中了第几条证据。
+  const evidenceLists = (question.agent?.evidence ?? []).length
+    ? (question.agent?.evidence ?? []).map((item) => item.chunk_ids ?? [])
+    : (question.evidence ?? []).map((item) => (item.chunk_id ? [item.chunk_id] : []));
+  const total = question.answerable ? evidenceLists.length : 0;
+  const queries = question.queries ?? [];
   return <section className="ag-log">
     <div className="ag-log-title">固定流程<small>检索 {searches} 次{sufficiency?.checked ? ` · 判断 ${sufficiency.calls ?? 1} 次` : ""} · 耗时 {formatMs(question.flow_latency_ms ?? question.latency_ms)}</small></div>
-    {question.rewrite && <div className="ag-flow-step"><span className="ag-tool">改写</span><span>{rewriteLabel(question)}</span>
-      {question.rewrite.duration_ms !== undefined && question.rewrite.classifier === "llm" && <Tag outline plain>耗时 {formatMs(question.rewrite.duration_ms)}{question.rewrite.cached ? "（缓存，当时）" : ""}</Tag>}
-      {question.rerank_query && question.rerank_query !== question.question && <span>补全后的问题 <code>{question.rerank_query}</code></span>}</div>}
+    {question.rewrite && <div className="ag-flow-step is-block">
+      <div className="ag-step-head"><span className="ag-tool">改写</span><span>{rewriteLabel(question)}</span>
+        {question.rewrite.duration_ms !== undefined && question.rewrite.classifier === "llm" && <Tag outline plain>耗时 {formatMs(question.rewrite.duration_ms)}{question.rewrite.cached ? "（缓存，当时）" : ""}</Tag>}</div>
+      {question.rerank_query && question.rerank_query !== question.question && <div className="ag-step-row"><span className="ag-row-label">补全后的问题</span><span>{question.rerank_query}</span></div>}
+      <div className="ag-step-row"><span className="ag-row-label">扩展查询（{queries.length} 路）</span>
+        <div><ul className="ag-query-list">{queries.map((query) => <li key={query}>{query}</li>)}</ul>
+          {queries.length > 1 && <small className="ag-muted">每一路分别检索，结果合并后再重排</small>}</div></div>
+    </div>}
     <div className={`ag-call ${usedRetry ? "is-unused" : ""}`}>
-      <div className="ag-call-head"><span className="ag-tool">{sufficiency?.retried ? "第 1 次 · " : ""}检索</span>{question.queries.map((query) => <code key={query}>{query}</code>)}
-        <Tag outline plain>混合检索</Tag><Tag outline plain>耗时 {formatMs(question.latency_ms)}</Tag>{items.some((item) => item.hit) && <Tag tone="success" dot>命中</Tag>}
+      <div className="ag-call-head"><span className="ag-tool">{sufficiency?.retried ? "第 1 次 · " : ""}检索</span>
+        <Tag outline plain>耗时 {formatMs(question.latency_ms)}</Tag><HitTag hits={hitEvidence(items, evidenceLists)} total={total} />
         {usedRetry && <Tag outline plain>没采用（换成了补充检索的结果）</Tag>}</div>
+      {!question.rewrite && <ul className="ag-query-list">{queries.map((query) => <li key={query}>{query}</li>)}</ul>}
+      <div className="ag-call-params">{params.join(" · ")}</div>
       <ChunkTabs items={items} empty="过滤后没有分块。" />
     </div>
     {sufficiency && <SufficiencySteps question={question} />}
     {retry && <div className={`ag-call ${usedRetry ? "" : "is-unused"}`}>
-      <div className="ag-call-head"><span className="ag-tool">第 2 次 · 补充检索</span>{question.queries.map((query) => <code key={query}>{query}</code>)}{sufficiency?.retry_query && <code>+ {sufficiency.retry_query}</code>}
-        <Tag outline plain>返回 {retry.returned} 段</Tag>{retryItems.some((item) => item.hit) && <Tag tone="success" dot>命中</Tag>}
-        <Tag outline plain>{usedRetry ? "采用了" : "没变好，沿用第一次的"}</Tag></div>
+      <div className="ag-call-head"><span className="ag-tool">第 2 次 · 补充检索</span>
+        <HitTag hits={hitEvidence(retryItems, evidenceLists)} total={total} /><Tag outline plain>{usedRetry ? "采用了" : "没变好，沿用第一次的"}</Tag></div>
+      <ul className="ag-query-list">{queries.map((query) => <li key={query}>{query}</li>)}{sufficiency?.retry_query && <li className="is-added">{sufficiency.retry_query}<small>补充的</small></li>}</ul>
+      <div className="ag-call-params">{params.join(" · ")} · 返回 {retry.returned} 段</div>
       {retry.sources ? <ChunkTabs items={retryItems} empty="补充检索没有返回分块。" /> : <p className="ag-muted">这次评测没有保存补充检索的分块。</p>}
     </div>}
     {question.cleared && <div className="ag-flow-cleared">判断资料不足，已清空：线上会直接拒答。</div>}
@@ -467,18 +503,21 @@ function AgentCall({ call, fresh, evidenceChunks }: { call: EvalAgentCall; fresh
     fresh: call.chunk_ids.some((chunkId) => fresh.has(chunkId)),
     title: null, heading: null, text: call.text, hit: (call.read_hits ?? []).length > 0 }];
   return <div className={`ag-call ${call.status !== "ok" ? "is-off" : ""} ${hit ? "is-hit" : ""}`}>
+    {/* 标题行放结果（耗时、命中、新增）；下面一行是检索的问题，再下一行是参数。 */}
     <div className="ag-call-head">
       <span className="ag-tool">第 {call.call} 次 · {TOOL_LABELS[call.name] ?? call.name}</span>
-      {call.name === "search_knowledge" && call.query !== undefined ? <><code>{call.query}</code>
-        <Tag outline plain>{SEARCH_MODE_LABELS[call.mode ?? ""] ?? call.mode}</Tag><Tag outline plain>Top K {call.top_k}</Tag></>
-        : call.name === "read_context" && call.source_id ? <span>{call.source_id} 的{call.direction === "before" ? "前文" : "后文"}</span>
-          : <code>{JSON.stringify(call.arguments)}</code>}
       {call.duration_ms !== undefined && call.duration_ms !== null && <Tag outline plain>耗时 {formatMs(call.duration_ms)}</Tag>}
+      {hit ? <Tag tone="success" dot>命中证据 {call.hits.map((index) => index + 1).join("、")}</Tag>
+        : executed && (call.name === "search_knowledge" || call.name === "read_context") ? <Tag outline plain>没命中证据</Tag> : null}
       {executed && (call.name === "search_knowledge" || call.name === "read_context") && (newCount > 0
         ? <Tag>新增 {newCount} 片</Tag>
         : <Tag tone="warning" title="这次拿回的分块，前面的调用都已经拿到过">无新增</Tag>)}
-      {hit && <Tag tone="success" dot>命中证据 {call.hits.map((index) => index + 1).join("、")}</Tag>}
     </div>
+    {call.name === "search_knowledge" && call.query !== undefined ? <>
+      <div className="ag-call-query">{call.query}</div>
+      <div className="ag-call-params">{SEARCH_MODE_LABELS[call.mode ?? ""] ?? call.mode} · Top K {call.top_k}</div></>
+      : call.name === "read_context" && call.source_id ? <div className="ag-call-query">{call.source_id} 的{call.direction === "before" ? "前文" : "后文"}</div>
+        : <div className="ag-call-query"><code>{JSON.stringify(call.arguments)}</code></div>}
     {status && <div className="ag-call-meta">{status}{call.error ? `：${call.error}` : ""}</div>}
     {call.note && call.status !== "ok" && <div className="ag-call-meta">{call.note}</div>}
     {(call.results || call.name === "read_context") && <ChunkTabs items={items} empty={call.results ? "没有返回分块（空检索）。" : "没有读到内容。"} />}
@@ -533,7 +572,7 @@ export function SpecialAgentResults({ section }: { section: EvalSpecialSection }
   };
   const fixedChange = newly("previous_passed", "fixed_passed");
   const agentChange = newly("previous_agent_passed", "agent_passed");
-  const run = { questions, config: { split: null, suites: [], modes } } as unknown as EvalRun;
+  const run = { questions, config: { split: null, suites: [], modes, search_label: section.search_mode_label } } as unknown as EvalRun;
   return <div className="ev-overview ag-eval ag-special">
     {hasFixed && section.search_mode && section.search_mode !== "hybrid" && <p className="ev-settings-diff">这个专项设置了「{section.search_mode_label}」，和 Agent 比不公平，请用混合检索。</p>}
     <div className="ev-cards">
