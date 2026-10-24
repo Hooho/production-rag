@@ -14,9 +14,9 @@ def test_seeded_suites(setup):
     assert by_name["多轮对话"]["method"] == "dialogue" and by_name["多轮对话"]["item_count"] == 3
     assert listed["methods"] == {"retrieval": "检索", "answer": "回答", "dialogue": "多轮对话"}
     assert client.get("/eval/suites", headers=headers("alice")).status_code == 403
-    # 后来新增的初始专项：新库直接带上；24 道题，证据都在评测语料里（检索方式的校验规则）。
+    # 后来新增的初始专项：新库直接带上；12 道题，证据都在评测语料里（检索方式的校验规则）。
     late = by_name["Agent 区分题"]
-    assert late["method"] == "retrieval" and late["search_mode"] == "hybrid" and late["item_count"] == 24
+    assert late["method"] == "retrieval" and late["search_mode"] == "hybrid" and late["item_count"] == 12
 
 
 # 已经初始化过的库：启动时补加后来新增的初始专项，只加一次；用户删掉后不会再加回来。
@@ -328,3 +328,37 @@ def test_special_scores():
     assert section["agent_score_bands"] == {"full": 1, "half": 1, "some": 0, "none": 0}
     stats = by_type(section["questions"])
     assert stats[0]["fixed_score"] == 15 and stats[0]["agent_score"] == 75
+
+
+# 新版初始专项少了题：用户没动过的多余旧题删掉，用户改过的保留；专项里有用户自己加的题时整个专项不动。
+def test_late_seed_revision_removes_items(setup):
+    from sqlalchemy import insert, select, update
+    from app.evaluation.dataset import LATE_SEED_KEY, seed_late_suites, seed_suites
+    from app.mysql.store import settings as settings_table
+    from app.mysql.tables import eval_suite_items, eval_suites
+    _, store = setup
+    seed = next(suite for suite in seed_suites() if suite["name"] == "Agent 区分题")
+
+    def reset(extra):
+        with store.engine.begin() as connection:
+            suite_id = connection.execute(select(eval_suites.c.id).where(eval_suites.c.name == "Agent 区分题")).scalar_one()
+            for index, (item_id, created_by, updated) in enumerate(extra):
+                connection.execute(insert(eval_suite_items).values(id=item_id, suite_id=suite_id, position=len(seed["items"]) + index,
+                    data={"question": item_id, "evidence": ["旧"]}, created_by=created_by, created="2020-01-01", updated=updated))
+            value = connection.execute(select(settings_table.c.value).where(settings_table.c.key == LATE_SEED_KEY)).scalar_one()
+            connection.execute(update(settings_table).where(settings_table.c.key == LATE_SEED_KEY).values(value={"names": value["names"]}))
+        return suite_id
+
+    def ids(suite_id):
+        with store.engine.connect() as connection:
+            return connection.execute(select(eval_suite_items.c.id).where(eval_suite_items.c.suite_id == suite_id)).scalars().all()
+
+    suite_id = reset([("old-1", "system", "2020-01-01"), ("old-2", "system", "2099-01-01")])
+    seed_late_suites(store.engine)
+    remaining = ids(suite_id)
+    assert "old-1" not in remaining and "old-2" in remaining and len(remaining) == len(seed["items"]) + 1
+    # 用户自己加的题：整个专项不动。
+    reset([("mine", "admin", "2020-01-01"), ("old-3", "system", "2020-01-01")])
+    seed_late_suites(store.engine)
+    remaining = ids(suite_id)
+    assert "mine" in remaining and "old-3" in remaining

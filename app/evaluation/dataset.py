@@ -130,24 +130,39 @@ def seed_late_suites(engine):
                 added.append(suite["name"])
             done.append(suite["name"])
             changed = True
-        # 初始专项的题改过（suites.json 里 revision 加 1）：库里还是系统原样、用户没动过的题换成新版，每个版本只换一次。
-        # 用户增删过题（题数对不上）就整个不动；单题改过（updated 和 created 不同）的那题不动。
+        # 初始专项的题改过（suites.json 里 revision 加 1）：按位置把库里的题换成新版，新版少了的删掉、多了的补上，
+        # 每个版本只换一次。用户改过的题（updated 和 created 不同）保留不动；专项里有用户自己加的题时整个专项不动，
+        # 免得按位置对错题。专项说明也一并更新（用户改过专项就不动）。
         for suite in late:
             revision = suite.get("revision") or 1
             if revisions.get(suite["name"], 1) >= revision:
                 continue
             revisions[suite["name"]] = revision
             changed = True
-            exists = connection.execute(select(eval_suites.c.id).where(eval_suites.c.name == suite["name"])).first()
+            exists = connection.execute(select(eval_suites.c.id, eval_suites.c.created, eval_suites.c.updated).where(
+                eval_suites.c.name == suite["name"])).first()
             if not exists:
                 continue
             rows = connection.execute(select(eval_suite_items.c.id, eval_suite_items.c.data, eval_suite_items.c.created_by,
-                eval_suite_items.c.created, eval_suite_items.c.updated).where(eval_suite_items.c.suite_id == exists[0]).order_by(
+                eval_suite_items.c.created, eval_suite_items.c.updated).where(eval_suite_items.c.suite_id == exists.id).order_by(
                     eval_suite_items.c.position)).all()
-            if len(rows) != len(suite["items"]):
+            if any(item.created_by != "system" for item in rows):
                 continue
-            for item, data in zip(rows, suite["items"]):
-                if item.created_by == "system" and item.updated == item.created and item.data != data:
+            if exists.updated == exists.created:
+                connection.execute(eval_suites.update().where(eval_suites.c.id == exists.id).values(
+                    description=suite.get("description")))
+            items = suite["items"]
+            for index in range(max(len(rows), len(items))):
+                item = rows[index] if index < len(rows) else None
+                data = items[index] if index < len(items) else None
+                if item is None:
+                    connection.execute(eval_suite_items.insert().values(id=str(uuid4()), suite_id=exists.id,
+                        position=index, data=data, created_by="system", created=now, updated=now))
+                elif item.updated != item.created:
+                    continue
+                elif data is None:
+                    connection.execute(eval_suite_items.delete().where(eval_suite_items.c.id == item.id))
+                elif item.data != data:
                     connection.execute(eval_suite_items.update().where(eval_suite_items.c.id == item.id).values(data=data))
         if changed:
             value = {"names": done, "revisions": revisions, "at": now}
