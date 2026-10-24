@@ -1398,16 +1398,35 @@ function runResult(item: EvalRunBrief) {
   return "—";
 }
 
-// 和上一次同类评测比，参数改过哪些（设置页参数、改写提示词和模型、Agent 提示词和模型）；没改过返回空数组。
+// 只比和检索、回答结果有关的参数：设置页里「检索」「分片」「回答」三组（app/runtime_config.py 的 group）。
+// 对话记忆、安全检查、巡检、界面配色、服务超时这些和评测分数关系不大，改了也不提示。
+const RESULT_SETTINGS = new Set([
+  "rerank_min_score", "rerank_fallback_min_score", "rerank_candidates", "return_limit", "parent_context", "parent_max_chars",
+  "parent_radius", "rerank_enabled", "rrf_k", "chunk_context_max_tokens", "chunk_size", "chunk_overlap",
+  "sufficiency_check", "intent_local", "contextual_retrieval", "agent_tool_budget", "agent_timeout",
+]);
+
+// 上一次「同一种」评测：调参评测要类型和题目范围都相同；专项要跑的是同一组专项（截断专项和 Agent 区分题不互相比）。
+function sameSeries(run: EvalRunBrief, item: EvalRunBrief) {
+  if (run.kind !== item.kind) return false;
+  if (item.kind === "special") {
+    const ids = (value: EvalRunBrief) => (value.config.special?.suites ?? []).map((suite) => suite.id).sort().join(",");
+    return ids(run) === ids(item);
+  }
+  return run.config.split === item.config.split;
+}
+
+// 和上一次同一种评测比，参数改过哪些（和结果有关的设置页参数、改写提示词和模型、Agent 提示词和模型）；没改过返回空数组。
 // 参数平时不怎么改，表格里不再每行列出参数，只在改过时提示。
 function settingsChanges(item: EvalRunBrief, runs: EvalRunBrief[]) {
   const index = runs.findIndex((run) => run.id === item.id);
-  const previous = runs.slice(index + 1).find((run) => run.kind === item.kind && run.status === "completed" && run.config.settings);
+  const previous = runs.slice(index + 1).find((run) => sameSeries(run, item) && run.status === "completed" && run.config.settings);
   if (!previous || !item.config.settings) return [];
   const changes: string[] = [];
   const before = previous.config.settings as Record<string, unknown>;
   const after = item.config.settings as Record<string, unknown>;
   for (const key of Object.keys(after)) {
+    if (!RESULT_SETTINGS.has(key)) continue;
     if (key in before && JSON.stringify(before[key]) !== JSON.stringify(after[key])) changes.push(`${settingLabel(key)} ${String(before[key])} → ${String(after[key])}`);
   }
   const pairs: [string, unknown, unknown][] = [
@@ -1493,7 +1512,7 @@ function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: 
             <td><input type="checkbox" aria-label={`选择 ${item.id}`} checked={picked.includes(item.id)} disabled={item.status !== "completed"} onClick={(event) => event.stopPropagation()} onChange={() => toggle(item.id)} /></td>
             <td className="ev-history-time">{formatTime(item.created)}</td><td><span className="tag-row"><HueTag label={KIND_LABELS[item.kind]} />{(item.kind === "retrieval" || item.kind === "special") && runModes(item).includes("agent") && runModes(item).map((mode) => <HueTag key={mode} label={mode === "agent" ? "Agent" : "固定流程"} />)}</span></td><td>{item.kind === "special" ? (item.config.special?.suites ?? []).map((suite) => suite.name).join("、") : SPLIT_LABELS[item.config.split ?? ""] ?? item.config.split}</td><td className="num ev-history-number">{item.kind === "special" ? item.summary?.count ?? "—" : item.config.dataset_size ?? "—"}</td>
             {/* 结果列：每次最主要的那个数；参数平时不变，只在和上一次同类评测不一样时标「参数改过」，鼠标放上去看改了什么。 */}
-            <td className="ev-result-cell"><span className="tag-row"><span>{runResult(item)}</span>{(() => { const changes = settingsChanges(item, runs); return changes.length > 0 && <Tag size="sm" tone="warning" title={changes.join("\n")}>参数改过</Tag>; })()}</span></td>
+            <td className="ev-result-cell"><span className="tag-row"><span>{runResult(item)}</span>{(() => { const changes = settingsChanges(item, runs); return changes.length > 0 && <Tag size="sm" tone="warning" title={`和上一次同一种评测比：\n${changes.join("\n")}`}>参数改过</Tag>; })()}</span></td>
             <td className="num ev-history-latency" title={durationTitle(item.summary?.flow_latency_avg_ms ?? item.summary?.latency_avg_ms ?? item.summary?.agent_latency_avg_ms)}>{formatMs(item.summary?.flow_latency_avg_ms ?? item.summary?.latency_avg_ms ?? item.summary?.agent_latency_avg_ms)}</td>
             <td><span className="tag-row"><Tag dot tone={runStatus(item.status).tone}>{runStatus(item.status).label}{item.status === "running" ? ` ${progressPercent(item)}%` : ""}</Tag></span></td>
             <td><div className="ev-history-actions"><button className="ev-link ev-expand-link" aria-expanded={metricsExpanded} onClick={(event) => { event.stopPropagation(); toggleMetrics(item.id); }}>{item.kind === "special" ? "各专项" : "指标"} {metricsExpanded ? "▴" : "▾"}</button><button className="ev-link" onClick={(event) => { event.stopPropagation(); onOpen(item.id); }}>查看</button><button className="ev-delete-link" disabled={item.status === "running" || deletingId === item.id} title={item.status === "running" ? "评测运行中，不能删除" : "删除这条评测记录"} onClick={(event) => { event.stopPropagation(); void remove(item); }}>{deletingId === item.id ? "删除中…" : "删除"}</button></div></td>
