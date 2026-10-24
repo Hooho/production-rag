@@ -8049,8 +8049,30 @@ input:focus {
    flex: 1 1 100%;
 }
 
+/* 按类型统计表：框跟着表格内容宽度走，不再撑满整行。 */
+.diag-table-wrap.type-stats-wrap {
+   width: fit-content;
+   max-width: 100%;
+}
+
 .type-stats {
-   max-width: 560px;
+   width: auto;
+}
+
+.type-stat {
+   display: inline-flex;
+   align-items: center;
+   gap: 6px;
+   font-variant-numeric: tabular-nums;
+}
+
+.type-stat.is-all {
+   color: var(--tone-success-text);
+   font-weight: 700;
+}
+
+.type-stat.is-none {
+   color: var(--tone-danger-text);
 }
 
 /* 专项题目列表上方：每种类型几道题。 */
