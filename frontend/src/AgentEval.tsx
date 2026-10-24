@@ -196,13 +196,6 @@ function freshness(question: EvalQuestion) {
   return { perCall, wasted: question.agent?.wasted_searches ?? wasted };
 }
 
-// Agent 在第几次调用拿到了证据（去重、按顺序），例如 [1, 3]。
-function agentHitCalls(question: EvalQuestion) {
-  const calls = new Set<number>();
-  for (const evidence of question.agent?.evidence ?? []) for (const where of evidence.where) calls.add(where.call);
-  return [...calls].sort((a, b) => a - b);
-}
-
 function AgentQuestionList({ run, hasFixed }: { run: EvalRun; hasFixed: boolean }) {
   const questions = run.questions ?? [];
   const [typeFilter, setTypeFilter] = useState("all");
@@ -253,13 +246,12 @@ function AgentQuestionList({ run, hasFixed }: { run: EvalRun; hasFixed: boolean 
     <div className="ev-question-list">{visible.map((question) => {
       const open = expanded === question.id;
       const agent = question.agent;
-      const hitCalls = agentHitCalls(question);
       return <article className={`ev-question ${open ? "is-open" : ""}`} key={question.id}>
         <button className={`ag-q-head ${layout}`} aria-expanded={open} onClick={() => setExpanded(open ? null : question.id)}>
           <span className="ev-qid" title={question.id}>{question.seq ?? question.id}</span>
           <span className="ev-question-text">{question.question}<small><TypeTag type={question.type} hues={hues} />{question.evidence_count > 1 ? ` ${question.evidence_count} 条证据` : ""}{question.compare ? ` · ${COMPARE_LABELS[question.compare]}` : ""}{question.note ? ` · ${question.note}` : ""}</small></span>
           {hasFixed && <><Verdict verdict={fixedVerdict(question)} /><span className="ag-num">{formatMs(question.flow_latency_ms ?? question.latency_ms)}</span></>}
-          <span className="ag-verdict-cell"><Verdict verdict={agentVerdict(question)} />{hitCalls.length > 0 && <small>第 {hitCalls.join("、")} 次调用命中</small>}</span>
+          <span className="ag-verdict-cell"><Verdict verdict={agentVerdict(question)} /></span>
           <span className="ag-num ag-search-cell">{agent ? `${agent.searches} 次` : "—"}{agent && freshness(question).wasted > 0 && <small>{freshness(question).wasted} 次无新增</small>}</span>
           <span className="ag-num">{agent ? formatMs(agent.latency_ms) : "—"}</span>
           <span className="collapse-icon">{open ? "−" : "＋"}</span>
