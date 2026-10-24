@@ -208,7 +208,8 @@ function modeRows(questions: EvalQuestion[], config: EvalConfig | undefined, has
   const rewrite = flow ? flow.rewrite_cached + flow.rewrite_fresh : 0;
   const agentConfig = config?.agent;
   rows.push({ group: "config", label: "配置", ...pick(
-    { value: config ? fixedParams(config).join(" · ") : "—", note: rewrite ? `改写 ${rewrite} 题，${flow!.rewrite_cached} 题来自缓存` : undefined },
+    // 检索参数两边共用（写在卡片上方），这里只放各自独有的：固定流程是改写和充分性判断，Agent 是预算、超时和提示词。
+    { value: flow ? `大模型改写${flow.sufficiency ? " + 充分性判断" : "（充分性判断未启用）"}` : "—", note: rewrite ? `改写 ${rewrite} 题，${flow!.rewrite_cached} 题来自缓存${flow?.model ? ` · ${flow.model}` : ""}` : undefined },
     { value: agentConfig ? `预算 ${agentConfig.tool_budget} 次 · 超时 ${agentConfig.timeout} 秒` : "—", note: agentConfig ? `提示词 ${agentConfig.prompt_version}${agentConfig.model ? ` · ${agentConfig.model}` : ""}` : undefined }) });
   return rows;
 }
@@ -228,6 +229,7 @@ function ModeCards({ questions, config, hasFixed, hasAgent }: { questions: EvalQ
   </section>;
   return <>
     <p className="ev-muted-note">得分：{SCORE_RULE}；无法回答的题拿到资料扣 20。</p>
+    {config && <p className="ev-muted-note">{hasFixed && hasAgent ? "两边共用的检索参数" : "检索参数"}：{fixedParams(config).join(" · ")}。{hasAgent ? "Agent 每次检索也走这一套，只是可以自己选检索方式、少取几段。" : ""}</p>}
     <div className={`ag-mode-cards${hasFixed && hasAgent ? " is-two" : ""}`}>
       {hasFixed && card("fixed", "固定流程")}
       {hasAgent && card("agent", "Agent")}
