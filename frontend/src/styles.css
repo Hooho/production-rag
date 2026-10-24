@@ -7804,9 +7804,31 @@ input:focus {
    line-height: 1.7;
 }
 
-/* 这次调用新拿到的分块：红色边框（和是否含证据的绿色底色可以同时出现）。 */
-.ag-chunk-tab.is-new {
-   border: 2px solid var(--ev-bad);
+/* 分块标签的强弱按重要程度：含证据最醒目（绿底实线框 + ✓）；这次新拿到的只在前面加一个小红点；
+   前面的调用已经拿到过的（重复）变灰变淡，一眼看出白查了。以前「新拿到」用红色粗框，比命中还抢眼。 */
+.ag-chunk-tab.is-hit {
+   border-color: #24684a;
+}
+
+.ag-chunk-tab.is-new::before {
+   content: "";
+   width: 6px;
+   height: 6px;
+   flex: none;
+   align-self: center;
+   border-radius: 50%;
+   background: var(--tone-danger-text);
+}
+
+.ag-chunk-tab.is-seen {
+   background: #f2f4f6;
+   color: var(--ev-muted);
+   opacity: .75;
+}
+
+.ag-chunk-tab .ag-check {
+   color: #1f7a4a;
+   font-weight: 700;
 }
 
 .ag-search-cell {

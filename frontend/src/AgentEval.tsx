@@ -315,11 +315,11 @@ function ChunkTabs({ items, empty }: { items: ChunkItem[]; empty: string }) {
   const current = items.find((item) => item.key === selected) ?? null;
   return <div className="ag-chunks">
     <div className="ag-chunk-tabs" role="tablist">{items.map((item) => <button key={item.key} type="button" role="tab" aria-selected={selected === item.key}
-      className={`ag-chunk-tab ${item.hit ? "is-hit" : ""} ${hitByExtension(item) ? "is-ext-hit" : ""} ${item.fresh ? "is-new" : ""} ${selected === item.key ? "is-active" : ""}`}
+      className={`ag-chunk-tab ${item.hit ? "is-hit" : ""} ${hitByExtension(item) ? "is-ext-hit" : ""} ${item.fresh ? "is-new" : ""} ${item.fresh === false && !item.hit ? "is-seen" : ""} ${selected === item.key ? "is-active" : ""}`}
       title={[item.hit ? (hitByExtension(item) ? "证据在父块扩展拼进来的分片里，检索命中的这一片本身没有" : "检索命中的这一片就含证据") : item.title ?? "",
         extendedParts(item).length ? `父块扩展还拼进了 ${extendedParts(item).map((chunkId) => chunkLabel(null, chunkId)).join("、")}` : "",
-        item.fresh ? "这次调用新拿到的（前面的调用没拿到过）" : ""].filter(Boolean).join("；")} onClick={() => { setSelected(selected === item.key ? null : item.key); setFullText(false); }}>
-      {chunkLabel(item.position, item.chunkId)}<small>{item.id}</small>{extendedParts(item).length > 0 && <em className={`ag-ext-badge ${hitByExtension(item) ? "is-hit" : ""}`}>{hitByExtension(item) ? `证据在扩展的 ${extendedParts(item).length} 片里` : `+扩展 ${extendedParts(item).length} 片`}</em>}</button>)}</div>
+        item.fresh ? "这次调用新拿到的" : item.fresh === false ? "前面的调用已经拿到过" : ""].filter(Boolean).join("；")} onClick={() => { setSelected(selected === item.key ? null : item.key); setFullText(false); }}>
+      {item.hit && <b className="ag-check" aria-label="含证据">✓</b>}{chunkLabel(item.position, item.chunkId)}<small>{item.id}</small>{extendedParts(item).length > 0 && <em className={`ag-ext-badge ${hitByExtension(item) ? "is-hit" : ""}`}>{hitByExtension(item) ? `证据在扩展的 ${extendedParts(item).length} 片里` : `+扩展 ${extendedParts(item).length} 片`}</em>}</button>)}</div>
     {current && <div className={`ag-chunk-body ${current.hit ? "is-hit" : ""}`}>
       <div className="ag-chunk-meta"><strong>{chunkLabel(current.position, current.chunkId)}</strong><small>本次检索的 {current.id}</small>{current.title ?? "—"}{current.heading ? ` · ${current.heading}` : ""}{current.relevance !== undefined && current.relevance !== null && <small> · 相关性 {current.relevance.toFixed(2)}{current.low ? "（较低）" : ""}</small>}{current.hit && <Tag tone="success" dot>{hitByExtension(current) ? "证据在扩展的分片里" : "含证据"}</Tag>}</div>
       {extendedParts(current).length > 0 && <PartsRow item={current} />}
@@ -352,7 +352,7 @@ function QuestionDetail({ question, hasFixed }: { question: EvalQuestion; hasFix
         <span className={evidence.found ? "is-hit" : "is-miss"}>Agent：{evidence.found ? `拿到了（${evidence.where.map((item) => `第 ${item.call} 次的 ${item.evidence_id ?? "—"}${viaExtension(agent, item, evidence.chunk_ids) ? " 扩展" : ""}`).join("、")}）` : "没拿到"}</span>
       </div>;
     })}</div> : <p className="ev-muted-note">没有答案的题，拿到的资料越少越好。</p>}
-    <p className="ag-muted ag-numbering-note">绿底：含证据（虚线绿框 = 证据在扩展的分片里）　红框：新拿到的　+扩展：父块拼进了相邻分片　S1、S2：这次检索的结果顺序</p>
+    <p className="ag-muted ag-numbering-note">✓ 绿底：含证据　虚线绿框：证据在扩展的分片里　小红点：新拿到　灰色：前面拿到过　+扩展：父块拼进了相邻分片　S1、S2：这次检索的结果顺序</p>
     <div className={`ag-columns ${hasFixed ? "" : "is-single"}`}>
       {hasFixed && <FixedLog question={question} />}
       {agent && <AgentLog question={question} />}
@@ -473,7 +473,7 @@ function AgentCall({ call, fresh, evidenceChunks }: { call: EvalAgentCall; fresh
           : <code>{JSON.stringify(call.arguments)}</code>}
       {call.duration_ms !== undefined && call.duration_ms !== null && <Tag outline plain>耗时 {formatMs(call.duration_ms)}</Tag>}
       {executed && (call.name === "search_knowledge" || call.name === "read_context") && (newCount > 0
-        ? <Tag tone="danger">新增 {newCount} 片</Tag>
+        ? <Tag>新增 {newCount} 片</Tag>
         : <Tag tone="warning" title="这次拿回的分块，前面的调用都已经拿到过">无新增</Tag>)}
       {hit && <Tag tone="success" dot>命中证据 {call.hits.map((index) => index + 1).join("、")}</Tag>}
     </div>
