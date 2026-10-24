@@ -126,6 +126,11 @@ def evaluate_agent(agent_mode, store, models, item, chunk_texts, positions=None)
         answer = ""
         row.update(status="failed", error=f"{type(error).__name__}: {str(error)[:300]}")
     row["latency_ms"] = round((time.monotonic() - started) * 1000)
+    # 检索耗时：发起了工具调用的那几轮（模型想查什么 + 执行检索），到最后一次检索结束为止；
+    # 剩下的是写回答（含强制回答、引用重写），和固定流程的「完整检索耗时」一样不算回答。
+    tool_rounds = [record for record in outcome.get("rounds") or [] if record.get("tool_results")]
+    row["search_ms"] = sum(record.get("duration_ms") or 0 for record in tool_rounds)
+    row["answer_ms"] = max(0, row["latency_ms"] - row["search_ms"])
     calls = []
     for record in outcome.get("rounds") or []:
         for call in record.get("tool_results") or []:
@@ -239,6 +244,9 @@ def summarize_agent(rows):
         "agent_avg_prompt_tokens": average("prompt_tokens"), "agent_avg_completion_tokens": average("completion_tokens"),
         "agent_cache_hit_rate": round(cached / prompt_tokens, 4) if prompt_tokens else None,
         "agent_latency_avg_ms": round(sum(latencies) / len(latencies)) if latencies else None,
+        # 只算检索（不含写回答），和固定流程的完整检索耗时可以直接比；旧记录没有 search_ms 时是 None。
+        "agent_search_latency_avg_ms": mean([agent["search_ms"] for agent in agents if "search_ms" in agent]),
+        "agent_answer_latency_avg_ms": mean([agent["answer_ms"] for agent in agents if "answer_ms" in agent]),
         "agent_latency_p95_ms": percentile(latencies, 0.95)}
 
 

@@ -720,6 +720,9 @@ export type EvalAgentQuestion = {
   status: string;
   error: string | null;
   latency_ms: number;
+  // 检索耗时（发起工具调用的那几轮）和写回答耗时，两者加起来是 latency_ms（旧记录没有）。
+  search_ms?: number;
+  answer_ms?: number;
   recall: number | null;
   // chunk_ids：证据在知识库里所属的分块（旧记录没有）。
   // positions：同一顺序的分块序号（从 0 开始，页面显示「第 N 片」）。

@@ -56,6 +56,8 @@ def test_agent_retrieval_runs_with_fixed(setup, eval_dir, monkeypatch):
     assert isinstance(call["results"][0]["position"], int)
     assert agent["rounds"] == 3 and agent["tool_calls"] == 2 and agent["prompt_tokens"] == 300
     assert agent["answer"] == "签收后七天内可以退货 [S1]。"
+    # 检索耗时只算发起工具调用的那几轮，加上写回答等于总耗时。
+    assert agent["search_ms"] >= 0 and agent["answer_ms"] >= 0 and agent["search_ms"] + agent["answer_ms"] >= agent["latency_ms"] - 1
     assert second["agent"]["recall"] == 0 and second["agent"]["returned"] == 0 and second["agent"]["calls"] == []
     assert third["agent"]["recall"] is None
 

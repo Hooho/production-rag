@@ -61,6 +61,7 @@ METRICS = [
     ("agent_avg_tool_calls", "Agent 平均工具调用次数", "lower"),
     ("agent_wasted_rate", "Agent 无新增检索比例", "lower"),
     ("agent_avg_prompt_tokens", "Agent 平均输入 token", "lower"),
+    ("agent_search_latency_avg_ms", "Agent 平均检索耗时（毫秒，不含写回答）", "lower"),
     ("agent_latency_avg_ms", "Agent 平均耗时（毫秒）", "lower"),
 ]
 MODES = ("fixed", "agent")

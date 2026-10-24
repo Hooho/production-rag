@@ -198,7 +198,9 @@ function modeRows(questions: EvalQuestion[], config: EvalConfig | undefined, has
     { value: `平均 ${number(avg(agentRuns.map((item) => item.rounds)))} 轮`, note: `强制回答 ${agent.forced} 题` }) });
   rows.push({ group: "process", label: "耗时", ...pick(
     { value: `平均 ${formatMs(flowLatency)}`, note: "改写 + 检索 + 充分性判断，不含写回答" },
-    { value: `平均 ${formatMs(avg(agentRuns.map((item) => item.latency_ms)))}`, note: "含写回答" }) });
+    agentRuns.some((item) => item.search_ms !== undefined)
+      ? { value: `平均 ${formatMs(avg(agentRuns.map((item) => item.search_ms ?? 0)))}`, note: `只算检索；写回答另需 ${formatMs(avg(agentRuns.map((item) => item.answer_ms ?? 0)))}，合计 ${formatMs(avg(agentRuns.map((item) => item.latency_ms)))}` }
+      : { value: `平均 ${formatMs(avg(agentRuns.map((item) => item.latency_ms)))}`, note: "含写回答（旧记录分不开）" }) });
   if (hasAgent) rows.push({ group: "process", label: "输入 token", ...pick(
     { value: "—", note: "没记录" },
     { value: `平均 ${number(avg(agentRuns.map((item) => item.prompt_tokens)), 0)}` }) });
@@ -300,7 +302,7 @@ export function AgentPanel({ run }: { run: EvalRun }) {
     <div className="ev-cards">
       <Card label="输入 token" value={number(summary.agent_avg_prompt_tokens, 0)} note={`缓存命中 ${percent(summary.agent_cache_hit_rate)}`} />
       <Card label="输出 token" value={number(summary.agent_avg_completion_tokens, 0)} />
-      <Card label="耗时" value={formatMs(summary.agent_latency_avg_ms)} note={`P95 ${formatMs(summary.agent_latency_p95_ms)}`} />
+      <Card label="检索耗时" value={formatMs(summary.agent_search_latency_avg_ms ?? summary.agent_latency_avg_ms)} note={summary.agent_search_latency_avg_ms !== undefined && summary.agent_search_latency_avg_ms !== null ? `不含写回答；写回答另需 ${formatMs(summary.agent_answer_latency_avg_ms)}，合计 ${formatMs(summary.agent_latency_avg_ms)}` : `含写回答（旧记录分不开）· P95 ${formatMs(summary.agent_latency_p95_ms)}`} />
     </div>
     <div className="ev-section-title">按题目类型</div>
     <div className="diag-table-wrap"><table className="diag-table ev-table">
@@ -376,7 +378,7 @@ function AgentQuestionList({ run, hasFixed }: { run: EvalRun; hasFixed: boolean 
     </div>
     {/* 表头固定在顶部：题目多、展开详情后往下翻，仍然知道每一列是什么。 */}
     <div ref={sentinel} className="ag-sticky-sentinel" aria-hidden="true" />
-    <div ref={header} className={`ag-q-columns ${layout} ${stuck ? "is-stuck" : ""}`} aria-hidden="true"><span>编号</span><span>问题</span>{hasFixed && <><span>固定流程</span><span>固定流程耗时</span></>}<span>Agent</span><span>Agent 检索次数</span><span>Agent 耗时</span><span /></div>
+    <div ref={header} className={`ag-q-columns ${layout} ${stuck ? "is-stuck" : ""}`} aria-hidden="true"><span>编号</span><span>问题</span>{hasFixed && <><span>固定流程</span><span>固定流程耗时</span></>}<span>Agent</span><span>Agent 检索次数</span><span>Agent 检索耗时</span><span /></div>
     <div className="ev-question-list">{visible.map((question) => {
       const open = expanded === question.id;
       const agent = question.agent;
@@ -387,7 +389,7 @@ function AgentQuestionList({ run, hasFixed }: { run: EvalRun; hasFixed: boolean 
           {hasFixed && <><Verdict verdict={fixedVerdict(question)} /><span className="ag-num">{formatMs(question.flow_latency_ms ?? question.latency_ms)}</span></>}
           <span className="ag-verdict-cell"><Verdict verdict={agentVerdict(question)} /></span>
           <span className="ag-num ag-search-cell">{agent ? `${agent.searches} 次` : "—"}</span>
-          <span className="ag-num">{agent ? formatMs(agent.latency_ms) : "—"}</span>
+          <span className="ag-num">{agent ? formatMs(agent.search_ms ?? agent.latency_ms) : "—"}</span>
           <span className="collapse-icon">{open ? "−" : "＋"}</span>
         </button>
         {open && <QuestionDetail question={question} hasFixed={hasFixed} params={fixedParams(run.config)} />}
@@ -618,7 +620,7 @@ function AgentLog({ question }: { question: EvalQuestion }) {
   const evidenceChunks = new Set<string>();
   for (const item of agent.evidence ?? []) for (const chunkId of item.chunk_ids ?? []) evidenceChunks.add(chunkId);
   return <section className="ag-log">
-    <div className="ag-log-title">Agent<small>检索 {agent.searches} 次{fresh.wasted > 0 ? `（${fresh.wasted} 次无新增）` : ""} · {agent.rounds} 轮 · {agent.prompt_tokens} token · 耗时 {formatMs(agent.latency_ms)} · {STOP_LABELS[agent.stop_reason ?? ""] ?? agent.stop_reason ?? "—"}</small></div>
+    <div className="ag-log-title">Agent<small>检索 {agent.searches} 次{fresh.wasted > 0 ? `（${fresh.wasted} 次无新增）` : ""} · {agent.rounds} 轮 · {agent.prompt_tokens} token · {agent.search_ms !== undefined ? `检索 ${formatMs(agent.search_ms)} + 写回答 ${formatMs(agent.answer_ms)}` : `耗时 ${formatMs(agent.latency_ms)}`} · {STOP_LABELS[agent.stop_reason ?? ""] ?? agent.stop_reason ?? "—"}</small></div>
     {agent.question_sent !== question.question && <div className="ag-call-meta">实际提问（多轮追问按规则补全）：{agent.question_sent}</div>}
     {agent.calls.length === 0 && <p className="ag-muted">没有调用任何工具，直接回答了。</p>}
     {/* 按轮分组：同一轮里模型同时发出的几次调用放在一个框里，它们彼此看不到对方的结果。 */}
