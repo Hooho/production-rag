@@ -247,3 +247,50 @@ def test_item_type_is_kept_and_counted():
         "fixed_evidence": [{"given": True}, {"given": True}, {"given": False}],
         "agent": {"evidence": [{"found": True}, {"found": False}, {"found": False}]}}])
     assert stats[0]["evidence_total"] == 3 and stats[0]["fixed_hits"] == 2 and stats[0]["agent_hits"] == 1
+
+
+# 初始专项的题改过（revision 加 1）：旧库里用户没动过的题换成新版，用户改过的题不动，每个版本只换一次。
+def test_late_seed_revision_updates_untouched_items(setup):
+    from sqlalchemy import select, update
+    from app.evaluation.dataset import LATE_SEED_KEY, seed_late_suites, seed_suites
+    from app.mysql.store import settings as settings_table
+    from app.mysql.tables import eval_suite_items, eval_suites
+    _, store = setup
+    seed = next(suite for suite in seed_suites() if suite["name"] == "Agent 区分题")
+    assert seed.get("revision", 1) >= 2
+    with store.engine.begin() as connection:
+        suite_id = connection.execute(select(eval_suites.c.id).where(eval_suites.c.name == "Agent 区分题")).scalar_one()
+        rows = connection.execute(select(eval_suite_items.c.id, eval_suite_items.c.created).where(
+            eval_suite_items.c.suite_id == suite_id).order_by(eval_suite_items.c.position)).all()
+        # 第 1 题是系统原样的旧版，第 2 题用户改过（updated 和 created 不同）。
+        connection.execute(update(eval_suite_items).where(eval_suite_items.c.id == rows[0].id).values(data={"question": "旧题", "evidence": ["旧"]}))
+        connection.execute(update(eval_suite_items).where(eval_suite_items.c.id == rows[1].id).values(
+            data={"question": "用户的题", "evidence": ["改"]}, updated="2099-01-01"))
+        value = connection.execute(select(settings_table.c.value).where(settings_table.c.key == LATE_SEED_KEY)).scalar_one()
+        connection.execute(update(settings_table).where(settings_table.c.key == LATE_SEED_KEY).values(value={"names": value["names"]}))
+    seed_late_suites(store.engine)
+    with store.engine.connect() as connection:
+        data = connection.execute(select(eval_suite_items.c.data).where(eval_suite_items.c.suite_id == suite_id).order_by(
+            eval_suite_items.c.position)).scalars().all()
+    assert data[0] == seed["items"][0]
+    assert data[1]["question"] == "用户的题"
+    # 已经换过这个版本：再把第 1 题改回旧版也不会再换。
+    with store.engine.begin() as connection:
+        connection.execute(update(eval_suite_items).where(eval_suite_items.c.id == rows[0].id).values(data={"question": "旧题", "evidence": ["旧"]}))
+    seed_late_suites(store.engine)
+    with store.engine.connect() as connection:
+        first = connection.execute(select(eval_suite_items.c.data).where(eval_suite_items.c.id == rows[0].id)).scalar_one()
+    assert first["question"] == "旧题"
+
+
+# 一条证据写几处原文（用 || 隔开）：分片含任意一处就算拿到；保存时每处都要在语料里。
+def test_evidence_alternatives():
+    import pytest
+    from app.evaluation.retrieval import evidence_hits
+    from app.evaluation.suites import check_item
+    texts = {"a": "甲乙丙", "b": "丁戊己", "c": "庚辛"}
+    hits = evidence_hits([{"chunk_id": "a"}, {"chunk_id": "b"}, {"chunk_id": "c"}], ["乙丙 || 戊己", "辛"], texts)
+    assert hits == {"a": [0], "b": [0], "c": [1]}
+    assert check_item("retrieval", {"question": "问", "evidence": ["甲乙 || 丙丁"]}, "甲乙丙丁")["evidence"] == ["甲乙 || 丙丁"]
+    with pytest.raises(ValueError, match="戊己"):
+        check_item("retrieval", {"question": "问", "evidence": ["甲乙 || 戊己"]}, "甲乙丙丁")

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { type EvalAgentCall, type EvalCompareKey, type EvalConfig, type EvalMode, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSummary } from "./api";
-import { formatDuration as formatMs } from "./format";
+import { evidenceLabel, formatDuration as formatMs } from "./format";
 import { Tag, TypeStats, TypeTag, typeHues } from "./Tag";
 import type { Tone } from "./tags";
 
@@ -486,7 +486,7 @@ function QuestionDetail({ question, hasFixed, params }: { question: EvalQuestion
       const fixedFound = fixed?.given ?? fixed?.status === "returned";
       const chunkIds = evidence.chunk_ids?.length ? evidence.chunk_ids : fixed?.chunk_id ? [fixed.chunk_id] : [];
       return <div className="ag-evidence" key={index}>
-        <p>证据 {index + 1}：“{evidence.text}”</p>
+        <p>证据 {index + 1}：“{evidenceLabel(evidence.text)}”</p>
         <span className="ag-evidence-chunk">所在分块 {chunkIds.length ? chunkIds.map((chunkId, order) => <code key={chunkId} title={chunkId}>{chunkLabel(evidence.positions?.[order], chunkId)}</code>) : "知识库里没找到"}</span>
         {hasFixed && <span className={fixedFound ? "is-hit" : "is-miss"}>固定流程：{fixedFound ? `拿到了${fixed?.first_given === false ? "（补充检索拿到的）" : fixed?.status === "returned" && fixed?.source_id ? `（${fixed.source_id} 检索命中）` : "（父块扩展拼进来的）"}` : question.cleared && fixed?.first_given ? "第一次检索拿到了，但被充分性判断清空了" : "没拿到"}</span>}
         <span className={evidence.found ? "is-hit" : "is-miss"}>Agent：{evidence.found ? `拿到了（${evidence.where.map((item) => `第 ${item.call} 次的 ${item.evidence_id ?? "—"}${viaExtension(agent, item, evidence.chunk_ids) ? " 扩展" : ""}`).join("、")}）` : "没拿到"}</span>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { SpecialAgentResults, rewriteLabel } from "./AgentEval";
+import { evidenceLabel } from "./format";
 import { addEvalSuiteItem, createEvalSuite, deleteEvalSuite, deleteEvalSuiteItem, getEvalRun, getEvalSuite, listEvalSuites, startSpecialRun, updateEvalSuite, updateEvalSuiteItem, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSuiteBrief, type EvalSuiteFull, type EvalSuiteItem, type EvalSuiteMethod, type EvalSuiteSearchMode, type EvalSuiteRunEntry } from "./api";
 import { EvidenceDetails } from "./EvidenceChunks";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
@@ -304,7 +305,7 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
             </div>
             <details className="rg-details"><summary>查看内容</summary>
               {item.turns && item.turns.length > 0 && <div className="rg-text"><span className="rg-muted">前面的提问：</span><ol className="sp-turns">{item.turns.map((turn, index) => <li key={index}>{turn}</li>)}</ol></div>}
-              {item.evidence && item.evidence.map((text, index) => <div key={index} className="rg-text"><span className="rg-muted">证据：</span>{text}</div>)}
+              {item.evidence && item.evidence.map((text, index) => <div key={index} className="rg-text"><span className="rg-muted">证据：</span>{evidenceLabel(text)}</div>)}
               {item.evidence && <div className="rg-text"><EvidenceDetails texts={item.evidence} /></div>}
               {item.reference_answer && <div className="rg-text"><span className="rg-muted">参考答案：</span>{item.reference_answer}</div>}
             </details>
@@ -356,7 +357,7 @@ function ItemForm({ suiteId, method, initial, types, onToast, onDone }: { suiteI
     <div className="rg-form-title">{initial ? "编辑题目" : "添加题目"}</div>
     {method === "dialogue" && <label className="rg-field is-top"><span>前面的提问</span><textarea value={turns} rows={4} onChange={(event) => setTurns(event.target.value)} placeholder="每行一轮，按顺序问" autoFocus /></label>}
     <label className="rg-field"><span>{method === "dialogue" ? "最后一问" : "问题"}</span><input value={question} maxLength={500} onChange={(event) => setQuestion(event.target.value)} placeholder={method === "dialogue" ? "要用到前面内容的问题，例如「回到我最开始问的那个」" : "完整的问题"} autoFocus={method !== "dialogue"} /></label>
-    {method !== "dialogue" && <label className="rg-field is-top"><span>证据原文</span><textarea value={evidence} rows={3} onChange={(event) => setEvidence(event.target.value)} placeholder={method === "retrieval" ? "每行一条，必须是评测语料里的原文" : "可选：每行一条，必须是评测语料里的原文"} /></label>}
+    {method !== "dialogue" && <label className="rg-field is-top"><span>证据原文</span><textarea value={evidence} rows={3} onChange={(event) => setEvidence(event.target.value)} placeholder={`${method === "retrieval" ? "" : "可选："}每行一条，必须是评测语料里的原文；同一件事书里写了几处，用 || 隔开，拿到任意一处就算`} /></label>}
     {/* 类型：普通文本框，可以输入新类型；下面列出这个专项已经用过的类型，点一下填进去（同一类别写成同一个名字）。 */}
     <div className="rg-field is-top"><span>类型</span><div className="sp-type-input">
       <input value={type} maxLength={20} onChange={(event) => setType(event.target.value)} placeholder="可选，例如多跳、比较；结果会按类型统计" />
@@ -422,7 +423,7 @@ function SpecialQuestion({ question, hues, method, searchMode }: { question: Eva
     </div>
     {question.evidence && question.evidence.length > 0 && <ul className="sp-evidence">
       {question.evidence.map((item, index) => <li key={index}>
-        <span className="sp-evidence-text">{item.text}</span>
+        <span className="sp-evidence-text">{evidenceLabel(item.text)}</span>
         <span className="sp-evidence-ranks" title="向量取前 12，关键词取前 30">
           <span className="sp-evidence-label">含证据的分片</span>
           {searchMode === "keyword" ? <span>向量检索：这次没用</span> : <span className={item.dense_rank === null ? "is-miss" : ""}>{rankText("向量", item.dense_rank, 12)}</span>}

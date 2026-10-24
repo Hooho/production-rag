@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 
 from ..mysql.store import eval_suite_items, eval_suites
 from ..runtime_config import snapshot as runtime_snapshot
-from .dataset import corpus_text, normalize, now_text
+from .dataset import corpus_text, missing_variants, normalize, now_text
 from .generation import judge_answer
 from .results import answer_hook, list_runs
 from .retrieval import current_chunk_texts, import_corpus
@@ -164,8 +164,9 @@ def check_item(method, data, corpus=None):
             raise ValueError("检索方式的题目至少要有一条证据原文")
         folded = normalize(corpus if corpus is not None else corpus_text())
         for text in evidence:
-            if normalize(text) not in folded:
-                raise ValueError(f"证据不在评测语料中：{text[:60]}")
+            missing = missing_variants(text, folded)
+            if missing:
+                raise ValueError(f"证据不在评测语料中：{missing[0][:60]}")
         cleaned["evidence"] = evidence
     if method == "dialogue":
         turns = [text.strip() for text in data.get("turns") or [] if isinstance(text, str) and text.strip()]

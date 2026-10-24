@@ -10,7 +10,7 @@ from ..models import Models
 from ..mysql.store import chunks, document_chunks, document_heads
 from ..runtime_config import snapshot as runtime_snapshot
 from ..tools.search import DocumentSearchTool
-from .dataset import QUESTION_TYPES, corpus_files, normalize, select_split
+from .dataset import QUESTION_TYPES, corpus_files, evidence_variants, normalize, select_split
 from .flow import apply_sufficiency, given_chunk_ids, rewrite_item
 
 
@@ -91,16 +91,17 @@ def plan_queries(item):
 
 
 # 找出每条证据落在哪些候选分片里，返回 {候选 chunk_id: [证据序号]}。
+# 一条证据写了几处原文（用 || 隔开）时，分片含其中任意一处就算。
 def evidence_hits(candidates, evidence, chunk_texts):
     targets = []
     for text in evidence:
-        targets.append(normalize(text))
+        targets.append(evidence_variants(text))
     hits = {}
     for candidate in candidates:
         text = chunk_texts.get(candidate["chunk_id"], "")
         found = []
-        for index, target in enumerate(targets):
-            if target and target in text:
+        for index, variants in enumerate(targets):
+            if any(variant in text for variant in variants):
                 found.append(index)
         if found:
             hits[candidate["chunk_id"]] = found

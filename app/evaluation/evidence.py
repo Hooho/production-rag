@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from ..ingestion.chunking import chunk_document_records
 from ..mysql.store import chunks, document_chunks, document_heads
-from .dataset import corpus_files, normalize
+from .dataset import EVIDENCE_OR, corpus_files, normalize
 from .retrieval import EVAL_OWNER
 
 
@@ -27,14 +27,16 @@ def normalized_index(text):
 
 # 证据在原文里的起止位置（忽略空白和全半角差异）；找不到返回 None。
 # indexed 是分片正文规范化后的结果（normalized_index 的返回值），一次查询里每个分片只算一次。
+# 证据写了几处原文（用 || 隔开）时，返回分片里找到的第一处。
 def find_in(indexed, evidence):
     folded, positions = indexed
-    target = normalize(evidence)
-    start = folded.find(target) if target else -1
-    if start < 0:
-        return None
-    end = start + len(target) - 1
-    return positions[start], positions[end] + 1
+    for piece in evidence.split(EVIDENCE_OR):
+        target = normalize(piece)
+        start = folded.find(target) if target else -1
+        if start >= 0:
+            end = start + len(target) - 1
+            return positions[start], positions[end] + 1
+    return None
 
 
 # 评测语料当前的全部分片：(分片 id, 标题, 送去算向量的文字, 正文, 元数据)。

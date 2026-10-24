@@ -42,3 +42,8 @@ export function durationTitle(value: number | null | undefined) {
 export function isDurationField(key: string | undefined, value: unknown): value is number {
   return !!key && key.endsWith("_ms") && typeof value === "number";
 }
+
+// 一条证据可以写几处原文（用 || 隔开，命中任意一处就算），显示时换成「或」。
+export function evidenceLabel(text: string) {
+  return text.split("||").map((piece) => piece.trim()).filter(Boolean).join("　或　");
+}

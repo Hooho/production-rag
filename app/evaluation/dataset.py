@@ -33,6 +33,20 @@ def normalize(text):
     return re.sub(r"\s+", "", folded)
 
 
+# 一条证据可以写几处原文，用 || 隔开，命中任意一处就算拿到这条：同一件事书里写了好几处时，
+# 只认一处会冤枉从别处拿到它的检索。例如「他以很低的价格购入网易公司的股票 || 无论是投资网易，还是茅台」。
+EVIDENCE_OR = "||"
+
+
+def evidence_variants(text):
+    return [part for part in (normalize(piece) for piece in (text or "").split(EVIDENCE_OR)) if part]
+
+
+# 证据里没在语料中找到的那几处原文（逐处检查）；全都找到返回空列表。corpus 是规范化后的语料。
+def missing_variants(text, corpus):
+    return [piece.strip() for piece in (text or "").split(EVIDENCE_OR) if normalize(piece) and normalize(piece) not in corpus]
+
+
 def now_text():
     return datetime.now(timezone.utc).isoformat()
 
@@ -98,6 +112,7 @@ def seed_late_suites(engine):
     with engine.begin() as connection:
         row = connection.execute(select(settings_table.c.value).where(settings_table.c.key == LATE_SEED_KEY)).first()
         done = list(((row[0] if row else None) or {}).get("names") or [])
+        revisions = dict(((row[0] if row else None) or {}).get("revisions") or {})
         now = now_text()
         changed = False
         for suite in late:
@@ -115,8 +130,27 @@ def seed_late_suites(engine):
                 added.append(suite["name"])
             done.append(suite["name"])
             changed = True
+        # 初始专项的题改过（suites.json 里 revision 加 1）：库里还是系统原样、用户没动过的题换成新版，每个版本只换一次。
+        # 用户增删过题（题数对不上）就整个不动；单题改过（updated 和 created 不同）的那题不动。
+        for suite in late:
+            revision = suite.get("revision") or 1
+            if revisions.get(suite["name"], 1) >= revision:
+                continue
+            revisions[suite["name"]] = revision
+            changed = True
+            exists = connection.execute(select(eval_suites.c.id).where(eval_suites.c.name == suite["name"])).first()
+            if not exists:
+                continue
+            rows = connection.execute(select(eval_suite_items.c.id, eval_suite_items.c.data, eval_suite_items.c.created_by,
+                eval_suite_items.c.created, eval_suite_items.c.updated).where(eval_suite_items.c.suite_id == exists[0]).order_by(
+                    eval_suite_items.c.position)).all()
+            if len(rows) != len(suite["items"]):
+                continue
+            for item, data in zip(rows, suite["items"]):
+                if item.created_by == "system" and item.updated == item.created and item.data != data:
+                    connection.execute(eval_suite_items.update().where(eval_suite_items.c.id == item.id).values(data=data))
         if changed:
-            value = {"names": done, "at": now}
+            value = {"names": done, "revisions": revisions, "at": now}
             if row:
                 connection.execute(settings_table.update().where(settings_table.c.key == LATE_SEED_KEY).values(
                     value=value, updated=now))
@@ -337,8 +371,8 @@ def validate_dataset(items, corpus_text):
         if not item.get("answerable") and evidence:
             problems.append(f"{item_id}：无法回答的题不应该有证据")
         for text in evidence:
-            if normalize(text) not in corpus:
-                problems.append(f"{item_id}：证据不在语料中：{text}")
+            for piece in missing_variants(text, corpus):
+                problems.append(f"{item_id}：证据不在语料中：{piece}")
     # 同义改写如果只保存一边或混用了共享答案，会让后续成对指标失去比较意义，因此在写入时拦截不完整题对。
     pairs = {}
     for item in items:
