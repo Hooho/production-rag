@@ -209,6 +209,26 @@ def score_question(item, retrieval, chunk_texts, pool_size):
         pool.append({"p": row["rerank_probability"] if config["reranked"] else None,
             "ev": hits.get(row["chunk_id"], [])})
     stats = retrieval["stats"]
+    # 每一路检索词各自召回了什么：固定流程把扩展出来的几路检索词分别检索（向量、关键词各一张排名表），
+    # 再用 RRF 合并、重排。这里按检索词拆开记：召回了几段、其中含哪几条证据、证据最好排第几、有几段留到了最后。
+    # 页面上和 Agent「同一轮同时发出的几次检索」对照着看。完整诊断只在调参评测保存，这份精简记录专项也有。
+    routes = {}
+    for row in candidates:
+        for contribution in row.get("contributions") or []:
+            route = routes.setdefault(contribution["query"], {"query": contribution["query"], "chunks": set(),
+                "evidence": set(), "best": {}, "kept": set()})
+            route["chunks"].add(row["chunk_id"])
+            if row["status"] == "returned":
+                route["kept"].add(row["chunk_id"])
+            for index in hits.get(row["chunk_id"], []):
+                route["evidence"].add(index)
+                label = f"{contribution['method']}"
+                best = route["best"].setdefault(index, {})
+                if label not in best or contribution["rank"] < best[label]:
+                    best[label] = contribution["rank"]
+    query_routes = [{"query": route["query"], "recalled": len(route["chunks"]), "kept": len(route["kept"]),
+        "evidence": sorted(route["evidence"]),
+        "best": [{"evidence": index, **ranks} for index, ranks in sorted(route["best"].items())]} for route in routes.values()]
     return {"id": item["id"], "question": item["question"], "type": item["type"],
         # 题目仍独立计分；保留题对关系只用于评测结果中的成对分析。
         "pair_id": item.get("pair_id"), "pair_role": item.get("pair_role"),
@@ -217,6 +237,7 @@ def score_question(item, retrieval, chunk_texts, pool_size):
         "given_recall": len(given_found) / len(evidence) if evidence else None,
         "returned": stats["returned"], "pool": pool,
         "max_probability": max((row["p"] for row in pool if row["p"] is not None), default=None),
+        "query_routes": query_routes,
         "recall_ms": stats.get("recall_ms"), "rerank_ms": stats.get("rerank_ms")}
 
 

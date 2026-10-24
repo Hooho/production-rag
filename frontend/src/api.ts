@@ -648,7 +648,9 @@ export type EvalRewrite = { classifier: string; route?: string | null; intent?: 
 // 补充检索：返回几段、是否被采用、补充检索的资料命中率和来源。
 export type EvalRetry = { returned: number; used: boolean; given_recall: number | null; found?: number[]; sources?: (Source & { chunk_id?: string | null; position?: number | null; parent_chunk_ids?: string[] })[] };
 // 和完整检索流程有关的逐题字段，调参评测和专项评测共用。
-export type EvalFlowFields = { given_hits?: number | null; ext_hits?: number | null; first_given_recall?: number | null; rewrite?: EvalRewrite | null; retry?: EvalRetry | null; cleared?: boolean | null; flow_latency_ms?: number | null };
+// 固定流程每一路检索词各自召回的情况：召回几段、留到最后几段、含哪几条证据（从 0 开始）、证据在向量 / 关键词排名表里最好排第几。
+export type EvalQueryRoute = { query: string; recalled: number; kept: number; evidence: number[]; best: { evidence: number; dense?: number; keyword?: number }[] };
+export type EvalFlowFields = { query_routes?: EvalQueryRoute[] | null; given_hits?: number | null; ext_hits?: number | null; first_given_recall?: number | null; rewrite?: EvalRewrite | null; retry?: EvalRetry | null; cleared?: boolean | null; flow_latency_ms?: number | null };
 export type EvalQuestion = {
   id: string;
   question: string;

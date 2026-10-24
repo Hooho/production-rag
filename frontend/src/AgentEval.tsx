@@ -414,6 +414,8 @@ function FixedLog({ question, params }: { question: EvalQuestion; params: string
     : (question.evidence ?? []).map((item) => (item.chunk_id ? [item.chunk_id] : []));
   const total = question.answerable ? evidenceLists.length : 0;
   const queries = question.queries ?? [];
+  // 按扩展查询里的顺序排每一路（旧记录没有 query_routes 时是空的，退回只列检索词）。
+  const routes = [...(question.query_routes ?? [])].sort((a, b) => queries.indexOf(a.query) - queries.indexOf(b.query));
   return <section className="ag-log">
     <div className="ag-log-title">固定流程<small>检索 {searches} 次{sufficiency?.checked ? ` · 判断 ${sufficiency.calls ?? 1} 次` : ""} · 耗时 {formatMs(question.flow_latency_ms ?? question.latency_ms)}</small></div>
     {question.rewrite && <div className="ag-flow-step is-block">
@@ -421,15 +423,27 @@ function FixedLog({ question, params }: { question: EvalQuestion; params: string
         {question.rewrite.duration_ms !== undefined && question.rewrite.classifier === "llm" && <Tag outline plain>耗时 {formatMs(question.rewrite.duration_ms)}{question.rewrite.cached ? "（缓存，当时）" : ""}</Tag>}</div>
       {question.rerank_query && question.rerank_query !== question.question && <div className="ag-step-row"><span className="ag-row-label">补全后的问题</span><span>{question.rerank_query}</span></div>}
       <div className="ag-step-row"><span className="ag-row-label">扩展查询（{queries.length} 路）</span>
-        <div><ul className="ag-query-list">{queries.map((query) => <li key={query}>{query}</li>)}</ul>
-          {queries.length > 1 && <small className="ag-muted">每一路分别检索，结果合并后再重排</small>}</div></div>
+        {routes.length ? <span className="ag-muted">每一路分别检索，见下方检索</span>
+          : <div><ul className="ag-query-list">{queries.map((query) => <li key={query}>{query}</li>)}</ul>
+            {queries.length > 1 && <small className="ag-muted">每一路分别检索，结果合并后再重排</small>}</div>}</div>
     </div>}
     <div className={`ag-call ${usedRetry ? "is-unused" : ""}`}>
       <div className="ag-call-head"><span className="ag-tool">{sufficiency?.retried ? "第 1 次 · " : ""}检索</span>
         <Tag outline plain>耗时 {formatMs(question.latency_ms)}</Tag><HitTag hits={hitEvidence(items, evidenceLists)} total={total} />
         {usedRetry && <Tag outline plain>没采用（换成了补充检索的结果）</Tag>}</div>
-      {!question.rewrite && <ul className="ag-query-list">{queries.map((query) => <li key={query}>{query}</li>)}</ul>}
+      {!question.rewrite && !routes.length && <ul className="ag-query-list">{queries.map((query) => <li key={query}>{query}</li>)}</ul>}
       <div className="ag-call-params">{params.join(" · ")}</div>
+      {/* 每一路检索词分别检索（和 Agent 同一轮同时发出的几次检索对应），再合并、重排、过滤成最后的结果。 */}
+      {routes.length > 0 && <div className={`ag-round ${routes.length > 1 ? "is-parallel" : ""}`}>
+        <div className="ag-round-head">{routes.length > 1 ? <>同时检索 {routes.length} 路<Tag size="sm" tone="warning">每路分别检索，合并后重排</Tag></> : "检索"}</div>
+        {routes.map((route, index) => <div className="ag-route" key={route.query}>
+          <div className="ag-call-head"><span className="ag-tool">第 {index + 1} 路</span><HitTag hits={route.evidence} total={total} />
+            <Tag outline plain>召回 {route.recalled} 段</Tag><Tag outline plain>留到最后 {route.kept} 段</Tag></div>
+          <div className="ag-call-query">{route.query}</div>
+          {route.best.length > 0 && <div className="ag-call-params">{route.best.map((item) => `证据 ${item.evidence + 1}：${[item.dense ? `向量第 ${item.dense} 名` : "", item.keyword ? `关键词第 ${item.keyword} 名` : ""].filter(Boolean).join("、")}`).join("；")}</div>}
+        </div>)}
+      </div>}
+      {routes.length > 0 && <div className="ag-merge-label">合并 → 重排 → 阈值过滤后交给模型的</div>}
       <ChunkTabs items={items} empty="过滤后没有分块。" />
     </div>
     {sufficiency && <SufficiencySteps question={question} />}
@@ -547,7 +561,7 @@ function fromSpecial(question: EvalSpecialQuestion, hasFixed: boolean, seq: numb
     returned: question.returned ?? 0, max_probability: null, latency_ms: question.latency_ms ?? 0,
     queries: question.queries ?? [], rerank_query: question.rerank_query ?? "", query_source: question.rewrite?.classifier ?? "rule",
     first_given_recall: question.first_given_recall, rewrite: question.rewrite, retry: question.retry, cleared: question.cleared,
-    flow_latency_ms: question.flow_latency_ms, sufficiency: question.sufficiency ?? undefined,
+    flow_latency_ms: question.flow_latency_ms, sufficiency: question.sufficiency ?? undefined, query_routes: question.query_routes,
     sources: question.sources, agent: question.agent, compare: question.compare, note: notes.join(" · ") || undefined,
   };
 }

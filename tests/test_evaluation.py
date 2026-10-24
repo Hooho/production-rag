@@ -487,6 +487,10 @@ def test_retrieval_full_flow_rewrite_cache_and_sufficiency(setup, eval_dir, monk
     assert first["rewrite"]["classifier"] == "llm" and first["rewrite"]["cached"] is False
     assert first["sufficiency"]["verdict"] == "sufficient" and first["given_recall"] == 1
     assert first["flow_latency_ms"] >= first["latency_ms"]
+    # 两路检索词各自召回了什么：每一路都记了召回段数和含哪几条证据。
+    routes = {route["query"]: route for route in first["query_routes"]}
+    assert set(routes) == set(first["queries"]) and all(route["recalled"] > 0 for route in routes.values())
+    assert any(route["evidence"] == [0] for route in routes.values())
     cleared = rows["a2"]
     assert cleared["first_given_recall"] == 1
     assert cleared["sufficiency"]["retried"] and cleared["sufficiency"]["retry_query"] == "人为损坏"

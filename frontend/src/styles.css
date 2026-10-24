@@ -8241,3 +8241,22 @@ input:focus {
    color: var(--tone-warning-text);
    font-size: 11px;
 }
+
+/* 固定流程的每一路检索：和 Agent 同一轮的几次调用一样圈在一个框里，每一路一个小块。 */
+.ag-route {
+   padding: 8px 10px;
+   border: 1px solid var(--ev-line);
+   border-radius: 6px;
+   background: rgba(255, 255, 255, .85);
+}
+
+.ag-route .ag-call-params {
+   margin-bottom: 0;
+}
+
+.ag-merge-label {
+   margin: 10px 0 6px;
+   color: var(--ev-muted);
+   font-size: 12px;
+   font-weight: 600;
+}
