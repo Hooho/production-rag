@@ -562,7 +562,7 @@ function FixedLog({ question, params }: { question: EvalQuestion; params: string
       {routes.length > 0 && <div className="ag-merge-label">合并 → 重排 → 阈值过滤后交给模型的</div>}
       <ChunkTabs items={items} empty="过滤后没有分块。" />
     </div>
-    {sufficiency && <SufficiencySteps question={question} />}
+    {sufficiency && <SufficiencySteps question={question} part="first" />}
     {retry && <div className={`ag-call ${usedRetry ? "" : "is-unused"}`}>
       <div className="ag-call-head"><span className="ag-tool">第 2 次 · 补充检索</span>
         <HitTag hits={hitEvidence(retryItems, evidenceLists)} total={total} /><Tag outline plain>{usedRetry ? "采用了" : "没变好，沿用第一次的"}</Tag></div>
@@ -570,18 +570,23 @@ function FixedLog({ question, params }: { question: EvalQuestion; params: string
       <div className="ag-call-params">{params.join(" · ")} · 返回 {retry.returned} 段</div>
       {retry.sources ? <ChunkTabs items={retryItems} empty="补充检索没有返回分块。" /> : <p className="ag-muted">这次评测没有保存补充检索的分块。</p>}
     </div>}
+    {sufficiency && retry && <SufficiencySteps question={question} part="rest" />}
     {question.cleared && <div className="ag-flow-cleared">判断资料不足，已清空：线上会直接拒答。</div>}
   </section>;
 }
 
 const VERDICT_LABELS: Record<string, string> = { sufficient: "够了", partial: "只够一部分", insufficient: "不够" };
 
-// 充分性判断：每次判断的结论和缺什么（补充检索后会再判断一次）。
-function SufficiencySteps({ question }: { question: EvalQuestion }) {
+// 充分性判断：每次判断的结论和缺什么。补充检索后会再判断一次，按发生的顺序放：
+// part="first" 放在第一次检索后面（没有补充检索时放全部），part="rest" 放在补充检索后面。
+function SufficiencySteps({ question, part }: { question: EvalQuestion; part: "first" | "rest" }) {
   const sufficiency = question.sufficiency!;
+  if (part === "rest" && !sufficiency.checked) return null;
   if (!sufficiency.checked) return <div className="ag-flow-step"><span className="ag-tool">充分性判断</span><span className="ag-muted">{question.returned === 0 ? "第一次检索没有来源，不用判断" : "没做（要真实大模型并打开充分性判断）"}</span></div>;
   const judgements = sufficiency.judgements?.length ? sufficiency.judgements : [{ verdict: sufficiency.verdict ?? "", missing: typeof sufficiency.missing === "string" ? sufficiency.missing : "", rewrite_query: sufficiency.retry_query ?? "" }];
-  return <>{judgements.map((judgement, index) => <div key={index} className={`ag-flow-step is-judge is-${judgement.verdict}`}>
+  const start = part === "rest" ? 1 : 0;
+  const end = part === "first" && question.retry ? 1 : judgements.length;
+  return <>{judgements.slice(start, end).map((judgement, offset) => ({ judgement, index: start + offset })).map(({ judgement, index }) => <div key={index} className={`ag-flow-step is-judge is-${judgement.verdict}`}>
     <span className="ag-tool">{judgements.length > 1 ? `第 ${index + 1} 次判断` : "充分性判断"}</span>
     <strong>{VERDICT_LABELS[judgement.verdict] ?? judgement.verdict}</strong>
     {judgement.missing && <span>缺：{judgement.missing}</span>}
