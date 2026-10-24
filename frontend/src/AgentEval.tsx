@@ -176,9 +176,13 @@ function modeRows(questions: EvalQuestion[], config: EvalConfig | undefined, has
   rows.push({ group: "result", label: "证据命中", ...pick(
     { value: ratio(fixed.hits, evidenceTotal), note: "最后交给模型的资料里有的证据", best: best("hits", "fixed") },
     { value: ratio(agent.hits, evidenceTotal), note: "Agent 拿到的资料里有的证据", best: best("hits", "agent") }) });
+  // 每条证据是检索命中那一片里拿到的，还是父块扩展拼进来的（via）：加扩展命中统计之前跑的评测没有记，显示「—」而不是 0。
+  const fixedVia = answerable.some((question) => question.ext_hits !== undefined && question.ext_hits !== null || question.evidence.some((item) => item.via !== undefined && item.via !== null));
+  const agentVia = answerable.some((question) => (question.agent?.evidence ?? []).some((item) => item.via !== undefined && item.via !== null));
+  const noVia = { value: "—", note: "这次评测没记录（加扩展命中统计之前跑的），重跑后才有" };
   rows.push({ group: "result", label: "扩展命中", ...pick(
-    { value: `${fixed.ext} 条`, note: "只在父块扩展的分片里" },
-    { value: `${agent.ext} 条`, note: agent.context ? `只在父块扩展的分片里 · 读前后文 ${agent.context} 条` : "只在父块扩展的分片里" }) });
+    fixedVia ? { value: `${fixed.ext} 条`, note: "只在父块扩展的分片里" } : noVia,
+    agentVia ? { value: `${agent.ext} 条`, note: agent.context ? `只在父块扩展的分片里 · 读前后文 ${agent.context} 条` : "只在父块扩展的分片里" } : noVia) });
   if (unanswerable.length) {
     rows.push({ group: "result", label: "误杀", ...pick(
       { value: `${fixed.rejected} 题`, note: `${fixed.count} 道有答案的题一段资料都没拿到` },
