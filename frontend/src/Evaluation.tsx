@@ -753,7 +753,7 @@ function SpecialRunResults({ run }: { run: EvalRun }) {
     {sections.map((section) => <section key={section.suite_id} className="sp-run-section">
       <h3>{section.name}<Tag size="sm" hue className="is-after">{section.method_label}</Tag></h3>
       {section.description && <p>{section.description}</p>}
-      <SpecialSection section={section} />
+      <SpecialSection section={{ ...section, run_config: run.config }} />
     </section>)}
   </div>;
 }

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { type EvalAgentCall, type EvalCompareKey, type EvalMode, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSummary } from "./api";
+import { type EvalAgentCall, type EvalCompareKey, type EvalConfig, type EvalMode, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSummary } from "./api";
 import { formatDuration as formatMs } from "./format";
 import { Tag, TypeStats, TypeTag, typeHues } from "./Tag";
+import type { Tone } from "./tags";
 
 // Agent 检索评测的结果页（后端 app/evaluation/agent_retrieval.py）。
 // Agent 每道题用新会话跑一遍，只看它最后拿到的资料里有没有证据（最后命中），口径和固定流程的「交给模型的资料命中率」一致
@@ -92,30 +93,145 @@ function Card({ label, value, note }: { label: string; value: string; note?: str
   return <div className="ev-card"><span className="ev-card-label">{label}</span><strong className="ev-card-value">{value}</strong>{note && <div className="ev-card-explanation"><span>{note}</span></div>}</div>;
 }
 
+// 两种模式的大卡片：左边固定流程、右边 Agent，每张卡片放这个模式的全部指标，同一行左右对齐好比较。
+// 分三块：结果（通过、证据命中、扩展命中）、过程（检索次数、耗时……）、配置。数字都从逐题结果现算，调参评测和专项共用。
+type ModeCell = { value: string; note?: string; best?: boolean };
+type ModeRow = { group: "result" | "process" | "config"; label: string; fixed?: ModeCell; agent?: ModeCell };
+
+function avg(values: number[]) {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+}
+
+function ratio(part: number, total: number) {
+  return total ? `${part} / ${total} · ${Math.round((part / total) * 100)}%` : "—";
+}
+
+// 固定流程一道题命中几条证据：按最后交给模型的资料算，被清空算 0。
+function fixedHits(question: EvalQuestion) {
+  if (question.cleared) return 0;
+  if (question.given_hits !== undefined && question.given_hits !== null) return question.given_hits;
+  if (question.evidence.some((item) => item.given !== undefined)) return question.evidence.filter((item) => item.given).length;
+  return Math.round((question.given_recall ?? question.stages?.final.recall ?? 0) * question.evidence_count);
+}
+
+function fixedExtHits(question: EvalQuestion) {
+  if (question.cleared) return 0;
+  return question.ext_hits ?? question.evidence.filter((item) => item.given && item.via === "extension").length;
+}
+
+function modeRows(questions: EvalQuestion[], config: EvalConfig | undefined, hasFixed: boolean, hasAgent: boolean): ModeRow[] {
+  const answerable = questions.filter((question) => question.answerable);
+  const unanswerable = questions.filter((question) => !question.answerable);
+  const evidenceTotal = answerable.reduce((sum, question) => sum + question.evidence_count, 0);
+  const rows: ModeRow[] = [];
+  let fixed: Record<string, number> = {};
+  let agent: Record<string, number> = {};
+  if (hasFixed) {
+    const ran = answerable.filter((question) => question.stages);
+    const hits = ran.map(fixedHits);
+    fixed = {
+      passed: ran.filter((question, index) => question.evidence_count > 0 && hits[index] >= question.evidence_count).length,
+      count: ran.length, hits: hits.reduce((sum, value) => sum + value, 0), ext: ran.reduce((sum, question) => sum + fixedExtHits(question), 0),
+      retried: questions.filter((question) => question.retry?.used).length, cleared: answerable.filter((question) => question.cleared).length,
+      rejected: ran.filter((question) => question.cleared || question.returned === 0).length,
+      accepted: unanswerable.filter((question) => question.stages && !question.cleared && question.returned > 0).length,
+    };
+  }
+  if (hasAgent) {
+    const ran = answerable.filter((question) => question.agent);
+    const found = ran.map((question) => question.agent!.evidence.filter((item) => item.found).length);
+    const all = questions.filter((question) => question.agent).map((question) => question.agent!);
+    const searches = all.reduce((sum, item) => sum + item.searches, 0);
+    agent = {
+      passed: ran.filter((question, index) => question.evidence_count > 0 && found[index] >= (question.agent!.evidence.length || question.evidence_count)).length,
+      count: ran.length, hits: found.reduce((sum, value) => sum + value, 0),
+      ext: ran.reduce((sum, question) => sum + question.agent!.evidence.filter((item) => item.found && item.via === "extension").length, 0),
+      context: ran.reduce((sum, question) => sum + question.agent!.evidence.filter((item) => item.found && item.via === "context").length, 0),
+      searches, wasted: all.reduce((sum, item) => sum + (item.wasted_searches ?? 0), 0), forced: all.filter((item) => item.forced).length,
+      failed: all.filter((item) => item.status !== "completed").length,
+      rejected: ran.filter((question) => question.agent!.returned === 0).length,
+      accepted: unanswerable.filter((question) => question.agent && question.agent.returned > 0).length,
+    };
+  }
+  const both = hasFixed && hasAgent;
+  // 两边都跑时，通过数、证据命中多的一边打 ✓。
+  const best = (key: string, side: "fixed" | "agent") => both && (side === "fixed" ? fixed[key] > agent[key] : agent[key] > fixed[key]);
+  const pick = (fixedCell: ModeCell | undefined, agentCell: ModeCell | undefined) => ({ fixed: hasFixed ? fixedCell : undefined, agent: hasAgent ? agentCell : undefined });
+  rows.push({ group: "result", label: "通过", ...pick(
+    { value: `${fixed.passed} / ${fixed.count}`, note: "证据全拿到的题", best: best("passed", "fixed") },
+    { value: `${agent.passed} / ${agent.count}`, note: agent.failed ? `证据全拿到的题 · 运行失败 ${agent.failed} 题` : "证据全拿到的题", best: best("passed", "agent") }) });
+  rows.push({ group: "result", label: "证据命中", ...pick(
+    { value: ratio(fixed.hits, evidenceTotal), note: "最后交给模型的资料里有的证据", best: best("hits", "fixed") },
+    { value: ratio(agent.hits, evidenceTotal), note: "Agent 拿到的资料里有的证据", best: best("hits", "agent") }) });
+  rows.push({ group: "result", label: "扩展命中", ...pick(
+    { value: `${fixed.ext} 条`, note: "只在父块扩展的分片里" },
+    { value: `${agent.ext} 条`, note: agent.context ? `只在父块扩展的分片里 · 读前后文 ${agent.context} 条` : "只在父块扩展的分片里" }) });
+  if (unanswerable.length) {
+    rows.push({ group: "result", label: "误杀", ...pick(
+      { value: `${fixed.rejected} 题`, note: `${fixed.count} 道有答案的题一段资料都没拿到` },
+      { value: `${agent.rejected} 题`, note: `${agent.count} 道有答案的题一段资料都没拿到` }) });
+    rows.push({ group: "result", label: "漏放", ...pick(
+      { value: `${fixed.accepted} 题`, note: `${unanswerable.length} 道没答案的题还拿到了资料` },
+      { value: `${agent.accepted} 题`, note: `${unanswerable.length} 道没答案的题还拿到了资料` }) });
+  }
+  const flowLatency = avg(questions.filter((question) => question.stages).map((question) => question.flow_latency_ms ?? question.latency_ms));
+  const agentRuns = questions.filter((question) => question.agent).map((question) => question.agent!);
+  const fixedCount = questions.filter((question) => question.stages).length;
+  rows.push({ group: "process", label: "检索", ...pick(
+    { value: `平均 ${number(fixedCount ? 1 + fixed.retried / fixedCount : null)} 次`, note: `补充检索 ${fixed.retried} 题${fixed.cleared ? ` · 被清空 ${fixed.cleared} 题` : ""}` },
+    { value: `平均 ${number(avg(agentRuns.map((item) => item.searches)))} 次`, note: agent.searches ? `无新增 ${agent.wasted} 次，占 ${Math.round((agent.wasted / agent.searches) * 100)}%` : undefined }) });
+  if (hasAgent) rows.push({ group: "process", label: "轮数", ...pick(
+    { value: "—", note: "固定流程没有轮次" },
+    { value: `平均 ${number(avg(agentRuns.map((item) => item.rounds)))} 轮`, note: `强制回答 ${agent.forced} 题` }) });
+  rows.push({ group: "process", label: "耗时", ...pick(
+    { value: `平均 ${formatMs(flowLatency)}`, note: "改写 + 检索 + 充分性判断，不含写回答" },
+    { value: `平均 ${formatMs(avg(agentRuns.map((item) => item.latency_ms)))}`, note: "含写回答" }) });
+  if (hasAgent) rows.push({ group: "process", label: "输入 token", ...pick(
+    { value: "—", note: "没记录" },
+    { value: `平均 ${number(avg(agentRuns.map((item) => item.prompt_tokens)), 0)}` }) });
+  const flow = config?.flow;
+  const rewrite = flow ? flow.rewrite_cached + flow.rewrite_fresh : 0;
+  const agentConfig = config?.agent;
+  rows.push({ group: "config", label: "配置", ...pick(
+    { value: config ? fixedParams(config).join(" · ") : "—", note: rewrite ? `改写 ${rewrite} 题，${flow!.rewrite_cached} 题来自缓存` : undefined },
+    { value: agentConfig ? `预算 ${agentConfig.tool_budget} 次 · 超时 ${agentConfig.timeout} 秒` : "—", note: agentConfig ? `提示词 ${agentConfig.prompt_version}${agentConfig.model ? ` · ${agentConfig.model}` : ""}` : undefined }) });
+  return rows;
+}
+
+function ModeCards({ questions, config, hasFixed, hasAgent }: { questions: EvalQuestion[]; config?: EvalConfig; hasFixed: boolean; hasAgent: boolean }) {
+  const rows = modeRows(questions, config, hasFixed, hasAgent);
+  const card = (side: "fixed" | "agent", title: string) => <section className="ag-mode-card">
+    <h4>{title}</h4>
+    {rows.map((row, index) => {
+      const cell = row[side];
+      if (!cell) return null;
+      return <div key={row.label} className={`ag-mode-row is-${row.group}${index > 0 && rows[index - 1].group !== row.group ? " is-break" : ""}`}>
+        <span className="ag-mode-label">{row.label}</span>
+        <span className="ag-mode-value"><b>{cell.value}</b>{cell.best && <Tag tone="success" size="sm">✓ 更多</Tag>}{cell.note && <small>{cell.note}</small>}</span>
+      </div>;
+    })}
+  </section>;
+  return <div className={`ag-mode-cards${hasFixed && hasAgent ? " is-two" : ""}`}>
+    {hasFixed && card("fixed", "固定流程")}
+    {hasAgent && card("agent", "Agent")}
+  </div>;
+}
+
+// 两边都跑时，能回答的题按两边是否命中分成四类，一行标签。
+function CompareLine({ counts }: { counts: Record<EvalCompareKey, number> }) {
+  const tones: Record<EvalCompareKey, Tone> = { agent_only: "info", fixed_only: "warning", neither: "danger", both: "success" };
+  return <div className="ag-compare-line"><span>逐题对比</span>
+    {(Object.keys(COMPARE_LABELS) as EvalCompareKey[]).map((key) => <Tag key={key} tone={tones[key]} title={COMPARE_HINTS[key]}>{COMPARE_LABELS[key]} {counts[key] ?? 0}</Tag>)}
+  </div>;
+}
+
 // 「对比」页签（固定流程和 Agent 一起跑时默认打开）：两边的核心指标左右并排，下面是逐题对比，点开看两边的检索日志。
 export function ComparePanel({ run }: { run: EvalRun }) {
   const summary: EvalSummary = run.summary ?? {};
-  const rows: [string, string, string, string][] = [
-    ["资料命中率", percent(summary.recall_given ?? summary.recall_final), percent(summary.agent_recall), "最后交给模型的资料里证据的比例"],
-    ["误杀率", percent(summary.false_reject_rate), percent(summary.agent_false_reject_rate), "有答案却没拿到资料，越低越好"],
-    ["漏放率", percent(summary.false_accept_rate), percent(summary.agent_false_accept_rate), "没答案却拿到资料，越低越好"],
-    ["平均检索次数", summary.retry_rate !== undefined && summary.retry_rate !== null ? number(1 + summary.retry_rate) : "1", number(summary.agent_avg_searches), "固定流程不够时补查一次；Agent 自己定"],
-    ["平均无新增检索", "—", number(summary.agent_avg_wasted_searches), `没拿到新分块的检索，占 ${percent(summary.agent_wasted_rate)}`],
-    summary.flow_latency_avg_ms !== undefined && summary.flow_latency_avg_ms !== null
-      ? ["平均耗时", formatMs(summary.flow_latency_avg_ms), formatMs(summary.agent_latency_avg_ms), "固定流程不含写回答，Agent 含"]
-      : ["平均耗时", formatMs(summary.latency_avg_ms), formatMs(summary.agent_latency_avg_ms), "旧记录：固定流程只算检索"],
-    ["平均输入 token", "—", number(summary.agent_avg_prompt_tokens, 0), "固定流程没记录"],
-  ];
   return <div className="ev-overview ag-eval">
     <p className="ev-muted-note">{summary.answerable_count ?? 0} 道能回答 · {summary.unanswerable_count ?? 0} 道无法回答，比的是最后交给模型的资料里有没有证据。</p>
-    <div className="diag-table-wrap"><table className="diag-table ev-table ag-compare-table">
-      <thead><tr><th>指标</th><th className="num">固定流程</th><th className="num">Agent</th><th>说明</th></tr></thead>
-      <tbody>{rows.map(([label, fixed, agent, hint]) => <tr key={label}><td>{label}</td><td className="num">{fixed}</td><td className="num">{agent}</td><td className="ag-muted">{hint}</td></tr>)}</tbody>
-    </table></div>
-    {run.comparison && <>
-      <div className="ev-section-title">逐题对比<small>能回答的题，证据全部拿到算命中</small></div>
-      <div className="ev-cards">{(Object.keys(COMPARE_LABELS) as EvalCompareKey[]).map((key) => <Card key={key} label={COMPARE_LABELS[key]} value={`${run.comparison?.[key] ?? 0} 题`} note={COMPARE_HINTS[key]} />)}</div>
-    </>}
+    <ModeCards questions={run.questions ?? []} config={run.config} hasFixed hasAgent />
+    {run.comparison && <CompareLine counts={run.comparison} />}
     <div className="ev-section-title">按题目类型<small>资料命中率</small></div>
     <div className="diag-table-wrap"><table className="diag-table ev-table">
       <thead><tr><th>题型</th><th className="num">题数</th><th className="num">固定流程</th><th className="num">Agent</th><th className="num">Agent 平均检索次数</th></tr></thead>
@@ -560,7 +676,7 @@ function fromSpecial(question: EvalSpecialQuestion, hasFixed: boolean, seq: numb
     given_recall: question.given_recall,
     returned: question.returned ?? 0, max_probability: null, latency_ms: question.latency_ms ?? 0,
     queries: question.queries ?? [], rerank_query: question.rerank_query ?? "", query_source: question.rewrite?.classifier ?? "rule",
-    first_given_recall: question.first_given_recall, rewrite: question.rewrite, retry: question.retry, cleared: question.cleared,
+    first_given_recall: question.first_given_recall, given_hits: question.given_hits, ext_hits: question.ext_hits, rewrite: question.rewrite, retry: question.retry, cleared: question.cleared,
     flow_latency_ms: question.flow_latency_ms, sufficiency: question.sufficiency ?? undefined, query_routes: question.query_routes,
     sources: question.sources, agent: question.agent, compare: question.compare, note: notes.join(" · ") || undefined,
   };
@@ -576,10 +692,8 @@ export function SpecialAgentResults({ section }: { section: EvalSpecialSection }
   const run = { questions, config: { split: null, suites: [], modes, search_label: section.search_mode_label } } as unknown as EvalRun;
   return <div className="ev-overview ag-eval ag-special">
     {hasFixed && section.search_mode && section.search_mode !== "hybrid" && <p className="ev-settings-diff">这个专项设置了「{section.search_mode_label}」，和 Agent 比不公平，请用混合检索。</p>}
-    <div className="ev-cards">
-      {hasFixed && (Object.keys(COMPARE_LABELS) as EvalCompareKey[]).map((key) => <Card key={key} label={COMPARE_LABELS[key]} value={`${counts[key]} 题`} note={COMPARE_HINTS[key]} />)}
-    </div>
-    <p className="ev-muted-note">证据全拿到算通过。{section.agent && <> Agent：工具预算 {section.agent.tool_budget} 次 · 超时 {section.agent.timeout} 秒 · 提示词 {section.agent.prompt_version}</>}</p>
+    <ModeCards questions={questions} config={{ ...section.run_config, agent: section.agent ?? section.run_config?.agent, search_label: section.search_mode_label } as EvalConfig} hasFixed={hasFixed} hasAgent={modes.includes("agent")} />
+    {hasFixed && <CompareLine counts={counts} />}
     {section.by_type && <><div className="ev-section-title">按类型<small>哪类题 Agent 更强、哪类固定流程就够了</small></div>
       <TypeStats stats={section.by_type} hues={typeHues(section.questions.map((question) => question.type))} both={hasFixed} /></>}
     <AgentQuestionList run={run} hasFixed={hasFixed} />

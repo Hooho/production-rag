@@ -174,7 +174,8 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
     getEvalRun(runId).then((run) => {
       if (cancelled) return;
       if (run.status !== "completed") setRunError(run.error ?? "这次评测没有正常结束");
-      setSection(run.special?.find((item) => item.suite_id === suiteId) ?? null);
+      const found = run.special?.find((item) => item.suite_id === suiteId);
+      setSection(found ? { ...found, run_config: run.config } : null);
     }).catch((reason: Error) => onToast("error", reason.message));
     return () => { cancelled = true; };
   }, [runId, selectedStatus]);

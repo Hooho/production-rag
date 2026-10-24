@@ -8272,3 +8272,91 @@ input:focus {
    border-top: 2px solid var(--ev-line);
    font-weight: 700;
 }
+
+/* 两种模式的大卡片：固定流程、Agent 左右并排，同一行对齐；窄屏上下排。 */
+.ag-mode-cards {
+   display: grid;
+   gap: 12px;
+   grid-template-columns: minmax(0, 1fr);
+   margin-bottom: 10px;
+}
+
+.ag-mode-cards.is-two {
+   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.ag-mode-card {
+   border: 1px solid var(--ev-line);
+   background: rgba(255, 255, 255, .96);
+   padding: 14px 16px;
+}
+
+.ag-mode-card h4 {
+   margin: 0 0 8px;
+   font-size: 15px;
+   font-weight: 800;
+   color: var(--ev-ink);
+}
+
+.ag-mode-row {
+   display: grid;
+   grid-template-columns: 76px minmax(0, 1fr);
+   gap: 10px;
+   padding: 7px 0;
+   align-items: baseline;
+}
+
+.ag-mode-row.is-break {
+   border-top: 1px dashed var(--ev-line);
+   margin-top: 4px;
+   padding-top: 11px;
+}
+
+.ag-mode-label {
+   font-size: 12px;
+   color: var(--ev-muted);
+}
+
+.ag-mode-value {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: baseline;
+   gap: 4px 8px;
+   min-width: 0;
+}
+
+.ag-mode-value b {
+   font-size: 15px;
+   font-weight: 700;
+   color: var(--ev-ink);
+   font-variant-numeric: tabular-nums;
+}
+
+.ag-mode-row.is-result b {
+   font-size: 18px;
+}
+
+.ag-mode-row.is-config b {
+   font-size: 13px;
+   font-weight: 600;
+}
+
+.ag-mode-value small {
+   flex-basis: 100%;
+   font-size: 12px;
+   color: var(--ev-muted);
+}
+
+.ag-compare-line {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: 6px;
+   margin: 4px 0 14px;
+   font-size: 12px;
+   color: var(--ev-muted);
+}
+
+.ag-compare-line > span {
+   margin-right: 4px;
+}
