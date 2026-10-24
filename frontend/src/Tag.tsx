@@ -87,16 +87,21 @@ export function TypeStats({ stats, hues, both }: { stats: TypeStat[]; hues: Map<
   const row = (item: TypeStat, isTotal = false) => <tr key={item.type} className={isTotal ? "is-total" : ""}>
     <td>{isTotal ? "合计" : <TypeTag type={item.type} hues={hues} />}</td><td className="num">{item.count}</td>
     {both ? <>
-      {hasScore && <td className="num">{points(item.fixed_score)}</td>}<td className="num">{cell(item.fixed_passed, item.count)}</td>{hasEvidence && <td className="num">{evidence(item.fixed_hits, item.evidence_total)}</td>}
-      {hasScore && <td className="num">{points(item.agent_score)}</td>}<td className="num">{cell(item.agent_passed, item.count)}</td>{hasEvidence && <td className="num">{evidence(item.agent_hits, item.evidence_total)}</td>}
+      {hasScore && <td className="num is-fixed">{points(item.fixed_score)}</td>}<td className="num is-fixed">{cell(item.fixed_passed, item.count)}</td>{hasEvidence && <td className="num is-fixed">{evidence(item.fixed_hits, item.evidence_total)}</td>}
+      {hasScore && <td className="num is-agent">{points(item.agent_score)}</td>}<td className="num is-agent">{cell(item.agent_passed, item.count)}</td>{hasEvidence && <td className="num is-agent">{evidence(item.agent_hits, item.evidence_total)}</td>}
     </> : <>
       {hasScore && <td className="num">{points(item.fixed_score ?? item.agent_score)}</td>}<td className="num">{cell(item.passed, item.count)}</td>{hasEvidence && <td className="num">{evidence(item.fixed_hits ?? item.agent_hits, item.evidence_total)}</td>}
     </>}
   </tr>;
   return <div className="diag-table-wrap type-stats-wrap"><table className="diag-table ev-table type-stats">
-    <thead><tr><th>类型</th><th className="num">题数</th>{both
-      ? <>{hasScore && <th className="num">固定流程得分</th>}<th className="num">固定流程通过</th>{hasEvidence && <th className="num">固定流程证据命中率</th>}{hasScore && <th className="num">Agent 得分</th>}<th className="num">Agent 通过</th>{hasEvidence && <th className="num">Agent 证据命中率</th>}</>
-      : <>{hasScore && <th className="num">得分</th>}<th className="num">通过</th>{hasEvidence && <th className="num">证据命中率</th>}</>}</tr></thead>
+    {/* 两种模式一起跑时表头分两行：上面一行写模式，下面是各自的得分、通过、证据命中率；两边用不同底色区分。 */}
+    <thead>{both ? <>
+      <tr><th rowSpan={2}>类型</th><th className="num" rowSpan={2}>题数</th>
+        <th className="is-fixed is-group" colSpan={1 + (hasScore ? 1 : 0) + (hasEvidence ? 1 : 0)}>固定流程</th>
+        <th className="is-agent is-group" colSpan={1 + (hasScore ? 1 : 0) + (hasEvidence ? 1 : 0)}>Agent</th></tr>
+      <tr>{hasScore && <th className="num is-fixed">得分</th>}<th className="num is-fixed">通过</th>{hasEvidence && <th className="num is-fixed">证据命中率</th>}
+        {hasScore && <th className="num is-agent">得分</th>}<th className="num is-agent">通过</th>{hasEvidence && <th className="num is-agent">证据命中率</th>}</tr>
+    </> : <tr><th>类型</th><th className="num">题数</th>{hasScore && <th className="num">得分</th>}<th className="num">通过</th>{hasEvidence && <th className="num">证据命中率</th>}</tr>}</thead>
     <tbody>{stats.map((item) => row(item))}{stats.length > 1 && row(total, true)}</tbody>
   </table></div>;
 }

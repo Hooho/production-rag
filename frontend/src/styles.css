@@ -8376,3 +8376,42 @@ input:focus {
       white-space: normal;
    }
 }
+
+/* 按类型表：固定流程、Agent 两组列用不同底色（蓝 / 紫），组之间加一条粗线。 */
+.type-stats th.is-fixed,
+.type-stats td.is-fixed {
+   background: color-mix(in srgb, var(--tone-info-bg) 70%, transparent);
+}
+
+.type-stats th.is-agent,
+.type-stats td.is-agent {
+   background: color-mix(in srgb, var(--tone-accent-bg) 70%, transparent);
+}
+
+.type-stats th.is-group {
+   text-align: center;
+   font-weight: 700;
+}
+
+.type-stats th.is-group.is-fixed {
+   background: var(--tone-info-bg);
+   color: var(--tone-info-text);
+}
+
+.type-stats th.is-group.is-agent {
+   background: var(--tone-accent-bg);
+   color: var(--tone-accent-text);
+}
+
+.type-stats th.is-group.is-agent,
+.type-stats tr > .is-fixed + .is-agent {
+   border-left: 2px solid var(--ev-line);
+}
+
+.type-stats tr.is-total td.is-fixed {
+   background: var(--tone-info-bg);
+}
+
+.type-stats tr.is-total td.is-agent {
+   background: var(--tone-accent-bg);
+}
