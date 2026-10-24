@@ -503,32 +503,17 @@ function HitTag({ hits, total }: { hits: number[]; total: number }) {
   return hits.length ? <Tag tone="success" dot>命中证据 {hits.map((index) => index + 1).join("、")}</Tag> : <Tag outline plain>没命中证据</Tag>;
 }
 
-// 固定流程没拿到某条证据时，写清楚丢在哪一步：哪几路召回到了（各排第几），合并后有没有进候选池，重排分够不够阈值，有没有排进返回段数。
-// 用的是第一次检索的记录；做了补充检索的，最后再说补充检索有没有拿到。
-const FATE_STATUS: Record<string, string> = { not_in_pool: "合并后没进候选池", filtered_low_score: "重排分低于阈值，被过滤", beyond_limit: "超出返回段数", in_pool: "进了候选池，但没交给模型" };
-
-function fixedEvidenceFate(question: EvalQuestion, index: number, config: EvalRun["config"]) {
-  const fixed = question.evidence?.[index];
-  if (!fixed) return "没拿到";
-  const routes = (question.query_routes ?? []).map((route, order) => ({ route, order })).filter(({ route }) => route.evidence.includes(index));
-  const recalled = routes.map(({ route, order }) => {
-    const best = route.best.find((item) => item.evidence === index);
-    const ranks = [best?.dense ? `向量第 ${best.dense} 名` : "", best?.keyword ? `关键词第 ${best.keyword} 名` : ""].filter(Boolean).join("、");
-    return `第 ${order + 1} 路${ranks ? `（${ranks}）` : ""}`;
-  });
-  const head = recalled.length ? `${recalled.join("、")}召回到了` : "召回到了";
-  const score = typeof fixed.rerank_probability === "number" ? `重排分 ${fixed.rerank_probability.toFixed(2)}` : "";
-  let fate: string;
-  switch (fixed.status) {
-    case "not_recalled": fate = "每一路都没召回"; break;
-    case "not_in_pool": fate = `${head} → 合并后排第 ${fixed.rrf_rank ?? "—"} 名，没进候选池（前 ${config.pool_size ?? "—"} 段）`; break;
-    case "filtered_low_score": fate = `${head} → 进了重排，${score || "重排分"}，低于阈值 ${typeof config.min_score === "number" ? config.min_score.toFixed(2) : "—"}，被过滤`; break;
-    case "beyond_limit": fate = `${head} → ${score ? `${score}，` : ""}重排第 ${fixed.rerank_rank ?? "—"} 名，超出返回的 ${config.return_limit ?? "—"} 段`; break;
-    case "returned": fate = `第一次检索拿到了（${score || "交给了模型"}），但最后交给模型的资料里没有`; break;
-    default: fate = `${head} → ${FATE_STATUS[fixed.status] ?? fixed.status}`;
+// 第一次检索里，一条证据合并之后的去向：交给模型了，或者丢在哪一步（没召回 / 没进候选池 / 重排分低于阈值 / 超出返回段数）。
+function mergeOutcome(fixed: EvalQuestion["evidence"][number] | undefined, given: boolean, config: EvalRun["config"]) {
+  if (given) return { ok: true, text: "交给模型了" };
+  const score = typeof fixed?.rerank_probability === "number" ? `重排分 ${fixed.rerank_probability.toFixed(2)}` : "";
+  switch (fixed?.status) {
+    case "not_recalled": case undefined: return { ok: false, text: "每一路都没召回" };
+    case "not_in_pool": return { ok: false, text: `合并后排第 ${fixed.rrf_rank ?? "—"} 名，没进候选池（前 ${config.pool_size ?? "—"} 段）` };
+    case "filtered_low_score": return { ok: false, text: `进了重排，${score ? `${score}，` : "重排分"}低于阈值 ${typeof config.min_score === "number" ? config.min_score.toFixed(2) : "—"}，被过滤` };
+    case "beyond_limit": return { ok: false, text: `${score ? `${score}，` : ""}重排第 ${fixed.rerank_rank ?? "—"} 名，超出返回的 ${config.return_limit ?? "—"} 段` };
+    default: return { ok: false, text: "进了候选池，但没交给模型" };
   }
-  if (question.retry?.returned !== undefined) fate += question.retry.used ? "；补充检索也没拿到" : "；补充检索没变好，没采用";
-  return `没拿到：${fate}`;
 }
 
 function QuestionDetail({ question, hasFixed, params, config }: { question: EvalQuestion; hasFixed: boolean; params: string[]; config: EvalRun["config"] }) {
@@ -542,19 +527,19 @@ function QuestionDetail({ question, hasFixed, params, config }: { question: Eval
       return <div className="ag-evidence" key={index}>
         <p>证据 {index + 1}：“{evidenceLabel(evidence.text)}”</p>
         <span className="ag-evidence-chunk">所在分块 {chunkIds.length ? chunkIds.map((chunkId, order) => <code key={chunkId} title={chunkId}>{chunkLabel(evidence.positions?.[order], chunkId)}</code>) : "知识库里没找到"}</span>
-        {hasFixed && <span className={fixedFound ? "is-hit" : "is-miss"}>固定流程：{fixedFound ? `拿到了${fixed?.first_given === false ? "（补充检索拿到的）" : fixed?.status === "returned" && fixed?.source_id ? `（${fixed.source_id} 检索命中）` : "（父块扩展拼进来的）"}` : question.cleared && fixed?.first_given ? "第一次检索拿到了，但被充分性判断清空了" : fixedEvidenceFate(question, index, config)}</span>}
+        {hasFixed && <span className={fixedFound ? "is-hit" : "is-miss"}>固定流程：{fixedFound ? `拿到了${fixed?.first_given === false ? "（补充检索拿到的）" : fixed?.status === "returned" && fixed?.source_id ? `（${fixed.source_id} 检索命中）` : "（父块扩展拼进来的）"}` : question.cleared && fixed?.first_given ? "第一次检索拿到了，但被充分性判断清空了" : "没拿到（丢在哪一步见下方固定流程的检索）"}</span>}
         <span className={evidence.found ? "is-hit" : "is-miss"}>Agent：{evidence.found ? `拿到了（${evidence.where.map((item) => `第 ${item.call} 次的 ${item.evidence_id ?? "—"}${viaExtension(agent, item, evidence.chunk_ids) ? " 扩展" : ""}`).join("、")}）` : "没拿到"}</span>
       </div>;
     })}</div> : <p className="ev-muted-note">没有答案的题，拿到的资料越少越好。</p>}
     <p className="ag-muted ag-numbering-note">✓ 绿底：含证据　虚线绿框：证据在扩展的分片里　小红点：新拿到　灰色：前面拿到过　+扩展：父块拼进了相邻分片　S1、S2：这次检索的结果顺序</p>
     <div className={`ag-columns ${hasFixed ? "" : "is-single"}`}>
-      {hasFixed && <FixedLog question={question} params={params} />}
+      {hasFixed && <FixedLog question={question} params={params} config={config} />}
       {agent && <AgentLog question={question} />}
     </div>
   </div>;
 }
 
-function FixedLog({ question, params }: { question: EvalQuestion; params: string[] }) {
+function FixedLog({ question, params, config }: { question: EvalQuestion; params: string[]; config: EvalRun["config"] }) {
   // 证据所在的分片（Agent 记的所在分块，或固定流程命中的分片）；来源是父块，父块里任何一片含证据都算命中。
   const evidenceChunks = new Set<string>();
   for (const item of question.agent?.evidence ?? []) for (const chunkId of item.chunk_ids ?? []) evidenceChunks.add(chunkId);
@@ -583,6 +568,7 @@ function FixedLog({ question, params }: { question: EvalQuestion; params: string
     ? (question.agent?.evidence ?? []).map((item) => item.chunk_ids ?? [])
     : (question.evidence ?? []).map((item) => (item.chunk_id ? [item.chunk_id] : []));
   const total = question.answerable ? evidenceLists.length : 0;
+  const firstHits = hitEvidence(items, evidenceLists);
   const queries = question.queries ?? [];
   // 按扩展查询里的顺序排每一路（旧记录没有 query_routes 时是空的，退回只列检索词）。
   const routes = [...(question.query_routes ?? [])].sort((a, b) => queries.indexOf(a.query) - queries.indexOf(b.query));
@@ -607,13 +593,26 @@ function FixedLog({ question, params }: { question: EvalQuestion; params: string
       {routes.length > 0 && <div className={`ag-round ${routes.length > 1 ? "is-parallel" : ""}`}>
         <div className="ag-round-head">{routes.length > 1 ? <>同时检索 {routes.length} 路<Tag size="sm" tone="warning">每路分别检索，合并后重排</Tag></> : "检索"}</div>
         {routes.map((route, index) => <div className="ag-route" key={route.query}>
-          <div className="ag-call-head"><span className="ag-tool">第 {index + 1} 路</span><HitTag hits={route.evidence} total={total} />
+          <div className="ag-call-head"><span className="ag-tool">第 {index + 1} 路</span>
             <Tag outline plain>召回 {route.recalled} 段</Tag><Tag outline plain>留到最后 {route.kept} 段</Tag></div>
           <div className="ag-call-query">{route.query}</div>
-          {route.best.length > 0 && <div className="ag-call-params">{route.best.map((item) => `证据 ${item.evidence + 1}：${[item.dense ? `向量第 ${item.dense} 名` : "", item.keyword ? `关键词第 ${item.keyword} 名` : ""].filter(Boolean).join("、")}`).join("；")}</div>}
+          {/* 这一路召回到了哪几条证据、各排第几（向量、关键词两张排名表）。 */}
+          {total > 0 && <ul className="ag-evidence-trace">{Array.from({ length: total }, (_, evidence) => {
+            const best = route.best.find((item) => item.evidence === evidence);
+            const ranks = [best?.dense ? `向量第 ${best.dense} 名` : "", best?.keyword ? `关键词第 ${best.keyword} 名` : ""].filter(Boolean).join("、");
+            return route.evidence.includes(evidence)
+              ? <li key={evidence} className="is-hit"><b>✓</b>证据 {evidence + 1}<small>召回到了{ranks ? ` · ${ranks}` : ""}</small></li>
+              : <li key={evidence} className="is-miss"><b>—</b>证据 {evidence + 1}<small>这一路没召回</small></li>;
+          })}</ul>}
         </div>)}
       </div>}
-      {routes.length > 0 && <div className="ag-merge-label">合并 → 重排 → 阈值过滤后交给模型的</div>}
+      {routes.length > 0 && <div className="ag-merge">
+        <div className="ag-merge-label">合并 → 前 {config.pool_size ?? "—"} 段进重排 → 过阈值 {typeof config.min_score === "number" ? config.min_score.toFixed(2) : "—"} → 最多 {config.return_limit ?? "—"} 段交给模型</div>
+        {total > 0 && <ul className="ag-evidence-trace">{Array.from({ length: total }, (_, evidence) => {
+          const outcome = mergeOutcome(question.evidence?.[evidence], firstHits.includes(evidence), config);
+          return <li key={evidence} className={outcome.ok ? "is-hit" : "is-lost"}><b>{outcome.ok ? "✓" : "✕"}</b>证据 {evidence + 1}<small>{outcome.text}</small></li>;
+        })}</ul>}
+      </div>}
       <ChunkTabs items={items} empty="过滤后没有分块。" />
     </div>
     {sufficiency && <SufficiencySteps question={question} part="first" />}

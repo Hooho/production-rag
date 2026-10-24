@@ -8415,3 +8415,54 @@ input:focus {
 .type-stats tr.is-total td.is-agent {
    background: var(--tone-accent-bg);
 }
+
+/* 固定流程每一路召回到了哪几条证据，以及合并、重排、过滤后每条证据的去向：一条证据一行。 */
+.ag-evidence-trace {
+   list-style: none;
+   margin: 6px 0 0;
+   padding: 0;
+   display: grid;
+   gap: 3px;
+   font-size: 12px;
+}
+
+.ag-evidence-trace li {
+   display: flex;
+   align-items: baseline;
+   gap: 6px;
+}
+
+.ag-evidence-trace b {
+   width: 14px;
+   flex-shrink: 0;
+   text-align: center;
+}
+
+.ag-evidence-trace small {
+   color: var(--ev-muted);
+   font-size: 12px;
+}
+
+.ag-evidence-trace .is-hit b {
+   color: var(--tone-success-text);
+}
+
+.ag-evidence-trace .is-miss {
+   color: var(--ev-muted);
+}
+
+.ag-evidence-trace .is-lost b,
+.ag-evidence-trace .is-lost small {
+   color: var(--tone-danger-text);
+}
+
+.ag-merge {
+   margin: 10px 0 8px;
+   padding: 8px 10px;
+   border: 1px dashed var(--ev-line);
+   border-radius: 6px;
+}
+
+.ag-merge .ag-merge-label {
+   margin: 0;
+}
