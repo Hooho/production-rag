@@ -294,3 +294,37 @@ def test_evidence_alternatives():
     assert check_item("retrieval", {"question": "问", "evidence": ["甲乙 || 丙丁"]}, "甲乙丙丁")["evidence"] == ["甲乙 || 丙丁"]
     with pytest.raises(ValueError, match="戊己"):
         check_item("retrieval", {"question": "问", "evidence": ["甲乙 || 戊己"]}, "甲乙丙丁")
+
+
+# 得分：全部找到 100，部分按比例最高 90，一条没找到每条证据扣 10、最多扣 50；无法回答的题拿到资料扣 20。
+def test_question_score():
+    from app.evaluation.score import question_score, score_band, summarize_scores
+    assert question_score(True, 8, 8) == 100
+    assert question_score(True, 7, 8) == 87.5
+    assert question_score(True, 19, 20) == 90
+    assert question_score(True, 1, 2) == 50
+    assert question_score(True, 0, 1) == -10
+    assert question_score(True, 0, 3) == -30
+    assert question_score(True, 0, 8) == -50
+    assert question_score(False, 0, 0, 0) == 100 and question_score(False, 0, 0, 3) == -20
+    assert question_score(True, 0, 0) is None
+    assert [score_band(found, 4) for found in (4, 2, 1, 0)] == ["full", "half", "some", "none"]
+    summary = summarize_scores([(True, 2, 2, 0), (True, 0, 1, 0), (False, 0, 0, 0)])
+    assert summary == {"score": 63.3, "score_bands": {"full": 1, "half": 0, "some": 0, "none": 1}}
+
+
+# 专项：每题记两边得分，专项记平均分，按类型也有平均分。
+def test_special_scores():
+    from app.evaluation.suites import attach_scores, by_type
+    section = {"questions": [
+        {"type": "汇总", "evidence_count": 4, "fixed_evidence": [{"given": True}, {"given": True}, {"given": False}, {"given": False}],
+            "agent": {"evidence": [{"found": True}] * 4}},
+        {"type": "汇总", "evidence_count": 2, "fixed_evidence": [{"given": False}, {"given": False}],
+            "agent": {"evidence": [{"found": False}, {"found": True}]}}]}
+    attach_scores(section)
+    assert [question["fixed_score"] for question in section["questions"]] == [50, -20]
+    assert [question["agent_score"] for question in section["questions"]] == [100, 50]
+    assert section["fixed_score"] == 15 and section["agent_score"] == 75
+    assert section["agent_score_bands"] == {"full": 1, "half": 1, "some": 0, "none": 0}
+    stats = by_type(section["questions"])
+    assert stats[0]["fixed_score"] == 15 and stats[0]["agent_score"] == 75

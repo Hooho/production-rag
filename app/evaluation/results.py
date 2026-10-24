@@ -32,6 +32,8 @@ METRICS = [
     ("recall_final", "过滤后 Recall", "higher"),
     # 交给回答模型的资料（含父块扩展拼进来的相邻分片）里的证据比例；和 Agent 资料命中率口径一致。
     # 固定流程现在和线上一样做充分性判断和补充检索（见 app/evaluation/flow.py），这是判断之后最终交给模型的。
+    # 得分：每题满分 100，没拿全最高 90，一条没找到按证据条数扣分（规则见 score.py），取所有题平均。
+    ("score", "固定流程得分", "higher"),
     ("recall_given", "固定流程资料命中率", "higher"),
     ("recall_given_first", "第一次检索交给模型的资料命中率", "higher"),
     ("rescued_count", "补充检索救回的题数", "higher"),
@@ -52,6 +54,7 @@ METRICS = [
     ("refusal_accuracy", "拒答正确率", "higher"),
     ("citation_validity", "引用有效性", "higher"),
     # Agent 检索评测（勾选了 Agent 时才有）：只有“最后命中”，口径和固定流程的过滤后 Recall 一致。
+    ("agent_score", "Agent 得分", "higher"),
     ("agent_recall", "Agent 资料命中率", "higher"),
     ("agent_false_reject_rate", "Agent 误杀率", "lower"),
     ("agent_false_accept_rate", "Agent 漏放率", "lower"),

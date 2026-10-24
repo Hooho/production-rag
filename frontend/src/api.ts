@@ -980,7 +980,9 @@ export type EvalSpecialSection = {
   previous_agent?: { id: string; created: string; passed: number | null; count: number };
   agent?: { tool_budget: number; timeout: number; prompt_version: string; model: string | null };
   // 按题目类型的通过数（没有题标类型时没有）。
-  by_type?: { type: string; count: number; passed: number; fixed_passed?: number; agent_passed?: number; evidence_total?: number; fixed_hits?: number; agent_hits?: number }[] | null;
+  by_type?: { type: string; count: number; passed: number; fixed_passed?: number; agent_passed?: number; evidence_total?: number; fixed_hits?: number; agent_hits?: number; fixed_score?: number; agent_score?: number }[] | null;
+  // 两边的平均得分和分档计数（规则见 app/evaluation/score.py，旧记录没有）。
+  fixed_score?: number | null; agent_score?: number | null;
   // 前端补上的：这次评测的配置（检索参数、改写缓存），给模式卡片显示。
   run_config?: EvalConfig;
 };

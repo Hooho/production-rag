@@ -7,6 +7,7 @@ import { EvidenceDetails } from "./EvidenceChunks";
 import "./Special.css";
 // 耗时格式化移到公共文件，知识库、问答、设置页共用同一套规则。
 import { durationTitle, evidenceLabel, formatDuration as formatMs, formatDurationDelta } from "./format";
+import { SCORE_RULE, bandsText, formatPoints } from "./score";
 import { AgentPanel, ComparePanel, modesLabel, rewriteLabel, runModes } from "./AgentEval";
 import { HueTag, Tag } from "./Tag";
 import { runStatus } from "./tags";
@@ -302,6 +303,7 @@ function historyEvidenceStats(metrics: EvalHistoryMetrics | null | undefined): H
 // 每个指标的显示方式：比例用百分比，MRR 用小数，耗时用时分秒。
 function formatMetric(key: string, value: number | null | undefined) {
   if (key.startsWith("mrr")) return formatScore(value);
+  if (key === "score" || key === "agent_score") return formatPoints(value);
   if (key === "rescued_count") return value === null || value === undefined ? "—" : `${value} 题`;
   if (key === "avg_judge_calls") return value === null || value === undefined ? "—" : `${value.toFixed(2)} 次`;
   if (key.includes("_ms")) return formatMs(value);
@@ -313,7 +315,7 @@ function metricLabel(key: string, run: EvalRunBrief) {
   const pool = run.config.pool_size ?? 20;
   const top = run.config.return_limit ?? 6;
   const labels: Record<string, string> = {
-    recall_pool: `召回 Recall@${pool}`, recall_top: `重排 Recall@${top}`, recall_final: "过滤后 Recall", recall_given: "固定流程资料命中率",
+    recall_pool: `召回 Recall@${pool}`, recall_top: `重排 Recall@${top}`, recall_final: "过滤后 Recall", recall_given: "固定流程资料命中率", score: "固定流程得分",
     recall_given_first: "第一次检索交给模型的资料命中率", ext_hit_rate: "扩展命中率", rescued_count: "补充检索救回", wrong_clear_rate: "误清空率",
     right_clear_rate: "正确清空率", retry_rate: "补充检索比例", avg_judge_calls: "平均判断次数", flow_latency_avg_ms: "完整检索平均耗时",
     mrr_pool: `召回 MRR@${pool}`, mrr_top: `重排 MRR@${top}`, mrr_final: "过滤后 MRR",
@@ -361,6 +363,10 @@ const METRIC_HINTS: Record<string, string> = {
 function metricCardDetails(metricKey: string, run: EvalRun, value: number | null | undefined) {
   const sentence = metricSentence(metricKey, summarizeHistoryEvidence(run), run.config);
   if (sentence) return [sentence];
+  if (metricKey === "score") {
+    const bands = (run.summary as unknown as { score_bands?: Record<string, number> } | null)?.score_bands;
+    return bands ? [bandsText(bands), SCORE_RULE] : [SCORE_RULE];
+  }
   const explanation = GENERATION_METRIC_EXPLANATIONS[metricKey] ?? FLOW_METRIC_EXPLANATIONS[metricKey] ?? METRIC_HINTS[metricKey];
   if (explanation && !["faithfulness", "correctness", "refusal_accuracy", "citation_validity"].includes(metricKey)) return [explanation];
 
@@ -839,7 +845,7 @@ function Overview({ run, comparison }: { run: EvalRun; comparison: EvalCompariso
   const hasGeneration = run.kind === "generation";
   // 完整检索流程（新记录才有）：第一次检索之后还有充分性判断和补充检索，最终交给模型的资料可能不同。
   const hasFlow = run.config.flow?.name === "full";
-  const flowKeys = ["recall_given_first", "recall_given", "ext_hit_rate", "rescued_count", "wrong_clear_rate", "right_clear_rate", "retry_rate"];
+  const flowKeys = ["score", "recall_given_first", "recall_given", "ext_hit_rate", "rescued_count", "wrong_clear_rate", "right_clear_rate", "retry_rate"];
   return <div className="ev-overview">
     {/* 顶部总览只展示本次评测结果，移除重复的历史对比提示；历史对比仍用于耗时变化和历史页。 */}
     {comparison?.settings_diff && comparison.settings_diff.length > 0 && <div className="ev-settings-diff">和上一次评测相比，系统参数改过 {comparison.settings_diff.length} 项：{comparison.settings_diff.map((item) => `${item.key} ${String(item.base)} → ${String(item.target)}`).join("；")}。分数变化可能来自参数，而不是代码。</div>}
@@ -1519,17 +1525,19 @@ function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: 
           </tr>
           {metricsExpanded && item.kind === "special" && <tr id={`history-metrics-${item.id}`} className="ev-history-metrics-row">
             <td colSpan={9}><div className="ev-history-metrics-panel"><div className="ev-history-metrics-heading">各专项结果</div><div className="ev-history-metrics-grid">
-              {Object.entries(((item.summary as unknown as { suites?: Record<string, { name: string; count: number; passed: number; modes?: EvalMode[]; agent_passed?: number | null }> } | null)?.suites) ?? {}).map(([key, entry]) => {
+              {Object.entries(((item.summary as unknown as { suites?: Record<string, { name: string; count: number; passed: number; modes?: EvalMode[]; agent_passed?: number | null; fixed_score?: number | null; agent_score?: number | null }> } | null)?.suites) ?? {}).map(([key, entry]) => {
                 const agentOnly = (entry.modes ?? []).length === 1 && entry.modes?.[0] === "agent";
                 const both = (entry.modes ?? []).includes("agent") && !agentOnly;
-                return <HistoryMetric key={key} label={entry.name} value={both ? <span className="ev-metric-pair"><span><small>固定流程</small>{entry.passed} / {entry.count}</span><span><small>Agent</small>{entry.agent_passed ?? 0} / {entry.count}</span></span> : `${entry.passed} / ${entry.count}`}
-                  hint={`${entry.count} 道题里，通过的题数（证据全拿到算通过）${agentOnly ? "，只跑了 Agent" : ""}`} />;
+                return <HistoryMetric key={key} label={entry.name} value={both ? <span className="ev-metric-pair"><span><small>固定流程</small>{entry.passed} / {entry.count}{entry.fixed_score !== undefined && entry.fixed_score !== null ? ` · ${formatPoints(entry.fixed_score)}` : ""}</span><span><small>Agent</small>{entry.agent_passed ?? 0} / {entry.count}{entry.agent_score !== undefined && entry.agent_score !== null ? ` · ${formatPoints(entry.agent_score)}` : ""}</span></span> : `${entry.passed} / ${entry.count}${(agentOnly ? entry.agent_score : entry.fixed_score) !== undefined && (agentOnly ? entry.agent_score : entry.fixed_score) !== null ? ` · ${formatPoints(agentOnly ? entry.agent_score : entry.fixed_score)}` : ""}`}
+                  hint={`${entry.count} 道题里，通过的题数（证据全拿到算通过）和得分${agentOnly ? "，只跑了 Agent" : ""}`} />;
               })}
               {item.status !== "completed" && <span className="ev-muted-note">{runStatus(item.status).label}</span>}
             </div></div></td>
           </tr>}
           {metricsExpanded && item.kind !== "special" && <tr id={`history-metrics-${item.id}`} className="ev-history-metrics-row">
             <td colSpan={9}><div className="ev-history-metrics-panel"><div className="ev-history-metrics-heading">本条记录指标</div><div className="ev-history-metrics-grid">
+              {runModes(item).includes("agent") && <HistoryMetric label="Agent 得分" value={formatPoints(item.summary?.agent_score)} hint={SCORE_RULE} />}
+              {runModes(item).includes("fixed") && item.config.flow?.name === "full" && <HistoryMetric label="固定流程得分" value={formatPoints(item.summary?.score)} hint={SCORE_RULE} />}
               {runModes(item).includes("agent") && <HistoryMetric label="Agent 资料命中率" value={formatPercent(item.summary?.agent_recall)} hint={metricSentence("agent_recall", stats, item.config) ?? "Agent 找到资料，包含题目的证据的比例"} />}
               {runModes(item).includes("fixed") && <>
               {/* 完整检索流程的新记录：最终交给模型的命中率（结果列显示的就是它）和误清空率。 */}

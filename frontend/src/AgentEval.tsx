@@ -3,6 +3,7 @@ import { type EvalAgentCall, type EvalCompareKey, type EvalConfig, type EvalMode
 import { evidenceLabel, formatDuration as formatMs } from "./format";
 import { Tag, TypeStats, TypeTag, typeHues } from "./Tag";
 import type { Tone } from "./tags";
+import { SCORE_RULE, bandsText, formatPoints, questionScore, summarizeScores } from "./score";
 
 // Agent 检索评测的结果页（后端 app/evaluation/agent_retrieval.py）。
 // Agent 每道题用新会话跑一遍，只看它最后拿到的资料里有没有证据（最后命中），口径和固定流程的「交给模型的资料命中率」一致
@@ -50,15 +51,17 @@ function agentVerdict(question: EvalQuestion) {
   const agent = question.agent;
   if (!agent) return { key: "none", label: "—" };
   if (agent.status !== "completed") return { key: "bad", label: "运行失败" };
-  if (!question.answerable) return agent.returned === 0 ? { key: "good", label: "没拿到资料" } : { key: "warn", label: `拿到 ${agent.returned} 段` };
+  if (!question.answerable) return agent.returned === 0 ? { key: "good", label: "没拿到资料 · 100 分" } : { key: "warn", label: `拿到 ${agent.returned} 段 · -20 分` };
   // 写出拿到几条证据：「命中 3 / 3」「部分 1 / 3」「未命中 0 / 3」。
   const total = agent.evidence.length || question.evidence_count;
   const found = agent.evidence.length ? agent.evidence.filter((item) => item.found).length : Math.round((agent.recall ?? 0) * total);
   return countVerdict(found, total);
 }
 
+// 后面带上这题的得分（规则见 score.ts）。
 function countVerdict(found: number, total: number) {
-  const count = `${found} / ${total}`;
+  const score = questionScore(true, found, total);
+  const count = `${found} / ${total}${score === null ? "" : ` · ${score} 分`}`;
   if (total > 0 && found >= total) return { key: "good", label: `命中 ${count}` };
   if (found > 0) return { key: "warn", label: `部分 ${count}` };
   return { key: "bad", label: `未命中 ${count}` };
@@ -75,9 +78,9 @@ export function rewriteLabel(question: { rewrite?: EvalQuestion["rewrite"]; quer
 
 function fixedVerdict(question: EvalQuestion) {
   if (!question.stages) return { key: "none", label: "—" };
-  if (!question.answerable) return question.returned === 0 || question.cleared ? { key: "good", label: question.cleared ? "被清空，没拿到资料" : "没拿到资料" } : { key: "warn", label: `拿到 ${question.sufficiency?.source_count ?? question.returned} 段` };
+  if (!question.answerable) return question.returned === 0 || question.cleared ? { key: "good", label: `${question.cleared ? "被清空，没拿到资料" : "没拿到资料"} · 100 分` } : { key: "warn", label: `拿到 ${question.sufficiency?.source_count ?? question.returned} 段 · -20 分` };
   // 被充分性判断清空：模型什么资料都拿不到。
-  if (question.cleared) return { key: "bad", label: `被清空 0 / ${question.evidence_count}` };
+  if (question.cleared) return { key: "bad", label: `被清空 0 / ${question.evidence_count} · ${questionScore(true, 0, question.evidence_count)} 分` };
   // 和 Agent 比较时按「最终交给模型的资料」（含父块扩展、补充检索）算；旧记录没有，用过滤后 Recall。
   const recall = question.given_recall ?? question.stages.final.recall ?? 0;
   const total = question.evidence_count;
@@ -157,6 +160,16 @@ function modeRows(questions: EvalQuestion[], config: EvalConfig | undefined, has
   // 两边都跑时，通过数、证据命中多的一边打 ✓。
   const best = (key: string, side: "fixed" | "agent") => both && (side === "fixed" ? fixed[key] > agent[key] : agent[key] > fixed[key]);
   const pick = (fixedCell: ModeCell | undefined, agentCell: ModeCell | undefined) => ({ fixed: hasFixed ? fixedCell : undefined, agent: hasAgent ? agentCell : undefined });
+  // 得分：每题满分 100，没拿全最高 90，一条没找到按证据条数扣分；下面一行是分档计数。
+  const fixedScore = summarizeScores(questions.filter((question) => question.stages).map((question) =>
+    [question.answerable, question.answerable ? fixedHits(question) : 0, question.evidence_count, question.cleared ? 0 : question.returned]));
+  const agentScore = summarizeScores(questions.filter((question) => question.agent && question.agent.status === "completed").map((question) =>
+    [question.answerable, question.agent!.evidence.filter((item) => item.found).length, question.agent!.evidence.length || question.evidence_count, question.agent!.returned]));
+  const scoreBest = (side: "fixed" | "agent") => both && fixedScore.score !== null && agentScore.score !== null
+    && (side === "fixed" ? fixedScore.score > agentScore.score : agentScore.score > fixedScore.score);
+  rows.push({ group: "result", label: "得分", ...pick(
+    { value: formatPoints(fixedScore.score), note: bandsText(fixedScore.bands), best: scoreBest("fixed") },
+    { value: formatPoints(agentScore.score), note: bandsText(agentScore.bands), best: scoreBest("agent") }) });
   rows.push({ group: "result", label: "通过", ...pick(
     { value: `${fixed.passed} / ${fixed.count}`, note: "证据全拿到的题", best: best("passed", "fixed") },
     { value: `${agent.passed} / ${agent.count}`, note: agent.failed ? `证据全拿到的题 · 运行失败 ${agent.failed} 题` : "证据全拿到的题", best: best("passed", "agent") }) });
@@ -207,14 +220,17 @@ function ModeCards({ questions, config, hasFixed, hasAgent }: { questions: EvalQ
       if (!cell) return null;
       return <div key={row.label} className={`ag-mode-row is-${row.group}${index > 0 && rows[index - 1].group !== row.group ? " is-break" : ""}`}>
         <span className="ag-mode-label">{row.label}</span>
-        <span className="ag-mode-value"><b>{cell.value}</b>{cell.best && <Tag tone="success" size="sm">✓ 更多</Tag>}{cell.note && <small>{cell.note}</small>}</span>
+        <span className="ag-mode-value"><b>{cell.value}</b>{cell.best && <Tag tone="success" size="sm">{row.label === "得分" ? "✓ 更高" : "✓ 更多"}</Tag>}{cell.note && <small>{cell.note}</small>}</span>
       </div>;
     })}
   </section>;
-  return <div className={`ag-mode-cards${hasFixed && hasAgent ? " is-two" : ""}`}>
-    {hasFixed && card("fixed", "固定流程")}
-    {hasAgent && card("agent", "Agent")}
-  </div>;
+  return <>
+    <p className="ev-muted-note">得分：{SCORE_RULE}；无法回答的题拿到资料扣 20。</p>
+    <div className={`ag-mode-cards${hasFixed && hasAgent ? " is-two" : ""}`}>
+      {hasFixed && card("fixed", "固定流程")}
+      {hasAgent && card("agent", "Agent")}
+    </div>
+  </>;
 }
 
 // 两边都跑时，能回答的题按两边是否命中分成四类，一行标签。
@@ -232,11 +248,12 @@ export function ComparePanel({ run }: { run: EvalRun }) {
     <p className="ev-muted-note">{summary.answerable_count ?? 0} 道能回答 · {summary.unanswerable_count ?? 0} 道无法回答，比的是最后交给模型的资料里有没有证据。</p>
     <ModeCards questions={run.questions ?? []} config={run.config} hasFixed hasAgent />
     {run.comparison && <CompareLine counts={run.comparison} />}
-    <div className="ev-section-title">按题目类型<small>资料命中率</small></div>
+    <div className="ev-section-title">按题目类型<small>得分和资料命中率</small></div>
     <div className="diag-table-wrap"><table className="diag-table ev-table">
-      <thead><tr><th>题型</th><th className="num">题数</th><th className="num">固定流程</th><th className="num">Agent</th><th className="num">Agent 平均检索次数</th></tr></thead>
+      <thead><tr><th>题型</th><th className="num">题数</th><th className="num">固定流程得分</th><th className="num">Agent 得分</th><th className="num">固定流程命中率</th><th className="num">Agent 命中率</th><th className="num">Agent 平均检索次数</th></tr></thead>
       <tbody>{Object.entries(run.by_type ?? {}).map(([type, row]) => <tr key={type}>
-        <td>{type}</td><td className="num">{row.count ?? row.agent_count ?? "—"}</td><td className="num">{percent(row.recall_given ?? row.recall_final)}</td>
+        <td>{type}</td><td className="num">{row.count ?? row.agent_count ?? "—"}</td>
+        <td className="num">{formatPoints(row.score)}</td><td className="num">{formatPoints(row.agent_score)}</td><td className="num">{percent(row.recall_given ?? row.recall_final)}</td>
         <td className="num">{percent(row.agent_recall)}</td><td className="num">{number(row.agent_avg_searches)}</td>
       </tr>)}</tbody>
     </table></div>
@@ -264,6 +281,7 @@ export function AgentPanel({ run }: { run: EvalRun }) {
     <p className="ev-muted-note">只看 Agent 最后拿到的资料里有没有证据。{config && <> 工具预算 {config.tool_budget} 次 · 超时 {config.timeout} 秒 · 提示词 {config.prompt_version}{config.model ? ` · ${config.model}` : ""}</>}</p>
     <div className="ev-section-title">命中<small>{summary.answerable_count ?? 0} 道能回答 · {summary.unanswerable_count ?? 0} 道无法回答</small></div>
     <div className="ev-cards">
+      <Card label="得分" value={formatPoints(summary.agent_score)} note={summary.agent_score_bands ? bandsText(summary.agent_score_bands as unknown as Record<string, number>) : SCORE_RULE} />
       <Card label="资料命中率" value={percent(summary.agent_recall)} note={agentQuestions.length ? `共 ${evidenceTotal} 条证据，Agent 找到的资料里有 ${evidenceFound} 条` : "Agent 找到资料，包含题目的证据的比例"} />
       <Card label="扩展命中率" value={percent(summary.agent_ext_hit_rate)} note={hasVia ? `拿到的 ${evidenceFound} 条证据里，有 ${viaCount("extension")} 条在扩展的分片里${viaCount("context") ? `，${viaCount("context")} 条靠读前后文` : ""}` : "拿到的证据里，只在父块扩展拼进来的分片里的比例"} />
       <Card label="误杀率" value={percent(summary.agent_false_reject_rate)} note={agentQuestions.length ? `${answerable.length} 道有答案的题，有 ${rejected} 道一段资料都没拿到` : "有答案却没拿到资料"} />

@@ -304,6 +304,10 @@ def summarize(rows):
         summary[f"mrr_{stage}"] = mean(reciprocals)
     given = [row["given_recall"] for row in answerable if row.get("given_recall") is not None]
     summary["recall_given"] = mean(given)
+    # 得分：全部找到 100，部分按比例最高 90，一条没找到按证据条数扣分（规则见 score.py）。
+    from .score import fixed_item, summarize_scores
+    scored = summarize_scores([fixed_item(row) for row in rows if row.get("stages")])
+    summary["score"], summary["score_bands"] = scored["score"], scored["score_bands"]
     summary.update(summarize_flow(rows, answerable, unanswerable))
     # 扩展命中率：拿到的证据里靠父块扩展拿到的比例；不扩展的话，这部分证据就拿不到。
     counted = [row for row in answerable if "ext_hits" in row]

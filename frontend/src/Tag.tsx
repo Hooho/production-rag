@@ -53,7 +53,9 @@ export { hueMap as typeHues };
 
 export type TypeStat = { type: string; count: number; passed: number; fixed_passed?: number; agent_passed?: number;
   // 证据命中：一共几条证据、两边各命中几条（旧记录没有）。
-  evidence_total?: number; fixed_hits?: number; agent_hits?: number };
+  evidence_total?: number; fixed_hits?: number; agent_hits?: number;
+  // 两边每题得分的平均（规则见 score.ts，旧记录没有）。
+  fixed_score?: number; agent_score?: number };
 
 // 按类型统计：每类题的通过数（证据全拿到算通过），以及证据命中条数（命中的证据 / 全部证据）。
 // 只看通过数会掩盖差别：汇总题拿到 6/7 和 1/7 都算没通过。两种模式一起跑时固定流程、Agent 各两列；最后一行是合计。
@@ -68,23 +70,33 @@ export function TypeStats({ stats, hues, both }: { stats: TypeStat[]; hues: Map<
     if (hits === undefined || !total) return "—";
     return <span className={`type-stat ${hits >= total ? "is-all" : hits === 0 ? "is-none" : ""}`}>{Math.round((hits / total) * 100)}%<small>{hits} / {total}</small></span>;
   };
+  const points = (value: number | undefined) => value === undefined ? "—"
+    : <span className={`type-stat ${value >= 100 ? "is-all" : value <= 0 ? "is-none" : ""}`}>{Math.round(value * 10) / 10}</span>;
+  // 合计行的得分按题数加权平均（每道题分量一样）。
+  const weighted = (key: "fixed_score" | "agent_score") => {
+    const rows = stats.filter((row) => row[key] !== undefined);
+    const count = rows.reduce((value, row) => value + row.count, 0);
+    return count ? rows.reduce((value, row) => value + (row[key] ?? 0) * row.count, 0) / count : undefined;
+  };
   const sum = (key: keyof TypeStat) => stats.some((row) => row[key] !== undefined) ? stats.reduce((value, row) => value + (Number(row[key]) || 0), 0) : undefined;
   const total: TypeStat = { type: "合计", count: sum("count") ?? 0, passed: sum("passed") ?? 0, fixed_passed: sum("fixed_passed"), agent_passed: sum("agent_passed"),
-    evidence_total: sum("evidence_total"), fixed_hits: sum("fixed_hits"), agent_hits: sum("agent_hits") };
+    evidence_total: sum("evidence_total"), fixed_hits: sum("fixed_hits"), agent_hits: sum("agent_hits"),
+    fixed_score: weighted("fixed_score"), agent_score: weighted("agent_score") };
+  const hasScore = stats.some((row) => row.fixed_score !== undefined || row.agent_score !== undefined);
   const hasEvidence = stats.some((row) => row.evidence_total);
   const row = (item: TypeStat, isTotal = false) => <tr key={item.type} className={isTotal ? "is-total" : ""}>
     <td>{isTotal ? "合计" : <TypeTag type={item.type} hues={hues} />}</td><td className="num">{item.count}</td>
     {both ? <>
-      <td className="num">{cell(item.fixed_passed, item.count)}</td>{hasEvidence && <td className="num">{evidence(item.fixed_hits, item.evidence_total)}</td>}
-      <td className="num">{cell(item.agent_passed, item.count)}</td>{hasEvidence && <td className="num">{evidence(item.agent_hits, item.evidence_total)}</td>}
+      {hasScore && <td className="num">{points(item.fixed_score)}</td>}<td className="num">{cell(item.fixed_passed, item.count)}</td>{hasEvidence && <td className="num">{evidence(item.fixed_hits, item.evidence_total)}</td>}
+      {hasScore && <td className="num">{points(item.agent_score)}</td>}<td className="num">{cell(item.agent_passed, item.count)}</td>{hasEvidence && <td className="num">{evidence(item.agent_hits, item.evidence_total)}</td>}
     </> : <>
-      <td className="num">{cell(item.passed, item.count)}</td>{hasEvidence && <td className="num">{evidence(item.fixed_hits ?? item.agent_hits, item.evidence_total)}</td>}
+      {hasScore && <td className="num">{points(item.fixed_score ?? item.agent_score)}</td>}<td className="num">{cell(item.passed, item.count)}</td>{hasEvidence && <td className="num">{evidence(item.fixed_hits ?? item.agent_hits, item.evidence_total)}</td>}
     </>}
   </tr>;
   return <div className="diag-table-wrap type-stats-wrap"><table className="diag-table ev-table type-stats">
     <thead><tr><th>类型</th><th className="num">题数</th>{both
-      ? <><th className="num">固定流程通过</th>{hasEvidence && <th className="num">固定流程证据命中率</th>}<th className="num">Agent 通过</th>{hasEvidence && <th className="num">Agent 证据命中率</th>}</>
-      : <><th className="num">通过</th>{hasEvidence && <th className="num">证据命中率</th>}</>}</tr></thead>
+      ? <>{hasScore && <th className="num">固定流程得分</th>}<th className="num">固定流程通过</th>{hasEvidence && <th className="num">固定流程证据命中率</th>}{hasScore && <th className="num">Agent 得分</th>}<th className="num">Agent 通过</th>{hasEvidence && <th className="num">Agent 证据命中率</th>}</>
+      : <>{hasScore && <th className="num">得分</th>}<th className="num">通过</th>{hasEvidence && <th className="num">证据命中率</th>}</>}</tr></thead>
     <tbody>{stats.map((item) => row(item))}{stats.length > 1 && row(total, true)}</tbody>
   </table></div>;
 }

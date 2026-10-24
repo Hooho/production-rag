@@ -8360,3 +8360,8 @@ input:focus {
 .ag-compare-line > span {
    margin-right: 4px;
 }
+
+/* 逐题结果带上得分后变长，不换行。 */
+.ag-eval .ev-verdict {
+   white-space: nowrap;
+}

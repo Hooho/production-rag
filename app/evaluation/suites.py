@@ -449,6 +449,7 @@ def run_special(store, models, run, on_progress, responder, agent_mode=None):
             search_config = config or search_config
             offset[0] += len(suite["items"]) * (len(modes) if suite["method"] == "retrieval" else 1)
         passed = sum(1 for question in section["questions"] if question["passed"])
+        attach_scores(section)
         section["by_type"] = by_type(section["questions"])
         section.update({"suite_id": suite["id"], "name": suite["name"], "description": suite["description"],
             "method": suite["method"], "method_label": METHODS[suite["method"]], "count": len(suite["items"]),
@@ -466,7 +467,8 @@ def run_special(store, models, run, on_progress, responder, agent_mode=None):
     run["summary"] = {"count": count, "passed": passed, "pass_rate": round(passed / count, 4) if count else None,
         "suites": {section["suite_id"]: {"name": section["name"], "method": section["method"],
             "count": section["count"], "passed": section["passed"], "modes": section.get("modes") or ["fixed"],
-            "agent_passed": section.get("agent_passed")} for section in sections}}
+            "agent_passed": section.get("agent_passed"), "fixed_score": section.get("fixed_score"),
+            "agent_score": section.get("agent_score")} for section in sections}}
     if any("agent" in (section.get("modes") or []) for section in sections):
         run["summary"]["agent_passed"] = sum(section.get("agent_passed") or 0 for section in sections)
     return run
@@ -494,7 +496,32 @@ def by_type(questions):
                 group["fixed_hits"] = group.get("fixed_hits", 0) + fixed_hits
             if agent_hits is not None:
                 group["agent_hits"] = group.get("agent_hits", 0) + agent_hits
+        for key in ("fixed_score", "agent_score"):
+            if question.get(key) is not None:
+                group.setdefault(f"_{key}", []).append(question[key])
+    for group in groups.values():
+        for key in ("fixed_score", "agent_score"):
+            values = group.pop(f"_{key}", None)
+            if values:
+                group[key] = round(sum(values) / len(values), 1)
     return list(groups.values()) or None
+
+
+# 检索方式的专项：每题两边各自的得分（规则见 score.py），专项上记两边的平均分和分档计数。
+def attach_scores(section):
+    from .score import question_score, summarize_scores
+    items = {"fixed": [], "agent": []}
+    for question in section["questions"]:
+        fixed_hits, agent_hits, total = evidence_counts(question)
+        for mode, hits in (("fixed", fixed_hits), ("agent", agent_hits)):
+            if hits is None or not total:
+                continue
+            question[f"{mode}_score"] = question_score(True, hits, total)
+            items[mode].append((True, hits, total, 0))
+    for mode, selected in items.items():
+        if selected:
+            scored = summarize_scores(selected)
+            section[f"{mode}_score"], section[f"{mode}_score_bands"] = scored["score"], scored["score_bands"]
 
 
 # 一道专项题两边各命中几条证据、一共几条：固定流程按最后交给模型的资料（given），Agent 按它拿到的全部资料。

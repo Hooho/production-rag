@@ -214,7 +214,10 @@ def summarize_agent(rows):
     def rate(selected, check):
         return round(sum(1 for agent in selected if check(agent)) / len(selected), 4) if selected else None
 
-    return {"agent_count": len(agents),
+    from .score import agent_item, summarize_scores
+    scored = summarize_scores([agent_item(row["answerable"], row["agent"]) for row in rows
+        if row.get("agent") and row["agent"]["status"] == "completed"])
+    return {"agent_count": len(agents), "agent_score": scored["score"], "agent_score_bands": scored["score_bands"],
         "agent_recall": mean([agent["recall"] for agent in answerable if agent["recall"] is not None]),
         "agent_false_reject_rate": rate(answerable, lambda agent: agent["returned"] == 0),
         # 扩展命中率：拿到的证据里，只在父块扩展拼进来的分片里的比例（旧记录没有 ext_hits 时是 None）。
