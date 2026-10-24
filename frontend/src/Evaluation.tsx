@@ -1372,7 +1372,7 @@ function VariantPanel({ run }: { run: EvalRun }) {
 }
 
 // 历史记录中的单个指标子项：把解释放在数值下方，用户不必再对照页面底部说明。
-function HistoryMetric({ label, value, hint }: { label: string; value: string; hint: ReactNode }) {
+function HistoryMetric({ label, value, hint }: { label: string; value: ReactNode; hint: ReactNode }) {
   return <div className="ev-history-metric-item"><span className="ev-history-metric-label">{label}</span><strong>{value}</strong><small>{hint}</small></div>;
 }
 
@@ -1522,8 +1522,8 @@ function RunHistory({ runs, onOpen, onDelete }: { runs: EvalRunBrief[]; onOpen: 
               {Object.entries(((item.summary as unknown as { suites?: Record<string, { name: string; count: number; passed: number; modes?: EvalMode[]; agent_passed?: number | null }> } | null)?.suites) ?? {}).map(([key, entry]) => {
                 const agentOnly = (entry.modes ?? []).length === 1 && entry.modes?.[0] === "agent";
                 const both = (entry.modes ?? []).includes("agent") && !agentOnly;
-                return <HistoryMetric key={key} label={entry.name} value={both ? `${entry.passed} / ${entry.count} · Agent ${entry.agent_passed ?? 0} / ${entry.count}` : `${entry.passed} / ${entry.count}`}
-                  hint={both ? "固定流程 · Agent 各自通过数" : agentOnly ? "Agent 通过数" : "通过数"} />;
+                return <HistoryMetric key={key} label={entry.name} value={both ? <span className="ev-metric-pair"><span><small>固定流程</small>{entry.passed} / {entry.count}</span><span><small>Agent</small>{entry.agent_passed ?? 0} / {entry.count}</span></span> : `${entry.passed} / ${entry.count}`}
+                  hint={`${entry.count} 道题里，通过的题数（证据全拿到算通过）${agentOnly ? "，只跑了 Agent" : ""}`} />;
               })}
               {item.status !== "completed" && <span className="ev-muted-note">{runStatus(item.status).label}</span>}
             </div></div></td>

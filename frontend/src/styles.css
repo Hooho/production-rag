@@ -8146,3 +8146,22 @@ input:focus {
    border-radius: 8px;
    background: rgba(255, 244, 229, .35);
 }
+
+/* 专项卡片里两种模式的通过数：各占一行，前面写是哪一边，不再挤成一串「19 / 24 · Agent 20 / 24」。 */
+.ev-metric-pair {
+   display: grid;
+   gap: 2px;
+}
+
+.ev-metric-pair > span {
+   display: flex;
+   align-items: baseline;
+   gap: 10px;
+}
+
+.ev-metric-pair small {
+   min-width: 4.5em;
+   color: var(--ev-muted);
+   font-size: 13px;
+   font-weight: 600;
+}
