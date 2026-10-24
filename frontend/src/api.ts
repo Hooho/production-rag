@@ -954,7 +954,8 @@ export type EvalSpecialQuestion = {
   agent?: EvalAgentQuestion;
   recall_final?: number;
   given_recall?: number | null;
-  fixed_evidence?: { text: string; chunk_id: string | null; source_id: string | null; status: string | null; given?: boolean; first_given?: boolean }[];
+  fixed_evidence?: { text: string; chunk_id: string | null; source_id: string | null; status: string | null; given?: boolean; first_given?: boolean;
+    via?: "direct" | "extension" | null; rrf_rank?: number | null; rerank_rank?: number | null; rerank_probability?: number | null }[];
   sources?: (Source & { chunk_id?: string | null; position?: number | null; parent_chunk_ids?: string[] })[];
   queries?: string[];
   rerank_query?: string;

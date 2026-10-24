@@ -315,7 +315,10 @@ def run_search_suite(store, models, suite, responder, run_id, progress, modes=("
             "reference_answer": item["reference_answer"] or None,
             # 和 Agent 逐题对比时要用：过滤后的召回、证据去向、交给回答模型的来源、检索词和耗时。
             "recall_final": found, "given_recall": row.get("given_recall"),
-            "fixed_evidence": [{key: value.get(key) for key in ("text", "chunk_id", "source_id", "status", "given", "via")}
+            # 证据去向：status（没召回 / 没进候选池 / 低于阈值被过滤 / 超出返回段数 / 交给模型）和合并名次、重排名次、重排分，
+            # 页面据此写出「召回到了但丢在哪一步」。
+            "fixed_evidence": [{key: value.get(key) for key in ("text", "chunk_id", "source_id", "status", "given", "via",
+                "rrf_rank", "rerank_rank", "rerank_probability")}
                 for value in row.get("evidence") or []],
             "sources": [{key: source.get(key) for key in ("id", "title", "heading", "text", "chunk_id", "position",
                 "parent_chunk_ids")} for source in row.get("sources") or []],

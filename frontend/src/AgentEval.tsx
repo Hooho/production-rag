@@ -398,7 +398,7 @@ function AgentQuestionList({ run, hasFixed }: { run: EvalRun; hasFixed: boolean 
           <span className="ag-num">{agent ? formatMs(agent.search_ms ?? agent.latency_ms) : "—"}</span>
           <span className="collapse-icon">{open ? "−" : "＋"}</span>
         </button>
-        {open && <QuestionDetail question={question} hasFixed={hasFixed} params={fixedParams(run.config)} />}
+        {open && <QuestionDetail question={question} hasFixed={hasFixed} params={fixedParams(run.config)} config={run.config} />}
       </article>;
     })}</div>
   </div>;
@@ -503,7 +503,35 @@ function HitTag({ hits, total }: { hits: number[]; total: number }) {
   return hits.length ? <Tag tone="success" dot>命中证据 {hits.map((index) => index + 1).join("、")}</Tag> : <Tag outline plain>没命中证据</Tag>;
 }
 
-function QuestionDetail({ question, hasFixed, params }: { question: EvalQuestion; hasFixed: boolean; params: string[] }) {
+// 固定流程没拿到某条证据时，写清楚丢在哪一步：哪几路召回到了（各排第几），合并后有没有进候选池，重排分够不够阈值，有没有排进返回段数。
+// 用的是第一次检索的记录；做了补充检索的，最后再说补充检索有没有拿到。
+const FATE_STATUS: Record<string, string> = { not_in_pool: "合并后没进候选池", filtered_low_score: "重排分低于阈值，被过滤", beyond_limit: "超出返回段数", in_pool: "进了候选池，但没交给模型" };
+
+function fixedEvidenceFate(question: EvalQuestion, index: number, config: EvalRun["config"]) {
+  const fixed = question.evidence?.[index];
+  if (!fixed) return "没拿到";
+  const routes = (question.query_routes ?? []).map((route, order) => ({ route, order })).filter(({ route }) => route.evidence.includes(index));
+  const recalled = routes.map(({ route, order }) => {
+    const best = route.best.find((item) => item.evidence === index);
+    const ranks = [best?.dense ? `向量第 ${best.dense} 名` : "", best?.keyword ? `关键词第 ${best.keyword} 名` : ""].filter(Boolean).join("、");
+    return `第 ${order + 1} 路${ranks ? `（${ranks}）` : ""}`;
+  });
+  const head = recalled.length ? `${recalled.join("、")}召回到了` : "召回到了";
+  const score = typeof fixed.rerank_probability === "number" ? `重排分 ${fixed.rerank_probability.toFixed(2)}` : "";
+  let fate: string;
+  switch (fixed.status) {
+    case "not_recalled": fate = "每一路都没召回"; break;
+    case "not_in_pool": fate = `${head} → 合并后排第 ${fixed.rrf_rank ?? "—"} 名，没进候选池（前 ${config.pool_size ?? "—"} 段）`; break;
+    case "filtered_low_score": fate = `${head} → 进了重排，${score || "重排分"}，低于阈值 ${typeof config.min_score === "number" ? config.min_score.toFixed(2) : "—"}，被过滤`; break;
+    case "beyond_limit": fate = `${head} → ${score ? `${score}，` : ""}重排第 ${fixed.rerank_rank ?? "—"} 名，超出返回的 ${config.return_limit ?? "—"} 段`; break;
+    case "returned": fate = `第一次检索拿到了（${score || "交给了模型"}），但最后交给模型的资料里没有`; break;
+    default: fate = `${head} → ${FATE_STATUS[fixed.status] ?? fixed.status}`;
+  }
+  if (question.retry?.returned !== undefined) fate += question.retry.used ? "；补充检索也没拿到" : "；补充检索没变好，没采用";
+  return `没拿到：${fate}`;
+}
+
+function QuestionDetail({ question, hasFixed, params, config }: { question: EvalQuestion; hasFixed: boolean; params: string[]; config: EvalRun["config"] }) {
   const agent = question.agent;
   return <div className="ev-question-body">
     {agent?.error && <p className="ev-lost-hint">Agent 运行失败：{agent.error}</p>}
@@ -514,7 +542,7 @@ function QuestionDetail({ question, hasFixed, params }: { question: EvalQuestion
       return <div className="ag-evidence" key={index}>
         <p>证据 {index + 1}：“{evidenceLabel(evidence.text)}”</p>
         <span className="ag-evidence-chunk">所在分块 {chunkIds.length ? chunkIds.map((chunkId, order) => <code key={chunkId} title={chunkId}>{chunkLabel(evidence.positions?.[order], chunkId)}</code>) : "知识库里没找到"}</span>
-        {hasFixed && <span className={fixedFound ? "is-hit" : "is-miss"}>固定流程：{fixedFound ? `拿到了${fixed?.first_given === false ? "（补充检索拿到的）" : fixed?.status === "returned" && fixed?.source_id ? `（${fixed.source_id} 检索命中）` : "（父块扩展拼进来的）"}` : question.cleared && fixed?.first_given ? "第一次检索拿到了，但被充分性判断清空了" : "没拿到"}</span>}
+        {hasFixed && <span className={fixedFound ? "is-hit" : "is-miss"}>固定流程：{fixedFound ? `拿到了${fixed?.first_given === false ? "（补充检索拿到的）" : fixed?.status === "returned" && fixed?.source_id ? `（${fixed.source_id} 检索命中）` : "（父块扩展拼进来的）"}` : question.cleared && fixed?.first_given ? "第一次检索拿到了，但被充分性判断清空了" : fixedEvidenceFate(question, index, config)}</span>}
         <span className={evidence.found ? "is-hit" : "is-miss"}>Agent：{evidence.found ? `拿到了（${evidence.where.map((item) => `第 ${item.call} 次的 ${item.evidence_id ?? "—"}${viaExtension(agent, item, evidence.chunk_ids) ? " 扩展" : ""}`).join("、")}）` : "没拿到"}</span>
       </div>;
     })}</div> : <p className="ev-muted-note">没有答案的题，拿到的资料越少越好。</p>}
@@ -703,7 +731,8 @@ function fromSpecial(question: EvalSpecialQuestion, hasFixed: boolean, seq: numb
     evidence_count: question.evidence_count ?? question.agent?.evidence.length ?? 0,
     stages: (hasFixed ? { pool: { recall, rr: 0, rank: null }, top: { recall, rr: 0, rank: null }, final: { recall, rr: 0, rank: null } } : undefined) as EvalQuestion["stages"],
     lost_stage: question.lost_stage ?? null,
-    evidence: (question.fixed_evidence ?? []).map((item) => ({ ...item, rrf_rank: null, rerank_rank: null, rerank_probability: null, status: item.status ?? "not_recalled" })),
+    evidence: (question.fixed_evidence ?? []).map((item) => ({ ...item, rrf_rank: item.rrf_rank ?? null, rerank_rank: item.rerank_rank ?? null,
+      rerank_probability: item.rerank_probability ?? null, status: item.status ?? "not_recalled" })),
     given_recall: question.given_recall,
     returned: question.returned ?? 0, max_probability: null, latency_ms: question.latency_ms ?? 0,
     queries: question.queries ?? [], rerank_query: question.rerank_query ?? "", query_source: question.rewrite?.classifier ?? "rule",
@@ -751,7 +780,7 @@ export function SpecialAgentResults({ section }: { section: EvalSpecialSection }
   const questions = section.questions.map((question, index) => fromSpecial(question, hasFixed, index + 1));
   const counts = { both: 0, fixed_only: 0, agent_only: 0, neither: 0 } as Record<EvalCompareKey, number>;
   for (const question of section.questions) if (question.compare) counts[question.compare] += 1;
-  const run = { questions, config: { split: null, suites: [], modes, search_label: section.search_mode_label } } as unknown as EvalRun;
+  const run = { questions, config: { ...section.run_config, split: null, suites: [], modes, search_label: section.search_mode_label } } as unknown as EvalRun;
   const typeStats = specialTypeStats(section.questions, hasFixed, modes.includes("agent"));
   return <div className="ev-overview ag-eval ag-special">
     {hasFixed && section.search_mode && section.search_mode !== "hybrid" && <p className="ev-settings-diff">这个专项设置了「{section.search_mode_label}」，和 Agent 比不公平，请用混合检索。</p>}
