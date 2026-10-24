@@ -50,10 +50,17 @@ function agentVerdict(question: EvalQuestion) {
   if (!agent) return { key: "none", label: "—" };
   if (agent.status !== "completed") return { key: "bad", label: "运行失败" };
   if (!question.answerable) return agent.returned === 0 ? { key: "good", label: "没拿到资料" } : { key: "warn", label: `拿到 ${agent.returned} 段` };
-  const recall = agent.recall ?? 0;
-  if (recall >= 1) return { key: "good", label: "命中" };
-  if (recall > 0) return { key: "warn", label: `部分 ${percent(recall)}` };
-  return { key: "bad", label: "未命中" };
+  // 写出拿到几条证据：「命中 3 / 3」「部分 1 / 3」「未命中 0 / 3」。
+  const total = agent.evidence.length || question.evidence_count;
+  const found = agent.evidence.length ? agent.evidence.filter((item) => item.found).length : Math.round((agent.recall ?? 0) * total);
+  return countVerdict(found, total);
+}
+
+function countVerdict(found: number, total: number) {
+  const count = `${found} / ${total}`;
+  if (total > 0 && found >= total) return { key: "good", label: `命中 ${count}` };
+  if (found > 0) return { key: "warn", label: `部分 ${count}` };
+  return { key: "bad", label: `未命中 ${count}` };
 }
 
 // 一道题的检索词是谁给的。
@@ -69,12 +76,11 @@ function fixedVerdict(question: EvalQuestion) {
   if (!question.stages) return { key: "none", label: "—" };
   if (!question.answerable) return question.returned === 0 || question.cleared ? { key: "good", label: question.cleared ? "被清空，没拿到资料" : "没拿到资料" } : { key: "warn", label: `拿到 ${question.sufficiency?.source_count ?? question.returned} 段` };
   // 被充分性判断清空：模型什么资料都拿不到。
-  if (question.cleared) return { key: "bad", label: "被清空" };
+  if (question.cleared) return { key: "bad", label: `被清空 0 / ${question.evidence_count}` };
   // 和 Agent 比较时按「最终交给模型的资料」（含父块扩展、补充检索）算；旧记录没有，用过滤后 Recall。
   const recall = question.given_recall ?? question.stages.final.recall ?? 0;
-  if (recall >= 1) return { key: "good", label: "命中" };
-  if (recall > 0) return { key: "warn", label: `部分 ${percent(recall)}` };
-  return { key: "bad", label: "未命中" };
+  const total = question.evidence_count;
+  return countVerdict(question.given_hits ?? Math.round(recall * total), total);
 }
 
 function Verdict({ verdict }: { verdict: { key: string; label: string } }) {
