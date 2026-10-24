@@ -571,27 +571,12 @@ export function SpecialAgentResults({ section }: { section: EvalSpecialSection }
   const modes = section.modes ?? ["fixed"];
   const hasFixed = modes.includes("fixed");
   const questions = section.questions.map((question, index) => fromSpecial(question, hasFixed, index + 1));
-  const fixedPassed = section.questions.filter((question) => question.fixed_passed ?? (hasFixed && question.passed)).length;
-  const agentPassed = section.agent_passed ?? section.questions.filter((question) => question.agent_passed).length;
   const counts = { both: 0, fixed_only: 0, agent_only: 0, neither: 0 } as Record<EvalCompareKey, number>;
   for (const question of section.questions) if (question.compare) counts[question.compare] += 1;
-  const newly = (key: "previous_passed" | "previous_agent_passed", now: "fixed_passed" | "agent_passed") => {
-    let better = 0, worse = 0;
-    for (const question of section.questions) {
-      const result = change(question[now], question[key]);
-      if (result === "新通过") better += 1;
-      if (result === "新失败") worse += 1;
-    }
-    return { better, worse };
-  };
-  const fixedChange = newly("previous_passed", "fixed_passed");
-  const agentChange = newly("previous_agent_passed", "agent_passed");
   const run = { questions, config: { split: null, suites: [], modes, search_label: section.search_mode_label } } as unknown as EvalRun;
   return <div className="ev-overview ag-eval ag-special">
     {hasFixed && section.search_mode && section.search_mode !== "hybrid" && <p className="ev-settings-diff">这个专项设置了「{section.search_mode_label}」，和 Agent 比不公平，请用混合检索。</p>}
     <div className="ev-cards">
-      {hasFixed && <Card label="固定流程通过" value={`${fixedPassed} / ${section.count}`} note={section.previous ? `上次 ${section.previous.passed} / ${section.previous.count} · 新通过 ${fixedChange.better} · 新失败 ${fixedChange.worse}` : "第一次跑"} />}
-      <Card label="Agent 通过" value={`${agentPassed} / ${section.count}`} note={section.previous_agent ? `上次 ${section.previous_agent.passed ?? "—"} / ${section.previous_agent.count} · 新通过 ${agentChange.better} · 新失败 ${agentChange.worse}` : "第一次跑"} />
       {hasFixed && (Object.keys(COMPARE_LABELS) as EvalCompareKey[]).map((key) => <Card key={key} label={COMPARE_LABELS[key]} value={`${counts[key]} 题`} note={COMPARE_HINTS[key]} />)}
     </div>
     <p className="ev-muted-note">证据全拿到算通过。{section.agent && <> Agent：工具预算 {section.agent.tool_budget} 次 · 超时 {section.agent.timeout} 秒 · 提示词 {section.agent.prompt_version}</>}</p>
