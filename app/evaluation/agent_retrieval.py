@@ -27,7 +27,7 @@ from .dataset import QUESTION_TYPES, select_split
 from sqlalchemy import select
 
 from ..mysql.store import document_chunks, document_heads
-from .retrieval import (EVAL_OWNER, current_chunk_texts, evidence_hits, import_corpus, mean, percentile, plan_queries,
+from .retrieval import (EVAL_OWNER, current_chunk_texts, evidence_hits, import_corpus, material, material_summary, mean, percentile, plan_queries,
     run_retrieval)
 
 FORCED = {"budget", "timeout"}
@@ -126,6 +126,8 @@ def evaluate_agent(agent_mode, store, models, item, chunk_texts, positions=None)
         answer = ""
         row.update(status="failed", error=f"{type(error).__name__}: {str(error)[:300]}")
     row["latency_ms"] = round((time.monotonic() - started) * 1000)
+    # 交给模型的资料：资料池里的全部资料（每次检索留下的累加，同一分片只算一次）。
+    row["material"] = material(outcome.get("sources") or [])
     # 检索耗时：发起了工具调用的那几轮（模型想查什么 + 执行检索），到最后一次检索结束为止；
     # 剩下的是写回答（含强制回答、引用重写），和固定流程的「完整检索耗时」一样不算回答。
     tool_rounds = [record for record in outcome.get("rounds") or [] if record.get("tool_results")]
@@ -222,7 +224,8 @@ def summarize_agent(rows):
     from .score import agent_item, summarize_scores
     scored = summarize_scores([agent_item(row["answerable"], row["agent"]) for row in rows
         if row.get("agent") and row["agent"]["status"] == "completed"])
-    return {"agent_count": len(agents), "agent_score": scored["score"], "agent_score_bands": scored["score_bands"],
+    return {**material_summary([agent.get("material") for agent in agents], "agent_"),
+        "agent_count": len(agents), "agent_score": scored["score"], "agent_score_bands": scored["score_bands"],
         "agent_recall": mean([agent["recall"] for agent in answerable if agent["recall"] is not None]),
         "agent_false_reject_rate": rate(answerable, lambda agent: agent["returned"] == 0),
         # 扩展命中率：拿到的证据里，只在父块扩展拼进来的分片里的比例（旧记录没有 ext_hits 时是 None）。

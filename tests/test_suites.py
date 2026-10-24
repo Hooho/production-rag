@@ -362,3 +362,12 @@ def test_late_seed_revision_removes_items(setup):
     seed_late_suites(store.engine)
     remaining = ids(suite_id)
     assert "mine" in remaining and "old-3" in remaining
+
+
+# 交给模型的资料：几段、多少字、约多少 token（中文一个字算 1，其他 4 个字符算 1）。
+def test_material_counts():
+    from app.evaluation.retrieval import material, material_summary
+    assert material([{"text": "耳机保修一年"}, {"text": "abcd"}]) == {"count": 2, "chars": 10, "tokens": 7}
+    assert material([]) == {"count": 0, "chars": 0, "tokens": 0}
+    summary = material_summary([{"count": 2, "chars": 10, "tokens": 7}, {"count": 4, "chars": 20, "tokens": 13}, None], "agent_")
+    assert summary == {"agent_material_avg_count": 3, "agent_material_avg_tokens": 10, "agent_material_avg_chars": 15}

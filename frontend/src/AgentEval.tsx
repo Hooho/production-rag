@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { type EvalAgentCall, type EvalCompareKey, type EvalConfig, type EvalMode, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSummary } from "./api";
+import { type EvalAgentCall, type EvalCompareKey, type EvalConfig, type EvalMaterial, type EvalMode, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSummary } from "./api";
 import { evidenceLabel, formatDuration as formatMs } from "./format";
 import { Tag, TypeStats, TypeTag, typeHues, type TypeStat } from "./Tag";
 import type { Tone } from "./tags";
@@ -109,6 +109,33 @@ function ratio(part: number, total: number) {
   return total ? `${part} / ${total} · ${Math.round((part / total) * 100)}%` : "—";
 }
 
+// 交给模型的资料：后端记的段数、字数、token；旧记录按保存下来的来源正文现算（token 用和后端同一种估算）。
+const WIDE_CHARS = /[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]/g;
+function textTokens(text: string) {
+  const wide = (text.match(WIDE_CHARS) ?? []).length;
+  return wide + Math.ceil((text.length - wide) / 4);
+}
+
+function fixedMaterial(question: EvalQuestion): EvalMaterial | null {
+  if (question.material) return question.material;
+  if (!question.stages) return null;
+  if (question.cleared) return { count: 0, chars: 0, tokens: 0 };
+  const sources = question.retry?.used && question.retry.sources ? question.retry.sources : question.sources;
+  if (!sources) return null;
+  return { count: sources.length, chars: sources.reduce((sum, source) => sum + (source.text ?? "").length, 0),
+    tokens: sources.reduce((sum, source) => sum + textTokens(source.text ?? ""), 0) };
+}
+
+function agentMaterial(question: EvalQuestion): EvalMaterial | null {
+  return question.agent?.material ?? null;
+}
+
+function MaterialLine({ material }: { material: EvalMaterial | null }) {
+  if (!material) return null;
+  return <div className="ag-material"><span className="ag-tool">交给模型的资料</span>
+    <span><b>{material.count}</b> 段 · {material.chars.toLocaleString()} 字 · 约 {material.tokens.toLocaleString()} token</span></div>;
+}
+
 // 固定流程一道题命中几条证据：按最后交给模型的资料算，被清空算 0。
 function fixedHits(question: EvalQuestion) {
   if (question.cleared) return 0;
@@ -194,6 +221,19 @@ function modeRows(questions: EvalQuestion[], config: EvalConfig | undefined, has
   const flowLatency = avg(questions.filter((question) => question.stages).map((question) => question.flow_latency_ms ?? question.latency_ms));
   const agentRuns = questions.filter((question) => question.agent).map((question) => question.agent!);
   const fixedCount = questions.filter((question) => question.stages).length;
+  // 交给模型的资料：固定流程是最后留下的那几段，Agent 是资料池里全部（每次检索留下的累加）。
+  const averageMaterial = (items: (EvalMaterial | null)[]) => {
+    const known = items.filter((item): item is EvalMaterial => item !== null);
+    return known.length ? { count: avg(known.map((item) => item.count))!, chars: avg(known.map((item) => item.chars))!, tokens: avg(known.map((item) => item.tokens))! } : null;
+  };
+  const fixedGiven = averageMaterial(questions.filter((question) => question.stages).map(fixedMaterial));
+  const agentGiven = averageMaterial(questions.filter((question) => question.agent).map(agentMaterial));
+  const materialCell = (value: ReturnType<typeof averageMaterial>, note: string) => value
+    ? { value: `平均 ${number(value.count)} 段 · 约 ${Math.round(value.tokens).toLocaleString()} token`, note: `约 ${Math.round(value.chars).toLocaleString()} 字；${note}` }
+    : { value: "—", note: "这次评测没记录，重跑后才有" };
+  rows.push({ group: "process", label: "资料量", ...pick(
+    materialCell(fixedGiven, "交给模型的是最后留下的那几段"),
+    materialCell(agentGiven, "交给模型的是资料池里全部，每次检索留下的累加")) });
   rows.push({ group: "process", label: "检索", ...pick(
     { value: `平均 ${number(fixedCount ? 1 + fixed.retried / fixedCount : null)} 次`, note: `补充检索 ${fixed.retried} 题${fixed.cleared ? ` · 被清空 ${fixed.cleared} 题` : ""}` },
     { value: `平均 ${number(avg(agentRuns.map((item) => item.searches)))} 次`, note: agent.searches ? `无新增 ${agent.wasted} 次，占 ${Math.round((agent.wasted / agent.searches) * 100)}%` : undefined }) });
@@ -258,11 +298,14 @@ export function ComparePanel({ run }: { run: EvalRun }) {
     {run.comparison && <CompareLine counts={run.comparison} />}
     <div className="ev-section-title">按题目类型<small>得分和资料命中率</small></div>
     <div className="diag-table-wrap"><table className="diag-table ev-table">
-      <thead><tr><th>题型</th><th className="num">题数</th><th className="num">固定流程得分</th><th className="num">Agent 得分</th><th className="num">固定流程命中率</th><th className="num">Agent 命中率</th><th className="num">Agent 平均检索次数</th></tr></thead>
+      <thead><tr><th>题型</th><th className="num">题数</th><th className="num">固定流程得分</th><th className="num">Agent 得分</th><th className="num">固定流程命中率</th><th className="num">Agent 命中率</th><th className="num">固定流程资料</th><th className="num">Agent 资料</th><th className="num">Agent 平均检索次数</th></tr></thead>
       <tbody>{Object.entries(run.by_type ?? {}).map(([type, row]) => <tr key={type}>
         <td>{type}</td><td className="num">{row.count ?? row.agent_count ?? "—"}</td>
         <td className="num">{formatPoints(row.score)}</td><td className="num">{formatPoints(row.agent_score)}</td><td className="num">{percent(row.recall_given ?? row.recall_final)}</td>
-        <td className="num">{percent(row.agent_recall)}</td><td className="num">{number(row.agent_avg_searches)}</td>
+        <td className="num">{percent(row.agent_recall)}</td>
+        <td className="num">{row.material_avg_count === undefined || row.material_avg_count === null ? "—" : `${number(row.material_avg_count)} 段 · 约 ${Math.round(row.material_avg_tokens ?? 0).toLocaleString()} token`}</td>
+        <td className="num">{row.agent_material_avg_count === undefined || row.agent_material_avg_count === null ? "—" : `${number(row.agent_material_avg_count)} 段 · 约 ${Math.round(row.agent_material_avg_tokens ?? 0).toLocaleString()} token`}</td>
+        <td className="num">{number(row.agent_avg_searches)}</td>
       </tr>)}</tbody>
     </table></div>
     <div className="ev-section-title">逐题<small>点开看两边的检索日志</small></div>
@@ -625,6 +668,7 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
     </div>}
     {sufficiency && retry && <SufficiencySteps question={question} part="rest" />}
     {question.cleared && <div className="ag-flow-cleared">判断资料不足，已清空：线上会直接拒答。</div>}
+    <MaterialLine material={fixedMaterial(question)} />
   </section>;
 }
 
@@ -663,6 +707,7 @@ function AgentLog({ question }: { question: EvalQuestion }) {
     </div>)}
     {/* 预算用完或超时后，程序再让模型跑一轮不带工具的，直接写回答；这一轮没有检索。 */}
     {agent.forced && <div className="ag-round"><div className="ag-round-head">第 {agent.rounds} 轮<Tag size="sm" outline plain>{agent.stop_reason === "timeout" ? "时间到了" : "工具预算用完"}，不带工具直接回答，没有检索</Tag></div></div>}
+    <MaterialLine material={agentMaterial(question)} />
   </section>;
 }
 
@@ -736,17 +781,22 @@ function fromSpecial(question: EvalSpecialQuestion, hasFixed: boolean, seq: numb
     returned: question.returned ?? 0, max_probability: null, latency_ms: question.latency_ms ?? 0,
     queries: question.queries ?? [], rerank_query: question.rerank_query ?? "", query_source: question.rewrite?.classifier ?? "rule",
     first_given_recall: question.first_given_recall, given_hits: question.given_hits, ext_hits: question.ext_hits, rewrite: question.rewrite, retry: question.retry, cleared: question.cleared,
-    flow_latency_ms: question.flow_latency_ms, sufficiency: question.sufficiency ?? undefined, query_routes: question.query_routes,
+    flow_latency_ms: question.flow_latency_ms, material: question.material, sufficiency: question.sufficiency ?? undefined, query_routes: question.query_routes,
     sources: question.sources, agent: question.agent, compare: question.compare, note: notes.join(" · ") || undefined,
   };
 }
 
 // 按类型统计：从逐题结果现算（通过数、证据命中条数、得分），旧记录后端没存证据命中和得分也能显示。
 function specialTypeStats(questions: EvalSpecialQuestion[], hasFixed: boolean, hasAgent: boolean): TypeStat[] | null {
-  const groups = new Map<string, TypeStat & { fixedScores: number[]; agentScores: number[] }>();
+  const groups = new Map<string, TypeStat & { fixedScores: number[]; agentScores: number[]; fixedMaterials: EvalMaterial[]; agentMaterials: EvalMaterial[] }>();
   for (const question of questions) {
     if (!question.type) continue;
-    const group = groups.get(question.type) ?? { type: question.type, count: 0, passed: 0, fixedScores: [], agentScores: [] };
+    const group = groups.get(question.type) ?? { type: question.type, count: 0, passed: 0, fixedScores: [], agentScores: [], fixedMaterials: [], agentMaterials: [] };
+    if (hasFixed && question.material) group.fixedMaterials.push(question.material);
+    else if (hasFixed && question.cleared) group.fixedMaterials.push({ count: 0, chars: 0, tokens: 0 });
+    else if (hasFixed && question.sources) group.fixedMaterials.push({ count: question.sources.length, chars: 0,
+      tokens: question.sources.reduce((sum, source) => sum + textTokens(source.text ?? ""), 0) });
+    if (hasAgent && question.agent?.material) group.agentMaterials.push(question.agent.material);
     groups.set(question.type, group);
     const total = question.evidence_count ?? question.fixed_evidence?.length ?? question.agent?.evidence.length ?? 0;
     group.count += 1;
@@ -768,7 +818,10 @@ function specialTypeStats(questions: EvalSpecialQuestion[], hasFixed: boolean, h
     }
   }
   const average = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : undefined;
-  const stats = [...groups.values()].map(({ fixedScores, agentScores, ...group }) => ({ ...group, fixed_score: average(fixedScores), agent_score: average(agentScores) }));
+  const stats = [...groups.values()].map(({ fixedScores, agentScores, fixedMaterials, agentMaterials, ...group }) => ({ ...group,
+    fixed_score: average(fixedScores), agent_score: average(agentScores),
+    fixed_material_count: average(fixedMaterials.map((item) => item.count)), fixed_material_tokens: average(fixedMaterials.map((item) => item.tokens)),
+    agent_material_count: average(agentMaterials.map((item) => item.count)), agent_material_tokens: average(agentMaterials.map((item) => item.tokens)) }));
   return stats.length ? stats : null;
 }
 

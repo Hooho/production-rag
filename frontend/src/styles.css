@@ -8466,3 +8466,17 @@ input:focus {
 .ag-merge .ag-merge-label {
    margin: 0;
 }
+
+/* 检索日志最后一行：交给模型的资料有多少（段数、字数、约多少 token）。 */
+.ag-material {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: 8px;
+   margin-top: 10px;
+   padding: 8px 12px;
+   border: 1px solid var(--ev-line);
+   border-radius: 6px;
+   background: rgba(255, 255, 255, .7);
+   font-size: 13px;
+}

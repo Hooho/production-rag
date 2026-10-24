@@ -242,6 +242,24 @@ def score_question(item, retrieval, chunk_texts, pool_size):
         "recall_ms": stats.get("recall_ms"), "rerank_ms": stats.get("rerank_ms")}
 
 
+# 交给模型的资料有多少：几段、多少字、约多少 token（按记忆模块的估算：中日韩文字一个算 1，其他 4 个字符算 1）。
+# 只算资料正文，不含提示词和对话；Agent 的输入 token 里同一份资料每轮都会再发一次，所以比这个大得多。
+def material(sources):
+    from ..memory.framework import text_tokens
+    texts = [source.get("text") or source.get("answer") or "" for source in sources or []]
+    return {"count": len(texts), "chars": sum(len(text) for text in texts), "tokens": sum(text_tokens(text) for text in texts)}
+
+
+# 一组题平均交给模型多少资料（段数、token）；没有记录（旧结果）时是 None。
+def material_summary(materials, prefix):
+    materials = [item for item in materials if item]
+    if not materials:
+        return {f"{prefix}material_avg_count": None, f"{prefix}material_avg_tokens": None, f"{prefix}material_avg_chars": None}
+    return {f"{prefix}material_avg_count": mean([item["count"] for item in materials]),
+        f"{prefix}material_avg_tokens": mean([item["tokens"] for item in materials]),
+        f"{prefix}material_avg_chars": mean([item["chars"] for item in materials])}
+
+
 # 一批来源交给模型的分片（含父块扩展拼进来的）里找到了哪几条证据，返回证据序号集合。
 def evidence_found(sources, evidence, chunk_texts):
     hits = evidence_hits([{"chunk_id": chunk_id} for chunk_id in given_chunk_ids(sources)], evidence, chunk_texts)
@@ -304,6 +322,7 @@ def summarize(rows):
         summary[f"mrr_{stage}"] = mean(reciprocals)
     given = [row["given_recall"] for row in answerable if row.get("given_recall") is not None]
     summary["recall_given"] = mean(given)
+    summary.update(material_summary([row.get("material") for row in rows], ""))
     # 得分：全部找到 100，部分按比例最高 90，一条没找到按证据条数扣分（规则见 score.py）。
     from .score import fixed_item, summarize_scores
     scored = summarize_scores([fixed_item(row) for row in rows if row.get("stages")])
@@ -565,11 +584,13 @@ def evaluate_items(store, models, items, chunk_texts, options, keep_diagnostics,
                 retrieval["sources"], len(evidence), keep_diagnostics)
             row["check_ms"] = check_ms
             mark_extension(row, check["sources"], evidence, chunk_texts)
+            row["material"] = material(check["sources"])
             row["flow_latency_ms"] = rewrite["duration_ms"] + latency_ms + check_ms
             # 生成评测接着回答时直接用这次的判断结果，不再判断一次（见 results.answer_hook）。
             retrieval["sufficiency_check"] = check
         if not judge:
             mark_extension(row, retrieval["sources"], item.get("evidence") or [], chunk_texts)
+            row["material"] = material(retrieval["sources"])
         if keep_diagnostics:
             row["diagnostics"] = retrieval["diagnostics"]
             row["sources"] = retrieval["sources"]

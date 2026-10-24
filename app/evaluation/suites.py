@@ -326,7 +326,7 @@ def run_search_suite(store, models, suite, responder, run_id, progress, modes=("
             # 完整检索流程：改写、充分性判断、补充检索（见 app/evaluation/flow.py）。
             "first_given_recall": row.get("first_given_recall"), "rewrite": row.get("rewrite"),
             "sufficiency": row.get("sufficiency"), "retry": row.get("retry"), "cleared": row.get("cleared"),
-            "flow_latency_ms": row.get("flow_latency_ms"), "query_routes": row.get("query_routes")}
+            "flow_latency_ms": row.get("flow_latency_ms"), "query_routes": row.get("query_routes"), "material": row.get("material")}
         for index, value in enumerate(row.get("evidence") or []):
             entry["fixed_evidence"][index]["first_given"] = value.get("first_given")
         if suite["method"] == "answer":

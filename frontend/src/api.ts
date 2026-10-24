@@ -650,7 +650,9 @@ export type EvalRetry = { returned: number; used: boolean; given_recall: number 
 // 和完整检索流程有关的逐题字段，调参评测和专项评测共用。
 // 固定流程每一路检索词各自召回的情况：召回几段、留到最后几段、含哪几条证据（从 0 开始）、证据在向量 / 关键词排名表里最好排第几。
 export type EvalQueryRoute = { query: string; recalled: number; kept: number; evidence: number[]; best: { evidence: number; dense?: number; keyword?: number }[] };
-export type EvalFlowFields = { query_routes?: EvalQueryRoute[] | null; given_hits?: number | null; ext_hits?: number | null; first_given_recall?: number | null; rewrite?: EvalRewrite | null; retry?: EvalRetry | null; cleared?: boolean | null; flow_latency_ms?: number | null };
+// 交给模型的资料：几段、多少字、约多少 token（只算资料正文，旧记录没有）。
+export type EvalMaterial = { count: number; chars: number; tokens: number };
+export type EvalFlowFields = { material?: EvalMaterial | null; query_routes?: EvalQueryRoute[] | null; given_hits?: number | null; ext_hits?: number | null; first_given_recall?: number | null; rewrite?: EvalRewrite | null; retry?: EvalRetry | null; cleared?: boolean | null; flow_latency_ms?: number | null };
 export type EvalQuestion = {
   id: string;
   question: string;
@@ -716,6 +718,8 @@ export type EvalAgentCall = {
   error?: string;
 };
 export type EvalAgentQuestion = {
+  // 交给模型的资料：资料池里全部资料（旧记录没有）。
+  material?: EvalMaterial;
   question_sent: string;
   status: string;
   error: string | null;
