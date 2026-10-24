@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { type EvalAgentCall, type EvalCompareKey, type EvalConfig, type EvalMode, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSummary } from "./api";
 import { evidenceLabel, formatDuration as formatMs } from "./format";
-import { Tag, TypeStats, TypeTag, typeHues } from "./Tag";
+import { Tag, TypeStats, TypeTag, typeHues, type TypeStat } from "./Tag";
 import type { Tone } from "./tags";
 import { SCORE_RULE, bandsText, formatPoints, questionScore, summarizeScores } from "./score";
 
@@ -707,6 +707,37 @@ function fromSpecial(question: EvalSpecialQuestion, hasFixed: boolean, seq: numb
   };
 }
 
+// 按类型统计：从逐题结果现算（通过数、证据命中条数、得分），旧记录后端没存证据命中和得分也能显示。
+function specialTypeStats(questions: EvalSpecialQuestion[], hasFixed: boolean, hasAgent: boolean): TypeStat[] | null {
+  const groups = new Map<string, TypeStat & { fixedScores: number[]; agentScores: number[] }>();
+  for (const question of questions) {
+    if (!question.type) continue;
+    const group = groups.get(question.type) ?? { type: question.type, count: 0, passed: 0, fixedScores: [], agentScores: [] };
+    groups.set(question.type, group);
+    const total = question.evidence_count ?? question.fixed_evidence?.length ?? question.agent?.evidence.length ?? 0;
+    group.count += 1;
+    group.passed += question.passed ? 1 : 0;
+    group.evidence_total = (group.evidence_total ?? 0) + total;
+    if (hasFixed) {
+      const hits = question.cleared ? 0 : question.fixed_evidence?.length ? question.fixed_evidence.filter((item) => item.given).length : question.given_hits ?? 0;
+      group.fixed_passed = (group.fixed_passed ?? 0) + (question.fixed_passed ? 1 : 0);
+      group.fixed_hits = (group.fixed_hits ?? 0) + hits;
+      const score = questionScore(true, hits, total);
+      if (score !== null) group.fixedScores.push(score);
+    }
+    if (hasAgent && question.agent) {
+      const hits = question.agent.evidence.filter((item) => item.found).length;
+      group.agent_passed = (group.agent_passed ?? 0) + (question.agent_passed ? 1 : 0);
+      group.agent_hits = (group.agent_hits ?? 0) + hits;
+      const score = questionScore(true, hits, question.agent.evidence.length || total);
+      if (score !== null) group.agentScores.push(score);
+    }
+  }
+  const average = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : undefined;
+  const stats = [...groups.values()].map(({ fixedScores, agentScores, ...group }) => ({ ...group, fixed_score: average(fixedScores), agent_score: average(agentScores) }));
+  return stats.length ? stats : null;
+}
+
 // 检索方式的专项勾了 Agent 时的结果：两边的通过数（和上次比）、对比分类，下面是逐题对比列表。
 export function SpecialAgentResults({ section }: { section: EvalSpecialSection }) {
   const modes = section.modes ?? ["fixed"];
@@ -715,12 +746,13 @@ export function SpecialAgentResults({ section }: { section: EvalSpecialSection }
   const counts = { both: 0, fixed_only: 0, agent_only: 0, neither: 0 } as Record<EvalCompareKey, number>;
   for (const question of section.questions) if (question.compare) counts[question.compare] += 1;
   const run = { questions, config: { split: null, suites: [], modes, search_label: section.search_mode_label } } as unknown as EvalRun;
+  const typeStats = specialTypeStats(section.questions, hasFixed, modes.includes("agent"));
   return <div className="ev-overview ag-eval ag-special">
     {hasFixed && section.search_mode && section.search_mode !== "hybrid" && <p className="ev-settings-diff">这个专项设置了「{section.search_mode_label}」，和 Agent 比不公平，请用混合检索。</p>}
     <ModeCards questions={questions} config={{ ...section.run_config, agent: section.agent ?? section.run_config?.agent, search_label: section.search_mode_label } as EvalConfig} hasFixed={hasFixed} hasAgent={modes.includes("agent")} />
     {hasFixed && <CompareLine counts={counts} />}
-    {section.by_type && <><div className="ev-section-title">按类型<small>哪类题 Agent 更强、哪类固定流程就够了</small></div>
-      <TypeStats stats={section.by_type} hues={typeHues(section.questions.map((question) => question.type))} both={hasFixed} /></>}
+    {typeStats && <><div className="ev-section-title">按类型<small>哪类题 Agent 更强、哪类固定流程就够了</small></div>
+      <TypeStats stats={typeStats} hues={typeHues(section.questions.map((question) => question.type))} both={hasFixed} /></>}
     <AgentQuestionList run={run} hasFixed={hasFixed} />
   </div>;
 }
