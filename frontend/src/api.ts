@@ -980,7 +980,7 @@ export type EvalSpecialSection = {
   previous_agent?: { id: string; created: string; passed: number | null; count: number };
   agent?: { tool_budget: number; timeout: number; prompt_version: string; model: string | null };
   // 按题目类型的通过数（没有题标类型时没有）。
-  by_type?: { type: string; count: number; passed: number; fixed_passed?: number; agent_passed?: number }[] | null;
+  by_type?: { type: string; count: number; passed: number; fixed_passed?: number; agent_passed?: number; evidence_total?: number; fixed_hits?: number; agent_hits?: number }[] | null;
 };
 
 export function listEvalSuites() {

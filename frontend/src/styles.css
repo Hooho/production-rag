@@ -8260,3 +8260,15 @@ input:focus {
    font-size: 12px;
    font-weight: 600;
 }
+
+/* 按类型统计：证据命中后面带百分比；合计行加粗、上面一条粗线。 */
+.type-stat small {
+   color: var(--ev-muted);
+   font-size: 11px;
+   font-weight: 400;
+}
+
+.type-stats tr.is-total td {
+   border-top: 2px solid var(--ev-line);
+   font-weight: 700;
+}

@@ -242,3 +242,8 @@ def test_item_type_is_kept_and_counted():
     assert stats == [{"type": "多跳", "count": 2, "passed": 1, "fixed_passed": 1, "agent_passed": 1},
         {"type": "比较", "count": 1, "passed": 0, "fixed_passed": 0, "agent_passed": 1}]
     assert by_type([{"passed": True}]) is None
+    # 证据命中条数：固定流程看 given，Agent 看 found。
+    stats = by_type([{"type": "汇总", "passed": False, "evidence_count": 3,
+        "fixed_evidence": [{"given": True}, {"given": True}, {"given": False}],
+        "agent": {"evidence": [{"found": True}, {"found": False}, {"found": False}]}}])
+    assert stats[0]["evidence_total"] == 3 and stats[0]["fixed_hits"] == 2 and stats[0]["agent_hits"] == 1

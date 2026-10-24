@@ -485,7 +485,26 @@ def by_type(questions):
         for key in ("fixed_passed", "agent_passed"):
             if key in question:
                 group[key] = group.get(key, 0) + bool(question[key])
+        # 证据命中：不只看整题过没过，还看命中了几条证据（汇总题拿到 6/7 和 1/7 都算没通过，但差很多）。
+        fixed_hits, agent_hits, total = evidence_counts(question)
+        if total:
+            group["evidence_total"] = group.get("evidence_total", 0) + total
+            if fixed_hits is not None:
+                group["fixed_hits"] = group.get("fixed_hits", 0) + fixed_hits
+            if agent_hits is not None:
+                group["agent_hits"] = group.get("agent_hits", 0) + agent_hits
     return list(groups.values()) or None
+
+
+# 一道专项题两边各命中几条证据、一共几条：固定流程按最后交给模型的资料（given），Agent 按它拿到的全部资料。
+# 没跑某一边时那一边是 None。
+def evidence_counts(question):
+    fixed = question.get("fixed_evidence")
+    agent = (question.get("agent") or {}).get("evidence")
+    total = question.get("evidence_count") or len(fixed or agent or question.get("evidence") or [])
+    fixed_hits = sum(1 for item in fixed if item.get("given")) if fixed else None
+    agent_hits = sum(1 for item in agent if item.get("found")) if agent else None
+    return fixed_hits, agent_hits, total
 
 
 def memory_suites_variants(compare):
