@@ -250,7 +250,7 @@ function AgentQuestionList({ run, hasFixed }: { run: EvalRun; hasFixed: boolean 
       const hitCalls = agentHitCalls(question);
       return <article className={`ev-question ${open ? "is-open" : ""}`} key={question.id}>
         <button className={`ag-q-head ${layout}`} aria-expanded={open} onClick={() => setExpanded(open ? null : question.id)}>
-          <span className="ev-qid">{question.id}</span>
+          <span className="ev-qid" title={question.id}>{question.seq ?? question.id}</span>
           <span className="ev-question-text">{question.question}<small><TypeTag type={question.type} hues={hues} />{question.evidence_count > 1 ? ` ${question.evidence_count} 条证据` : ""}{question.compare ? ` · ${COMPARE_LABELS[question.compare]}` : ""}{question.note ? ` · ${question.note}` : ""}</small></span>
           {hasFixed && <><Verdict verdict={fixedVerdict(question)} /><span className="ag-num">{formatMs(question.flow_latency_ms ?? question.latency_ms)}</span></>}
           <span className="ag-verdict-cell"><Verdict verdict={agentVerdict(question)} />{hitCalls.length > 0 && <small>第 {hitCalls.join("、")} 次调用命中</small>}</span>
@@ -496,12 +496,12 @@ function change(now: boolean | undefined, before: boolean | null | undefined) {
 }
 
 // 专项的一道题转成调参评测逐题对比用的格式，复用同一个列表和左右两栏的检索日志。
-function fromSpecial(question: EvalSpecialQuestion, hasFixed: boolean): EvalQuestion {
+function fromSpecial(question: EvalSpecialQuestion, hasFixed: boolean, seq: number): EvalQuestion {
   const notes = [hasFixed ? change(question.fixed_passed, question.previous_passed) && `固定流程${change(question.fixed_passed, question.previous_passed)}` : null,
     change(question.agent_passed, question.previous_agent_passed) && `Agent ${change(question.agent_passed, question.previous_agent_passed)}`].filter(Boolean);
   const recall = question.recall_final ?? (question.fixed_passed ? 1 : 0);
   return {
-    id: question.id, question: question.question, type: question.type ?? "未分类", answerable: true,
+    id: question.id, seq, question: question.question, type: question.type ?? "未分类", answerable: true,
     evidence_count: question.evidence_count ?? question.agent?.evidence.length ?? 0,
     stages: (hasFixed ? { pool: { recall, rr: 0, rank: null }, top: { recall, rr: 0, rank: null }, final: { recall, rr: 0, rank: null } } : undefined) as EvalQuestion["stages"],
     lost_stage: question.lost_stage ?? null,
@@ -519,7 +519,7 @@ function fromSpecial(question: EvalSpecialQuestion, hasFixed: boolean): EvalQues
 export function SpecialAgentResults({ section }: { section: EvalSpecialSection }) {
   const modes = section.modes ?? ["fixed"];
   const hasFixed = modes.includes("fixed");
-  const questions = section.questions.map((question) => fromSpecial(question, hasFixed));
+  const questions = section.questions.map((question, index) => fromSpecial(question, hasFixed, index + 1));
   const fixedPassed = section.questions.filter((question) => question.fixed_passed ?? (hasFixed && question.passed)).length;
   const agentPassed = section.agent_passed ?? section.questions.filter((question) => question.agent_passed).length;
   const counts = { both: 0, fixed_only: 0, agent_only: 0, neither: 0 } as Record<EvalCompareKey, number>;

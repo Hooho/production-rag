@@ -681,6 +681,8 @@ export type EvalQuestion = {
   given_recall?: number | null;
   // 列表里题目下方的补充说明（专项里用来显示「Agent 新通过」这类和上次的比较）。
   note?: string;
+  // 列表里显示的序号：专项题的编号是数据库里的长 id，显示成 1、2、3（调参题的编号本身就是 q01 这种，不用）。
+  seq?: number;
 } & EvalFlowFields;
 // Agent 检索评测（app/evaluation/agent_retrieval.py）：只看最后命中，口径和固定流程的过滤后 Recall 一致。
 export type EvalMode = "fixed" | "agent";
