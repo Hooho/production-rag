@@ -641,7 +641,7 @@ export type EvalEvidence = { text: string; chunk_id: string | null; rrf_rank: nu
 export type EvalJudgement = { refused: boolean; faithfulness: number; correctness: number; citation: number; faithfulness_reason: string; correctness_reason: string; citation_reason: string; judge: string };
 export type EvalSufficiency = { checked: boolean; verdict: "sufficient" | "partial" | "insufficient" | null; missing?: string | string[] | null; retried?: boolean; retry_query?: string | null; refused?: boolean; source_count?: number | null;
   // 完整检索流程（检索评测也做判断后才有）：每次判断的结论、判断次数、是否用了补充检索的结果。
-  judgements?: { verdict: string; missing: string; rewrite_query: string }[]; calls?: number; retry_used?: boolean };
+  judgements?: { verdict: string; missing: string; rewrite_query: string; error?: string }[]; calls?: number; errors?: number; retry_used?: boolean };
 // 固定流程的改写（app/evaluation/flow.py）：classifier 是谁改写的（llm 大模型 / small_model 小模型只分类 / rule、fallback 规则），
 // cached 表示用了改写缓存，duration_ms 是改写耗时（用缓存时是当时实际花的时间）。
 // fallback_reason：没用上大模型改写的原因（调用失败、格式不对、命中规则等），旧记录没有。

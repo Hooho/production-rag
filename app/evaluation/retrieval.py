@@ -366,6 +366,7 @@ def summarize(rows):
 #   wrong_clear_rate：有答案的题被判成资料不足、来源被清空的比例（新的一种损失）；
 #   right_clear_rate：没有答案的题被清空的比例（越高越好，模型拿不到资料就不会硬凑）；
 #   retry_rate、avg_judge_calls：补充检索比例、平均判断次数，看成本；
+#   judge_error_count：判断失败、按"资料充分"兜底的次数（失败时不会补充检索，次数多说明判断形同虚设）；
 #   rewrite_cache_rate：大模型改写里用了缓存的比例；flow_latency_avg_ms：改写 + 检索 + 判断的平均耗时。
 def summarize_flow(rows, answerable, unanswerable):
     checked = [row for row in rows if (row.get("sufficiency") or {}).get("checked")]
@@ -387,6 +388,7 @@ def summarize_flow(rows, answerable, unanswerable):
             if unanswerable_checked else None,
         "retry_rate": round(sum(1 for row in checked if row["sufficiency"].get("retried")) / len(checked), 4) if checked else None,
         "avg_judge_calls": mean([row["sufficiency"].get("calls", 0) for row in checked]),
+        "judge_error_count": sum(row["sufficiency"].get("errors", 0) for row in checked) if checked else None,
         "rewrite_cache_rate": round(sum(1 for row in llm if row["rewrite"].get("cached")) / len(llm), 4) if llm else None,
         "flow_latency_avg_ms": round(sum(flow_latencies) / len(flow_latencies)) if flow_latencies else None,
     }

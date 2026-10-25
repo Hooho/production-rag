@@ -114,10 +114,13 @@ def apply_sufficiency(row, check, found, first_sources, evidence_count, keep_sou
     for index, entry in enumerate(row.get("evidence") or []):
         entry["first_given"] = index in first
         entry["given"] = index in final
-    judgements = [{"verdict": item["verdict"], "missing": item.get("missing", ""), "rewrite_query": item.get("rewrite_query", "")}
-        for item in check["judgements"]]
+    # 判断失败（超时、输出被截断等）时按"资料充分"处理，不补充检索；把失败原因一起记下，
+    # 否则页面上只看到"资料充分"，分不清是模型判断的还是失败后的兜底。
+    judgements = [{"verdict": item["verdict"], "missing": item.get("missing", ""), "rewrite_query": item.get("rewrite_query", ""),
+        **({"error": item["error"]} if item.get("error") else {})} for item in check["judgements"]]
     row["sufficiency"] = {"checked": check["checked"], "verdict": check["verdict"], "missing": check["missing"],
-        "judgements": judgements, "calls": len(judgements), "retried": check["retried"],
+        "judgements": judgements, "calls": len(judgements), "errors": sum(1 for item in judgements if item.get("error")),
+        "retried": check["retried"],
         "retry_query": check["retry_query"], "retry_used": check.get("retry_used", False),
         "refused": check["refused"], "source_count": len(check["sources"])}
     if check["retried"]:

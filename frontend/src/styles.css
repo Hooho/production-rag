@@ -8011,6 +8011,8 @@ input:focus {
 .ag-flow-step.is-judge.is-sufficient { border-left: 3px solid var(--ev-good); }
 .ag-flow-step.is-judge.is-partial { border-left: 3px solid #d29b2c; }
 .ag-flow-step.is-judge.is-insufficient { border-left: 3px solid var(--ev-bad); }
+/* 判断失败、按"资料充分"兜底时写明原因，和真正判断出来的"资料充分"区分开。 */
+.ag-flow-step .ag-warn { color: var(--ev-bad); }
 
 .ag-flow-cleared {
    padding: 8px 10px;

@@ -40,6 +40,28 @@ class RerankError(Exception):
     pass
 
 
+# 模型输出被截断（finish_reason = length），去掉思考过程后什么都不剩：推理模型先写 <think> 思考过程，
+# 额度在思考里就用完了，正式结果一个字都没写出来。以前这种情况只报"模型没有返回 JSON"（ValueError），
+# 看不出是额度不够。继承 ValueError，原来捕获 ValueError 的地方照常退回兜底。
+class TruncatedOutput(ValueError):
+    pass
+
+
+# 意图识别（含查询改写）和充分性判断的输出额度。以前分别是 400 和 300：MiniMax-M3 这类推理模型先输出思考过程，
+# 长一点的比较题实测要 500～970 个 token（大部分是思考），400 时 3 道比较题全部被截断、退回规则只检索一路；
+# 短问题（"退货政策是什么？"）只用 100～160 个。2000 留出余量；只是上限，用不完不多花钱。
+INTENT_MAX_TOKENS = 2000
+SUFFICIENCY_MAX_TOKENS = 2000
+
+
+# 模型调用失败时写进记录的原因：截断写明额度用完了，其他错误带上类型和简短说明。
+def model_error_text(error):
+    if isinstance(error, TruncatedOutput):
+        return str(error)
+    detail = str(error).strip()[:100]
+    return f"{type(error).__name__}：{detail}" if detail else type(error).__name__
+
+
 # 同时支持无模型演示与真实模型，两种模式使用不同的向量集合。
 class Models:
     def __init__(self):
@@ -303,7 +325,7 @@ class Models:
         # 大模型除了最近 3 个问题，还收到滚动摘要（较早对话压缩成的摘要）。
         llm_context = self.intent_context(recent_questions, last_order, summary)
         try:
-            content = self.chat_completion(prompt.format_messages(payload=payload), 400)
+            content = self.chat_completion(prompt.format_messages(payload=payload), INTENT_MAX_TOKENS)
             if on_memory:
                 # 标题用实际模型名；以前写死成"DeepSeek 查询分析"，换了模型也不变。
                 memory = {"memory_summary": summary, "history_questions": history_text}
@@ -315,7 +337,7 @@ class Models:
             parsed = self.parse_json(content)
             analysis = self.normalize_analysis(parsed, fallback, classifier="llm")
         except (KeyError, TypeError, ValueError, httpx.HTTPError, OpenAIError) as error:
-            trace.append({"stage": "llm", "title": llm_title, "result": f"调用失败（{type(error).__name__}）",
+            trace.append({"stage": "llm", "title": llm_title, "result": f"调用失败（{model_error_text(error)}）",
                 "accepted": False, "context": llm_context})
             trace.append({"stage": "fallback", "title": "规则兜底", "result": fallback["reason"], "accepted": True})
             return fallback
@@ -495,7 +517,11 @@ class Models:
         content = response.content
         if not isinstance(content, str):
             raise ValueError("聊天模型没有返回文本")
-        return strip_think(content)
+        text = strip_think(content)
+        finish_reason = (getattr(response, "response_metadata", None) or {}).get("finish_reason")
+        if finish_reason == "length" and not text.strip():
+            raise TruncatedOutput(f"输出被截断：思考过程用完了 {max_tokens} 个 token 的额度，没写出结果")
+        return text
 
     # Contextual Retrieval：让模型读全文（或全文中的一段）后，用一两句话说明这个分片在全文里讲的是什么。
     # 分片单独拿出来常常丢掉主语和背景，例如"他后来把它卖了"看不出是谁、卖了什么；
@@ -532,10 +558,10 @@ class Models:
             ("human", "{payload}")])
         payload = json.dumps({"question": question, "sources": "\n".join(source_lines)}, ensure_ascii=False)
         try:
-            value = self.parse_json(self.chat_completion(prompt.format_messages(payload=payload), 300))
+            value = self.parse_json(self.chat_completion(prompt.format_messages(payload=payload), SUFFICIENCY_MAX_TOKENS))
         except (KeyError, TypeError, ValueError, httpx.HTTPError, OpenAIError) as error:
             return {"verdict": "sufficient", "missing": "", "rewrite_query": "",
-                "error": f"判断失败，按资料充分处理：{str(error)[:200]}"}
+                "error": f"判断失败，按资料充分处理：{model_error_text(error)}"}
         verdict = value.get("verdict")
         if verdict not in {"sufficient", "partial", "insufficient"}:
             verdict = "sufficient"

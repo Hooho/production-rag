@@ -803,6 +803,7 @@ function SufficiencySteps({ question, part }: { question: EvalQuestion; part: "f
     <span className="ag-tool">{judgements.length > 1 ? `第 ${index + 1} 次判断` : "充分性判断"}</span>
     <strong>{VERDICT_LABELS[judgement.verdict] ?? judgement.verdict}</strong>
     {judgement.missing && <span>缺：{judgement.missing}</span>}
+    {judgement.error && <span className="ag-warn">{judgement.error}</span>}
     {index === 0 && judgement.rewrite_query && judgement.verdict !== "sufficient" && <span>补充检索词 <code>{judgement.rewrite_query}</code></span>}
   </div>)}</>;
 }
