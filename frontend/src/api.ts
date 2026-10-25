@@ -652,7 +652,7 @@ export type EvalRetry = { returned: number; used: boolean; given_recall: number 
 // 固定流程每一路检索词各自召回的情况：召回几段、留到最后几段、含哪几条证据（从 0 开始）、证据在向量 / 关键词排名表里最好排第几。
 export type EvalQueryRoute = { query: string; recalled: number; kept: number; evidence: number[]; best: { evidence: number; dense?: number; keyword?: number }[] };
 // 交给模型的资料：几段、多少字、约多少 token（只算资料正文，旧记录没有）。
-export type EvalMaterial = { count: number; chars: number; tokens: number };
+export type EvalMaterial = { count: number; chars: number; tokens: number; items?: { chunk_id: string | null; chars: number; tokens: number }[] };
 export type EvalFlowFields = { material?: EvalMaterial | null; query_routes?: EvalQueryRoute[] | null; given_hits?: number | null; ext_hits?: number | null; first_given_recall?: number | null; rewrite?: EvalRewrite | null; retry?: EvalRetry | null; cleared?: boolean | null; flow_latency_ms?: number | null };
 export type EvalQuestion = {
   id: string;
@@ -692,7 +692,7 @@ export type EvalQuestion = {
 // Agent 检索评测（app/evaluation/agent_retrieval.py）：只看最后命中，口径和固定流程的过滤后 Recall 一致。
 export type EvalMode = "fixed" | "agent";
 export type EvalCompareKey = "both" | "fixed_only" | "agent_only" | "neither";
-export type EvalAgentResult = { evidence_id: string; title: string | null; heading?: string | null; chunk_id: string | null; position?: number | null; parent_chunk_ids?: string[]; relevance: number | null; low_relevance: boolean; text: string; hits: number[] };
+export type EvalAgentResult = { evidence_id: string; title: string | null; heading?: string | null; chunk_id: string | null; position?: number | null; parent_chunk_ids?: string[]; relevance: number | null; low_relevance: boolean; text: string; hits: number[]; main_hits?: number[] };
 export type EvalAgentCall = {
   call: number;
   round: number | null;

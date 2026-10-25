@@ -132,10 +132,29 @@ function agentMaterial(question: EvalQuestion): EvalMaterial | null {
   return question.agent?.material ?? null;
 }
 
-function MaterialLine({ material }: { material: EvalMaterial | null }) {
-  if (!material) return null;
-  return <div className="ag-material"><span className="ag-tool">交给模型的资料</span>
-    <span><b>{material.count}</b> 段 · {material.chars.toLocaleString()} 字 · 约 {material.tokens.toLocaleString()} token</span></div>;
+// 交给模型的每一段资料：编号、命中的分片（+父块扩展几片）、哪次检索拿到的、含哪几条证据（检索命中那片里，还是扩展的分片里）、多少字。
+type MaterialEntry = { id: string; chunkId: string | null; position?: number | null; extended: number; from: string;
+  hits: number[]; extHits: number[] };
+
+function MaterialBlock({ material, entries, notes = [] }: { material: EvalMaterial | null; entries: MaterialEntry[]; notes?: string[] }) {
+  if (!material && entries.length === 0) return null;
+  const sizes = new Map((material?.items ?? []).map((item) => [item.chunk_id, item]));
+  return <div className="ag-material">
+    <div className="ag-material-head"><span className="ag-tool">交给模型的资料</span>
+      {material ? <span><b>{material.count}</b> 段 · {material.chars.toLocaleString()} 字 · 约 {material.tokens.toLocaleString()} token</span> : <span><b>{entries.length}</b> 段</span>}</div>
+    {entries.length > 0 && <ul className="ag-material-list">{entries.map((entry) => {
+      const size = entry.chunkId ? sizes.get(entry.chunkId) : undefined;
+      const direct = entry.hits.filter((index) => !entry.extHits.includes(index));
+      return <li key={entry.id} className={entry.hits.length ? "is-hit" : ""}>
+        <b>{entry.id}</b><span>{chunkLabel(entry.position, entry.chunkId)}{entry.extended ? <em className="ag-ext-badge">+扩展 {entry.extended} 片</em> : null}</span>
+        <small>{entry.from}</small>
+        {direct.length > 0 && <Tag tone="success" size="sm">含证据 {direct.map((index) => index + 1).join("、")}</Tag>}
+        {entry.extHits.length > 0 && <Tag tone="success" size="sm" outline>证据 {entry.extHits.map((index) => index + 1).join("、")} 在扩展的分片里</Tag>}
+        {size && <small>{size.chars.toLocaleString()} 字 · 约 {size.tokens.toLocaleString()} token</small>}
+      </li>;
+    })}</ul>}
+    {notes.map((note) => <p key={note} className="ag-muted">{note}</p>)}
+  </div>;
 }
 
 // 固定流程一道题命中几条证据：按最后交给模型的资料算，被清空算 0。
@@ -675,7 +694,12 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
     </div>}
     {sufficiency && retry && <SufficiencySteps question={question} part="rest" />}
     {question.cleared && <div className="ag-flow-cleared">判断资料不足，已清空：线上会直接拒答。</div>}
-    <MaterialLine material={fixedMaterial(question)} />
+    <MaterialBlock material={fixedMaterial(question)} entries={question.cleared ? [] : (usedRetry ? retryItems : items).map((item) => {
+      const hits = Array.from({ length: total }, (_, index) => index).filter((index) => (item.parts ?? []).some((chunkId) => evidenceLists[index]?.includes(chunkId)));
+      return { id: item.id, chunkId: item.chunkId ?? null, position: item.position, extended: extendedParts(item).length,
+        from: usedRetry ? "补充检索命中" : "第 1 次检索命中",
+        hits, extHits: hits.filter((index) => !(item.chunkId && evidenceLists[index]?.includes(item.chunkId))) };
+    })} />
   </section>;
 }
 
@@ -698,6 +722,23 @@ function SufficiencySteps({ question, part }: { question: EvalQuestion; part: "f
   </div>)}</>;
 }
 
+// Agent 的资料池：按编号顺序，每段记第一次拿到它的那次检索（同一分片再次命中沿用原编号）。
+function agentEntries(agent: NonNullable<EvalQuestion["agent"]>): MaterialEntry[] {
+  const seen = new Map<string, MaterialEntry>();
+  for (const call of agent.calls) {
+    for (const result of call.results ?? []) {
+      if (seen.has(result.evidence_id)) continue;
+      const parts = result.parent_chunk_ids ?? [];
+      const main = result.main_hits;
+      seen.set(result.evidence_id, { id: result.evidence_id, chunkId: result.chunk_id, position: result.position,
+        extended: parts.filter((chunkId) => chunkId !== result.chunk_id).length,
+        from: `第 ${call.call} 次检索命中（第 ${call.round ?? "—"} 轮）`, hits: result.hits,
+        extHits: main ? result.hits.filter((index) => !main.includes(index)) : [] });
+    }
+  }
+  return [...seen.values()].sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
+}
+
 function AgentLog({ question }: { question: EvalQuestion }) {
   const agent = question.agent!;
   const fresh = freshness(question);
@@ -714,7 +755,8 @@ function AgentLog({ question }: { question: EvalQuestion }) {
     </div>)}
     {/* 预算用完或超时后，程序再让模型跑一轮不带工具的，直接写回答；这一轮没有检索。 */}
     {agent.forced && <div className="ag-round"><div className="ag-round-head">第 {agent.rounds} 轮<Tag size="sm" outline plain>{agent.stop_reason === "timeout" ? "时间到了" : "工具预算用完"}，不带工具直接回答，没有检索</Tag></div></div>}
-    <MaterialLine material={agentMaterial(question)} />
+    <MaterialBlock material={agentMaterial(question)} entries={agentEntries(agent)} notes={agent.calls.filter((call) => call.name === "read_context" && call.status === "ok")
+      .map((call) => `第 ${call.call} 次读了 ${call.source_id ?? "—"} 的${call.direction === "before" ? "前文" : "后文"}（${(call.positions ?? []).map((position) => `第 ${position + 1} 片`).join("、") || "—"}）`)} />
   </section>;
 }
 

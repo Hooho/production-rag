@@ -8486,3 +8486,43 @@ input:focus {
    text-decoration: underline dashed;
    text-underline-offset: 3px;
 }
+
+/* 交给模型的资料：标题一行，下面逐段列出（编号、命中的分片、哪次检索拿到的、含哪几条证据、多少字）。 */
+.ag-material {
+   display: block;
+}
+
+.ag-material-head {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: 8px;
+}
+
+.ag-material-list {
+   margin: 8px 0 0;
+   padding-left: 18px;
+   display: grid;
+   gap: 4px;
+   font-size: 12.5px;
+}
+
+.ag-material-list li > * + * {
+   margin-left: 8px;
+}
+
+.ag-material-list small {
+   color: var(--ev-muted);
+}
+
+.ag-material-list li.is-hit > b {
+   color: var(--tone-success-text);
+}
+
+.ag-material-list .ag-ext-badge {
+   margin-left: 6px;
+}
+
+.ag-material-list small {
+   white-space: nowrap;
+}

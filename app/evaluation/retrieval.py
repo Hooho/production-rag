@@ -247,7 +247,11 @@ def score_question(item, retrieval, chunk_texts, pool_size):
 def material(sources):
     from ..memory.framework import text_tokens
     texts = [source.get("text") or source.get("answer") or "" for source in sources or []]
-    return {"count": len(texts), "chars": sum(len(text) for text in texts), "tokens": sum(text_tokens(text) for text in texts)}
+    # items：每段各多少字、约多少 token（按分片编号对应），页面上逐段列出交给模型的资料时用。
+    items = [{"chunk_id": source.get("chunk_id"), "chars": len(text), "tokens": text_tokens(text)}
+        for source, text in zip(sources or [], texts)]
+    return {"count": len(texts), "chars": sum(len(text) for text in texts), "tokens": sum(text_tokens(text) for text in texts),
+        "items": items}
 
 
 # 一组题平均交给模型多少资料（段数、token）；没有记录（旧结果）时是 None。
