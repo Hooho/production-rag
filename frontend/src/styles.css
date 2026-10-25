@@ -8480,3 +8480,9 @@ input:focus {
    background: rgba(255, 255, 255, .7);
    font-size: 13px;
 }
+
+/* 证据是父块扩展拼进来的：和分片标签上的虚线框呼应，下面加一条虚线。 */
+.ag-evidence-trace .is-ext small {
+   text-decoration: underline dashed;
+   text-underline-offset: 3px;
+}

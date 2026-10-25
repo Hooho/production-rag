@@ -655,7 +655,12 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
         <div className="ag-merge-label">合并 → 前 {config.pool_size ?? "—"} 段进重排 → 过阈值 {typeof config.min_score === "number" ? config.min_score.toFixed(2) : "—"} → 最多 {config.return_limit ?? "—"} 段交给模型</div>
         {total > 0 && <ul className="ag-evidence-trace">{Array.from({ length: total }, (_, evidence) => {
           const outcome = mergeOutcome(question.evidence?.[evidence], firstHits.includes(evidence), config);
-          return <li key={evidence} className={outcome.ok ? "is-hit" : "is-lost"}><b>{outcome.ok ? "✓" : "✕"}</b>证据 {evidence + 1}<small>{outcome.text}</small></li>;
+          // 交给模型时写清楚是哪一段带进来的：检索命中的那一片本身含证据，还是父块扩展拼进来的相邻分片里才有。
+          const chunkIds = evidenceLists[evidence] ?? [];
+          const carrier = outcome.ok ? items.find((item) => (item.parts ?? []).some((chunkId) => chunkIds.includes(chunkId))) : undefined;
+          const direct = carrier && carrier.chunkId ? chunkIds.includes(carrier.chunkId) : true;
+          const detail = carrier ? (direct ? `（${carrier.id} 检索命中）` : `（父块扩展拼进来的：检索命中的是 ${carrier.id} ${chunkLabel(carrier.position, carrier.chunkId)}）`) : "";
+          return <li key={evidence} className={`${outcome.ok ? "is-hit" : "is-lost"} ${carrier && !direct ? "is-ext" : ""}`}><b>{outcome.ok ? "✓" : "✕"}</b>证据 {evidence + 1}<small>{outcome.text}{detail}</small></li>;
         })}</ul>}
       </div>}
       <ChunkTabs items={items} empty="过滤后没有分块。" />
