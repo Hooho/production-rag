@@ -8526,3 +8526,38 @@ input:focus {
 .ag-material-list small {
    white-space: nowrap;
 }
+
+/* 证据命中情况：每条证据一行，结果标签（检索命中 / 父块扩展命中 / 被过滤……）加细节。 */
+.ag-evidence-status {
+   margin-top: 10px;
+   padding: 10px 12px;
+   border: 1px solid var(--ev-line);
+   border-radius: 6px;
+   background: rgba(255, 255, 255, .7);
+}
+
+.ag-evidence-status ul {
+   list-style: none;
+   margin: 8px 0 0;
+   padding: 0;
+   display: grid;
+   gap: 6px;
+   font-size: 13px;
+}
+
+.ag-evidence-status li {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: 8px;
+}
+
+.ag-evidence-status .ag-evidence-name {
+   font-weight: 600;
+   min-width: 48px;
+}
+
+.ag-evidence-status small {
+   color: var(--ev-muted);
+   font-size: 12px;
+}
