@@ -124,8 +124,10 @@ function fixedMaterial(question: EvalQuestion): EvalMaterial | null {
   if (question.cleared) return { count: 0, chars: 0, tokens: 0 };
   const sources = question.retry?.used && question.retry.sources ? question.retry.sources : question.sources;
   if (!sources) return null;
-  return { count: sources.length, chars: sources.reduce((sum, source) => sum + (source.text ?? "").length, 0),
-    tokens: sources.reduce((sum, source) => sum + textTokens(source.text ?? ""), 0) };
+  return {
+    count: sources.length, chars: sources.reduce((sum, source) => sum + (source.text ?? "").length, 0),
+    tokens: sources.reduce((sum, source) => sum + textTokens(source.text ?? ""), 0)
+  };
 }
 
 function agentMaterial(question: EvalQuestion): EvalMaterial | null {
@@ -141,32 +143,16 @@ function MaterialLine({ material }: { material: EvalMaterial | null }) {
 // 证据命中情况：每条证据一个结果标签（检索命中 / 父块扩展命中 / 读前后文拿到 / 被过滤 / 没召回 / 没拿到），后面写细节。
 type EvidenceStatusRow = { label: string; tone: "success" | "danger" | "neutral" | "info"; dashed?: boolean; detail: string };
 
-function StatusCell({ row }: { row: EvidenceStatusRow | undefined }) {
-  if (!row) return <span className="ag-muted">—</span>;
-  return <><Tag tone={row.tone} size="sm" outline={row.dashed} className={row.dashed ? "is-dashed" : undefined}>{row.label}</Tag>
-    {row.detail && <small>{row.detail}</small>}</>;
-}
-
-function EvidenceStatus({ question, hasFixed, config }: { question: EvalQuestion; hasFixed: boolean; config: EvalRun["config"] }) {
-  const fixedRows = hasFixed ? fixedEvidenceRows(question, config) : [];
-  const agentRows = agentEvidenceRows(question);
-  const texts = (question.agent?.evidence ?? []).length ? question.agent!.evidence : question.evidence;
-  const hasAgent = Boolean(question.agent);
+// 每张卡片的第一块：证据命中情况，每条证据一个结果标签加细节；下面「详情」按钮展开这张卡片原来的检索过程。
+function EvidenceStatus({ rows, expanded, onToggle }: { rows: EvidenceStatusRow[]; expanded: boolean; onToggle: () => void }) {
   return <div className="ag-evidence-status">
     <div className="ag-tool">证据命中情况</div>
-    <div className="diag-table-wrap"><table className="diag-table ag-evidence-table">
-      <thead><tr><th>证据</th>{hasFixed && <th>固定流程</th>}{hasAgent && <th>Agent</th>}</tr></thead>
-      <tbody>{texts.map((evidence, index) => {
-        const fixedChunk = question.evidence?.[index]?.chunk_id;
-        const chunkIds = "chunk_ids" in evidence && evidence.chunk_ids?.length ? evidence.chunk_ids : fixedChunk ? [fixedChunk] : [];
-        const positions = "positions" in evidence ? evidence.positions : undefined;
-        return <tr key={index}>
-          <td><b>证据 {index + 1}</b>“{evidenceLabel(evidence.text)}”<small className="ag-evidence-chunk">所在分块 {chunkIds.length ? chunkIds.map((chunkId, order) => chunkLabel(positions?.[order], chunkId)).join("、") : "知识库里没找到"}</small></td>
-          {hasFixed && <td><StatusCell row={fixedRows[index]} /></td>}
-          {hasAgent && <td><StatusCell row={agentRows[index]} /></td>}
-        </tr>;
-      })}</tbody>
-    </table></div>
+    {rows.length > 0 ? <ul>{rows.map((row, index) => <li key={index}>
+      <span className="ag-evidence-name">证据 {index + 1}</span>
+      <Tag tone={row.tone} size="sm" outline={row.dashed} className={row.dashed ? "is-dashed" : undefined}>{row.label}</Tag>
+      {row.detail && <small>{row.detail}</small>}
+    </li>)}</ul> : <p className="ag-muted">没有答案的题，不看证据。</p>}
+    <button type="button" className="secondary-button ag-detail-button" aria-expanded={expanded} onClick={onToggle}>{expanded ? "收起详情" : "详情"}</button>
   </div>;
 }
 
@@ -175,8 +161,10 @@ function EvidenceStatus({ question, hasFixed, config }: { question: EvalQuestion
 function chunkItemsOf(sources: EvalQuestion["sources"] | EvalRetry["sources"] | undefined) {
   return (sources ?? []).map((source) => {
     const extra = source as { id: string; chunk_id?: string | null; position?: number | null; parent_chunk_ids?: string[] };
-    return { id: extra.id, chunkId: extra.chunk_id ?? null, position: extra.position ?? null,
-      parts: extra.parent_chunk_ids ?? (extra.chunk_id ? [extra.chunk_id] : []) };
+    return {
+      id: extra.id, chunkId: extra.chunk_id ?? null, position: extra.position ?? null,
+      parts: extra.parent_chunk_ids ?? (extra.chunk_id ? [extra.chunk_id] : [])
+    };
   });
 }
 
@@ -194,40 +182,40 @@ function fixedEvidenceRows(question: EvalQuestion, config: EvalRun["config"]): E
   const retryItems = chunkItemsOf(retry?.sources);
   const usedRetry = Boolean(question.sufficiency?.retry_used);
   return Array.from({ length: total }, (_, evidence): EvidenceStatusRow => {
-      const fixed = question.evidence?.[evidence];
-      if (question.cleared) return { label: "被过滤", tone: "danger", detail: "（被充分性判断清空，线上会直接拒答）" };
-      const finalItems = usedRetry ? retryItems : items;
-      const chunkIds = evidenceLists[evidence] ?? [];
-      const carrier = finalItems.find((item) => (item.parts ?? []).some((chunkId) => chunkIds.includes(chunkId)));
-      const from = usedRetry ? "补充检索的" : "";
-      if (carrier) {
-        const direct = carrier.chunkId ? chunkIds.includes(carrier.chunkId) : true;
-        return direct ? { label: "检索命中", tone: "success", detail: `${from}${carrier.id} ${chunkLabel(carrier.position, carrier.chunkId)}` }
-          : { label: "父块扩展命中", tone: "success", dashed: true, detail: `${from}${carrier.id} ${chunkLabel(carrier.position, carrier.chunkId)} 拼进来的相邻分片里` };
-      }
-      const row = lostRow(fixed, config);
-      return retry ? { ...row, detail: `${row.detail}${usedRetry ? "；补充检索也没拿到" : "；补充检索没采用"}` } : row;
-      });
+    const fixed = question.evidence?.[evidence];
+    if (question.cleared) return { label: "被过滤", tone: "danger", detail: "（被充分性判断清空，线上会直接拒答）" };
+    const finalItems = usedRetry ? retryItems : items;
+    const chunkIds = evidenceLists[evidence] ?? [];
+    const carrier = finalItems.find((item) => (item.parts ?? []).some((chunkId) => chunkIds.includes(chunkId)));
+    const from = usedRetry ? "补充检索的" : "";
+    if (carrier) {
+      const direct = carrier.chunkId ? chunkIds.includes(carrier.chunkId) : true;
+      return direct ? { label: "检索命中", tone: "success", detail: `${from}${carrier.id} ${chunkLabel(carrier.position, carrier.chunkId)}` }
+        : { label: "父块扩展命中", tone: "success", dashed: true, detail: `${from}${carrier.id} ${chunkLabel(carrier.position, carrier.chunkId)} 拼进来的相邻分片里` };
+    }
+    const row = lostRow(fixed, config);
+    return retry ? { ...row, detail: `${row.detail}${usedRetry ? "；补充检索也没拿到" : "；补充检索没采用"}` } : row;
+  });
 }
 
 function agentEvidenceRows(question: EvalQuestion): EvidenceStatusRow[] {
   const agent = question.agent;
   if (!agent || !question.answerable) return [];
   return agent.evidence.map((evidence): EvidenceStatusRow => {
-      // 重点是第几轮拿到的：按轮列出，每轮写第几次检索的哪一段；第一次拿到的那一轮放最前面。
-      const rounds = new Map<number | null, string[]>();
-      for (const item of evidence.where) {
-        const round = agent.calls.find((call) => call.call === item.call)?.round ?? null;
-        rounds.set(round, [...(rounds.get(round) ?? []), `第 ${item.call} 次的 ${item.evidence_id ?? "—"}`]);
-      }
-      const where = [...rounds.entries()].map(([round, calls]) => `第 ${round ?? "—"} 轮（${calls.join("、")}）`).join("；");
-      const firstRound = [...rounds.keys()][0];
-      if (!evidence.found) return { label: "没拿到", tone: "neutral", detail: "每次检索留下的资料里都没有" };
-      const head = `第 ${firstRound ?? "—"} 轮`;
-      if (evidence.via === "context") return { label: `${head}读前后文拿到`, tone: "info", detail: where };
-      if (evidence.via === "extension") return { label: `${head}父块扩展命中`, tone: "success", dashed: true, detail: where };
-      return { label: `${head}检索命中`, tone: "success", detail: where };
-      });
+    // 重点是第几轮拿到的：按轮列出，每轮写第几次检索的哪一段；第一次拿到的那一轮放最前面。
+    const rounds = new Map<number | null, string[]>();
+    for (const item of evidence.where) {
+      const round = agent.calls.find((call) => call.call === item.call)?.round ?? null;
+      rounds.set(round, [...(rounds.get(round) ?? []), `第 ${item.call} 次的 ${item.evidence_id ?? "—"}`]);
+    }
+    const where = [...rounds.entries()].map(([round, calls]) => `第 ${round ?? "—"} 轮（${calls.join("、")}）`).join("；");
+    const firstRound = [...rounds.keys()][0];
+    if (!evidence.found) return { label: "没拿到", tone: "neutral", detail: "每次检索留下的资料里都没有" };
+    const head = `第 ${firstRound ?? "—"} 轮`;
+    if (evidence.via === "context") return { label: `${head}读前后文拿到`, tone: "info", detail: where };
+    if (evidence.via === "extension") return { label: `${head}父块扩展命中`, tone: "success", dashed: true, detail: where };
+    return { label: `${head}检索命中`, tone: "success", detail: where };
+  });
 }
 
 // 固定流程没交给模型的证据：丢在哪一步（第一次检索的记录）。没召回单独一类，其余都算被过滤，括号里写原因。
@@ -295,29 +283,41 @@ function modeRows(questions: EvalQuestion[], config: EvalConfig | undefined, has
     [question.answerable, question.agent!.evidence.filter((item) => item.found).length, question.agent!.evidence.length || question.evidence_count, question.agent!.returned]));
   const scoreBest = (side: "fixed" | "agent") => both && fixedScore.score !== null && agentScore.score !== null
     && (side === "fixed" ? fixedScore.score > agentScore.score : agentScore.score > fixedScore.score);
-  rows.push({ group: "result", label: "得分", ...pick(
-    { value: formatPoints(fixedScore.score), note: bandsText(fixedScore.bands), best: scoreBest("fixed") },
-    { value: formatPoints(agentScore.score), note: bandsText(agentScore.bands), best: scoreBest("agent") }) });
-  rows.push({ group: "result", label: "通过", ...pick(
-    { value: `${fixed.passed} / ${fixed.count}`, note: "证据全拿到的题", best: best("passed", "fixed") },
-    { value: `${agent.passed} / ${agent.count}`, note: agent.failed ? `证据全拿到的题 · 运行失败 ${agent.failed} 题` : "证据全拿到的题", best: best("passed", "agent") }) });
-  rows.push({ group: "result", label: "证据命中", ...pick(
-    { value: ratio(fixed.hits, evidenceTotal), note: "最后交给模型的资料里有的证据", best: best("hits", "fixed") },
-    { value: ratio(agent.hits, evidenceTotal), note: "Agent 拿到的资料里有的证据", best: best("hits", "agent") }) });
+  rows.push({
+    group: "result", label: "得分", ...pick(
+      { value: formatPoints(fixedScore.score), note: bandsText(fixedScore.bands), best: scoreBest("fixed") },
+      { value: formatPoints(agentScore.score), note: bandsText(agentScore.bands), best: scoreBest("agent") })
+  });
+  rows.push({
+    group: "result", label: "通过", ...pick(
+      { value: `${fixed.passed} / ${fixed.count}`, note: "证据全拿到的题", best: best("passed", "fixed") },
+      { value: `${agent.passed} / ${agent.count}`, note: agent.failed ? `证据全拿到的题 · 运行失败 ${agent.failed} 题` : "证据全拿到的题", best: best("passed", "agent") })
+  });
+  rows.push({
+    group: "result", label: "证据命中", ...pick(
+      { value: ratio(fixed.hits, evidenceTotal), note: "最后交给模型的资料里有的证据", best: best("hits", "fixed") },
+      { value: ratio(agent.hits, evidenceTotal), note: "Agent 拿到的资料里有的证据", best: best("hits", "agent") })
+  });
   // 每条证据是检索命中那一片里拿到的，还是父块扩展拼进来的（via）：加扩展命中统计之前跑的评测没有记，显示「—」而不是 0。
   const fixedVia = answerable.some((question) => question.ext_hits !== undefined && question.ext_hits !== null || question.evidence.some((item) => item.via !== undefined && item.via !== null));
   const agentVia = answerable.some((question) => (question.agent?.evidence ?? []).some((item) => item.via !== undefined && item.via !== null));
   const noVia = { value: "—", note: "这次评测没记录（加扩展命中统计之前跑的），重跑后才有" };
-  rows.push({ group: "result", label: "扩展命中", ...pick(
-    fixedVia ? { value: `${fixed.ext} 条`, note: "只在父块扩展的分片里" } : noVia,
-    agentVia ? { value: `${agent.ext} 条`, note: agent.context ? `只在父块扩展的分片里 · 读前后文 ${agent.context} 条` : "只在父块扩展的分片里" } : noVia) });
+  rows.push({
+    group: "result", label: "扩展命中", ...pick(
+      fixedVia ? { value: `${fixed.ext} 条`, note: "只在父块扩展的分片里" } : noVia,
+      agentVia ? { value: `${agent.ext} 条`, note: agent.context ? `只在父块扩展的分片里 · 读前后文 ${agent.context} 条` : "只在父块扩展的分片里" } : noVia)
+  });
   if (unanswerable.length) {
-    rows.push({ group: "result", label: "误杀", ...pick(
-      { value: `${fixed.rejected} 题`, note: `${fixed.count} 道有答案的题一段资料都没拿到` },
-      { value: `${agent.rejected} 题`, note: `${agent.count} 道有答案的题一段资料都没拿到` }) });
-    rows.push({ group: "result", label: "漏放", ...pick(
-      { value: `${fixed.accepted} 题`, note: `${unanswerable.length} 道没答案的题还拿到了资料` },
-      { value: `${agent.accepted} 题`, note: `${unanswerable.length} 道没答案的题还拿到了资料` }) });
+    rows.push({
+      group: "result", label: "误杀", ...pick(
+        { value: `${fixed.rejected} 题`, note: `${fixed.count} 道有答案的题一段资料都没拿到` },
+        { value: `${agent.rejected} 题`, note: `${agent.count} 道有答案的题一段资料都没拿到` })
+    });
+    rows.push({
+      group: "result", label: "漏放", ...pick(
+        { value: `${fixed.accepted} 题`, note: `${unanswerable.length} 道没答案的题还拿到了资料` },
+        { value: `${agent.accepted} 题`, note: `${unanswerable.length} 道没答案的题还拿到了资料` })
+    });
   }
   const flowLatency = avg(questions.filter((question) => question.stages).map((question) => question.flow_latency_ms ?? question.latency_ms));
   const agentRuns = questions.filter((question) => question.agent).map((question) => question.agent!);
@@ -332,30 +332,42 @@ function modeRows(questions: EvalQuestion[], config: EvalConfig | undefined, has
   const materialCell = (value: ReturnType<typeof averageMaterial>, note: string) => value
     ? { value: `平均 ${number(value.count)} 段 · 约 ${Math.round(value.tokens).toLocaleString()} token`, note: `约 ${Math.round(value.chars).toLocaleString()} 字；${note}` }
     : { value: "—", note: "这次评测没记录，重跑后才有" };
-  rows.push({ group: "process", label: "资料量", ...pick(
-    materialCell(fixedGiven, "交给模型的是最后留下的那几段"),
-    materialCell(agentGiven, "交给模型的是资料池里全部，每次检索留下的累加")) });
-  rows.push({ group: "process", label: "检索", ...pick(
-    { value: `平均 ${number(fixedCount ? 1 + fixed.retried / fixedCount : null)} 次`, note: `补充检索 ${fixed.retried} 题${fixed.cleared ? ` · 被清空 ${fixed.cleared} 题` : ""}` },
-    { value: `平均 ${number(avg(agentRuns.map((item) => item.searches)))} 次`, note: agent.searches ? `无新增 ${agent.wasted} 次，占 ${Math.round((agent.wasted / agent.searches) * 100)}%` : undefined }) });
-  if (hasAgent) rows.push({ group: "process", label: "轮数", ...pick(
-    { value: "—", note: "固定流程没有轮次" },
-    { value: `平均 ${number(avg(agentRuns.map((item) => item.rounds)))} 轮`, note: `强制回答 ${agent.forced} 题` }) });
-  rows.push({ group: "process", label: "耗时", ...pick(
-    { value: `平均 ${formatMs(flowLatency)}`, note: "改写 + 检索 + 充分性判断，不含写回答" },
-    agentRuns.some((item) => item.search_ms !== undefined)
-      ? { value: `平均 ${formatMs(avg(agentRuns.map((item) => item.search_ms ?? 0)))}`, note: `只算检索；写回答另需 ${formatMs(avg(agentRuns.map((item) => item.answer_ms ?? 0)))}，合计 ${formatMs(avg(agentRuns.map((item) => item.latency_ms)))}` }
-      : { value: `平均 ${formatMs(avg(agentRuns.map((item) => item.latency_ms)))}`, note: "含写回答（旧记录分不开）" }) });
-  if (hasAgent) rows.push({ group: "process", label: "输入 token", ...pick(
-    { value: "—", note: "没记录" },
-    { value: `平均 ${number(avg(agentRuns.map((item) => item.prompt_tokens)), 0)}` }) });
+  rows.push({
+    group: "process", label: "资料量", ...pick(
+      materialCell(fixedGiven, "交给模型的是最后留下的那几段"),
+      materialCell(agentGiven, "交给模型的是资料池里全部，每次检索留下的累加"))
+  });
+  rows.push({
+    group: "process", label: "检索", ...pick(
+      { value: `平均 ${number(fixedCount ? 1 + fixed.retried / fixedCount : null)} 次`, note: `补充检索 ${fixed.retried} 题${fixed.cleared ? ` · 被清空 ${fixed.cleared} 题` : ""}` },
+      { value: `平均 ${number(avg(agentRuns.map((item) => item.searches)))} 次`, note: agent.searches ? `无新增 ${agent.wasted} 次，占 ${Math.round((agent.wasted / agent.searches) * 100)}%` : undefined })
+  });
+  if (hasAgent) rows.push({
+    group: "process", label: "轮数", ...pick(
+      { value: "—", note: "固定流程没有轮次" },
+      { value: `平均 ${number(avg(agentRuns.map((item) => item.rounds)))} 轮`, note: `强制回答 ${agent.forced} 题` })
+  });
+  rows.push({
+    group: "process", label: "耗时", ...pick(
+      { value: `平均 ${formatMs(flowLatency)}`, note: "改写 + 检索 + 充分性判断，不含写回答" },
+      agentRuns.some((item) => item.search_ms !== undefined)
+        ? { value: `平均 ${formatMs(avg(agentRuns.map((item) => item.search_ms ?? 0)))}`, note: `只算检索；写回答另需 ${formatMs(avg(agentRuns.map((item) => item.answer_ms ?? 0)))}，合计 ${formatMs(avg(agentRuns.map((item) => item.latency_ms)))}` }
+        : { value: `平均 ${formatMs(avg(agentRuns.map((item) => item.latency_ms)))}`, note: "含写回答（旧记录分不开）" })
+  });
+  if (hasAgent) rows.push({
+    group: "process", label: "输入 token", ...pick(
+      { value: "—", note: "没记录" },
+      { value: `平均 ${number(avg(agentRuns.map((item) => item.prompt_tokens)), 0)}` })
+  });
   const flow = config?.flow;
   const rewrite = flow ? flow.rewrite_cached + flow.rewrite_fresh : 0;
   const agentConfig = config?.agent;
-  rows.push({ group: "config", label: "配置", ...pick(
-    // 检索参数两边共用（写在卡片上方），这里只放各自独有的：固定流程是改写和充分性判断，Agent 是预算、超时和提示词。
-    { value: flow ? `大模型改写${flow.sufficiency ? " + 充分性判断" : "（充分性判断未启用）"}` : "—", note: rewrite ? `改写 ${rewrite} 题，${flow!.rewrite_cached} 题来自缓存${flow?.model ? ` · ${flow.model}` : ""}` : undefined },
-    { value: agentConfig ? `预算 ${agentConfig.tool_budget} 次 · 超时 ${agentConfig.timeout} 秒` : "—", note: agentConfig ? `提示词 ${agentConfig.prompt_version}${agentConfig.model ? ` · ${agentConfig.model}` : ""}` : undefined }) });
+  rows.push({
+    group: "config", label: "配置", ...pick(
+      // 检索参数两边共用（写在卡片上方），这里只放各自独有的：固定流程是改写和充分性判断，Agent 是预算、超时和提示词。
+      { value: flow ? `大模型改写${flow.sufficiency ? " + 充分性判断" : "（充分性判断未启用）"}` : "—", note: rewrite ? `改写 ${rewrite} 题，${flow!.rewrite_cached} 题来自缓存${flow?.model ? ` · ${flow.model}` : ""}` : undefined },
+      { value: agentConfig ? `预算 ${agentConfig.tool_budget} 次 · 超时 ${agentConfig.timeout} 秒` : "—", note: agentConfig ? `提示词 ${agentConfig.prompt_version}${agentConfig.model ? ` · ${agentConfig.model}` : ""}` : undefined })
+  });
   return rows;
 }
 
@@ -605,8 +617,8 @@ function ChunkTabs({ items, empty }: { items: ChunkItem[]; empty: string }) {
     <div className="ag-chunk-tabs" role="tablist">{items.map((item) => <button key={item.key} type="button" role="tab" aria-selected={selected === item.key}
       className={`ag-chunk-tab ${item.hit ? "is-hit" : ""} ${hitByExtension(item) ? "is-ext-hit" : ""} ${item.fresh ? "is-new" : ""} ${item.fresh === false && !item.hit ? "is-seen" : ""} ${selected === item.key ? "is-active" : ""}`}
       title={[item.hit ? (hitByExtension(item) ? "证据在父块扩展拼进来的分片里，检索命中的这一片本身没有" : "检索命中的这一片就含证据") : item.title ?? "",
-        extendedParts(item).length ? `父块扩展还拼进了 ${extendedParts(item).map((chunkId) => chunkLabel(null, chunkId)).join("、")}` : "",
-        item.fresh ? "这次调用新拿到的" : item.fresh === false ? "前面的调用已经拿到过" : ""].filter(Boolean).join("；")} onClick={() => { setSelected(selected === item.key ? null : item.key); setFullText(false); }}>
+      extendedParts(item).length ? `父块扩展还拼进了 ${extendedParts(item).map((chunkId) => chunkLabel(null, chunkId)).join("、")}` : "",
+      item.fresh ? "这次调用新拿到的" : item.fresh === false ? "前面的调用已经拿到过" : ""].filter(Boolean).join("；")} onClick={() => { setSelected(selected === item.key ? null : item.key); setFullText(false); }}>
       {item.hit && <b className="ag-check" aria-label="含证据">✓</b>}{chunkLabel(item.position, item.chunkId)}<small>{item.id}</small>{extendedParts(item).length > 0 && <em className={`ag-ext-badge ${hitByExtension(item) ? "is-hit" : ""}`}>{hitByExtension(item) ? `证据在扩展的 ${extendedParts(item).length} 片里` : `+扩展 ${extendedParts(item).length} 片`}</em>}</button>)}</div>
     {current && <div className={`ag-chunk-body ${current.hit ? "is-hit" : ""}`}>
       <div className="ag-chunk-meta"><strong>{chunkLabel(current.position, current.chunkId)}</strong><small>本次检索的 {current.id}</small>{current.title ?? "—"}{current.heading ? ` · ${current.heading}` : ""}{current.relevance !== undefined && current.relevance !== null && <small> · 相关性 {current.relevance.toFixed(2)}{current.low ? "（较低）" : ""}</small>}{current.hit && <Tag tone="success" dot>{hitByExtension(current) ? "证据在扩展的分片里" : "含证据"}</Tag>}</div>
@@ -662,24 +674,28 @@ function mergeOutcome(fixed: EvalQuestion["evidence"][number] | undefined, given
 
 function QuestionDetail({ question, hasFixed, params, config }: { question: EvalQuestion; hasFixed: boolean; params: string[]; config: EvalRun["config"] }) {
   const agent = question.agent;
-  // 默认只看两边的「证据命中情况」，点「检索详情」再展开每一步（改写、每一路、每轮检索、分片、交给模型的资料）。
-  const [expanded, setExpanded] = useState(false);
+  // 上面只列证据原文和所在分块；两边各自拿没拿到、怎么拿到的，看下面两张卡片里的「证据命中情况」。
+  const texts = (agent?.evidence ?? []).length ? agent!.evidence : question.evidence;
   return <div className="ev-question-body">
     {agent?.error && <p className="ev-lost-hint">Agent 运行失败：{agent.error}</p>}
-    {question.answerable ? <EvidenceStatus question={question} hasFixed={hasFixed} config={config} />
-      : <p className="ev-muted-note">没有答案的题，拿到的资料越少越好。</p>}
-    <div className="ag-detail-toggle">
-      <button type="button" className="secondary-button" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? "收起检索详情" : "检索详情"}</button>
-      {expanded && <span className="ag-muted ag-numbering-note">✓ 绿底：含证据　虚线绿框：证据在扩展的分片里　小红点：新拿到　灰色：前面拿到过　+扩展：父块拼进了相邻分片　S1、S2：这次检索的结果顺序</span>}
+    {question.answerable ? <div className="ag-evidence-list">{texts.map((evidence, index) => {
+      const fixedChunk = question.evidence?.[index]?.chunk_id;
+      const chunkIds = "chunk_ids" in evidence && evidence.chunk_ids?.length ? evidence.chunk_ids : fixedChunk ? [fixedChunk] : [];
+      const positions = "positions" in evidence ? evidence.positions : undefined;
+      return <div className="ag-evidence" key={index}>
+        <p>证据 {index + 1}：“{evidenceLabel(evidence.text)}”</p>
+        <span className="ag-evidence-chunk">所在分块 {chunkIds.length ? chunkIds.map((chunkId, order) => <code key={chunkId} title={chunkId}>{chunkLabel(positions?.[order], chunkId)}</code>) : "知识库里没找到"}</span>
+      </div>;
+    })}</div> : <p className="ev-muted-note">没有答案的题，拿到的资料越少越好。</p>}
+    <div className={`ag-columns ${hasFixed ? "" : "is-single"}`}>
+      {hasFixed && <FixedLog question={question} params={params} config={config} />}
+      {agent && <AgentLog question={question} />}
     </div>
-    {expanded && <div className={`ag-columns ${hasFixed ? "" : "is-single"}`}>
-      {hasFixed && <FixedLog question={question} params={params} config={config} expanded />}
-      {agent && <AgentLog question={question} expanded />}
-    </div>}
   </div>;
 }
 
-function FixedLog({ question, params, config, expanded }: { question: EvalQuestion; params: string[]; config: EvalRun["config"]; expanded: boolean }) {
+function FixedLog({ question, params, config }: { question: EvalQuestion; params: string[]; config: EvalRun["config"] }) {
+  const [expanded, setExpanded] = useState(false);
   // 证据所在的分片（Agent 记的所在分块，或固定流程命中的分片）；来源是父块，父块里任何一片含证据都算命中。
   const evidenceChunks = new Set<string>();
   for (const item of question.agent?.evidence ?? []) for (const chunkId of item.chunk_ids ?? []) evidenceChunks.add(chunkId);
@@ -688,17 +704,21 @@ function FixedLog({ question, params, config, expanded }: { question: EvalQuesti
   const items: ChunkItem[] = (question.sources ?? []).map((source) => {
     const extra = source as { chunk_id?: string; position?: number | null; parent_chunk_ids?: string[] };
     const parts = extra.parent_chunk_ids ?? (extra.chunk_id ? [extra.chunk_id] : []);
-    return { key: source.id, id: source.id, chunkId: extra.chunk_id ?? null, position: extra.position ?? null, parts, title: source.title,
+    return {
+      key: source.id, id: source.id, chunkId: extra.chunk_id ?? null, position: extra.position ?? null, parts, title: source.title,
       heading: source.heading ?? null, text: source.text, evidenceParts: new Set(parts.filter((chunkId) => evidenceChunks.has(chunkId))),
-      hit: hitSources.has(source.id) || parts.some((chunkId) => evidenceChunks.has(chunkId)) };
+      hit: hitSources.has(source.id) || parts.some((chunkId) => evidenceChunks.has(chunkId))
+    };
   });
   // 补充检索的来源：父块里任何一片含证据都算命中。
   const retry = question.retry;
   const retryItems: ChunkItem[] = (retry?.sources ?? []).map((source) => {
     const parts = source.parent_chunk_ids ?? (source.chunk_id ? [source.chunk_id] : []);
-    return { key: `retry-${source.id}`, id: source.id, chunkId: source.chunk_id ?? null, position: source.position ?? null, parts, title: source.title,
+    return {
+      key: `retry-${source.id}`, id: source.id, chunkId: source.chunk_id ?? null, position: source.position ?? null, parts, title: source.title,
       heading: source.heading ?? null, text: source.text, evidenceParts: new Set(parts.filter((chunkId) => evidenceChunks.has(chunkId))),
-      hit: parts.some((chunkId) => evidenceChunks.has(chunkId)) };
+      hit: parts.some((chunkId) => evidenceChunks.has(chunkId))
+    };
   });
   const sufficiency = question.sufficiency;
   const searches = 1 + (sufficiency?.retried ? 1 : 0);
@@ -713,53 +733,55 @@ function FixedLog({ question, params, config, expanded }: { question: EvalQuesti
   const routes = [...(question.query_routes ?? [])].sort((a, b) => queries.indexOf(a.query) - queries.indexOf(b.query));
   return <section className="ag-log">
     <div className="ag-log-title">固定流程<small>检索 {searches} 次{sufficiency?.checked ? ` · 判断 ${sufficiency.calls ?? 1} 次` : ""} · 耗时 {formatMs(question.flow_latency_ms ?? question.latency_ms)}</small></div>
+    <EvidenceStatus rows={fixedEvidenceRows(question, config)} expanded={expanded} onToggle={() => setExpanded(!expanded)} />
+    {expanded && <p className="ag-muted ag-numbering-note">✓ 绿底：含证据　虚线绿框：证据在扩展的分片里　+扩展：父块拼进了相邻分片　S1、S2：这次检索的结果顺序</p>}
     {expanded && <>
-    {question.rewrite && <div className="ag-flow-step is-block">
-      <div className="ag-step-head"><span className="ag-tool">改写</span><span>{rewriteLabel(question)}</span>
-        {question.rewrite.duration_ms !== undefined && question.rewrite.classifier === "llm" && <Tag outline plain>耗时 {formatMs(question.rewrite.duration_ms)}{question.rewrite.cached ? "（缓存，当时）" : ""}</Tag>}</div>
-      {question.rerank_query && question.rerank_query !== question.question && <div className="ag-step-row"><span className="ag-row-label">补全后的问题</span><span>{question.rerank_query}</span></div>}
-      <div className="ag-step-row"><span className="ag-row-label">扩展查询（{queries.length} 路）</span>
-        {routes.length ? <span className="ag-muted">每一路分别检索，见下方检索</span>
-          : <div><ul className="ag-query-list">{queries.map((query) => <li key={query}>{query}</li>)}</ul>
-            {queries.length > 1 && <small className="ag-muted">每一路分别检索，结果合并后再重排</small>}</div>}</div>
-    </div>}
-    <div className={`ag-call ${usedRetry ? "is-unused" : ""}`}>
-      <div className="ag-call-head"><span className="ag-tool">{sufficiency?.retried ? "第 1 次 · " : ""}检索</span>
-        <Tag outline plain>耗时 {formatMs(question.latency_ms)}</Tag><HitTag hits={hitEvidence(items, evidenceLists)} total={total} />
-        {usedRetry && <Tag outline plain>没采用（换成了补充检索的结果）</Tag>}</div>
-      {!question.rewrite && !routes.length && <ul className="ag-query-list">{queries.map((query) => <li key={query}>{query}</li>)}</ul>}
-      <div className="ag-call-params">{params.join(" · ")}</div>
-      {/* 每一路检索词分别检索（和 Agent 同一轮同时发出的几次检索对应），再合并、重排、过滤成最后的结果。 */}
-      {routes.length > 0 && <div className={`ag-round ${routes.length > 1 ? "is-parallel" : ""}`}>
-        <div className="ag-round-head">{routes.length > 1 ? <>同时检索 {routes.length} 路<Tag size="sm" tone="warning">每路分别检索，合并后重排</Tag></> : "检索"}</div>
-        {routes.map((route, index) => <div className="ag-route" key={route.query}>
-          <div className="ag-call-head"><span className="ag-tool">第 {index + 1} 路</span>
-            <Tag outline plain>召回 {route.recalled} 段</Tag><Tag outline plain>留到最后 {route.kept} 段</Tag></div>
-          <div className="ag-call-query">{route.query}</div>
-          {/* 这一路召回到了哪几条证据、各排第几（向量、关键词两张排名表）。 */}
-          {total > 0 && <ul className="ag-evidence-trace">{Array.from({ length: total }, (_, evidence) => {
-            const best = route.best.find((item) => item.evidence === evidence);
-            const ranks = [best?.dense ? `向量第 ${best.dense} 名` : "", best?.keyword ? `关键词第 ${best.keyword} 名` : ""].filter(Boolean).join("、");
-            return route.evidence.includes(evidence)
-              ? <li key={evidence} className="is-hit"><b>✓</b>证据 {evidence + 1}<small>召回到了{ranks ? ` · ${ranks}` : ""}</small></li>
-              : <li key={evidence} className="is-miss"><b>—</b>证据 {evidence + 1}<small>这一路没召回</small></li>;
-          })}</ul>}
-        </div>)}
+      {question.rewrite && <div className="ag-flow-step is-block">
+        <div className="ag-step-head"><span className="ag-tool">改写</span><span>{rewriteLabel(question)}</span>
+          {question.rewrite.duration_ms !== undefined && question.rewrite.classifier === "llm" && <Tag outline plain>耗时 {formatMs(question.rewrite.duration_ms)}{question.rewrite.cached ? "（缓存，当时）" : ""}</Tag>}</div>
+        {question.rerank_query && question.rerank_query !== question.question && <div className="ag-step-row"><span className="ag-row-label">补全后的问题</span><span>{question.rerank_query}</span></div>}
+        <div className="ag-step-row"><span className="ag-row-label">扩展查询（{queries.length} 路）</span>
+          {routes.length ? <span className="ag-muted">每一路分别检索，见下方检索</span>
+            : <div><ul className="ag-query-list">{queries.map((query) => <li key={query}>{query}</li>)}</ul>
+              {queries.length > 1 && <small className="ag-muted">每一路分别检索，结果合并后再重排</small>}</div>}</div>
       </div>}
-      {routes.length > 0 && <div className="ag-merge-label">合并 → 前 {config.pool_size ?? "—"} 段进重排 → 过阈值 {typeof config.min_score === "number" ? config.min_score.toFixed(2) : "—"} → 最多 {config.return_limit ?? "—"} 段交给模型</div>}
-      <ChunkTabs items={items} empty="过滤后没有分块。" />
-    </div>
-    {sufficiency && <SufficiencySteps question={question} part="first" />}
-    {retry && <div className={`ag-call ${usedRetry ? "" : "is-unused"}`}>
-      <div className="ag-call-head"><span className="ag-tool">第 2 次 · 补充检索</span>
-        <HitTag hits={hitEvidence(retryItems, evidenceLists)} total={total} /><Tag outline plain>{usedRetry ? "采用了" : "没变好，沿用第一次的"}</Tag></div>
-      <ul className="ag-query-list">{queries.map((query) => <li key={query}>{query}</li>)}{sufficiency?.retry_query && <li className="is-added">{sufficiency.retry_query}<small>补充的</small></li>}</ul>
-      <div className="ag-call-params">{params.join(" · ")} · 返回 {retry.returned} 段</div>
-      {retry.sources ? <ChunkTabs items={retryItems} empty="补充检索没有返回分块。" /> : <p className="ag-muted">这次评测没有保存补充检索的分块。</p>}
-    </div>}
-    {sufficiency && retry && <SufficiencySteps question={question} part="rest" />}
-    {question.cleared && <div className="ag-flow-cleared">判断资料不足，已清空：线上会直接拒答。</div>}
-    <MaterialLine material={fixedMaterial(question)} />
+      <div className={`ag-call ${usedRetry ? "is-unused" : ""}`}>
+        <div className="ag-call-head"><span className="ag-tool">{sufficiency?.retried ? "第 1 次 · " : ""}检索</span>
+          <Tag outline plain>耗时 {formatMs(question.latency_ms)}</Tag><HitTag hits={hitEvidence(items, evidenceLists)} total={total} />
+          {usedRetry && <Tag outline plain>没采用（换成了补充检索的结果）</Tag>}</div>
+        {!question.rewrite && !routes.length && <ul className="ag-query-list">{queries.map((query) => <li key={query}>{query}</li>)}</ul>}
+        <div className="ag-call-params">{params.join(" · ")}</div>
+        {/* 每一路检索词分别检索（和 Agent 同一轮同时发出的几次检索对应），再合并、重排、过滤成最后的结果。 */}
+        {routes.length > 0 && <div className={`ag-round ${routes.length > 1 ? "is-parallel" : ""}`}>
+          <div className="ag-round-head">{routes.length > 1 ? <>同时检索 {routes.length} 路<Tag size="sm" tone="warning">每路分别检索，合并后重排</Tag></> : "检索"}</div>
+          {routes.map((route, index) => <div className="ag-route" key={route.query}>
+            <div className="ag-call-head"><span className="ag-tool">第 {index + 1} 路</span>
+              <Tag outline plain>召回 {route.recalled} 段</Tag><Tag outline plain>留到最后 {route.kept} 段</Tag></div>
+            <div className="ag-call-query">{route.query}</div>
+            {/* 这一路召回到了哪几条证据、各排第几（向量、关键词两张排名表）。 */}
+            {total > 0 && <ul className="ag-evidence-trace">{Array.from({ length: total }, (_, evidence) => {
+              const best = route.best.find((item) => item.evidence === evidence);
+              const ranks = [best?.dense ? `向量第 ${best.dense} 名` : "", best?.keyword ? `关键词第 ${best.keyword} 名` : ""].filter(Boolean).join("、");
+              return route.evidence.includes(evidence)
+                ? <li key={evidence} className="is-hit"><b>✓</b>证据 {evidence + 1}<small>召回到了{ranks ? ` · ${ranks}` : ""}</small></li>
+                : <li key={evidence} className="is-miss"><b>—</b>证据 {evidence + 1}<small>这一路没召回</small></li>;
+            })}</ul>}
+          </div>)}
+        </div>}
+        {routes.length > 0 && <div className="ag-merge-label">合并 → 前 {config.pool_size ?? "—"} 段进重排 → 过阈值 {typeof config.min_score === "number" ? config.min_score.toFixed(2) : "—"} → 最多 {config.return_limit ?? "—"} 段交给模型</div>}
+        <ChunkTabs items={items} empty="过滤后没有分块。" />
+      </div>
+      {sufficiency && <SufficiencySteps question={question} part="first" />}
+      {retry && <div className={`ag-call ${usedRetry ? "" : "is-unused"}`}>
+        <div className="ag-call-head"><span className="ag-tool">第 2 次 · 补充检索</span>
+          <HitTag hits={hitEvidence(retryItems, evidenceLists)} total={total} /><Tag outline plain>{usedRetry ? "采用了" : "没变好，沿用第一次的"}</Tag></div>
+        <ul className="ag-query-list">{queries.map((query) => <li key={query}>{query}</li>)}{sufficiency?.retry_query && <li className="is-added">{sufficiency.retry_query}<small>补充的</small></li>}</ul>
+        <div className="ag-call-params">{params.join(" · ")} · 返回 {retry.returned} 段</div>
+        {retry.sources ? <ChunkTabs items={retryItems} empty="补充检索没有返回分块。" /> : <p className="ag-muted">这次评测没有保存补充检索的分块。</p>}
+      </div>}
+      {sufficiency && retry && <SufficiencySteps question={question} part="rest" />}
+      {question.cleared && <div className="ag-flow-cleared">判断资料不足，已清空：线上会直接拒答。</div>}
+      <MaterialLine material={fixedMaterial(question)} />
     </>}
   </section>;
 }
@@ -784,24 +806,27 @@ function SufficiencySteps({ question, part }: { question: EvalQuestion; part: "f
 }
 
 // （资料池逐段列表已去掉，只显示段数；证据怎么拿到的看「证据命中情况」。）
-function AgentLog({ question, expanded }: { question: EvalQuestion; expanded: boolean }) {
+function AgentLog({ question }: { question: EvalQuestion }) {
+  const [expanded, setExpanded] = useState(false);
   const agent = question.agent!;
   const fresh = freshness(question);
   const evidenceChunks = new Set<string>();
   for (const item of agent.evidence ?? []) for (const chunkId of item.chunk_ids ?? []) evidenceChunks.add(chunkId);
   return <section className="ag-log">
     <div className="ag-log-title">Agent<small>检索 {agent.searches} 次{fresh.wasted > 0 ? `（${fresh.wasted} 次无新增）` : ""} · {agent.rounds} 轮 · {agent.prompt_tokens} token · {agent.search_ms !== undefined ? `检索 ${formatMs(agent.search_ms)} + 写回答 ${formatMs(agent.answer_ms)}` : `耗时 ${formatMs(agent.latency_ms)}`} · {STOP_LABELS[agent.stop_reason ?? ""] ?? agent.stop_reason ?? "—"}</small></div>
+    <EvidenceStatus rows={agentEvidenceRows(question)} expanded={expanded} onToggle={() => setExpanded(!expanded)} />
+    {expanded && <p className="ag-muted ag-numbering-note">✓ 绿底：含证据　虚线绿框：证据在扩展的分片里　小红点：新拿到　灰色：前面拿到过　+扩展：父块拼进了相邻分片</p>}
     {expanded && <>
-    {agent.question_sent !== question.question && <div className="ag-call-meta">实际提问（多轮追问按规则补全）：{agent.question_sent}</div>}
-    {agent.calls.length === 0 && <p className="ag-muted">没有调用任何工具，直接回答了。</p>}
-    {/* 按轮分组：同一轮里模型同时发出的几次调用放在一个框里，它们彼此看不到对方的结果。 */}
-    {groupByRound(agent.calls).map(([round, calls]) => <div key={round ?? "none"} className={`ag-round ${calls.length > 1 ? "is-parallel" : ""}`}>
-      <div className="ag-round-head">第 {round ?? "—"} 轮{calls.length > 1 ? <Tag size="sm" tone="warning">同时发出 {calls.length} 次，彼此看不到结果</Tag> : null}</div>
-      {calls.map((call) => <AgentCall key={call.call} call={call} fresh={fresh.perCall.get(call.call) ?? new Set()} evidenceChunks={evidenceChunks} />)}
-    </div>)}
-    {/* 预算用完或超时后，程序再让模型跑一轮不带工具的，直接写回答；这一轮没有检索。 */}
-    {agent.forced && <div className="ag-round"><div className="ag-round-head">第 {agent.rounds} 轮<Tag size="sm" outline plain>{agent.stop_reason === "timeout" ? "时间到了" : "工具预算用完"}，不带工具直接回答，没有检索</Tag></div></div>}
-    <MaterialLine material={agentMaterial(question)} />
+      {agent.question_sent !== question.question && <div className="ag-call-meta">实际提问（多轮追问按规则补全）：{agent.question_sent}</div>}
+      {agent.calls.length === 0 && <p className="ag-muted">没有调用任何工具，直接回答了。</p>}
+      {/* 按轮分组：同一轮里模型同时发出的几次调用放在一个框里，它们彼此看不到对方的结果。 */}
+      {groupByRound(agent.calls).map(([round, calls]) => <div key={round ?? "none"} className={`ag-round ${calls.length > 1 ? "is-parallel" : ""}`}>
+        <div className="ag-round-head">第 {round ?? "—"} 轮{calls.length > 1 ? <Tag size="sm" tone="warning">同时发出 {calls.length} 次，彼此看不到结果</Tag> : null}</div>
+        {calls.map((call) => <AgentCall key={call.call} call={call} fresh={fresh.perCall.get(call.call) ?? new Set()} evidenceChunks={evidenceChunks} />)}
+      </div>)}
+      {/* 预算用完或超时后，程序再让模型跑一轮不带工具的，直接写回答；这一轮没有检索。 */}
+      {agent.forced && <div className="ag-round"><div className="ag-round-head">第 {agent.rounds} 轮<Tag size="sm" outline plain>{agent.stop_reason === "timeout" ? "时间到了" : "工具预算用完"}，不带工具直接回答，没有检索</Tag></div></div>}
+      <MaterialLine material={agentMaterial(question)} />
     </>}
   </section>;
 }
@@ -823,13 +848,17 @@ function AgentCall({ call, fresh, evidenceChunks }: { call: EvalAgentCall; fresh
   const executed = call.status === "ok" || call.status === "error";
   const newCount = call.new_chunks ?? fresh.size;
   let items: ChunkItem[] = [];
-  if (call.results) items = call.results.map((result) => ({ key: `${call.call}-${result.evidence_id}`, id: result.evidence_id, chunkId: result.chunk_id, position: result.position ?? null, parts: result.parent_chunk_ids, evidenceParts: new Set((result.parent_chunk_ids ?? []).filter((chunkId) => evidenceChunks.has(chunkId))), title: result.title,
+  if (call.results) items = call.results.map((result) => ({
+    key: `${call.call}-${result.evidence_id}`, id: result.evidence_id, chunkId: result.chunk_id, position: result.position ?? null, parts: result.parent_chunk_ids, evidenceParts: new Set((result.parent_chunk_ids ?? []).filter((chunkId) => evidenceChunks.has(chunkId))), title: result.title,
     heading: result.heading ?? null, text: result.text, relevance: result.relevance, low: result.low_relevance, hit: result.hits.length > 0,
-    fresh: Boolean(result.chunk_id) && fresh.has(result.chunk_id as string) }));
-  else if (call.name === "read_context" && call.text) items = [{ key: `${call.call}-read`, id: `${call.source_id ?? ""} ${call.direction === "before" ? "前文" : "后文"}`,
+    fresh: Boolean(result.chunk_id) && fresh.has(result.chunk_id as string)
+  }));
+  else if (call.name === "read_context" && call.text) items = [{
+    key: `${call.call}-read`, id: `${call.source_id ?? ""} ${call.direction === "before" ? "前文" : "后文"}`,
     position: call.positions?.length ? call.positions[0] : null, chunkId: call.chunk_ids[0] ?? null,
     fresh: call.chunk_ids.some((chunkId) => fresh.has(chunkId)),
-    title: null, heading: null, text: call.text, hit: (call.read_hits ?? []).length > 0 }];
+    title: null, heading: null, text: call.text, hit: (call.read_hits ?? []).length > 0
+  }];
   return <div className={`ag-call ${call.status !== "ok" ? "is-off" : ""} ${hit ? "is-hit" : ""}`}>
     {/* 标题行放结果（耗时、命中、新增）；下面一行是检索的问题，再下一行是参数。 */}
     <div className="ag-call-head">
@@ -863,15 +892,17 @@ function change(now: boolean | undefined, before: boolean | null | undefined) {
 // 专项的一道题转成调参评测逐题对比用的格式，复用同一个列表和左右两栏的检索日志。
 function fromSpecial(question: EvalSpecialQuestion, hasFixed: boolean, seq: number): EvalQuestion {
   const notes = [hasFixed ? change(question.fixed_passed, question.previous_passed) && `固定流程${change(question.fixed_passed, question.previous_passed)}` : null,
-    change(question.agent_passed, question.previous_agent_passed) && `Agent ${change(question.agent_passed, question.previous_agent_passed)}`].filter(Boolean);
+  change(question.agent_passed, question.previous_agent_passed) && `Agent ${change(question.agent_passed, question.previous_agent_passed)}`].filter(Boolean);
   const recall = question.recall_final ?? (question.fixed_passed ? 1 : 0);
   return {
     id: question.id, seq, question: question.question, type: question.type ?? "未分类", answerable: true,
     evidence_count: question.evidence_count ?? question.agent?.evidence.length ?? 0,
     stages: (hasFixed ? { pool: { recall, rr: 0, rank: null }, top: { recall, rr: 0, rank: null }, final: { recall, rr: 0, rank: null } } : undefined) as EvalQuestion["stages"],
     lost_stage: question.lost_stage ?? null,
-    evidence: (question.fixed_evidence ?? []).map((item) => ({ ...item, rrf_rank: item.rrf_rank ?? null, rerank_rank: item.rerank_rank ?? null,
-      rerank_probability: item.rerank_probability ?? null, status: item.status ?? "not_recalled" })),
+    evidence: (question.fixed_evidence ?? []).map((item) => ({
+      ...item, rrf_rank: item.rrf_rank ?? null, rerank_rank: item.rerank_rank ?? null,
+      rerank_probability: item.rerank_probability ?? null, status: item.status ?? "not_recalled"
+    })),
     given_recall: question.given_recall,
     returned: question.returned ?? 0, max_probability: null, latency_ms: question.latency_ms ?? 0,
     queries: question.queries ?? [], rerank_query: question.rerank_query ?? "", query_source: question.rewrite?.classifier ?? "rule",
@@ -889,8 +920,10 @@ function specialTypeStats(questions: EvalSpecialQuestion[], hasFixed: boolean, h
     const group = groups.get(question.type) ?? { type: question.type, count: 0, passed: 0, fixedScores: [], agentScores: [], fixedMaterials: [], agentMaterials: [] };
     if (hasFixed && question.material) group.fixedMaterials.push(question.material);
     else if (hasFixed && question.cleared) group.fixedMaterials.push({ count: 0, chars: 0, tokens: 0 });
-    else if (hasFixed && question.sources) group.fixedMaterials.push({ count: question.sources.length, chars: 0,
-      tokens: question.sources.reduce((sum, source) => sum + textTokens(source.text ?? ""), 0) });
+    else if (hasFixed && question.sources) group.fixedMaterials.push({
+      count: question.sources.length, chars: 0,
+      tokens: question.sources.reduce((sum, source) => sum + textTokens(source.text ?? ""), 0)
+    });
     if (hasAgent && question.agent?.material) group.agentMaterials.push(question.agent.material);
     groups.set(question.type, group);
     const total = question.evidence_count ?? question.fixed_evidence?.length ?? question.agent?.evidence.length ?? 0;
@@ -913,10 +946,12 @@ function specialTypeStats(questions: EvalSpecialQuestion[], hasFixed: boolean, h
     }
   }
   const average = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : undefined;
-  const stats = [...groups.values()].map(({ fixedScores, agentScores, fixedMaterials, agentMaterials, ...group }) => ({ ...group,
+  const stats = [...groups.values()].map(({ fixedScores, agentScores, fixedMaterials, agentMaterials, ...group }) => ({
+    ...group,
     fixed_score: average(fixedScores), agent_score: average(agentScores),
     fixed_material_count: average(fixedMaterials.map((item) => item.count)), fixed_material_tokens: average(fixedMaterials.map((item) => item.tokens)),
-    agent_material_count: average(agentMaterials.map((item) => item.count)), agent_material_tokens: average(agentMaterials.map((item) => item.tokens)) }));
+    agent_material_count: average(agentMaterials.map((item) => item.count)), agent_material_tokens: average(agentMaterials.map((item) => item.tokens))
+  }));
   return stats.length ? stats : null;
 }
 

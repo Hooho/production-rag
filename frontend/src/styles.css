@@ -8594,3 +8594,11 @@ input:focus {
 .ag-evidence-status .diag-table-wrap {
    margin-top: 8px;
 }
+
+.ag-evidence-status .ag-detail-button {
+   margin-top: 10px;
+}
+
+.ag-log > .ag-evidence-status {
+   margin-bottom: 10px;
+}
