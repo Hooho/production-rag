@@ -216,16 +216,12 @@ def mark_reviewed(item_id, engine=None):
     return item
 
 
-# 语料目录下的每个 Markdown 文件是一份文档，文件名（去掉扩展名）作为文档标题。
-def corpus_files():
-    return sorted((EVAL_DIR / "corpus").glob("*.md"))
-
-
-# 拼接评测语料原文，手动录入和 AI 生成共用这份内容做证据校验。
-def corpus_text():
+# 拼接评测语料库（见 app/evaluation/corpus.py）的全部原文，手动录入和 AI 生成共用这份内容做证据校验。
+def corpus_text(engine=None):
+    from .corpus import documents_for
     parts = []
-    for path in corpus_files():
-        parts.append(path.read_text(encoding="utf-8"))
+    for item in documents_for(engine=engine):
+        parts.append(item["content"])
     return "\n\n".join(parts)
 
 

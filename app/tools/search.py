@@ -1,6 +1,8 @@
+from contextlib import contextmanager
 import logging
 import math
 import os
+import threading
 import time
 
 from ..security import sanitize_source
@@ -20,6 +22,29 @@ RERANK_CANDIDATES = BY_KEY["rerank_candidates"]["default"]
 PREVIEW_CHARACTERS = 80
 # 诊断里权限范围最多列出的文档数。
 SCOPE_DOCUMENT_LIMIT = 50
+
+# 某个账号这段时间只检索哪几份文档：{owner: 标题集合}。给评测用：评测开跑时勾选了语料库里的几份，
+# 评测账号就只检索这几份（见 app/evaluation/corpus.py）。固定流程、补充检索、Agent 的 search_knowledge、
+# 完整问答流程最后都调用 execute，所以只在这里过滤一次，不用把范围一层层传下去。
+# 评测在后台线程里跑，同一时间只有一个（eval_lock），开跑时设、结束时清。
+_title_limits = {}
+_title_limits_lock = threading.Lock()
+
+
+@contextmanager
+def limit_titles(owner, titles):
+    with _title_limits_lock:
+        _title_limits[owner] = frozenset(titles)
+    try:
+        yield
+    finally:
+        with _title_limits_lock:
+            _title_limits.pop(owner, None)
+
+
+def title_limit(owner):
+    with _title_limits_lock:
+        return _title_limits.get(owner)
 
 
 class DocumentSearchTool:
@@ -51,6 +76,10 @@ class DocumentSearchTool:
         # scope 只给知识巡检用：传入全库范围，判断"提问人看不到、但知识库里其实有"的权限缺口。线上问答不传。
         if scope is None:
             scope = store.readable_scope(owner) if hasattr(store, "readable_scope") else None
+        limit = title_limit(owner)
+        if limit is not None and scope is not None:
+            kept = [item for item in scope["documents"] if item["title"] in limit]
+            scope = {"versions": {item["document_id"]: item["version"] for item in kept}, "documents": kept}
         scoped = {"versions": scope["versions"]} if scope else {}
         for query in queries:
             if "dense" in methods:

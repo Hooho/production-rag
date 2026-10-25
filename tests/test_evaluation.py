@@ -5,7 +5,8 @@ import pytest
 
 from app.evaluation import dataset as dataset_module
 from app.evaluation import results as results_module
-from app.evaluation.dataset import (QUESTION_TYPES, corpus_files, load_dataset, normalize, replace_dataset,
+from app.evaluation.corpus import seed_files as corpus_files
+from app.evaluation.dataset import (QUESTION_TYPES, load_dataset, normalize, replace_dataset,
     seed_items, select_split, validate_dataset)
 from app.evaluation.generation import judge_answer, summarize_generation
 from app.evaluation.results import compare_runs, execute_run, previous_run, start_run
@@ -21,7 +22,7 @@ def headers(owner="admin"):
     return user_headers(owner)
 
 
-# 读取仓库里的全部语料原文。
+# 读取仓库里的全部初始语料原文（eval/seed/corpus）。
 def corpus_text():
     parts = []
     for path in corpus_files():
@@ -78,8 +79,8 @@ def test_normalize_ignores_width_and_whitespace():
 # 用临时目录代替仓库的 eval 目录：两份小语料、四道题（一道无法回答），结果也写到临时目录。
 @pytest.fixture
 def eval_dir(setup, tmp_path, monkeypatch):
-    corpus = tmp_path / "corpus"
-    corpus.mkdir()
+    corpus = tmp_path / "seed" / "corpus"
+    corpus.mkdir(parents=True)
     (corpus / "售后.md").write_text("# 退货\n\n耳机签收后七天内可以无理由退货。\n\n# 保修\n\n耳机保修期为一年，人为损坏不在保修范围。",
         encoding="utf-8")
     (corpus / "物流.md").write_text("# 配送\n\n订单付款后四十八小时内发货，偏远地区需要五天送达。", encoding="utf-8")

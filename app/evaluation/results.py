@@ -332,6 +332,12 @@ def compare_runs(base, target):
         after = (target_config.get("flow") or {}).get(key)
         if before is not None and after is not None and before != after:
             settings_diff.append({"key": label, "base": before, "target": after})
+    # 评测语料不同（勾的语料不一样，或者同名语料内容改过）：分数变化可能来自语料。旧记录没有这一项，不比较。
+    base_corpus = base_config.get("corpus")
+    target_corpus = target_config.get("corpus")
+    if base_corpus is not None and target_corpus is not None and corpus_signature(base_corpus) != corpus_signature(target_corpus):
+        settings_diff.append({"key": "评测语料", "base": corpus_label(base_corpus, target_corpus),
+            "target": corpus_label(target_corpus, base_corpus)})
     if run_modes(base) != run_modes(target):
         settings_diff.append({"key": "模式", "base": "+".join(run_modes(base)), "target": "+".join(run_modes(target))})
     base_agent = base_config.get("agent") or {}
@@ -344,6 +350,20 @@ def compare_runs(base, target):
             if base_agent.get(key) != target_agent.get(key):
                 settings_diff.append({"key": label, "base": base_agent.get(key), "target": target_agent.get(key)})
     return {"base": run_brief(base), "target": run_brief(target), "metrics": rows, "settings_diff": settings_diff}
+
+
+def corpus_signature(corpus):
+    return sorted((item["title"], item.get("sha256")) for item in corpus)
+
+
+# 语料列表的显示：标题用顿号连起来；对方也有同名语料、但内容不同的标"（内容不同）"。
+def corpus_label(corpus, other):
+    other_sha = {item["title"]: item.get("sha256") for item in other}
+    names = []
+    for item in sorted(corpus, key=lambda entry: entry["title"]):
+        changed = item["title"] in other_sha and other_sha[item["title"]] != item.get("sha256")
+        names.append(f"《{item['title']}》" + ("（内容不同）" if changed else ""))
+    return "、".join(names) or "（无）"
 
 
 # 固定流程的检索口径（只有跑了固定流程才有意义）。
@@ -360,9 +380,12 @@ def run_modes(run):
 
 # 新建一次评测记录并立即保存为 running，前端马上就能在列表里看到它和进度。
 # modes：检索评测跑哪些模式（fixed 固定流程、agent），可以只跑一个，也可以一起跑。
-def start_run(kind, split, suites, special=None, modes=("fixed",)):
+# corpus：这次用的评测语料（编号、标题、内容指纹），见 app/evaluation/corpus.py。
+def start_run(kind, split, suites, special=None, modes=("fixed",), corpus=None):
     commit = git_commit()
     config = {"split": split, "suites": list(suites), "modes": [mode for mode in MODES if mode in modes]}
+    if corpus is not None:
+        config["corpus"] = list(corpus)
     # 专项评测：要跑的专项（编号和名称）以及多轮对话是否对比记忆参数。
     if special is not None:
         config["special"] = special

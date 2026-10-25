@@ -476,6 +476,21 @@ eval_query_cache = Table("eval_query_cache", metadata,
     Column("created", String(40), nullable=False),
 )
 
+# 评测语料库（见 app/evaluation/corpus.py）：评测检索的文档。上传的 Markdown / 文本存上传目录的 eval_corpus 下，
+# 初始语料（eval/seed/corpus）第一次用到时也复制进来，和上传的一样。评测开跑时勾选用哪几份，只导入、只检索勾选的。
+eval_corpus = Table("eval_corpus", metadata,
+    Column("id", String(36), primary_key=True),
+    # 标题用文件名（去掉扩展名），也是导入评测账号后的文档标题，所以不能重名
+    Column("title", String(200), nullable=False, unique=True),
+    Column("filename", String(255), nullable=False),
+    Column("path", String(500), nullable=False),
+    Column("sha256", String(64), nullable=False),
+    Column("char_count", Integer, nullable=False),
+    Column("created_by", String(32), nullable=False),
+    Column("created", String(40), nullable=False),
+    Column("updated", String(40), nullable=False),
+)
+
 # 提示词版本（见 app/prompts.py）：每次在「提示词」页保存生成一个新版本，只增不改；
 # 当前使用哪个版本存在 settings 表（key = prompts），回滚只改那里。内置版本（v0）在代码里，不存这张表。
 prompt_versions = Table("prompt_versions", metadata,

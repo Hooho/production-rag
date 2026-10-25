@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from ..ingestion.chunking import chunk_document_records
 from ..mysql.store import chunks, document_chunks, document_heads
-from .dataset import EVIDENCE_OR, corpus_files, normalize
+from .dataset import EVIDENCE_OR, normalize
 from .retrieval import EVAL_OWNER
 
 
@@ -52,11 +52,12 @@ def stored_chunks(store):
         "position": row[4], "metadata": row[5] or {}} for row in rows]
 
 
-def file_chunks():
+def file_chunks(engine):
+    from .corpus import documents_for
     result = []
-    for path in corpus_files():
-        for position, record in enumerate(chunk_document_records(path.read_text(encoding="utf-8"))):
-            result.append({"chunk_id": None, "title": path.stem, "text": record["embedding_text"],
+    for item in documents_for(engine=engine):
+        for position, record in enumerate(chunk_document_records(item["content"])):
+            result.append({"chunk_id": None, "title": item["title"], "text": record["embedding_text"],
                 "content": record["content"], "position": position, "metadata": record})
     return result
 
@@ -65,7 +66,7 @@ def locate_evidence(store, models, texts):
     pool = stored_chunks(store)
     imported = bool(pool)
     if not imported:
-        pool = file_chunks()
+        pool = file_chunks(store.engine)
     # 每个分片的正文只规范化一次，几条证据共用；不存进数据库（原文要用来显示、算向量，规则改了也不用回填）。
     for chunk in pool:
         chunk["indexed"] = normalized_index(chunk["content"])

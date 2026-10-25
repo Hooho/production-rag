@@ -32,10 +32,12 @@ from ..business.service import (DataError, can_pick, create_batch, create_record
     permission_matrix, ref_options, require, save_permission, update_record, user_permissions)
 from ..auth import (authenticate, check_groups, create_user, decode_access_token, hash_password, issue_tokens,
     load_user, revoke_refresh_token, revoke_user_tokens, rotate_refresh_token, seed_users, set_user_groups)
-from ..evaluation.dataset import QUESTION_TYPES, append_items, corpus_files, corpus_text, generate_items, load_dataset, mark_reviewed, next_item_id, next_pair_id, seed_eval_data, seed_late_suites, select_split, validate_dataset
+from ..evaluation.dataset import QUESTION_TYPES, append_items, corpus_text, generate_items, load_dataset, mark_reviewed, next_item_id, next_pair_id, seed_eval_data, seed_late_suites, select_split, validate_dataset
 from ..evaluation.results import compare_runs, delete_run, execute_run, import_result_files, list_runs, load_run, previous_run, start_run
 from ..evaluation.retrieval import SUITES, VARIANTS
-from ..evaluation import regression, suites as special_suites
+from ..evaluation import corpus as eval_corpus, regression, suites as special_suites
+from ..evaluation.retrieval import EVAL_OWNER
+from ..tools.search import limit_titles
 from ..evaluation.evidence import locate_evidence
 from .. import prompts, runtime_config
 from ..ingestion.parser import ALLOWED_EXTENSIONS, UNSUPPORTED_MESSAGE
@@ -84,6 +86,8 @@ class EvalRunInput(BaseModel):
     compare_memory: bool = False
     # 检索评测跑哪些模式：fixed 固定流程、agent（Agent 自己决定怎么检索）；可以只跑一个，也可以一起跑。
     modes: list[Literal["fixed", "agent"]] = Field(default_factory=lambda: ["fixed"], min_length=1, max_length=2)
+    # 用评测语料库里的哪几份语料（编号）；不传或为空就是全部。只导入、只检索勾选的。
+    corpus_ids: list[str] = Field(default_factory=list, max_length=200)
 
 
 # 手动录入一道评测题；编号、来源和审核状态由服务端统一生成，避免客户端伪造元数据。
@@ -1629,9 +1633,7 @@ def create_app(store=None, models=None, jwt_secret=None):
     # 评测集浏览：全部题目、题型和语料文档名。评测数据属于项目本身而不是某个用户。
     @app.get("/eval/dataset", dependencies=[Depends(require_admin)])
     def eval_dataset(owner=Depends(identity)):
-        corpus = []
-        for path in corpus_files():
-            corpus.append(path.stem)
+        corpus = [entry["title"] for entry in eval_corpus.list_entries(app.state.store.engine)]
         items = load_dataset()
         reviewed_count = len(select_split(items, "all"))
         return {"items": items, "types": QUESTION_TYPES, "corpus": corpus,
@@ -1658,7 +1660,7 @@ def create_app(store=None, models=None, jwt_secret=None):
             item["evidence"] = evidence
             item["origin"] = "manual"
             item["reviewed"] = True
-            problems = validate_dataset(existing + [item], corpus_text())
+            problems = validate_dataset(existing + [item], corpus_text(app.state.store.engine))
             if problems:
                 raise HTTPException(422, problems)
             append_items([item])
@@ -1688,7 +1690,7 @@ def create_app(store=None, models=None, jwt_secret=None):
                     "reviewed": True,
                 })
                 items.append(item)
-            problems = validate_dataset(existing + items, corpus_text())
+            problems = validate_dataset(existing + items, corpus_text(app.state.store.engine))
             if problems:
                 raise HTTPException(422, problems)
             append_items(items)
@@ -1824,11 +1826,12 @@ def create_app(store=None, models=None, jwt_secret=None):
             # 启动前检查审核后的题目，避免所有题目都在待审核时创建一个必然失败的空评测。
             if not select_split(load_dataset(), body.split):
                 raise HTTPException(422, "当前题目范围没有已审核题目，请先审核评测题")
+        corpus = pick_corpus(body.corpus_ids)
         if not app.state.eval_lock.acquire(blocking=False):
             raise HTTPException(409, "已有评测正在运行，请等待完成")
         try:
             run = start_run(body.kind, None if special else body.split, body.suites, special,
-                body.modes if body.kind in ("retrieval", "special") else ("fixed",))
+                body.modes if body.kind in ("retrieval", "special") else ("fixed",), corpus)
         except Exception:
             app.state.eval_lock.release()
             raise
@@ -1840,8 +1843,10 @@ def create_app(store=None, models=None, jwt_secret=None):
                 if needs_responder:
                     # 生成评测只验证回答质量，不应把评测题写进线上会话的持久化记忆，回答 Agent 用进程内记忆。
                     responder = ResponseAgent(app.state.models, use_postgres=False)
-                execute_run(app.state.store, app.state.models, [] if special else load_dataset(), run,
-                    generate=body.kind == "generation", responder=responder, agent_mode=app.state.agent_mode)
+                # 评测账号这次只检索勾选的语料：导入、固定流程、补充检索、Agent、完整问答都经过同一个检索入口。
+                with limit_titles(EVAL_OWNER, [item["title"] for item in corpus]):
+                    execute_run(app.state.store, app.state.models, [] if special else load_dataset(), run,
+                        generate=body.kind == "generation", responder=responder, agent_mode=app.state.agent_mode)
             except Exception:
                 logger.exception("eval_run_failed run_id=%s", run["id"])
             finally:
@@ -1852,6 +1857,83 @@ def create_app(store=None, models=None, jwt_secret=None):
 
         Thread(target=work, daemon=True).start()
         return {"id": run["id"], "status": "running"}
+
+    # 这次评测用哪几份语料：不传就是语料库里的全部；记进评测配置（编号、标题、内容指纹），对比两次评测时能看出语料变了。
+    def pick_corpus(corpus_ids):
+        entries = eval_corpus.list_entries(app.state.store.engine)
+        if corpus_ids:
+            by_id = {entry["id"]: entry for entry in entries}
+            unknown = [entry_id for entry_id in corpus_ids if entry_id not in by_id]
+            if unknown:
+                raise HTTPException(422, "语料不存在或已删除，请刷新后重新勾选")
+            entries = [by_id[entry_id] for entry_id in dict.fromkeys(corpus_ids)]
+        if not entries:
+            raise HTTPException(422, "评测语料库是空的：请先在「评测语料库」页签上传语料")
+        missing = [entry["title"] for entry in entries if entry["missing"]]
+        if missing:
+            raise HTTPException(422, f"这些语料的文件不存在：{'、'.join(missing)}")
+        return [{"id": entry["id"], "title": entry["title"], "sha256": entry["sha256"]} for entry in entries]
+
+    # 评测语料库：评测检索的文档。上传 Markdown / 文本，评测开跑时勾选用哪几份（见 app/evaluation/corpus.py）。
+    # 每份带上在评测账号里的导入情况：已导入几个分片、内容改过还没重新导入、还没导入（下次评测开跑时导入）。
+    @app.get("/eval/corpus", dependencies=[Depends(require_admin)])
+    def eval_corpus_list():
+        engine = app.state.store.engine
+        imported = eval_corpus.imported_versions(engine)
+        items = []
+        for entry in eval_corpus.list_entries(engine):
+            state = imported.get(entry["title"])
+            chunks_count = None
+            if state is None:
+                status = "not_imported"
+            elif state["sha256"] != entry["sha256"]:
+                status = "stale"
+            elif str(state["status"] or "").startswith("ready:"):
+                status = "imported"
+                chunks_count = int(str(state["status"]).split(":", 1)[1] or 0)
+            else:
+                status = "not_imported"
+            items.append({key: entry[key] for key in ("id", "title", "filename", "sha256", "char_count",
+                "created_by", "created", "missing")} | {"status": status, "chunks": chunks_count})
+        return {"items": items, "suffixes": sorted(eval_corpus.SUFFIXES), "max_bytes": eval_corpus.MAX_BYTES}
+
+    @app.get("/eval/corpus/{entry_id}", dependencies=[Depends(require_admin)])
+    def eval_corpus_get(entry_id: str):
+        entry = eval_corpus.get_entry(app.state.store.engine, entry_id)
+        if entry is None:
+            raise HTTPException(404, "语料不存在")
+        try:
+            content = eval_corpus.read_content(entry)
+        except eval_corpus.CorpusError as error:
+            raise HTTPException(404, str(error))
+        return {"id": entry["id"], "title": entry["title"], "filename": entry["filename"], "content": content}
+
+    # 一次可以上传几份；每份单独检查，收下的和没收的（原因）分别返回。
+    @app.post("/eval/corpus", status_code=201)
+    def eval_corpus_upload(files: list[UploadFile] = File(...), admin=Depends(require_admin)):
+        if len(files) > 20:
+            raise HTTPException(422, "一次最多上传 20 个文件")
+        added = []
+        rejected = []
+        for file in files:
+            data = file.file.read(eval_corpus.MAX_BYTES + 1)
+            try:
+                entry = eval_corpus.add_entry(app.state.store.engine, file.filename, data, admin["username"])
+            except eval_corpus.CorpusError as error:
+                rejected.append({"filename": Path(file.filename or "").name, "reason": str(error)})
+                continue
+            added.append({key: entry[key] for key in ("id", "title", "filename", "char_count")})
+        return {"added": added, "rejected": rejected}
+
+    # 删除语料：评测正在跑时不能删（它可能正在检索这份）。评测账号里导入过的这份文档一起删掉。
+    @app.delete("/eval/corpus/{entry_id}", dependencies=[Depends(require_admin)])
+    def eval_corpus_delete(entry_id: str):
+        if app.state.eval_running:
+            raise HTTPException(409, "有评测正在运行，等它跑完再删除语料")
+        entry = eval_corpus.delete_entry(app.state.store, entry_id)
+        if entry is None:
+            raise HTTPException(404, "语料不存在")
+        return {"id": entry_id, "deleted": True}
 
     # 专项评测集：管理员自建，每个专项针对一个方向，题目在评测语料上跑，不计入调参分数。
     def suite_or_404(result):

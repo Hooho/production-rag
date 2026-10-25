@@ -9,8 +9,9 @@ from sqlalchemy import select
 from ..models import Models
 from ..mysql.store import chunks, document_chunks, document_heads
 from ..runtime_config import snapshot as runtime_snapshot
-from ..tools.search import DocumentSearchTool
-from .dataset import QUESTION_TYPES, corpus_files, evidence_variants, normalize, select_split
+from ..tools.search import DocumentSearchTool, title_limit
+from .corpus import documents_for as corpus_documents
+from .dataset import QUESTION_TYPES, evidence_variants, normalize, select_split
 from .flow import apply_sufficiency, given_chunk_ids, rewrite_item
 
 
@@ -33,13 +34,15 @@ VARIANTS = {
 SUITES = {"ablation": "消融实验", "params": "参数对比"}
 
 
-# 把 eval/corpus 下的文档导入评测用户，走和线上导入相同的"去重 → 新版本 → 切换当前版本"流程。
+# 把评测语料库里的文档导入评测用户，走和线上导入相同的"去重 → 新版本 → 切换当前版本"流程。
 # 内容没变时 sha256 去重直接跳过，所以每次评测前都可以放心调用：语料改了才会重新切分和向量化。
+# 评测开跑时勾选了几份语料（limit_titles）就只导入这几份，没勾的不用花时间切分和向量化。
 def import_corpus(store, models):
     report = []
-    for path in corpus_files():
-        title = path.stem
-        content = path.read_text(encoding="utf-8")
+    for entry in corpus_documents(title_limit(EVAL_OWNER), store.engine):
+        title = entry["title"]
+        content = entry["content"]
+        filename = entry["filename"]
         content_sha256 = hashlib.sha256(content.encode()).hexdigest()
         with store.engine.connect() as connection:
             head = connection.execute(select(document_heads.c.current_document_id).where(
@@ -49,10 +52,10 @@ def import_corpus(store, models):
         # 带上 Contextual Retrieval 开关：开关变化后语料要重新导入，评测才能反映开关的效果。
         duplicate = store.find_duplicate(EVAL_OWNER, content_sha256, doc_key, getattr(models, "contextual", False))
         if duplicate:
-            report.append({"title": title, "document_id": duplicate, "status": "unchanged"})
+            report.append({"title": title, "document_id": duplicate, "status": "unchanged", "sha256": content_sha256})
             continue
         document_id = str(uuid4())
-        store.mysql.create_document(document_id, EVAL_OWNER, title, path.name, "", {"sha256": content_sha256},
+        store.mysql.create_document(document_id, EVAL_OWNER, title, filename, "", {"sha256": content_sha256},
             doc_key=doc_key, version=version, version_note="评测语料", content_sha256=content_sha256)
         try:
             count = store.ingest(EVAL_OWNER, title, content, models, document_id, doc_key or document_id)
@@ -61,7 +64,8 @@ def import_corpus(store, models):
             store.mysql.update_document(document_id, "failed", "评测语料导入失败")
             store.remove_version_data(document_id)
             raise
-        report.append({"title": title, "document_id": document_id, "status": "imported", "chunks": count})
+        report.append({"title": title, "document_id": document_id, "status": "imported", "chunks": count,
+            "sha256": content_sha256})
     return report
 
 
