@@ -498,7 +498,8 @@ function AgentQuestionList({ run, hasFixed }: { run: EvalRun; hasFixed: boolean 
   const questions = run.questions ?? [];
   const [typeFilter, setTypeFilter] = useState("all");
   const [resultFilter, setResultFilter] = useState("all");
-  const [expanded, setExpanded] = useState<string | null>(null);
+  // 每道题各自展开 / 收起，可以同时展开好几道对照着看。
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const types: string[] = [];
   for (const question of questions) if (!types.includes(question.type)) types.push(question.type);
   const hues = typeHues(types);
@@ -542,10 +543,10 @@ function AgentQuestionList({ run, hasFixed }: { run: EvalRun; hasFixed: boolean 
     <div ref={sentinel} className="ag-sticky-sentinel" aria-hidden="true" />
     <div ref={header} className={`ag-q-columns ${layout} ${stuck ? "is-stuck" : ""}`} aria-hidden="true"><span>编号</span><span>问题</span>{hasFixed && <><span>固定流程</span><span>固定流程耗时</span></>}<span>Agent</span><span>Agent 检索次数</span><span>Agent 检索耗时</span><span /></div>
     <div className="ev-question-list">{visible.map((question) => {
-      const open = expanded === question.id;
+      const open = expanded.has(question.id);
       const agent = question.agent;
       return <article className={`ev-question ${open ? "is-open" : ""}`} key={question.id}>
-        <button className={`ag-q-head ${layout}`} aria-expanded={open} onClick={() => setExpanded(open ? null : question.id)}>
+        <button className={`ag-q-head ${layout}`} aria-expanded={open} onClick={() => setExpanded((current) => { const next = new Set(current); if (open) next.delete(question.id); else next.add(question.id); return next; })}>
           <span className="ev-qid" title={question.id}>{question.seq ?? question.id}</span>
           <span className="ev-question-text">{question.question}<small><TypeTag type={question.type} hues={hues} />{question.evidence_count > 1 ? ` ${question.evidence_count} 条证据` : ""}{question.compare ? ` · ${COMPARE_LABELS[question.compare]}` : ""}{question.note ? ` · ${question.note}` : ""}</small></span>
           {hasFixed && <><Verdict verdict={fixedVerdict(question)} /><span className="ag-num">{formatMs(question.flow_latency_ms ?? question.latency_ms)}</span></>}
