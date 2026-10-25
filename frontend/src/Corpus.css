@@ -1,0 +1,74 @@
+/* 评测语料库页签：列表沿用回归集（Regression.css）的样式，这里只补语料特有的部分。 */
+.cp-item {
+   border: 1px solid var(--t-e3edf5);
+   border-radius: 6px;
+   background: #fff;
+   padding: 12px 16px;
+}
+
+.cp-head {
+   display: flex;
+   align-items: flex-start;
+   justify-content: space-between;
+   gap: 16px;
+}
+
+.cp-main {
+   display: flex;
+   min-width: 0;
+   flex-direction: column;
+   gap: 4px;
+}
+
+.cp-main .rg-set-meta {
+   display: flex;
+   flex-wrap: wrap;
+   gap: 4px 14px;
+   color: var(--t-5e7a95);
+   font-weight: 400;
+}
+
+.cp-total {
+   color: var(--t-5e7a95);
+}
+
+.cp-preview {
+   display: flex;
+   flex-direction: column;
+   align-items: flex-start;
+   gap: 8px;
+   margin-top: 12px;
+   border-top: 1px solid var(--t-e3edf5);
+   padding-top: 12px;
+}
+
+.cp-preview pre {
+   width: 100%;
+   margin: 0;
+   white-space: pre-wrap;
+   word-break: break-word;
+   color: var(--t-1d3550);
+   font-family: inherit;
+   font-size: 13px;
+   line-height: 1.7;
+}
+
+.cp-rejected {
+   border: 1px solid #f3c4c0;
+   border-radius: 6px;
+   background: #fdecec;
+   padding: 10px 14px;
+   color: #b42318;
+}
+
+.cp-rejected ul {
+   margin: 6px 0 0;
+   padding-left: 18px;
+}
+
+/* 发起评测时的语料勾选：一行一份，右边是字数。 */
+.ev-launch .cp-pick-list label em {
+   margin-left: 8px;
+   color: var(--t-7d95ac);
+   font-style: normal;
+}

@@ -55,6 +55,7 @@ function readRoute(pathname = window.location.pathname): Route {
   if (path === "/data") return { page: "data" };
   if (path === "/eval" || path === "/eval/runs") return { page: "eval", section: "history" };
   if (path === "/eval/dataset") return { page: "eval", section: "dataset" };
+  if (path === "/eval/corpus") return { page: "eval", section: "corpus" };
   if (path === "/eval/special") return { page: "eval", section: "special" };
   if (path.startsWith("/eval/special/")) return { page: "eval", section: "special", suiteId: decodeURIComponent(path.slice("/eval/special/".length)) };
   if (path === "/eval/regression") return { page: "eval", section: "regression" };

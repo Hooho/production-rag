@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ComponentType, type FormEvent, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
-import { addEvalDatasetItem, addEvalDatasetPair, compareEvalRuns, listEvalSuites, startSpecialRun, type EvalSuiteBrief, deleteEvalRun, generateEvalDatasetItems, getEvalDataset, getEvalRun, listEvalRuns, reviewEvalDatasetItem, startEvalRun, type EvalComparison, type EvalComparisonRow, type EvalDataset, type EvalHistoryMetrics, type EvalItem, type EvalParaphraseAnalysis, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalMode, type EvalSufficiency, type EvalSuite, type EvalSummary, type EvalLimitPoint, type EvalSweepPoint, type RetrievalDiagnosticsData } from "./api";
+import { addEvalDatasetItem, addEvalDatasetPair, compareEvalRuns, listEvalCorpus, listEvalSuites, startSpecialRun, type EvalCorpusEntry, type EvalSuiteBrief, deleteEvalRun, generateEvalDatasetItems, getEvalDataset, getEvalRun, listEvalRuns, reviewEvalDatasetItem, startEvalRun, type EvalComparison, type EvalComparisonRow, type EvalDataset, type EvalHistoryMetrics, type EvalItem, type EvalParaphraseAnalysis, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalMode, type EvalSufficiency, type EvalSuite, type EvalSummary, type EvalLimitPoint, type EvalSweepPoint, type RetrievalDiagnosticsData } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
+import Corpus from "./Corpus";
 import Regression from "./Regression";
 import Special, { SpecialSection } from "./Special";
 import { EvidenceDetails } from "./EvidenceChunks";
@@ -13,7 +14,7 @@ import { HueTag, Tag } from "./Tag";
 import { runStatus } from "./tags";
 import { settingLabel } from "./SystemSettings";
 
-export type EvaluationSection = "history" | "dataset" | "special" | "regression";
+export type EvaluationSection = "history" | "dataset" | "special" | "regression" | "corpus";
 type TopTab = EvaluationSection;
 type DetailTab = "overview" | "questions" | "sweep" | "variants";
 // 勾了 Agent 的检索评测：第一层按模式分页签（对比、固定流程、Agent），固定流程里再分原来的四个子页签。
@@ -43,6 +44,7 @@ const TOP_TAB_LABELS: Record<TopTab, string> = {
   dataset: "调参评测集",
   special: "专项评测集",
   regression: "巡检复测集",
+  corpus: "评测语料库",
 };
 const DETAIL_TAB_LABELS: Record<DetailTab, string> = {
   overview: "总览",
@@ -394,7 +396,7 @@ function metricCardDetails(metricKey: string, run: EvalRun, value: number | null
   return ["本次评测暂无逐题数据。"];
 }
 
-const TAB_PATHS: Record<TopTab, string> = { history: "/eval/runs", dataset: "/eval/dataset", special: "/eval/special", regression: "/eval/regression" };
+const TAB_PATHS: Record<TopTab, string> = { history: "/eval/runs", dataset: "/eval/dataset", special: "/eval/special", regression: "/eval/regression", corpus: "/eval/corpus" };
 
 function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate }: Props) {
   const [detailTab, setDetailTab] = useState<DetailTab>("overview");
@@ -420,6 +422,9 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
   const [launchModes, setLaunchModes] = useState<EvalMode[]>(["fixed"]);
   // 专项也能选模式：只对检索方式的专项生效，回答和多轮对话方式照常只跑固定流程。
   const [specialModes, setSpecialModes] = useState<EvalMode[]>(["fixed"]);
+  // 用评测语料库里的哪几份语料：每次打开历史记录页签重新读，默认全选。
+  const [corpusEntries, setCorpusEntries] = useState<EvalCorpusEntry[] | null>(null);
+  const [pickedCorpus, setPickedCorpus] = useState<string[]>([]);
   const [launching, setLaunching] = useState(false);
 
   // 刷新评测列表时不再自动打开某条记录，让页面首次进入先展示历史表格。
@@ -480,6 +485,14 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
     return () => { cancelled = true; };
   }, [selectedId, runs.find((item) => item.id === selectedId)?.status]);
 
+  useEffect(() => {
+    if (section !== "history") return;
+    listEvalCorpus().then((data) => {
+      setCorpusEntries(data.items);
+      setPickedCorpus(data.items.filter((item) => !item.missing).map((item) => item.id));
+    }).catch((reason: Error) => setError(reason.message));
+  }, [section]);
+
   // 切到「专项」时读取专项列表（专项页签里可能刚新建过，每次切换都重新读）。
   useEffect(() => {
     if (section !== "history" || launchMode !== "special") return;
@@ -491,7 +504,7 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
     setError("");
     try {
       if (launchMode === "special") {
-        const started = await startSpecialRun(pickedSuites, compareMemory, specialModes);
+        const started = await startSpecialRun(pickedSuites, compareMemory, specialModes, pickedCorpus);
         setSelectedId(started.id);
         await refreshRuns();
         onToast("success", "专项评测已启动。");
@@ -499,7 +512,7 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
       }
       const modes: EvalMode[] = launchKind === "retrieval" ? launchModes : ["fixed"];
       const suites = launchKind !== "retrieval" || !modes.includes("fixed") ? [] : launchSuites;
-      const started = await startEvalRun(launchKind, launchSplit, suites, modes);
+      const started = await startEvalRun(launchKind, launchSplit, suites, modes, pickedCorpus);
       setSelectedId(started.id);
       setDetailTab("overview");
       await refreshRuns();
@@ -646,16 +659,26 @@ function Evaluation({ onToast, Diagnostics, section, setId, suiteId, onNavigate 
             </div>;
           })}
           </>}
+          <div className="ev-launch-option sp-pick-option">
+            <span className="ev-option-title">评测语料</span>
+            {corpusEntries === null ? <span className="ev-muted-note">正在读取语料库…</span>
+              : corpusEntries.length === 0 ? <span className="ev-muted-note">语料库是空的，先到「评测语料库」上传。</span>
+              : <ul className="sp-pick-list cp-pick-list">{corpusEntries.map((entry) => <li key={entry.id}>
+                <label><input type="checkbox" checked={pickedCorpus.includes(entry.id)} disabled={entry.missing} onChange={() => setPickedCorpus((items) => items.includes(entry.id) ? items.filter((item) => item !== entry.id) : [...items, entry.id])} />
+                  <span className="sp-pick-text"><span className="sp-pick-name">{entry.title}<em>{entry.missing ? "文件不存在" : `${entry.char_count.toLocaleString()} 字`}</em></span></span></label>
+              </li>)}</ul>}
+            <Hint text={pickedCorpus.length === 0 ? "至少勾一份。" : "只导入、只检索勾选的；证据不在勾选语料里的题会找不到。"} />
+          </div>
         </div>
         <div className="ev-launch-actions">
-          <button className="primary-button" disabled={launching || Boolean(running) || (launchMode === "special" && (pickedSuites.length === 0 || specialModes.length === 0)) || (launchMode === "tuning" && launchKind === "retrieval" && launchModes.length === 0)} onClick={() => void launch()}>{running ? "评测进行中…" : launching ? "正在启动…" : "开始评测"}</button>
+          <button className="primary-button" disabled={launching || Boolean(running) || pickedCorpus.length === 0 || (launchMode === "special" && (pickedSuites.length === 0 || specialModes.length === 0)) || (launchMode === "tuning" && launchKind === "retrieval" && launchModes.length === 0)} onClick={() => void launch()}>{running ? "评测进行中…" : launching ? "正在启动…" : "开始评测"}</button>
         </div>
         {runningRun && <div className="ev-progress" aria-live="polite"><div className="ev-progress-track"><div className="ev-progress-fill" style={{ width: `${progressPercent(runningRun)}%` }} /></div><span>{runningRun.progress?.done ?? 0} / {runningRun.progress?.total || "…"} {runningRun.kind === "special" ? "题" : "次检索"}</span></div>}
         {runningRun && runningRun.kind !== "special" && progressBreakdown(runningRun, suites) && <p className="ev-progress-note">{progressBreakdown(runningRun, suites)}</p>}
       </div>
     </>}
     {error && <div className="error-banner">{error}</div>}
-    {section === "regression" ? <Regression setId={setId ?? null} onNavigate={onNavigate} onToast={onToast} /> : section === "special" ? <Special suiteId={suiteId ?? null} onNavigate={onNavigate} onToast={onToast} /> : section === "dataset" ? datasetLoading ? <DatasetSkeleton /> : <DatasetBrowser dataset={dataset} onToast={onToast} onSaved={async () => { setDataset(await getEvalDataset()); }} /> : runsLoading ? <RunHistorySkeleton /> : selectedId ? <RunDetailView
+    {section === "corpus" ? <Corpus onToast={onToast} /> : section === "regression" ? <Regression setId={setId ?? null} onNavigate={onNavigate} onToast={onToast} /> : section === "special" ? <Special suiteId={suiteId ?? null} onNavigate={onNavigate} onToast={onToast} /> : section === "dataset" ? datasetLoading ? <DatasetSkeleton /> : <DatasetBrowser dataset={dataset} onToast={onToast} onSaved={async () => { setDataset(await getEvalDataset()); }} /> : runsLoading ? <RunHistorySkeleton /> : selectedId ? <RunDetailView
       onBack={() => setSelectedId(null)}
       run={run}
       running={running}
@@ -796,6 +819,7 @@ function RunConfig({ run }: { run: EvalRunBrief }) {
   const items: [string, string][] = [
     ["题目", `${SPLIT_LABELS[config.split ?? ""] ?? config.split}${config.dataset_size ? ` · ${config.dataset_size} 题` : ""}`],
     ["模式", modesLabel(run)],
+    ...(config.corpus?.length ? [["语料", config.corpus.map((item) => `《${item.title}》`).join("、")] as [string, string]] : []),
     ...(config.agent ? [["Agent", `预算 ${config.agent.tool_budget} 次 · 超时 ${config.agent.timeout} 秒 · 提示词 ${config.agent.prompt_version}${config.agent.prompt_identity ? `（${config.agent.prompt_identity.slice(0, 6)}）` : ""}`] as [string, string]] : []),
     ["候选池", String(config.pool_size ?? "—")], ["返回上限", String(config.return_limit ?? "—")], ["RRF k", String(config.rrf_k ?? "—")],
     ["相关性阈值", config.reranked === false ? "未启用（没有重排）" : formatScore(config.min_score ?? null, 2)],

@@ -802,7 +802,9 @@ export type EvalConfig = { split: string | null; suites: string[]; special?: { s
   // 固定流程怎么跑的：name=full 是完整检索（改写 + 判断，旧记录没有，是规则检索词、只检索）。
   flow?: { name: string; intent_prompt: string; model: string; rewrite_cached: number; rewrite_fresh: number; sufficiency: boolean };
   // 这次评测用的全部设置页参数（评测记录里比较「参数改过」用）。
-  settings?: Record<string, unknown> };
+  settings?: Record<string, unknown>;
+  // 这次用的评测语料（标题、内容指纹；跑完后是导入情况）。旧记录也有（当时目录里的全部语料）。
+  corpus?: { title: string; sha256?: string; status?: string; chunks?: number }[] };
 export type EvalRunBrief = {
   id: string;
   // memory 是以前单独的多轮对话评测（现在并入专项评测集），旧记录仍然能打开。
@@ -905,20 +907,45 @@ export function compareEvalRuns(base: string, target: string) {
 }
 
 // 在界面上发起一次评测：调参评测按 split 选开发集或留出集；专项评测按 suite_ids 选专项。
-export function startEvalRun(kind: "retrieval" | "generation", split: string, suites: string[], modes: EvalMode[] = ["fixed"]) {
+// corpusIds：用评测语料库里的哪几份语料；不传（或空）就是全部。
+export function startEvalRun(kind: "retrieval" | "generation", split: string, suites: string[], modes: EvalMode[] = ["fixed"], corpusIds: string[] = []) {
   return request<{ id: string; status: string }>("/eval/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind, split, suites, modes }),
+    body: JSON.stringify({ kind, split, suites, modes, corpus_ids: corpusIds }),
   });
 }
 
-export function startSpecialRun(suiteIds: string[], compareMemory = false, modes: EvalMode[] = ["fixed"]) {
+export function startSpecialRun(suiteIds: string[], compareMemory = false, modes: EvalMode[] = ["fixed"], corpusIds: string[] = []) {
   return request<{ id: string; status: string }>("/eval/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind: "special", suite_ids: suiteIds, compare_memory: compareMemory, modes }),
+    body: JSON.stringify({ kind: "special", suite_ids: suiteIds, compare_memory: compareMemory, modes, corpus_ids: corpusIds }),
   });
+}
+
+// ---- 评测语料库 ----
+// status：imported 已导入评测账号（chunks 个分片）；stale 内容改过、下次评测重新导入；not_imported 还没导入（下次评测开跑时导入）。
+export type EvalCorpusStatus = "imported" | "stale" | "not_imported";
+export type EvalCorpusEntry = { id: string; title: string; filename: string; sha256: string; char_count: number; created_by: string; created: string; missing: boolean; status: EvalCorpusStatus; chunks: number | null };
+export type EvalCorpusUpload = { added: { id: string; title: string; filename: string; char_count: number }[]; rejected: { filename: string; reason: string }[] };
+
+export function listEvalCorpus() {
+  return request<{ items: EvalCorpusEntry[]; suffixes: string[]; max_bytes: number }>("/eval/corpus");
+}
+
+export function getEvalCorpus(entryId: string) {
+  return request<{ id: string; title: string; filename: string; content: string }>(`/eval/corpus/${encodeURIComponent(entryId)}`);
+}
+
+export function uploadEvalCorpus(files: File[]) {
+  const form = new FormData();
+  for (const file of files) form.append("files", file);
+  return request<EvalCorpusUpload>("/eval/corpus", { method: "POST", body: form });
+}
+
+export function deleteEvalCorpus(entryId: string) {
+  return requestEmpty(`/eval/corpus/${encodeURIComponent(entryId)}`, { method: "DELETE" });
 }
 
 // ---- 专项评测集 ----
