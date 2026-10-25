@@ -227,7 +227,9 @@ def score_question(item, retrieval, chunk_texts, pool_size):
                 best = route["best"].setdefault(index, {})
                 if label not in best or contribution["rank"] < best[label]:
                     best[label] = contribution["rank"]
+    # kept_ids：这一路召回、最后交给模型的分片，页面上逐段列资料时写「第几路命中」。
     query_routes = [{"query": route["query"], "recalled": len(route["chunks"]), "kept": len(route["kept"]),
+        "kept_ids": sorted(str(chunk_id) for chunk_id in route["kept"]),
         "evidence": sorted(route["evidence"]),
         "best": [{"evidence": index, **ranks} for index, ranks in sorted(route["best"].items())]} for route in routes.values()]
     return {"id": item["id"], "question": item["question"], "type": item["type"],

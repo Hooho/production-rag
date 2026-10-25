@@ -697,7 +697,11 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
     <MaterialBlock material={fixedMaterial(question)} entries={question.cleared ? [] : (usedRetry ? retryItems : items).map((item) => {
       const hits = Array.from({ length: total }, (_, index) => index).filter((index) => (item.parts ?? []).some((chunkId) => evidenceLists[index]?.includes(chunkId)));
       return { id: item.id, chunkId: item.chunkId ?? null, position: item.position, extended: extendedParts(item).length,
-        from: usedRetry ? "补充检索命中" : "第 1 次检索命中",
+        // 哪几路召回了这一段（旧记录没有 kept_ids，只写第 1 次检索命中）。
+        from: usedRetry ? "补充检索命中" : (() => {
+          const hitRoutes = routes.map((route, order) => (item.chunkId && route.kept_ids?.includes(item.chunkId) ? order + 1 : 0)).filter(Boolean);
+          return hitRoutes.length && routes.length > 1 ? `第 1 次检索 · 第 ${hitRoutes.join("、")} 路命中` : "第 1 次检索命中";
+        })(),
         hits, extHits: hits.filter((index) => !(item.chunkId && evidenceLists[index]?.includes(item.chunkId))) };
     })} />
   </section>;
