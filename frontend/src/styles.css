@@ -8602,3 +8602,15 @@ input:focus {
 .ag-log > .ag-evidence-status {
    margin-bottom: 10px;
 }
+
+/* 「详情」按钮：小一号。 */
+.ag-evidence-status .ag-detail-button {
+   padding: 2px 10px;
+   min-height: 0;
+   font-size: 12px;
+   line-height: 1.6;
+}
+
+.ag-single-route {
+   margin-top: 8px;
+}

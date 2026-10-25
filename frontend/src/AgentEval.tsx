@@ -752,8 +752,9 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
         {!question.rewrite && !routes.length && <ul className="ag-query-list">{queries.map((query) => <li key={query}>{query}</li>)}</ul>}
         <div className="ag-call-params">{params.join(" · ")}</div>
         {/* 每一路检索词分别检索（和 Agent 同一轮同时发出的几次检索对应），再合并、重排、过滤成最后的结果。 */}
-        {routes.length > 0 && <div className={`ag-round ${routes.length > 1 ? "is-parallel" : ""}`}>
-          <div className="ag-round-head">{routes.length > 1 ? <>同时检索 {routes.length} 路<Tag size="sm" tone="warning">每路分别检索，合并后重排</Tag></> : "检索"}</div>
+        {/* 只有 1 路时不再套一层「检索」框（外面已经是检索这一步），直接列这一路。 */}
+        {routes.length > 0 && <div className={routes.length > 1 ? "ag-round is-parallel" : "ag-single-route"}>
+          {routes.length > 1 && <div className="ag-round-head">同时检索 {routes.length} 路<Tag size="sm" tone="warning">每路分别检索，合并后重排</Tag></div>}
           {routes.map((route, index) => <div className="ag-route" key={route.query}>
             <div className="ag-call-head"><span className="ag-tool">第 {index + 1} 路</span>
               <Tag outline plain>召回 {route.recalled} 段</Tag><Tag outline plain>留到最后 {route.kept} 段</Tag></div>
