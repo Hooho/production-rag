@@ -8561,3 +8561,36 @@ input:focus {
    color: var(--ev-muted);
    font-size: 12px;
 }
+
+/* 逐题详情：默认只显示两边的证据命中情况，「检索详情」按钮展开每一步。 */
+.ag-detail-toggle {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: 12px;
+   margin: 8px 0;
+}
+
+.ag-log > .ag-evidence-status {
+   margin-top: 0;
+}
+
+/* 证据命中情况表：证据原文一列，两边结果各一列（标签 + 细节）。 */
+.ag-evidence-table td {
+   vertical-align: top;
+}
+
+.ag-evidence-table td b {
+   margin-right: 6px;
+}
+
+.ag-evidence-table td small {
+   display: block;
+   margin-top: 4px;
+   color: var(--ev-muted);
+   font-size: 12px;
+}
+
+.ag-evidence-status .diag-table-wrap {
+   margin-top: 8px;
+}
