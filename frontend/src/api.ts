@@ -925,9 +925,10 @@ export function startSpecialRun(suiteIds: string[], compareMemory = false, modes
 }
 
 // ---- 评测语料库 ----
-// status：imported 已导入评测账号（chunks 个分片）；stale 内容改过、下次评测重新导入；not_imported 还没导入（下次评测开跑时导入）。
-export type EvalCorpusStatus = "imported" | "stale" | "not_imported";
-export type EvalCorpusEntry = { id: string; title: string; filename: string; sha256: string; char_count: number; created_by: string; created: string; missing: boolean; status: EvalCorpusStatus; chunks: number | null };
+// status：imported 已导入评测账号（chunks 个分片）；stale 内容改过、下次评测重新导入；not_imported 还没导入（下次评测开跑时导入）；
+// importing 正在导入。import_error 是上次点「导入」失败的原因。
+export type EvalCorpusStatus = "imported" | "stale" | "not_imported" | "importing";
+export type EvalCorpusEntry = { id: string; title: string; filename: string; sha256: string; char_count: number; created_by: string; created: string; missing: boolean; status: EvalCorpusStatus; chunks: number | null; import_error?: string | null };
 export type EvalCorpusUpload = { added: { id: string; title: string; filename: string; char_count: number }[]; rejected: { filename: string; reason: string }[] };
 
 export function listEvalCorpus() {
@@ -942,6 +943,15 @@ export function uploadEvalCorpus(files: File[]) {
   const form = new FormData();
   for (const file of files) form.append("files", file);
   return request<EvalCorpusUpload>("/eval/corpus", { method: "POST", body: form });
+}
+
+// 语料在评测账号里的分片，格式和知识库文档的分块一样；stale 表示语料内容改过，这些是旧内容的分片。
+export function getEvalCorpusChunks(entryId: string, page: number) {
+  return request<DocumentChunkPage & { stale: boolean }>(`/eval/corpus/${encodeURIComponent(entryId)}/chunks?page=${page}&page_size=10`);
+}
+
+export function importEvalCorpus(entryId: string) {
+  return request<{ id: string; status: string }>(`/eval/corpus/${encodeURIComponent(entryId)}/import`, { method: "POST" });
 }
 
 export function deleteEvalCorpus(entryId: string) {

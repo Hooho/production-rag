@@ -72,3 +72,28 @@
    color: var(--t-7d95ac);
    font-style: normal;
 }
+
+.cp-error {
+   color: #b42318;
+   font-size: 12px;
+}
+
+.cp-chunks {
+   align-items: stretch;
+}
+
+.cp-chunks-head {
+   display: flex;
+   flex-wrap: wrap;
+   justify-content: space-between;
+   gap: 8px;
+   color: var(--t-5e7a95);
+}
+
+.cp-pager {
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   gap: 12px;
+   color: var(--t-5e7a95);
+}

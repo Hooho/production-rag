@@ -113,3 +113,25 @@ def test_eval_run_records_picked_corpus(setup, eval_dir, monkeypatch):
     assert diff["评测语料"]["base"] == "《售后》（内容不同）、《物流》" and diff["评测语料"]["target"] == "《售后》（内容不同）"
     same = {**target, "config": {**target["config"], "corpus": [{"title": "售后", "sha256": "c"}]}}
     assert "评测语料" not in {item["key"] for item in compare_runs(target, same)["settings_diff"]}
+
+
+# 没导入时看不到分片；点「导入」在后台导入（和评测共用一把锁），导入后能分页看分片，格式和知识库文档的分块一样。
+def test_corpus_import_and_chunks(setup, eval_dir):
+    client, store = setup
+    entries = {item["title"]: item for item in client.get("/eval/corpus", headers=headers()).json()["items"]}
+    after_sales = entries["售后"]
+    assert client.get(f"/eval/corpus/{after_sales['id']}/chunks", headers=headers()).status_code == 404
+    started = client.post(f"/eval/corpus/{after_sales['id']}/import", headers=headers())
+    assert started.status_code == 202
+    for _ in range(100):
+        item = next(entry for entry in client.get("/eval/corpus", headers=headers()).json()["items"] if entry["title"] == "售后")
+        if item["status"] != "importing":
+            break
+        time.sleep(0.05)
+    assert item["status"] == "imported" and item["chunks"] >= 1 and item["import_error"] is None
+    # 只导入了点的那一份。
+    assert eval_titles(store) == ["售后"]
+    page = client.get(f"/eval/corpus/{after_sales['id']}/chunks", headers=headers()).json()
+    assert page["total"] == item["chunks"] and page["stale"] is False
+    assert "耳机签收后七天内可以无理由退货" in page["chunks"][0]["content"]
+    assert client.post("/eval/corpus/nope/import", headers=headers()).status_code == 404

@@ -34,7 +34,7 @@ from ..auth import (authenticate, check_groups, create_user, decode_access_token
     load_user, revoke_refresh_token, revoke_user_tokens, rotate_refresh_token, seed_users, set_user_groups)
 from ..evaluation.dataset import QUESTION_TYPES, append_items, corpus_text, generate_items, load_dataset, mark_reviewed, next_item_id, next_pair_id, seed_eval_data, seed_late_suites, select_split, validate_dataset
 from ..evaluation.results import compare_runs, delete_run, execute_run, import_result_files, list_runs, load_run, previous_run, start_run
-from ..evaluation.retrieval import SUITES, VARIANTS
+from ..evaluation.retrieval import SUITES, VARIANTS, import_corpus
 from ..evaluation import corpus as eval_corpus, regression, suites as special_suites
 from ..evaluation.retrieval import EVAL_OWNER
 from ..tools.search import limit_titles
@@ -502,6 +502,9 @@ def create_app(store=None, models=None, jwt_secret=None):
         # 题目写入和 AI 起草必须串行，避免两个请求同时读取旧编号后生成重复 ID。
         app.state.eval_dataset_lock = Lock()
         app.state.eval_running = None
+        # 评测语料库里正在导入的那份（编号）和导入失败的原因 {编号: 原因}：导入和评测共用 eval_lock，同一时间只做一件。
+        app.state.corpus_importing = None
+        app.state.corpus_import_errors = {}
         # 页面发起的巡检在后台线程执行；保存线程便于测试等待它完成。
         app.state.inspection_thread = None
         # 巡检复测集的运行同样在后台线程执行；重启前没跑完的记录标记为中断。
@@ -1827,6 +1830,8 @@ def create_app(store=None, models=None, jwt_secret=None):
             if not select_split(load_dataset(), body.split):
                 raise HTTPException(422, "当前题目范围没有已审核题目，请先审核评测题")
         corpus = pick_corpus(body.corpus_ids)
+        if app.state.corpus_importing:
+            raise HTTPException(409, "正在导入评测语料，等导入完再发起评测")
         if not app.state.eval_lock.acquire(blocking=False):
             raise HTTPException(409, "已有评测正在运行，请等待完成")
         try:
@@ -1893,8 +1898,11 @@ def create_app(store=None, models=None, jwt_secret=None):
                 chunks_count = int(str(state["status"]).split(":", 1)[1] or 0)
             else:
                 status = "not_imported"
+            if app.state.corpus_importing == entry["id"]:
+                status = "importing"
             items.append({key: entry[key] for key in ("id", "title", "filename", "sha256", "char_count",
-                "created_by", "created", "missing")} | {"status": status, "chunks": chunks_count})
+                "created_by", "created", "missing")} | {"status": status, "chunks": chunks_count,
+                "import_error": app.state.corpus_import_errors.get(entry["id"])})
         return {"items": items, "suffixes": sorted(eval_corpus.SUFFIXES), "max_bytes": eval_corpus.MAX_BYTES}
 
     @app.get("/eval/corpus/{entry_id}", dependencies=[Depends(require_admin)])
@@ -1907,6 +1915,48 @@ def create_app(store=None, models=None, jwt_secret=None):
         except eval_corpus.CorpusError as error:
             raise HTTPException(404, str(error))
         return {"id": entry["id"], "title": entry["title"], "filename": entry["filename"], "content": content}
+
+    # 语料在评测账号里的分片：和知识库文档的「全部分块」同一个格式。还没导入时 404，可以先点「导入」。
+    @app.get("/eval/corpus/{entry_id}/chunks", dependencies=[Depends(require_admin)])
+    def eval_corpus_chunks(entry_id: str, page: int = Query(1, ge=1), page_size: int = Query(10, ge=1, le=100)):
+        engine = app.state.store.engine
+        entry = eval_corpus.get_entry(engine, entry_id)
+        if entry is None:
+            raise HTTPException(404, "语料不存在")
+        imported = eval_corpus.imported_versions(engine).get(entry["title"])
+        result = None if imported is None else app.state.store.list_document_chunks(
+            EVAL_OWNER, imported["document_id"], page, page_size)
+        if result is None:
+            raise HTTPException(404, "还没导入：点「导入」，或者跑一次评测时会自动导入")
+        result["stale"] = imported["sha256"] != entry["sha256"]
+        return result
+
+    # 现在就把这份语料导入评测账号（切分、算向量、生成上下文说明），不用等下次评测。后台跑，和评测共用 eval_lock。
+    @app.post("/eval/corpus/{entry_id}/import", status_code=202, dependencies=[Depends(require_admin)])
+    def eval_corpus_import(entry_id: str):
+        entry = eval_corpus.get_entry(app.state.store.engine, entry_id)
+        if entry is None:
+            raise HTTPException(404, "语料不存在")
+        if entry["missing"]:
+            raise HTTPException(422, f"语料《{entry['title']}》的文件不存在")
+        if not app.state.eval_lock.acquire(blocking=False):
+            raise HTTPException(409, "有评测或导入正在进行，请等它完成")
+        app.state.corpus_importing = entry_id
+        app.state.corpus_import_errors.pop(entry_id, None)
+
+        def work():
+            try:
+                with limit_titles(EVAL_OWNER, [entry["title"]]):
+                    import_corpus(app.state.store, app.state.models)
+            except Exception as error:
+                logger.exception("eval_corpus_import_failed entry_id=%s", entry_id)
+                app.state.corpus_import_errors[entry_id] = f"{type(error).__name__}: {error}"[:300]
+            finally:
+                app.state.corpus_importing = None
+                app.state.eval_lock.release()
+
+        Thread(target=work, daemon=True).start()
+        return {"id": entry_id, "status": "importing"}
 
     # 一次可以上传几份；每份单独检查，收下的和没收的（原因）分别返回。
     @app.post("/eval/corpus", status_code=201)
@@ -1928,7 +1978,7 @@ def create_app(store=None, models=None, jwt_secret=None):
     # 删除语料：评测正在跑时不能删（它可能正在检索这份）。评测账号里导入过的这份文档一起删掉。
     @app.delete("/eval/corpus/{entry_id}", dependencies=[Depends(require_admin)])
     def eval_corpus_delete(entry_id: str):
-        if app.state.eval_running:
+        if app.state.eval_running or app.state.corpus_importing:
             raise HTTPException(409, "有评测正在运行，等它跑完再删除语料")
         entry = eval_corpus.delete_entry(app.state.store, entry_id)
         if entry is None:
