@@ -644,7 +644,8 @@ export type EvalSufficiency = { checked: boolean; verdict: "sufficient" | "parti
   judgements?: { verdict: string; missing: string; rewrite_query: string }[]; calls?: number; retry_used?: boolean };
 // 固定流程的改写（app/evaluation/flow.py）：classifier 是谁改写的（llm 大模型 / small_model 小模型只分类 / rule、fallback 规则），
 // cached 表示用了改写缓存，duration_ms 是改写耗时（用缓存时是当时实际花的时间）。
-export type EvalRewrite = { classifier: string; route?: string | null; intent?: string | null; cached?: boolean; duration_ms?: number };
+// fallback_reason：没用上大模型改写的原因（调用失败、格式不对、命中规则等），旧记录没有。
+export type EvalRewrite = { classifier: string; route?: string | null; intent?: string | null; cached?: boolean; duration_ms?: number; fallback_reason?: string | null };
 // 补充检索：返回几段、是否被采用、补充检索的资料命中率和来源。
 export type EvalRetry = { returned: number; used: boolean; given_recall: number | null; found?: number[]; sources?: (Source & { chunk_id?: string | null; position?: number | null; parent_chunk_ids?: string[] })[] };
 // 和完整检索流程有关的逐题字段，调参评测和专项评测共用。

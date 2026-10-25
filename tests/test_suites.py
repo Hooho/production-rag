@@ -371,3 +371,15 @@ def test_material_counts():
     assert material([]) == {"count": 0, "chars": 0, "tokens": 0}
     summary = material_summary([{"count": 2, "chars": 10, "tokens": 7}, {"count": 4, "chars": 20, "tokens": 13}, None], "agent_")
     assert summary == {"agent_material_avg_count": 3, "agent_material_avg_tokens": 10, "agent_material_avg_chars": 15}
+
+
+# 没用上大模型改写时记下原因：调用失败、输出格式不对、命中规则；用上了就不记。
+def test_rewrite_fallback_reason():
+    from app.evaluation.flow import fallback_reason, rewrite_view
+    failed = {"classifier": "fallback", "queries": ["问"], "trace": [
+        {"stage": "rule", "accepted": False, "result": "未命中"},
+        {"stage": "llm", "accepted": False, "result": "调用失败（ReadTimeout）"}, {"stage": "fallback", "accepted": True, "result": "兜底"}]}
+    assert rewrite_view(failed, "问")["fallback_reason"] == "调用失败（ReadTimeout）"
+    assert fallback_reason({"classifier": "fallback", "trace": [{"stage": "rule", "accepted": True, "result": "命中：问候"}]}) == "命中：问候"
+    assert "fallback_reason" not in rewrite_view({"classifier": "llm", "queries": ["a", "b"], "trace": []}, "问")
+    assert fallback_reason({"classifier": "fallback", "error_reason": "意图识别出错（ValueError）"}) == "意图识别出错（ValueError）"

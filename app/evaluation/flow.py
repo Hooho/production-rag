@@ -29,10 +29,29 @@ def rewrite_key(question, history, prompt_tag, model, intent_mode):
 
 
 def rewrite_view(analysis, question):
-    return {"queries": list(analysis.get("queries") or [question]),
+    view = {"queries": list(analysis.get("queries") or [question]),
         "standalone_query": analysis.get("standalone_query") or question,
         "route": analysis.get("route"), "intent": analysis.get("intent"),
         "classifier": analysis.get("classifier") or "fallback"}
+    reason = fallback_reason(analysis)
+    if reason:
+        view["fallback_reason"] = reason
+    return view
+
+
+# 没用上大模型改写时的原因（从意图识别的过程记录里取）：大模型调用失败（超时、报错）、输出格式不对、命中了规则、没启用大模型。
+# 以前页面一律写「规则（未调用大模型）」，其实大模型多半调用了，只是失败了。
+def fallback_reason(analysis):
+    if analysis.get("classifier") in ("llm", "small_model"):
+        return None
+    for step in analysis.get("trace") or []:
+        if step.get("stage") == "llm" and not step.get("accepted"):
+            return step.get("result")
+        if step.get("stage") == "rule" and step.get("accepted"):
+            return step.get("result")
+        if step.get("stage") == "fallback":
+            return step.get("result")
+    return analysis.get("error_reason")
 
 
 # 改写一道题：和线上意图识别同一个函数（规则 → 本地小模型 → 大模型 → 规则兜底），只取检索词和补全后的问题；
@@ -52,8 +71,8 @@ def rewrite_item(store, models, item):
     started = time.monotonic()
     try:
         analysis = models.analyze_query(question, history, None)
-    except Exception:  # 意图识别出错时线上也会退回规则，评测不因此中断
-        analysis = Models.fallback_query(question, history, None)
+    except Exception as error:  # 意图识别出错时线上也会退回规则，评测不因此中断
+        analysis = {**Models.fallback_query(question, history, None), "error_reason": f"意图识别出错（{type(error).__name__}）"}
     duration_ms = round((time.monotonic() - started) * 1000)
     view = rewrite_view(analysis, question)
     # 只缓存大模型的改写：规则和小模型本来就稳定；大模型调用失败退回规则的也不缓存，下次再试。

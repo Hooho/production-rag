@@ -73,7 +73,9 @@ export function rewriteLabel(question: { rewrite?: EvalQuestion["rewrite"]; quer
   if (classifier === "llm") return question.rewrite?.cached ? "大模型改写（来自改写缓存）" : "大模型改写";
   if (classifier === "small_model") return "本地小模型只分类不改写，用原问题检索";
   if (classifier === "rewrite_cache") return "来自改写缓存";
-  return "规则（未调用大模型）";
+  // 没用上大模型：写出原因（大模型调用失败、输出格式不对、命中规则……），这时只用原问题检索一路。
+  const reason = question.rewrite?.fallback_reason;
+  return reason ? `没用上大模型改写：${reason}，只用原问题检索` : "没用上大模型改写，只用原问题检索（这次评测没记原因）";
 }
 
 function fixedVerdict(question: EvalQuestion) {

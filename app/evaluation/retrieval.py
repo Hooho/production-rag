@@ -574,7 +574,7 @@ def evaluate_items(store, models, items, chunk_texts, options, keep_diagnostics,
         row = score_question(item, retrieval, chunk_texts, pool_size)
         row.update({"latency_ms": latency_ms, "queries": queries, "rerank_query": rerank_query,
             "query_source": rewrite["classifier"],
-            "rewrite": {key: rewrite.get(key) for key in ("classifier", "route", "intent", "cached", "duration_ms")}})
+            "rewrite": {key: rewrite.get(key) for key in ("classifier", "route", "intent", "cached", "duration_ms", "fallback_reason")}})
         if judge:
             evidence = item.get("evidence") or []
             started = time.monotonic()
