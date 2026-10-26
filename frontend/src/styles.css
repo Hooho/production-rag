@@ -8722,9 +8722,10 @@ input:focus {
 
 .ag-evidence-status-head { display: flex; align-items: center; gap: 10px; }
 .ag-evidence-status-head .ag-evidence-details-button { padding: 1px 8px; min-height: 0; font-size: 11px; line-height: 1.6; }
-.ag-evidence-hit-dialog .ag-evidence-hit-list { display: grid; gap: 10px; padding-left: 20px; margin: 10px 0; }
-.ag-evidence-hit-list > li { display: list-item; }
-.ag-evidence-hit-list small { display: block; margin-top: 4px; font-size: 12px; color: var(--ev-muted); }
+.ag-evidence-hit-dialog .ag-evidence-hit-list { display: grid; gap: 8px; list-style: disc outside; padding-left: 20px; margin: 10px 0; }
+.ag-evidence-hit-dialog .ag-evidence-hit-list > li { display: list-item; padding-left: 2px; line-height: 1.8; }
+.ag-evidence-hit-list > li::marker { color: var(--ev-muted); }
+.ag-evidence-hit-dialog .ag-evidence-hit-list small { display: inline; margin: 0 0 0 8px; font-size: 12px; color: var(--ev-muted); }
 .ag-evidence-hit-dialog .ag-evidence-missed { color: #999; }
 
 .ag-evidence-chunk-button { color: inherit; font-family: monospace; cursor: pointer; }
