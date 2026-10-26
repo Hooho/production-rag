@@ -8712,3 +8712,10 @@ input:focus {
 .ag-evidence-status .ag-evidence-name.is-missed { color: #999; }
 
 .ag-call > .ag-call-params { margin-bottom: 0; }
+
+.ag-evidence-status-head { display: flex; align-items: center; gap: 10px; }
+.ag-evidence-status-head .ag-evidence-details-button { padding: 1px 8px; min-height: 0; font-size: 11px; line-height: 1.6; }
+.ag-evidence-hit-dialog .ag-evidence-hit-list { display: grid; gap: 10px; padding-left: 20px; margin: 10px 0; }
+.ag-evidence-hit-list > li { display: list-item; }
+.ag-evidence-hit-list small { display: block; margin-top: 4px; font-size: 12px; color: var(--ev-muted); }
+.ag-evidence-hit-dialog .ag-evidence-missed { color: #999; }

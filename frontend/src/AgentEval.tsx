@@ -145,20 +145,30 @@ function MaterialLine({ material }: { material: EvalMaterial | null }) {
 type EvidenceStatusEntry = { label: string; tone: "success" | "danger" | "neutral" | "info"; dashed?: boolean; detail: string; count?: number };
 type EvidenceStatusRow = EvidenceStatusEntry & { matches?: EvidenceStatusEntry[]; hitCount?: number };
 
-// 每张卡片的第一块：证据命中情况，每条证据一个结果标签加细节；下面「详情」按钮展开这张卡片原来的检索过程。
-function EvidenceStatus({ rows, expanded, onToggle, children }: { rows: EvidenceStatusRow[]; expanded: boolean; onToggle: () => void; children?: ReactNode }) {
+// 卡片显示简洁摘要，完整证据命中记录通过标题旁的详情按钮查看。
+function EvidenceStatus({ rows, expanded, onToggle, children, agent = false }: { rows: EvidenceStatusRow[]; expanded: boolean; onToggle: () => void; children?: ReactNode; agent?: boolean }) {
+  const [detailOpen, setDetailOpen] = useState(false);
   return <div className="ag-evidence-status">
-    <div className="ag-tool">证据命中情况</div>
+    <div className="ag-evidence-status-head"><span className="ag-tool">证据命中情况</span>
+      <button type="button" className="secondary-button ag-evidence-details-button" aria-haspopup="dialog" onClick={() => setDetailOpen(true)}>详情</button></div>
     {rows.length > 0 ? <ul>{rows.map((row, index) => <li key={index}>
       <span className={`ag-evidence-name ${row.tone === "danger" || row.tone === "neutral" ? "is-missed" : ""}`}>证据 {index + 1}</span>
-      {row.hitCount !== undefined && <small>累计命中 {row.hitCount} 次</small>}
-      {(row.matches ?? [row]).map((match) => <span className="ag-evidence-match" key={match.label}>
-        <Tag tone={match.tone} size="sm" outline={match.dashed} className={match.dashed ? "is-dashed" : undefined}>{match.label}{match.count !== undefined ? ` · ${match.count} 次` : ""}</Tag>
-        {match.detail && <small>{match.detail}</small>}
-      </span>)}
+      <Tag tone={row.tone} size="sm" outline={row.dashed} className={row.dashed ? "is-dashed" : undefined}>{row.label}</Tag>
+      {!agent && (row.tone === "danger" || row.tone === "neutral") && row.detail && <small>{row.detail}</small>}
     </li>)}</ul> : <p className="ag-muted">没有答案的题，不看证据。</p>}
     {children}
-    <button type="button" className="secondary-button ag-detail-button" aria-expanded={expanded} onClick={onToggle}>{expanded ? "收起详情" : "详情"}</button>
+    <button type="button" className="secondary-button ag-detail-button" aria-expanded={expanded} onClick={onToggle}>{expanded ? "收起检索详情" : "检索详情"}</button>
+    <DetailDialog open={detailOpen} title={`${agent ? "Agent" : "固定流程"} · 证据命中详情`} onClose={() => setDetailOpen(false)} className="ag-evidence-hit-dialog">
+      {rows.length === 0 && <p className="ag-muted">没有答案的题，不看证据。</p>}
+      {rows.map((row, index) => <section key={index}>
+        <h4 className={row.tone === "danger" || row.tone === "neutral" ? "ag-evidence-missed" : undefined}>证据 {index + 1}</h4>
+        {row.hitCount !== undefined && <p className="ag-muted">累计命中 {row.hitCount} 次</p>}
+        <ul className="ag-evidence-hit-list">{(row.matches ?? [row]).map((match) => <li key={match.label}>
+          <Tag tone={match.tone} size="sm" outline={match.dashed} className={match.dashed ? "is-dashed" : undefined}>{match.label}{match.count !== undefined ? ` · ${match.count} 次` : ""}</Tag>
+          {match.detail && <small>{match.detail}</small>}
+        </li>)}</ul>
+      </section>)}
+    </DetailDialog>
   </div>;
 }
 
@@ -908,7 +918,7 @@ function AgentLog({ question }: { question: EvalQuestion }) {
   for (const item of agent.evidence ?? []) for (const chunkId of item.chunk_ids ?? []) evidenceChunks.add(chunkId);
   return <section className="ag-log">
     <div className="ag-log-title">Agent<small>检索 {agent.searches} 次{fresh.wasted > 0 ? `（${fresh.wasted} 次无新增）` : ""} · {agent.rounds} 轮 · {agent.prompt_tokens} token · {agent.search_ms !== undefined ? `检索 ${formatMs(agent.search_ms)} + 写回答 ${formatMs(agent.answer_ms)}` : `耗时 ${formatMs(agent.latency_ms)}`} · {STOP_LABELS[agent.stop_reason ?? ""] ?? agent.stop_reason ?? "—"}</small></div>
-    <EvidenceStatus rows={agentEvidenceRows(question)} expanded={expanded} onToggle={() => setExpanded(!expanded)}>
+    <EvidenceStatus agent rows={agentEvidenceRows(question)} expanded={expanded} onToggle={() => setExpanded(!expanded)}>
       <FinalDelivery question={question} items={agentDelivery(question)} />
     </EvidenceStatus>
     {expanded && <p className="ag-muted ag-numbering-note">命中：含证据的来源；新增：本次新拿到的来源（可能同时命中）；已有：之前拿到且未命中的来源。点击编号查看原文。</p>}
