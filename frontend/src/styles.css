@@ -8734,3 +8734,6 @@ input:focus {
 
 .ag-evidence-hit-heading { display: flex; align-items: baseline; gap: 12px; margin: 16px 0 10px; }
 .ag-evidence-hit-heading > h4 { margin: 0; }
+
+.ag-retrieval-content { display: grid; gap: 10px; margin-top: 16px; min-width: 0; }
+.ag-retrieval-content .ag-round + .ag-round { margin-top: 0; }

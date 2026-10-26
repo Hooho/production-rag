@@ -158,7 +158,7 @@ function EvidenceStatus({ rows, expanded, onToggle, children, agent = false }: {
       {!agent && (row.tone === "danger" || row.tone === "neutral") && row.detail && <small>{row.detail}</small>}
     </li>)}</ul> : <p className="ag-muted">没有答案的题，不看证据。</p>}
     {children}
-    <button type="button" className="secondary-button ag-detail-button" aria-expanded={expanded} onClick={onToggle}>{expanded ? "收起检索详情" : "检索详情"}</button>
+    <button type="button" className="secondary-button ag-detail-button" aria-haspopup="dialog" onClick={onToggle}>检索详情</button>
     <DetailDialog open={detailOpen} title={`${agent ? "Agent" : "固定流程"} · 证据命中详情`} onClose={() => setDetailOpen(false)} className="ag-evidence-hit-dialog">
       {rows.length === 0 && <p className="ag-muted">没有答案的题，不看证据。</p>}
       {rows.map((row, index) => <section key={index}>
@@ -837,6 +837,8 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
     <EvidenceStatus rows={fixedEvidenceRows(question, config)} expanded={expanded} onToggle={() => setExpanded(!expanded)}>
       <FinalDelivery question={question} items={question.cleared ? [] : usedRetry ? retryItems : items} unavailable={!question.cleared && (usedRetry ? !retry?.sources : !question.sources)} />
     </EvidenceStatus>
+    <DetailDialog open={expanded} title="固定流程 · 检索详情" onClose={() => setExpanded(false)} className="ag-retrieval-dialog">
+    <div className="ag-retrieval-content">
     {expanded && <p className="ag-muted ag-numbering-note">命中：含证据的来源；S1、S2 是本次检索的来源编号，点击查看原文。</p>}
     {expanded && <>
       {question.rewrite && <div className="ag-flow-step is-block">
@@ -887,6 +889,8 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
       {question.cleared && <div className="ag-flow-cleared">判断资料不足，已清空：线上会直接拒答。</div>}
       <MaterialLine material={fixedMaterial(question)} />
     </>}
+    </div>
+    </DetailDialog>
   </section>;
 }
 
@@ -926,6 +930,8 @@ function AgentLog({ question }: { question: EvalQuestion }) {
     <EvidenceStatus agent rows={agentEvidenceRows(question)} expanded={expanded} onToggle={() => setExpanded(!expanded)}>
       <FinalDelivery question={question} items={agentDelivery(question)} />
     </EvidenceStatus>
+    <DetailDialog open={expanded} title="Agent · 检索详情" onClose={() => setExpanded(false)} className="ag-retrieval-dialog">
+    <div className="ag-retrieval-content">
     {expanded && <p className="ag-muted ag-numbering-note">命中：含证据的来源；新增：本次新拿到的来源（可能同时命中）；已有：之前拿到且未命中的来源。点击编号查看原文。</p>}
     {expanded && <>
       {agent.question_sent !== question.question && <div className="ag-call-meta">实际提问（多轮追问按规则补全）：{agent.question_sent}</div>}
@@ -949,6 +955,8 @@ function AgentLog({ question }: { question: EvalQuestion }) {
       {agent.forced && !agent.round_logs?.length && <details className="ag-round ag-collapsible-round" open={rounds.length === 0}><summary className="ag-round-head">第 {agent.rounds} 轮<span className="ag-round-toggle" aria-hidden="true" /></summary><p className="ag-muted">{agent.stop_reason === "timeout" ? "时间到了" : "工具预算用完"}，不带工具直接回答，没有检索。这条历史记录没有保存本轮推理过程。</p></details>}
       <MaterialLine material={agentMaterial(question)} />
     </>}
+    </div>
+    </DetailDialog>
     <DetailDialog open={reasoningDetail !== null} title={`第 ${reasoningDetail?.round ?? "—"} 轮 · Agent 推理过程`} onClose={() => setReasoningDetail(null)} className="ag-reasoning-dialog">
       <div className="ag-round-text">{reasoningDetail?.text}</div>
     </DetailDialog>

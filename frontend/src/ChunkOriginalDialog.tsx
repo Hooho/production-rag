@@ -17,7 +17,7 @@ export function DetailDialog({ open, title, onClose, children, className = "" }:
     if (open && !dialog.current?.open) dialog.current?.showModal();
     else if (!open && dialog.current?.open) dialog.current.close();
   }, [open]);
-  return <dialog ref={dialog} className={`ag-delivery-dialog ${className}`} aria-label={title} onClose={onClose}
+  return <dialog ref={dialog} className={`ag-delivery-dialog ${className}`} aria-label={title} onClose={(event) => { event.stopPropagation(); onClose(); }}
     onClick={(event) => { if (event.target === event.currentTarget) dialog.current?.close(); }}>
     <div className="ag-delivery-dialog-head"><strong>{title}</strong>
       <button type="button" className="secondary-button" autoFocus onClick={() => dialog.current?.close()}>关闭</button></div>
