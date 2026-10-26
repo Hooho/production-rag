@@ -142,7 +142,8 @@ function MaterialLine({ material }: { material: EvalMaterial | null }) {
 }
 
 // 证据命中情况：每条证据一个结果标签（检索命中 / 父块扩展命中 / 读前后文拿到 / 被过滤 / 没召回 / 没拿到），后面写细节。
-type EvidenceStatusRow = { label: string; tone: "success" | "danger" | "neutral" | "info"; dashed?: boolean; detail: string };
+type EvidenceStatusEntry = { label: string; tone: "success" | "danger" | "neutral" | "info"; dashed?: boolean; detail: string; count?: number };
+type EvidenceStatusRow = EvidenceStatusEntry & { matches?: EvidenceStatusEntry[]; hitCount?: number };
 
 // 每张卡片的第一块：证据命中情况，每条证据一个结果标签加细节；下面「详情」按钮展开这张卡片原来的检索过程。
 function EvidenceStatus({ rows, expanded, onToggle, children }: { rows: EvidenceStatusRow[]; expanded: boolean; onToggle: () => void; children?: ReactNode }) {
@@ -150,8 +151,11 @@ function EvidenceStatus({ rows, expanded, onToggle, children }: { rows: Evidence
     <div className="ag-tool">证据命中情况</div>
     {rows.length > 0 ? <ul>{rows.map((row, index) => <li key={index}>
       <span className="ag-evidence-name">证据 {index + 1}</span>
-      <Tag tone={row.tone} size="sm" outline={row.dashed} className={row.dashed ? "is-dashed" : undefined}>{row.label}</Tag>
-      {row.detail && <small>{row.detail}</small>}
+      {row.hitCount !== undefined && <small>累计命中 {row.hitCount} 次</small>}
+      {(row.matches ?? [row]).map((match) => <span className="ag-evidence-match" key={match.label}>
+        <Tag tone={match.tone} size="sm" outline={match.dashed} className={match.dashed ? "is-dashed" : undefined}>{match.label}{match.count !== undefined ? ` · ${match.count} 次` : ""}</Tag>
+        {match.detail && <small>{match.detail}</small>}
+      </span>)}
     </li>)}</ul> : <p className="ag-muted">没有答案的题，不看证据。</p>}
     {children}
     <button type="button" className="secondary-button ag-detail-button" aria-expanded={expanded} onClick={onToggle}>{expanded ? "收起详情" : "详情"}</button>
@@ -192,13 +196,20 @@ function fixedEvidenceRows(question: EvalQuestion, config: EvalRun["config"]): E
     if (question.cleared) return { label: "被过滤", tone: "danger", detail: "（被充分性判断清空，线上会直接拒答）" };
     const finalItems = usedRetry ? retryItems : items;
     const chunkIds = evidenceLists[evidence] ?? [];
-    const carrier = finalItems.find((item) => (item.parts ?? []).some((chunkId) => chunkIds.includes(chunkId)));
+    const carriers = finalItems.filter((item) => (item.parts ?? []).some((chunkId) => chunkIds.includes(chunkId)));
     const from = usedRetry ? "补充检索的" : "";
-    if (carrier) {
-      const direct = carrier.chunkId ? chunkIds.includes(carrier.chunkId) : true;
-      const score = rerankText(carrier.relevance ?? (!usedRetry && direct ? fixed?.rerank_probability : undefined), !direct);
-      return direct ? { label: "检索命中", tone: "success", detail: [`${from}${carrier.id} ${chunkLabel(carrier.position, carrier.chunkId)}`, score].filter(Boolean).join(" · ") }
-        : { label: "父块扩展命中", tone: "success", dashed: true, detail: [`${from}${carrier.id} ${chunkLabel(carrier.position, carrier.chunkId)} 拼进来的相邻分片里`, score].filter(Boolean).join(" · ") };
+    if (carriers.length) {
+      const matches: EvidenceStatusEntry[] = [];
+      for (const direct of [true, false]) {
+        const sources = carriers.filter((item) => (item.chunkId ? chunkIds.includes(item.chunkId) : fixed?.via !== "extension") === direct);
+        if (!sources.length) continue;
+        matches.push({ label: direct ? "检索命中" : "扩展命中", tone: "success", dashed: !direct,
+          detail: sources.map((item) => [
+            `${from}${item.id} ${chunkLabel(item.position, item.chunkId)}`,
+            rerankText(item.relevance ?? (!usedRetry && direct ? fixed?.rerank_probability : undefined), !direct)
+          ].filter(Boolean).join(" · ")).join("；") });
+      }
+      return { ...matches[0], matches };
     }
     const row = lostRow(fixed, config);
     return retry ? { ...row, detail: `${row.detail}${usedRetry ? "；补充检索也没拿到" : "；补充检索没采用"}` } : row;
@@ -208,17 +219,28 @@ function fixedEvidenceRows(question: EvalQuestion, config: EvalRun["config"]): E
 function agentEvidenceRows(question: EvalQuestion): EvidenceStatusRow[] {
   const agent = question.agent;
   if (!agent || !question.answerable) return [];
-  return agent.evidence.map((evidence): EvidenceStatusRow => {
+  return agent.evidence.map((evidence, index): EvidenceStatusRow => {
     if (!evidence.found) return { label: "没拿到", tone: "neutral", detail: "" };
-    const first = [...evidence.where].sort((a, b) => a.call - b.call)[0];
-    const call = agent.calls.find((item) => item.call === first?.call);
-    const source = call?.results?.find((item) => item.evidence_id === first?.evidence_id);
-    const head = `第 ${call?.round ?? "—"} 轮`;
-    if (call?.name === "read_context") return { label: `${head}读前后文拿到`, tone: "info", detail: "" };
-    const extended = first ? viaExtension(agent, first, evidence.chunk_ids) : evidence.via === "extension";
-    const score = rerankText(source?.relevance, extended);
-    return extended ? { label: `${head}父块扩展命中`, tone: "success", dashed: true, detail: score }
-      : { label: `${head}检索命中`, tone: "success", detail: score };
+    const matches = new Map<string, EvidenceStatusEntry>();
+    for (const where of [...evidence.where].sort((a, b) => a.call - b.call)) {
+      const call = agent.calls.find((item) => item.call === where.call);
+      const source = call?.results?.find((item) => item.evidence_id === where.evidence_id);
+      const context = call?.name === "read_context";
+      const extended = !context && (source && evidence.chunk_ids?.length
+        ? !evidence.chunk_ids.includes(source.chunk_id ?? "")
+        : source?.main_hits ? !source.main_hits.includes(index) : evidence.via === "extension");
+      const label = `第 ${call?.round ?? "—"} 轮${context ? "读前后文拿到" : extended ? "扩展命中" : "检索命中"}`;
+      const score = context ? "" : rerankText(source?.relevance, extended);
+      const previous = matches.get(label);
+      if (previous) {
+        previous.count = (previous.count ?? 0) + 1;
+        previous.detail = [...new Set([...previous.detail.split("；"), score].filter(Boolean))].join("；");
+      } else matches.set(label, { label, tone: context ? "info" : "success", dashed: extended, detail: score, count: 1 });
+    }
+    const entries = [...matches.values()];
+    return entries.length ? { ...entries[0], matches: entries, hitCount: entries.reduce((sum, entry) => sum + (entry.count ?? 0), 0) } : {
+      label: evidence.via === "extension" ? "扩展命中" : evidence.via === "context" ? "读前后文拿到" : "检索命中", tone: "success", detail: ""
+    };
   });
 }
 
