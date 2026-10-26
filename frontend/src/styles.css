@@ -7720,10 +7720,17 @@ input:focus {
 
 .ev-root .ag-evidence-list {
    gap: 10px;
+   grid-template-columns: repeat(auto-fit, minmax(min(100%, max(360px, calc((100% - 10px) / 2))), 1fr));
+}
+
+.ag-evidence-list > .ag-evidence {
+   min-width: 0;
+   overflow-wrap: anywhere;
 }
 
 .ag-evidence-chunk {
    display: inline-flex;
+   flex-wrap: wrap;
    align-items: center;
    gap: 6px;
    color: var(--t-536d86);
