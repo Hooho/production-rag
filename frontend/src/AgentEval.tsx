@@ -638,7 +638,13 @@ function FinalDelivery({ question, items, unavailable = false }: { question: Eva
     {unavailable ? <p className="ag-muted">这次评测没有保存最终交付资料。</p> : rows.size === 0 ? <p className="ag-muted">{question.cleared ? "资料已清空，没有最终交付。" : "没有最终交付资料。"}</p> : <ul>
       {[...rows].map(([key, row]) => <li key={key}><button type="button" className="ag-delivery-row" aria-haspopup="dialog" onClick={() => setSelected({ label: chunkLabel(row.position, row.chunkId), sources: row.sources, evidence: row.hits.map((index) => ({ number: index + 1, text: evidence[index]?.text ?? "" })) })}>
         <strong>{row.chunkId ? chunkLabel(row.position, row.chunkId).replace(/第 (\d+) 片/, "第$1分片") : "资料"}：</strong>
-        <span>{row.sources.map((item) => `${item.id} ${item.key.startsWith("context-") ? "（读前后文）" : row.chunkId !== item.chunkId ? "（扩展命中）" : "检索命中"}`).filter((value, index, all) => all.indexOf(value) === index).join("、")}</span>
+        <span className="ag-delivery-origins">{row.sources.filter((item, index, all) => all.findIndex((other) => other.id === item.id && other.chunkId === item.chunkId && other.key.startsWith("context-") === item.key.startsWith("context-")) === index).map((item) => {
+          const context = item.key.startsWith("context-");
+          const extended = !context && row.chunkId !== item.chunkId;
+          return <span className="ag-delivery-origin" key={item.key}><span>{item.id}</span>
+            <Tag size="sm" tone={context || extended ? "info" : "success"} outline={extended} className={extended ? "is-dashed" : undefined}>{context ? "读前后文" : extended ? "扩展命中" : "检索命中"}</Tag>
+          </span>;
+        })}</span>
         <Tag size="sm" tone={row.hits.length ? "success" : "neutral"}>{row.hits.length ? `证据 ${row.hits.map((index) => index + 1).join("、")}` : "非证据"}</Tag><small>查看原文 →</small>
       </button></li>)}
     </ul>}
