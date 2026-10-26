@@ -150,3 +150,20 @@ def test_compare_lists_builtin_prompt_change():
     assert compare_runs(base, target)["settings_diff"] == [{"key": "Agent 提示词内容", "base": "aaa", "target": "bbb"}]
     old = {"id": "c", "config": {"modes": ["agent"], "agent": agent}, "summary": {}}
     assert compare_runs(old, target)["settings_diff"] == []
+
+
+def test_delivery_keeps_full_source_and_context_text():
+    from app.evaluation.agent_retrieval import call_log
+
+    text = "正文" * 500 + "末尾证据"
+    source = {"chunk_id": "doc:0", "parent_chunk_ids": ["doc:0", "doc:1"], "text": text}
+    search = call_log(1, 1, {"name": "search_knowledge", "status": "ok", "trace": {
+        "retrieval": {"sources": [source]}, "evidence_ids": ["S1"]}}, ["末尾证据"], {"doc:0": "正文", "doc:1": "末尾证据"})
+    assert search["full_text"] is True
+    assert search["results"][0]["text"] == text
+    assert search["results"][0]["hits"] == [0]
+    assert search["results"][0]["main_hits"] == []
+    context = call_log(2, 2, {"name": "read_context", "status": "ok", "content": text,
+        "trace": {"source_id": "S1", "chunk_ids": ["doc:1"], "positions": [1]}}, ["末尾证据"], {"doc:1": "末尾证据"})
+    assert context["text"] == text and context["full_text"] is True
+    assert context["read_hits"] == [0]

@@ -31,7 +31,6 @@ from .retrieval import (EVAL_OWNER, current_chunk_texts, evidence_hits, import_c
     run_retrieval)
 
 FORCED = {"budget", "timeout"}
-TEXT_LIMIT = 400
 ANSWER_LIMIT = 1000
 
 
@@ -62,12 +61,12 @@ def chunk_hits(chunk_ids, evidence, chunk_texts):
 
 
 # 把一次工具调用整理成检索日志的一条：参数、状态、返回了哪些资料、每条资料命中了哪几条证据。
-# 完整的检索诊断太大，不保存；资料正文只留前一段。
+# 完整的检索诊断太大，不保存；资料正文完整保留，最终交付浮窗使用评测时的原文。
 def call_log(number, round_no, call, evidence, chunk_texts):
     name = call.get("name") or ""
     trace = call.get("trace") or {}
     entry = {"call": number, "round": round_no, "name": name, "arguments": parse_arguments(call.get("arguments")),
-        "status": call.get("status"), "duration_ms": call.get("duration_ms"), "chunk_ids": [], "hits": []}
+        "status": call.get("status"), "duration_ms": call.get("duration_ms"), "chunk_ids": [], "hits": [], "full_text": True}
     if call.get("status") not in ("ok", "error"):
         # duplicate（和之前的调用完全相同，没有执行）、skipped（预算用完）：只记状态和给模型的说明。
         entry["note"] = (call.get("content") or "")[:200]
@@ -88,7 +87,7 @@ def call_log(number, round_no, call, evidence, chunk_texts):
             results.append({"evidence_id": evidence_id, "title": source.get("title"), "heading": source.get("heading"),
                 "chunk_id": source.get("chunk_id"), "position": source.get("position"), "parent_chunk_ids": parts,
                 "relevance": source.get("relevance"), "low_relevance": bool(source.get("low_relevance")),
-                "text": (source.get("text") or "")[:TEXT_LIMIT],
+                "text": (source.get("text") or ""),
                 "hits": sorted({index for indexes in part_hits.values() for index in indexes}), "main_hits": sorted(main_hits)})
         entry.update(query=trace.get("query"), mode=trace.get("mode"), top_k=trace.get("top_k"), results=results,
             chunk_ids=ids)
@@ -97,7 +96,7 @@ def call_log(number, round_no, call, evidence, chunk_texts):
         hits = chunk_hits(ids, evidence, chunk_texts)
         entry.update(source_id=trace.get("source_id"), direction=trace.get("direction"), chunk_ids=ids,
             positions=list(trace.get("positions") or []),
-            text=(call.get("content") or "")[:TEXT_LIMIT])
+            text=(call.get("content") or ""))
         entry["read_hits"] = sorted({index for values in hits.values() for index in values})
     else:
         entry["note"] = (call.get("content") or "")[:200]

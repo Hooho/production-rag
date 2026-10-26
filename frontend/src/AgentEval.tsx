@@ -586,7 +586,7 @@ function chunkLabel(position: number | null | undefined, chunkId?: string | null
 }
 
 // 一个分块：编号做成标签，命中证据的标签有背景色；点标签才显示内容。
-type ChunkItem = { key: string; id: string; chunkId?: string | null; position?: number | null; parts?: string[]; evidenceParts?: Set<string>; fresh?: boolean; title: string | null; heading: string | null; text: string; relevance?: number | null; low?: boolean; hit: boolean };
+type ChunkItem = { key: string; id: string; chunkId?: string | null; position?: number | null; parts?: string[]; evidenceParts?: Set<string>; fresh?: boolean; snapshotNote?: string; title: string | null; heading: string | null; text: string; relevance?: number | null; low?: boolean; hit: boolean };
 
 // 父块扩展：检索命中的是一片，父块扩展会把同一父块里相邻的几片一起拼进来交给模型。
 // 拼进来的那几片标成「扩展」（虚线框），方便看出证据是检索直接命中的，还是靠扩展带进来的。
@@ -637,6 +637,87 @@ function ChunkTabs({ items, empty }: { items: ChunkItem[]; empty: string }) {
       <button type="button" className="ag-more-link" onClick={() => setFullText(!fullText)}>{fullText ? "收起" : "展开更多"}</button>
     </div>}
   </div>;
+}
+
+function DeliveryText({ text, evidence }: { text: string; evidence: string[] }) {
+  const ranges: [number, number][] = [];
+  for (const quote of evidence) {
+    if (!quote) continue;
+    let start = text.indexOf(quote);
+    while (start >= 0) {
+      ranges.push([start, start + quote.length]);
+      start = text.indexOf(quote, start + quote.length);
+    }
+  }
+  ranges.sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [];
+  for (const range of ranges) {
+    const last = merged[merged.length - 1];
+    if (last && range[0] <= last[1]) last[1] = Math.max(last[1], range[1]);
+    else merged.push([...range]);
+  }
+  let end = 0;
+  return <div className="ag-delivery-text">{merged.map(([start, to]) => {
+    const prefix = text.slice(end, start);
+    end = to;
+    return <span key={start}>{prefix}<mark>{text.slice(start, to)}</mark></span>;
+  })}{text.slice(end)}</div>;
+}
+
+// 最终交付按分片去重，保留各个来源编号及评测时保存的正文。
+function FinalDelivery({ question, items, unavailable = false }: { question: EvalQuestion; items: ChunkItem[]; unavailable?: boolean }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const lists = question.answerable ? evidenceChunkLists(question) : [];
+  const evidence = question.agent?.evidence.length ? question.agent.evidence : question.evidence;
+  const rows = new Map<string, { chunkId: string | null; position?: number | null; sources: ChunkItem[]; hits: number[] }>();
+  for (const item of items) for (const chunkId of item.parts?.length ? item.parts : [item.chunkId ?? null]) {
+    const key = chunkId ?? item.key;
+    const row = rows.get(key) ?? { chunkId, position: chunkId === item.chunkId ? item.position : null, sources: [],
+      hits: lists.flatMap((ids, index) => chunkId && ids.includes(chunkId) ? [index] : []) };
+    if (!row.sources.some((source) => source.key === item.key)) row.sources.push(item);
+    rows.set(key, row);
+  }
+  const current = selected ? rows.get(selected) : undefined;
+  return <details className="ag-delivery">
+    <summary><span className="ag-tool">最终交付情况</span><small>{rows.size} 个分片</small></summary>
+    {unavailable ? <p className="ag-muted">这次评测没有保存最终交付资料。</p> : rows.size === 0 ? <p className="ag-muted">{question.cleared ? "资料已清空，没有最终交付。" : "没有最终交付资料。"}</p> : <ul>
+      {[...rows].map(([key, row]) => <li key={key}><button type="button" className="ag-delivery-row" onClick={() => { setSelected(key); dialog.current?.showModal(); }}>
+        <strong>{row.chunkId ? chunkLabel(row.position, row.chunkId).replace(/第 (\d+) 片/, "第$1分片") : "资料"}：</strong>
+        <span>{row.sources.map((item) => `${item.id} ${item.key.startsWith("context-") ? "（读前后文）" : row.chunkId !== item.chunkId ? "（扩展命中）" : "检索命中"}`).filter((value, index, all) => all.indexOf(value) === index).join("、")}</span>
+        <Tag size="sm" tone={row.hits.length ? "success" : "neutral"}>{row.hits.length ? `证据 ${row.hits.map((index) => index + 1).join("、")}` : "非证据"}</Tag><small>查看原文 →</small>
+      </button></li>)}
+    </ul>}
+    <dialog ref={dialog} className="ag-delivery-dialog" aria-label="交付分片原文" onClick={(event) => { if (event.target === event.currentTarget) dialog.current?.close(); }}>
+      {current && <><div className="ag-delivery-dialog-head"><strong>{chunkLabel(current.position, current.chunkId)} · 原文</strong><button type="button" className="secondary-button" autoFocus onClick={() => dialog.current?.close()}>关闭</button></div>
+        <p className="ag-muted">{current.hits.length ? `对应证据 ${current.hits.map((index) => index + 1).join("、")}` : "非证据"}</p>
+        {current.hits.map((index) => <blockquote key={index}>证据 {index + 1}：{evidence[index]?.text}</blockquote>)}
+        {current.sources.filter((source, index, all) => all.findIndex((other) => other.text === source.text) === index).map((item) => <section key={item.key}>
+          <h4>{item.id} · {item.title ?? "来源资料"}</h4>{item.heading && <p>{item.heading}</p>}
+          {(item.parts?.length ?? 0) > 1 && <p className="ag-muted">以下为包含该分片的交付原文（含相邻分片）。</p>}
+          {item.snapshotNote && <p className="ag-muted">{item.snapshotNote}</p>}<DeliveryText text={item.text} evidence={current.hits.map((index) => evidence[index]?.text ?? "")} />
+        </section>)}</>}
+    </dialog>
+  </details>;
+}
+
+function agentDelivery(question: EvalQuestion): ChunkItem[] {
+  const items = new Map<string, ChunkItem>();
+  for (const call of question.agent?.calls ?? []) {
+    for (const result of call.results ?? []) {
+      // Agent 的 S 编号全程稳定；重复检索不会重复交付同一条资料。
+      if (!items.has(result.evidence_id)) items.set(result.evidence_id, {
+        key: result.evidence_id, id: result.evidence_id, chunkId: result.chunk_id, position: result.position,
+        parts: result.parent_chunk_ids, title: result.title, heading: result.heading ?? null,
+        text: result.text, hit: result.hits.length > 0, snapshotNote: call.full_text ? undefined : "历史记录仅保存正文摘要，可能不完整。"
+      });
+    }
+    if (call.name === "read_context" && call.chunk_ids.length) items.set(`context-${call.call}`, {
+      key: `context-${call.call}`, id: call.source_id ?? "—", chunkId: null, parts: call.chunk_ids,
+      title: "读前后文", heading: null, text: call.text ?? "", hit: Boolean(call.read_hits?.length), snapshotNote: call.full_text ? undefined : "历史记录仅保存正文摘要，可能不完整。"
+    });
+  }
+  return [...items.values()];
 }
 
 // Agent 某次调用的某个结果是不是靠父块扩展才含这条证据：结果检索命中的分片不在证据所在分片里。
@@ -744,6 +825,7 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
   return <section className="ag-log">
     <div className="ag-log-title">固定流程<small>检索 {searches} 次{sufficiency?.checked ? ` · 判断 ${sufficiency.calls ?? 1} 次` : ""} · 耗时 {formatMs(question.flow_latency_ms ?? question.latency_ms)}</small></div>
     <EvidenceStatus rows={fixedEvidenceRows(question, config)} expanded={expanded} onToggle={() => setExpanded(!expanded)} />
+    <FinalDelivery question={question} items={question.cleared ? [] : usedRetry ? retryItems : items} unavailable={!question.cleared && (usedRetry ? !retry?.sources : !question.sources)} />
     {expanded && <p className="ag-muted ag-numbering-note">✓ 绿底：含证据　虚线绿框：证据在扩展的分片里　+扩展：父块拼进了相邻分片　S1、S2：这次检索的结果顺序</p>}
     {expanded && <>
       {question.rewrite && <div className="ag-flow-step is-block">
@@ -827,6 +909,7 @@ function AgentLog({ question }: { question: EvalQuestion }) {
   return <section className="ag-log">
     <div className="ag-log-title">Agent<small>检索 {agent.searches} 次{fresh.wasted > 0 ? `（${fresh.wasted} 次无新增）` : ""} · {agent.rounds} 轮 · {agent.prompt_tokens} token · {agent.search_ms !== undefined ? `检索 ${formatMs(agent.search_ms)} + 写回答 ${formatMs(agent.answer_ms)}` : `耗时 ${formatMs(agent.latency_ms)}`} · {STOP_LABELS[agent.stop_reason ?? ""] ?? agent.stop_reason ?? "—"}</small></div>
     <EvidenceStatus rows={agentEvidenceRows(question)} expanded={expanded} onToggle={() => setExpanded(!expanded)} />
+    <FinalDelivery question={question} items={agentDelivery(question)} />
     {expanded && <p className="ag-muted ag-numbering-note">✓ 绿底：含证据　虚线绿框：证据在扩展的分片里　小红点：新拿到　灰色：前面拿到过　+扩展：父块拼进了相邻分片</p>}
     {expanded && <>
       {agent.question_sent !== question.question && <div className="ag-call-meta">实际提问（多轮追问按规则补全）：{agent.question_sent}</div>}

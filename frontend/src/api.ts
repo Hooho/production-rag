@@ -694,6 +694,7 @@ export type EvalMode = "fixed" | "agent";
 export type EvalCompareKey = "both" | "fixed_only" | "agent_only" | "neither";
 export type EvalAgentResult = { evidence_id: string; title: string | null; heading?: string | null; chunk_id: string | null; position?: number | null; parent_chunk_ids?: string[]; relevance: number | null; low_relevance: boolean; text: string; hits: number[]; main_hits?: number[] };
 export type EvalAgentCall = {
+  full_text?: boolean;
   call: number;
   round: number | null;
   name: string;
