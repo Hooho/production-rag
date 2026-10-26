@@ -8652,8 +8652,8 @@ input:focus {
 .ag-collapsible-round > summary::-webkit-details-marker,
 .ag-reasoning-collapse > summary::-webkit-details-marker { display: none; }
 .ag-collapsible-round { display: block; }
-.ag-collapsible-round[open] > summary { margin-bottom: 4px; }
-.ag-collapsible-round > .ag-round-reasoning { margin-top: 4px; }
+.ag-collapsible-round[open] > summary { margin-bottom: 12px; }
+.ag-collapsible-round > .ag-round-reasoning { margin-top: 12px; }
 .ag-round-toggle { margin-left: auto; font-size: 12px; font-weight: 400; }
 .ag-round-toggle::after { content: "展开 ＋"; }
 .ag-collapsible-round[open] > summary .ag-round-toggle::after { content: "收起 −"; }
