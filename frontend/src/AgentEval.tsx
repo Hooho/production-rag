@@ -638,30 +638,32 @@ function FinalDelivery({ question, items, unavailable = false }: { question: Eva
     for (const chunkId of item.parts?.length ? item.parts : [item.chunkId ?? null]) {
       const key = chunkId ?? item.key;
       chunks.add(key);
-      const row = rows.get(key) ?? { chunkId, position: chunkId === item.chunkId ? item.position : null, sources: [],
-        hits: lists.flatMap((ids, index) => chunkId && ids.includes(chunkId) ? [index] : []) };
+      const row = rows.get(key) ?? {
+        chunkId, position: chunkId === item.chunkId ? item.position : null, sources: [],
+        hits: lists.flatMap((ids, index) => chunkId && ids.includes(chunkId) ? [index] : [])
+      };
       if (!row.sources.some((source) => source.key === item.key)) row.sources.push(item);
       rows.set(key, row);
     }
     groups.set(item.id, rows);
   }
   return <details className="ag-delivery">
-    <summary><span className="ag-tool">最终交付情况</span><small>{groups.size} 条来源 · {chunks.size} 个分片（含扩展）</small></summary>
+    <summary><span className="ag-tool">最终交付给模型的资料</span><small>{groups.size} 条来源 · {chunks.size} 个分片（含扩展）</small></summary>
     {unavailable ? <p className="ag-muted">这次评测没有保存最终交付资料。</p> : groups.size === 0 ? <p className="ag-muted">{question.cleared ? "资料已清空，没有最终交付。" : "没有最终交付资料。"}</p> : <ul className="ag-delivery-groups">
       {[...groups].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([id, rows]) => <li className="ag-delivery-group" key={id}>
         <details className="ag-delivery-source" open={[...rows.values()].some((row) => row.hits.length > 0)}>
-        <summary className="ag-delivery-group-head"><SourceTag id={id} /><small>{rows.size} 个分片</small><span className="ag-delivery-source-toggle" aria-hidden="true" /></summary>
-        <blockquote className="ag-delivery-quote"><ul>
-          {[...rows].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([key, row]) => {
-            const direct = row.sources.some((item) => !item.key.startsWith("context-") && item.chunkId === row.chunkId);
-            const extended = !direct && row.sources.some((item) => !item.key.startsWith("context-"));
-            return <li key={key}><button type="button" className={`ag-delivery-row ${row.hits.length ? "" : "is-non-evidence"}`} aria-haspopup="dialog" onClick={() => setSelected({ label: chunkLabel(row.position, row.chunkId), sources: row.sources, evidence: row.hits.map((index) => ({ number: index + 1, text: evidence[index]?.text ?? "" })) })}>
-              <strong>{row.chunkId ? chunkLabel(row.position, row.chunkId).replace(/第 (\d+) 片/, "第$1分片") : "资料"}</strong>
-              <Tag size="sm" tone={direct ? "success" : "info"} outline={extended} className={extended ? "is-dashed" : undefined}>{direct ? "检索命中" : extended ? "扩展命中" : "读前后文"}</Tag>
-              <Tag size="sm" tone={row.hits.length ? "success" : "neutral"} className={row.hits.length ? undefined : "ag-non-evidence"}>{row.hits.length ? `证据 ${row.hits.map((index) => index + 1).join("、")}` : "非证据"}</Tag><small>查看原文 →</small>
-            </button></li>;
-          })}
-        </ul></blockquote>
+          <summary className="ag-delivery-group-head"><SourceTag id={id} /><small>{rows.size} 个分片</small><span className="ag-delivery-source-toggle" aria-hidden="true" /></summary>
+          <blockquote className="ag-delivery-quote"><ul>
+            {[...rows].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([key, row]) => {
+              const direct = row.sources.some((item) => !item.key.startsWith("context-") && item.chunkId === row.chunkId);
+              const extended = !direct && row.sources.some((item) => !item.key.startsWith("context-"));
+              return <li key={key}><button type="button" className={`ag-delivery-row ${row.hits.length ? "" : "is-non-evidence"}`} aria-haspopup="dialog" onClick={() => setSelected({ label: chunkLabel(row.position, row.chunkId), sources: row.sources, evidence: row.hits.map((index) => ({ number: index + 1, text: evidence[index]?.text ?? "" })) })}>
+                <strong>{row.chunkId ? chunkLabel(row.position, row.chunkId).replace(/第 (\d+) 片/, "第$1分片") : "资料"}</strong>
+                <Tag size="sm" tone={direct ? "success" : "info"} outline={extended} className={extended ? "is-dashed" : undefined}>{direct ? "检索命中" : extended ? "扩展命中" : "读前后文"}</Tag>
+                <Tag size="sm" tone={row.hits.length ? "success" : "neutral"} className={row.hits.length ? undefined : "ag-non-evidence"}>{row.hits.length ? `证据 ${row.hits.map((index) => index + 1).join("、")}` : "非证据"}</Tag><small>查看原文 →</small>
+              </button></li>;
+            })}
+          </ul></blockquote>
         </details>
       </li>)}
     </ul>}
