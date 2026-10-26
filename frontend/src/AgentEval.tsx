@@ -162,8 +162,8 @@ function EvidenceStatus({ rows, expanded, onToggle, children, agent = false }: {
     <DetailDialog open={detailOpen} title={`${agent ? "Agent" : "固定流程"} · 证据命中详情`} onClose={() => setDetailOpen(false)} className="ag-evidence-hit-dialog">
       {rows.length === 0 && <p className="ag-muted">没有答案的题，不看证据。</p>}
       {rows.map((row, index) => <section key={index}>
-        <h4 className={row.tone === "danger" || row.tone === "neutral" ? "ag-evidence-missed" : undefined}>证据 {index + 1}</h4>
-        {row.hitCount !== undefined && <p className="ag-muted">累计命中 {row.hitCount} 次</p>}
+        <div className="ag-evidence-hit-heading"><h4 className={row.tone === "danger" || row.tone === "neutral" ? "ag-evidence-missed" : undefined}>证据 {index + 1}</h4>
+          {row.hitCount !== undefined && <small className="ag-muted">累计命中 {row.hitCount} 次</small>}</div>
         <ul className="ag-evidence-hit-list">{(row.matches ?? [row]).map((match) => <li key={match.label}>
           <Tag tone={match.tone} size="sm" outline={match.dashed} className={match.dashed ? "is-dashed" : undefined}>{match.label}{match.count !== undefined ? ` · ${match.count} 次` : ""}</Tag>
           {match.detail && <small>{match.detail}</small>}

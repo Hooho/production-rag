@@ -8731,3 +8731,6 @@ input:focus {
 .ag-evidence-chunk-button { color: inherit; font-family: monospace; cursor: pointer; }
 .ag-evidence-chunk-button:hover { background: #fff; text-decoration: underline; }
 .ag-evidence-chunk-button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+
+.ag-evidence-hit-heading { display: flex; align-items: baseline; gap: 12px; margin: 16px 0 10px; }
+.ag-evidence-hit-heading > h4 { margin: 0; }
