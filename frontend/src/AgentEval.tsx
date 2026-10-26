@@ -659,7 +659,7 @@ function FinalDelivery({ question, items, unavailable = false }: { question: Eva
               const extended = !direct && row.sources.some((item) => !item.key.startsWith("context-"));
               return <li key={key}><button type="button" className={`ag-delivery-row ${row.hits.length ? "" : "is-non-evidence"}`} aria-haspopup="dialog" onClick={() => setSelected({ label: chunkLabel(row.position, row.chunkId), sources: row.sources, evidence: row.hits.map((index) => ({ number: index + 1, text: evidence[index]?.text ?? "" })) })}>
                 <strong>{row.chunkId ? chunkLabel(row.position, row.chunkId).replace(/第 (\d+) 片/, "第$1分片") : "资料"}</strong>
-                <Tag size="sm" tone={direct ? "success" : "info"} outline={extended} className={extended ? "is-dashed" : undefined}>{direct ? "检索命中" : extended ? "扩展命中" : "读前后文"}</Tag>
+                <Tag size="sm" tone={direct ? "success" : "info"} outline={extended} className={extended ? "is-dashed" : undefined}>{direct ? (row.hits.length ? "检索命中" : "检索返回") : extended ? (row.hits.length ? "扩展命中" : "扩展返回") : "读前后文"}</Tag>
                 <Tag size="sm" tone={row.hits.length ? "success" : "neutral"} className={row.hits.length ? undefined : "ag-non-evidence"}>{row.hits.length ? `证据 ${row.hits.map((index) => index + 1).join("、")}` : "非证据"}</Tag><small>查看原文 →</small>
               </button></li>;
             })}
