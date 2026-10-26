@@ -15,7 +15,7 @@ from test_evaluation import eval_dir, fake_rerank, headers  # noqa: F401  pytest
 # dev 集三道题：a1 退货（Agent 检索并命中）、a2 保修（Agent 没检索直接回答，算没命中）、u1 天气（无法回答，Agent 直接回答）。
 def scripted_agent(client):
     model = ScriptedModel(
-        reply(calls=[tool_call("c1", "search_knowledge", query="耳机签收后几天内可以退货")]),
+        reply(calls=[tool_call("c1", "search_knowledge", query="耳机签收后几天内可以退货")], reasoning="先查询退货期限"),
         reply(calls=[tool_call("c2", "search_knowledge", query="耳机签收后几天内可以退货吗")]),
         reply("签收后七天内可以退货 [S1]。"),
         reply("资料中没有找到保修期。"),
@@ -55,6 +55,11 @@ def test_agent_retrieval_runs_with_fixed(setup, eval_dir, monkeypatch):
     assert agent["found_count"] == 1 and agent["ext_hits"] == 0 and call["results"][0]["main_hits"] == [0]
     assert agent["found_count"] - agent["ext_hits"] - agent["context_hits"] == 1
     assert isinstance(call["results"][0]["position"], int)
+    assert len(agent["round_logs"]) == 3
+    assert agent["round_logs"][0]["round"] == 1
+    assert agent["round_logs"][0]["reasoning"] == "先查询退货期限"
+    assert agent["round_logs"][1]["reasoning"] == ""
+    assert agent["round_logs"][2]["content"] == "签收后七天内可以退货 [S1]。"
     assert agent["rounds"] == 3 and agent["tool_calls"] == 2 and agent["prompt_tokens"] == 300
     assert agent["answer"] == "签收后七天内可以退货 [S1]。"
     # 检索耗时只算发起工具调用的那几轮，加上写回答等于总耗时。

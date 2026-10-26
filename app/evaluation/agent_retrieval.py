@@ -184,6 +184,10 @@ def evaluate_agent(agent_mode, store, models, item, chunk_texts, positions=None)
         "found_count": len(found), "ext_hits": sum(1 for index in found if via.get(index) == "extension"),
         "context_hits": sum(1 for index in found if via.get(index) == "context"),
         "calls": calls, "returned": len(chunks),
+        "round_logs": [{"round": record.get("round"), "kind": record.get("kind") or "normal",
+            "reasoning": record.get("reasoning") or "", "content": record.get("content") or "",
+            "error": record.get("error"), "duration_ms": record.get("duration_ms")}
+            for record in outcome.get("rounds") or []],
         "searches": len(searches), "empty_searches": sum(1 for entry in searches if not entry.get("results")),
         "wasted_searches": sum(1 for entry in searches if entry["new_chunks"] == 0),
         "queries": [entry.get("query") for entry in searches],

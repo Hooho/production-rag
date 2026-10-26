@@ -719,7 +719,9 @@ export type EvalAgentCall = {
   note?: string;
   error?: string;
 };
+export type EvalAgentRound = { round: number | null; kind: string; reasoning: string; content: string; error?: string | null; duration_ms?: number | null };
 export type EvalAgentQuestion = {
+  round_logs?: EvalAgentRound[];
   // 交给模型的资料：资料池里全部资料（旧记录没有）。
   material?: EvalMaterial;
   question_sent: string;

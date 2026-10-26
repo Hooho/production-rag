@@ -8631,3 +8631,11 @@ input:focus {
 .ag-delivery-dialog blockquote { margin: 16px 0; padding: 12px 16px; border-left: 3px solid #3c8655; background: #eef8f0; white-space: pre-wrap; }
 .ag-delivery-dialog section { border-top: 1px solid #d9e5dc; padding-top: 12px; margin-top: 20px; }
 .ag-delivery-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
+
+.ag-round-reasoning { margin: 12px 0; padding: 12px 14px; border-left: 3px solid #b2cdb7; border-radius: 4px; background: #f3f8f4; }
+.ag-round-reasoning > .ag-tool { display: block; margin-bottom: 8px; }
+.ag-round-reasoning > p { margin: 0; }
+.ag-round-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
+.ag-round-output { margin: 10px 0 14px; }
+.ag-round-output > summary { cursor: pointer; color: var(--muted, #718675); }
+.ag-round-output > .ag-round-text { margin-top: 10px; }
