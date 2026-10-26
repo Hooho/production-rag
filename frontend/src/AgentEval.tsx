@@ -176,7 +176,7 @@ function EvidenceStatus({ rows, expanded, onToggle, children, agent = false }: {
 // 证据命中情况（两边各一列）：从逐题结果算出每条证据的结果标签和细节。
 // 固定流程按最后交给模型的资料算（补充检索、被清空都考虑），没拿到的写丢在哪一步；Agent 重点写第几轮拿到的。
 function rerankText(value: number | null | undefined, extended = false) {
-  return typeof value === "number" && Number.isFinite(value) ? `${extended ? "来源" : ""}重排分 ${value.toFixed(2)}` : "";
+  return !extended && typeof value === "number" && Number.isFinite(value) ? `重排分 ${value.toFixed(2)}` : "";
 }
 
 function chunkItemsOf(sources: EvalQuestion["sources"] | EvalRetry["sources"] | undefined) {
@@ -653,7 +653,7 @@ function ChunkTabs({ items, empty, question }: { items: ChunkItem[]; empty: stri
           const ids = item.parts?.length ? item.parts : item.chunkId ? [item.chunkId] : [];
           const texts = question.agent?.evidence.length ? question.agent.evidence : question.evidence;
           const hits = question.answerable ? evidenceChunkLists(question).flatMap((chunks, index) => chunks.some((id) => ids.includes(id)) ? [index] : []) : [];
-          setSelected({ label: chunkLabel(item.position, item.chunkId), sources: [item], evidence: hits.map((index) => ({ number: index + 1, text: texts[index]?.text ?? "" })) });
+          setSelected({ label: chunkLabel(item.position, item.chunkId), chunkId: item.chunkId, sources: [item], evidence: hits.map((index) => ({ number: index + 1, text: texts[index]?.text ?? "" })) });
         }} />)}</span>
     </li>)}</ul>
     <ChunkOriginalDialog value={selected} onClose={() => setSelected(null)} />
@@ -693,7 +693,7 @@ function FinalDelivery({ question, items, unavailable = false }: { question: Eva
               const direct = row.sources.some((item) => !item.key.startsWith("context-") && item.chunkId === row.chunkId);
               const extended = !direct && row.sources.some((item) => !item.key.startsWith("context-"));
               const score = [...new Set(row.sources.map((item) => rerankText(item.relevance, extended)).filter(Boolean))].join("、");
-              return <li key={key}><button type="button" className={`ag-delivery-row ${row.hits.length ? "" : "is-non-evidence"}`} aria-haspopup="dialog" onClick={() => setSelected({ label: chunkLabel(row.position, row.chunkId), sources: row.sources, evidence: row.hits.map((index) => ({ number: index + 1, text: evidence[index]?.text ?? "" })) })}>
+              return <li key={key}><button type="button" className={`ag-delivery-row ${row.hits.length ? "" : "is-non-evidence"}`} aria-haspopup="dialog" onClick={() => setSelected({ label: chunkLabel(row.position, row.chunkId), chunkId: row.chunkId, sources: row.sources, evidence: row.hits.map((index) => ({ number: index + 1, text: evidence[index]?.text ?? "" })) })}>
                 <strong>{row.chunkId ? chunkLabel(row.position, row.chunkId).replace(/第 (\d+) 片/, "第$1分片") : "资料"}</strong>
                 <Tag size="sm" tone={direct ? "success" : "info"} outline={extended} className={extended ? "is-dashed" : undefined}>{direct ? (row.hits.length ? "检索命中" : "检索返回") : extended ? (row.hits.length ? "扩展命中" : "扩展返回") : "读前后文"}</Tag>
                 <Tag size="sm" tone={row.hits.length ? "success" : "neutral"} className={row.hits.length ? undefined : "ag-non-evidence"}>{row.hits.length ? `证据 ${row.hits.map((index) => index + 1).join("、")}` : "非证据"}</Tag>{score && <span className="ag-delivery-score">{score}</span>}<small>查看原文 →</small>

@@ -4,10 +4,10 @@ import { SourceTag } from "./Tag";
 
 export type ChunkOriginalSource = {
   key: string; id: string; title: string | null; heading: string | null; text: string;
-  parts?: string[]; snapshotNote?: string; relevance?: number | null; low?: boolean;
+  chunkId?: string | null; parts?: string[]; snapshotNote?: string; relevance?: number | null; low?: boolean;
 };
 export type ChunkOriginal = {
-  label: string; note?: string; sources: ChunkOriginalSource[]; evidence: { number: number; text: string }[];
+  label: string; chunkId?: string | null; note?: string; sources: ChunkOriginalSource[]; evidence: { number: number; text: string }[];
 };
 
 // 原文和推理全文共用右侧弹窗，保留原生对话框的焦点管理与 Escape 关闭。
@@ -33,7 +33,7 @@ export function ChunkOriginalDialog({ value, onClose }: { value: ChunkOriginal |
       {value.evidence.map((item) => <blockquote key={item.number}>证据 {item.number}：{item.text}</blockquote>)}
       {value.sources.filter((source, index, all) => all.findIndex((other) => other.text === source.text) === index).map((item) => <section key={item.key}>
         <h4><SourceTag id={item.id} /> · {item.title ?? "来源资料"}</h4>{item.heading && <p>{item.heading}</p>}
-        {item.relevance != null && <p className="ag-muted">来源重排分 {item.relevance.toFixed(2)}{item.low ? "（较低）" : ""}</p>}
+        {value.chunkId && item.chunkId === value.chunkId && item.relevance != null && <p className="ag-muted">重排分 {item.relevance.toFixed(2)}{item.low ? "（较低）" : ""}</p>}
         {(item.parts?.length ?? 0) > 1 && <p className="ag-muted">以下为包含该分片的交付原文（含相邻分片）。</p>}
         {item.snapshotNote && <p className="ag-muted">{item.snapshotNote}</p>}
         <OriginalText text={item.text} evidence={value.evidence.map((quote) => quote.text)} />
