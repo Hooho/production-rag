@@ -856,14 +856,14 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
         {question.rerank_query && question.rerank_query !== question.question && <div className="ag-step-row"><span className="ag-row-label">补全后的问题</span><span>{question.rerank_query}</span></div>}
         <div className="ag-step-row"><span className="ag-row-label">扩展查询（{queries.length} 路）</span>
           {routes.length ? <span className="ag-muted">每一路分别检索，见下方检索</span>
-            : <div><ul className="ag-query-list">{queries.map((query) => <li key={query}>{query}</li>)}</ul>
+            : <div><ul className="ag-query-list">{queries.map((query) => <li key={query}><strong className="ag-query-title">{queries.length > 1 ? "扩展查询" : "检索查询"}</strong>{query}</li>)}</ul>
               {queries.length > 1 && <small className="ag-muted">每一路分别检索，结果合并后再重排</small>}</div>}</div>
       </div>}
       <div className={`ag-call ${usedRetry ? "is-unused" : ""}`}>
         <div className="ag-call-head"><span className="ag-tool">{sufficiency?.retried ? "第 1 次 · " : ""}检索</span>
           <Tag outline plain>耗时 {formatMs(question.latency_ms)}</Tag><HitTag hits={hitEvidence(items, evidenceLists)} total={total} />
           {usedRetry && <Tag outline plain>没采用（换成了补充检索的结果）</Tag>}</div>
-        {!question.rewrite && !routes.length && <ul className="ag-query-list">{queries.map((query) => <li key={query}>{query}</li>)}</ul>}
+        {!question.rewrite && !routes.length && <ul className="ag-query-list">{queries.map((query) => <li key={query}><strong className="ag-query-title">{queries.length > 1 ? "扩展查询" : "检索查询"}</strong>{query}</li>)}</ul>}
         <SearchParams values={params} />
         {/* 每一路检索词分别检索（和 Agent 同一轮同时发出的几次检索对应），再合并、重排、过滤成最后的结果。 */}
         {/* 只有 1 路时不再套一层「检索」框（外面已经是检索这一步），直接列这一路。 */}
@@ -872,7 +872,7 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
           {routes.map((route, index) => <div className="ag-route" key={route.query}>
             <div className="ag-call-head"><span className="ag-tool">第 {index + 1} 路</span>
               <Tag outline plain>召回 {route.recalled} 段</Tag><Tag outline plain>留到最后 {route.kept} 段</Tag></div>
-            <div className="ag-call-query">{route.query}</div>
+            <div className="ag-call-query"><strong className="ag-query-title">{routes.length > 1 ? "扩展查询" : "检索查询"}</strong><span>{route.query}</span></div>
             {/* 这一路召回到了哪几条证据、各排第几（向量、关键词两张排名表）。 */}
             {total > 0 && <ul className="ag-evidence-trace">{Array.from({ length: total }, (_, evidence) => {
               const best = route.best.find((item) => item.evidence === evidence);
@@ -898,7 +898,7 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
       {retry && <div className={`ag-call ${usedRetry ? "" : "is-unused"}`}>
         <div className="ag-call-head"><span className="ag-tool">第 2 次 · 补充检索</span>
           <HitTag hits={hitEvidence(retryItems, evidenceLists)} total={total} /><Tag outline plain>{usedRetry ? "采用了" : "没变好，沿用第一次的"}</Tag></div>
-        <ul className="ag-query-list">{queries.map((query) => <li key={query}>{query}</li>)}{sufficiency?.retry_query && <li className="is-added">{sufficiency.retry_query}<small>补充的</small></li>}</ul>
+        <ul className="ag-query-list">{queries.map((query) => <li key={query}><strong className="ag-query-title">{queries.length > 1 ? "扩展查询" : "检索查询"}</strong>{query}</li>)}{sufficiency?.retry_query && <li className="is-added"><strong className="ag-query-title">补充查询</strong>{sufficiency.retry_query}<small>补充的</small></li>}</ul>
         <SearchParams values={[...params, `返回 ${retry.returned} 段`]} />
         {retry.sources ? <ChunkTabs question={question} items={retryItems} empty="补充检索没有返回分块。" /> : <p className="ag-muted">这次评测没有保存补充检索的分块。</p>}
       </div>}
@@ -1022,7 +1022,7 @@ function AgentCall({ call, fresh, evidenceChunks, question }: { question: EvalQu
         : <Tag tone="warning" title="这次拿回的分块，前面的调用都已经拿到过">无新增</Tag>)}
     </div>
     {call.name === "search_knowledge" && call.query !== undefined ? <>
-      <div className="ag-call-query">{call.query}</div>
+      <div className="ag-call-query"><strong className="ag-query-title">Agent 查询</strong><span>{call.query}</span></div>
       <SearchParams values={[SEARCH_MODE_LABELS[call.mode ?? ""] ?? call.mode ?? "默认检索", `Top K ${call.top_k ?? "—"}`]} /></>
       : call.name === "read_context" && call.source_id ? <div className="ag-call-query">{call.source_id} 的{call.direction === "before" ? "前文" : "后文"}</div>
         : <div className="ag-call-query"><code>{JSON.stringify(call.arguments)}</code></div>}

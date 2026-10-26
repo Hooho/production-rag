@@ -8745,6 +8745,9 @@ input:focus {
 .ag-merge-evidence li, .ag-merge-evidence .ag-evidence-match { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
 .ag-merge-evidence .ag-evidence-name.is-missed { color: var(--ev-muted); }
 
-.ag-call-params { display: grid; gap: 6px; }
+.ag-call-params { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .ag-call-params > strong { font-size: inherit; font-weight: 600; }
 .ag-call-param-values { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.ag-call-params > strong { flex-shrink: 0; }
+.ag-query-title { display: inline-block; margin-right: 10px; color: var(--ev-muted); font-size: 12px; font-weight: 600; }
