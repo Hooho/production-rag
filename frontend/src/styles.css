@@ -8672,3 +8672,5 @@ input:focus {
 .ag-chunk-groups > li { display: flex; align-items: baseline; gap: 4px; }
 .ag-chunk-group-label { flex-shrink: 0; color: var(--ev-muted); }
 .ag-chunk-group-sources { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+
+.ag-delivery .tag.ag-non-evidence { --tag-text: #666; --tag-bg: #f2f2f2; --tag-border: #ddd; }

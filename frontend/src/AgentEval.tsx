@@ -650,7 +650,7 @@ function FinalDelivery({ question, items, unavailable = false }: { question: Eva
             <Tag size="sm" tone={context || extended ? "info" : "success"} outline={extended} className={extended ? "is-dashed" : undefined}>{context ? "读前后文" : extended ? "扩展命中" : "检索命中"}</Tag>
           </span>;
         })}</span>
-        <Tag size="sm" tone={row.hits.length ? "success" : "neutral"}>{row.hits.length ? `证据 ${row.hits.map((index) => index + 1).join("、")}` : "非证据"}</Tag><small>查看原文 →</small>
+        <Tag size="sm" tone={row.hits.length ? "success" : "neutral"} className={row.hits.length ? undefined : "ag-non-evidence"}>{row.hits.length ? `证据 ${row.hits.map((index) => index + 1).join("、")}` : "非证据"}</Tag><small>查看原文 →</small>
       </button></li>)}
     </ul>}
     <ChunkOriginalDialog value={selected} onClose={() => setSelected(null)} />
