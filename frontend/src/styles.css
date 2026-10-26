@@ -8665,8 +8665,6 @@ input:focus {
 .ag-evidence-status .ag-delivery > summary .ag-tool { font-size: 13px; }
 
 .ag-evidence-status .ag-delivery > ul { gap: 2px; margin-top: 6px; }
-.ag-delivery-origins { display: inline-flex; flex-wrap: wrap; gap: 6px; }
-.ag-delivery-origin { display: inline-flex; align-items: center; gap: 4px; }
 
 .ag-chunk-groups { display: grid; gap: 5px; list-style: none; margin: 8px 0 0; padding: 0; font-size: 13px; }
 .ag-chunk-groups > li { display: flex; align-items: baseline; gap: 4px; }
@@ -8674,3 +8672,8 @@ input:focus {
 .ag-chunk-group-sources { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 
 .ag-delivery .tag.ag-non-evidence { --tag-text: #666; --tag-bg: #f2f2f2; --tag-border: #ddd; }
+
+.ag-evidence-status .ag-delivery-groups > .ag-delivery-group { display: block; margin-top: 6px; }
+.ag-delivery-group-head { display: flex; align-items: center; gap: 8px; }
+.ag-delivery-quote { margin: 6px 0 8px 10px; padding: 0 0 0 12px; border-left: 2px solid var(--ev-line, #d9e5dc); }
+.ag-evidence-status .ag-delivery-quote > ul { margin: 0; gap: 2px; }

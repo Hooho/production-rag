@@ -625,33 +625,43 @@ function ChunkTabs({ items, empty, question }: { items: ChunkItem[]; empty: stri
   </div>;
 }
 
-// 最终交付按分片去重，保留各个来源编号及评测时保存的正文。
+// 按来源编号分组，每组内合并同一分片；不同来源可能覆盖同一个分片。
 function FinalDelivery({ question, items, unavailable = false }: { question: EvalQuestion; items: ChunkItem[]; unavailable?: boolean }) {
   const [selected, setSelected] = useState<ChunkOriginal | null>(null);
   const lists = question.answerable ? evidenceChunkLists(question) : [];
   const evidence = question.agent?.evidence.length ? question.agent.evidence : question.evidence;
-  const rows = new Map<string, { chunkId: string | null; position?: number | null; sources: ChunkItem[]; hits: number[] }>();
-  for (const item of items) for (const chunkId of item.parts?.length ? item.parts : [item.chunkId ?? null]) {
-    const key = chunkId ?? item.key;
-    const row = rows.get(key) ?? { chunkId, position: chunkId === item.chunkId ? item.position : null, sources: [],
-      hits: lists.flatMap((ids, index) => chunkId && ids.includes(chunkId) ? [index] : []) };
-    if (!row.sources.some((source) => source.key === item.key)) row.sources.push(item);
-    rows.set(key, row);
+  type Row = { chunkId: string | null; position?: number | null; sources: ChunkItem[]; hits: number[] };
+  const groups = new Map<string, Map<string, Row>>();
+  const chunks = new Set<string>();
+  for (const item of items) {
+    const rows = groups.get(item.id) ?? new Map<string, Row>();
+    for (const chunkId of item.parts?.length ? item.parts : [item.chunkId ?? null]) {
+      const key = chunkId ?? item.key;
+      chunks.add(key);
+      const row = rows.get(key) ?? { chunkId, position: chunkId === item.chunkId ? item.position : null, sources: [],
+        hits: lists.flatMap((ids, index) => chunkId && ids.includes(chunkId) ? [index] : []) };
+      if (!row.sources.some((source) => source.key === item.key)) row.sources.push(item);
+      rows.set(key, row);
+    }
+    groups.set(item.id, rows);
   }
   return <details className="ag-delivery">
-    <summary><span className="ag-tool">最终交付情况</span><small>{rows.size} 个分片</small></summary>
-    {unavailable ? <p className="ag-muted">这次评测没有保存最终交付资料。</p> : rows.size === 0 ? <p className="ag-muted">{question.cleared ? "资料已清空，没有最终交付。" : "没有最终交付资料。"}</p> : <ul>
-      {[...rows].map(([key, row]) => <li key={key}><button type="button" className="ag-delivery-row" aria-haspopup="dialog" onClick={() => setSelected({ label: chunkLabel(row.position, row.chunkId), sources: row.sources, evidence: row.hits.map((index) => ({ number: index + 1, text: evidence[index]?.text ?? "" })) })}>
-        <strong>{row.chunkId ? chunkLabel(row.position, row.chunkId).replace(/第 (\d+) 片/, "第$1分片") : "资料"}：</strong>
-        <span className="ag-delivery-origins">{row.sources.filter((item, index, all) => all.findIndex((other) => other.id === item.id && other.chunkId === item.chunkId && other.key.startsWith("context-") === item.key.startsWith("context-")) === index).map((item) => {
-          const context = item.key.startsWith("context-");
-          const extended = !context && row.chunkId !== item.chunkId;
-          return <span className="ag-delivery-origin" key={item.key}><SourceTag id={item.id} />
-            <Tag size="sm" tone={context || extended ? "info" : "success"} outline={extended} className={extended ? "is-dashed" : undefined}>{context ? "读前后文" : extended ? "扩展命中" : "检索命中"}</Tag>
-          </span>;
-        })}</span>
-        <Tag size="sm" tone={row.hits.length ? "success" : "neutral"} className={row.hits.length ? undefined : "ag-non-evidence"}>{row.hits.length ? `证据 ${row.hits.map((index) => index + 1).join("、")}` : "非证据"}</Tag><small>查看原文 →</small>
-      </button></li>)}
+    <summary><span className="ag-tool">最终交付情况</span><small>{groups.size} 条来源 · {chunks.size} 个分片（含扩展）</small></summary>
+    {unavailable ? <p className="ag-muted">这次评测没有保存最终交付资料。</p> : groups.size === 0 ? <p className="ag-muted">{question.cleared ? "资料已清空，没有最终交付。" : "没有最终交付资料。"}</p> : <ul className="ag-delivery-groups">
+      {[...groups].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([id, rows]) => <li className="ag-delivery-group" key={id}>
+        <div className="ag-delivery-group-head"><SourceTag id={id} /><small>{rows.size} 个分片</small></div>
+        <blockquote className="ag-delivery-quote"><ul>
+          {[...rows].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([key, row]) => {
+            const direct = row.sources.some((item) => !item.key.startsWith("context-") && item.chunkId === row.chunkId);
+            const extended = !direct && row.sources.some((item) => !item.key.startsWith("context-"));
+            return <li key={key}><button type="button" className="ag-delivery-row" aria-haspopup="dialog" onClick={() => setSelected({ label: chunkLabel(row.position, row.chunkId), sources: row.sources, evidence: row.hits.map((index) => ({ number: index + 1, text: evidence[index]?.text ?? "" })) })}>
+              <strong>{row.chunkId ? chunkLabel(row.position, row.chunkId).replace(/第 (\d+) 片/, "第$1分片") : "资料"}</strong>
+              <Tag size="sm" tone={direct ? "success" : "info"} outline={extended} className={extended ? "is-dashed" : undefined}>{direct ? "检索命中" : extended ? "扩展命中" : "读前后文"}</Tag>
+              <Tag size="sm" tone={row.hits.length ? "success" : "neutral"} className={row.hits.length ? undefined : "ag-non-evidence"}>{row.hits.length ? `证据 ${row.hits.map((index) => index + 1).join("、")}` : "非证据"}</Tag><small>查看原文 →</small>
+            </button></li>;
+          })}
+        </ul></blockquote>
+      </li>)}
     </ul>}
     <ChunkOriginalDialog value={selected} onClose={() => setSelected(null)} />
   </details>;
