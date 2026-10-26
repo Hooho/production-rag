@@ -737,6 +737,13 @@ function viaExtension(agent: EvalQuestion["agent"], where: { call: number; evide
 
 // 展开后：先说每条证据在哪个分块（两边各自的编号，Agent 还标第几次调用），下面左右两栏只列分块编号。
 // 固定流程的检索参数（一行显示）：检索方式、候选池、返回段数、相关度阈值；专项只知道检索方式。
+function SearchParams({ values }: { values: string[] }) {
+  return <div className="ag-call-params" role="group" aria-label="检索参数">
+    <strong>检索参数</strong>
+    <div className="ag-call-param-values">{values.map((value, index) => <Tag key={index} outline plain size="sm">{value}</Tag>)}</div>
+  </div>;
+}
+
 function fixedParams(config: EvalRun["config"] & { search_label?: string }) {
   const parts = [config.search_label ?? "混合检索"];
   if (config.pool_size) parts.push(`候选池 ${config.pool_size}`);
@@ -857,7 +864,7 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
           <Tag outline plain>耗时 {formatMs(question.latency_ms)}</Tag><HitTag hits={hitEvidence(items, evidenceLists)} total={total} />
           {usedRetry && <Tag outline plain>没采用（换成了补充检索的结果）</Tag>}</div>
         {!question.rewrite && !routes.length && <ul className="ag-query-list">{queries.map((query) => <li key={query}>{query}</li>)}</ul>}
-        <div className="ag-call-params">{params.join(" · ")}</div>
+        <SearchParams values={params} />
         {/* 每一路检索词分别检索（和 Agent 同一轮同时发出的几次检索对应），再合并、重排、过滤成最后的结果。 */}
         {/* 只有 1 路时不再套一层「检索」框（外面已经是检索这一步），直接列这一路。 */}
         {routes.length > 0 && <div className={routes.length > 1 ? "ag-round is-parallel" : "ag-single-route"}>
@@ -891,7 +898,7 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
         <div className="ag-call-head"><span className="ag-tool">第 2 次 · 补充检索</span>
           <HitTag hits={hitEvidence(retryItems, evidenceLists)} total={total} /><Tag outline plain>{usedRetry ? "采用了" : "没变好，沿用第一次的"}</Tag></div>
         <ul className="ag-query-list">{queries.map((query) => <li key={query}>{query}</li>)}{sufficiency?.retry_query && <li className="is-added">{sufficiency.retry_query}<small>补充的</small></li>}</ul>
-        <div className="ag-call-params">{params.join(" · ")} · 返回 {retry.returned} 段</div>
+        <SearchParams values={[...params, `返回 ${retry.returned} 段`]} />
         {retry.sources ? <ChunkTabs question={question} items={retryItems} empty="补充检索没有返回分块。" /> : <p className="ag-muted">这次评测没有保存补充检索的分块。</p>}
       </div>}
       {sufficiency && retry && <SufficiencySteps question={question} part="rest" />}
@@ -1015,7 +1022,7 @@ function AgentCall({ call, fresh, evidenceChunks, question }: { question: EvalQu
     </div>
     {call.name === "search_knowledge" && call.query !== undefined ? <>
       <div className="ag-call-query">{call.query}</div>
-      <div className="ag-call-params">{SEARCH_MODE_LABELS[call.mode ?? ""] ?? call.mode} · Top K {call.top_k}</div></>
+      <SearchParams values={[SEARCH_MODE_LABELS[call.mode ?? ""] ?? call.mode ?? "默认检索", `Top K ${call.top_k ?? "—"}`]} /></>
       : call.name === "read_context" && call.source_id ? <div className="ag-call-query">{call.source_id} 的{call.direction === "before" ? "前文" : "后文"}</div>
         : <div className="ag-call-query"><code>{JSON.stringify(call.arguments)}</code></div>}
     {status && <div className="ag-call-meta">{status}{call.error ? `：${call.error}` : ""}</div>}

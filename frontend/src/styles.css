@@ -8743,3 +8743,7 @@ input:focus {
 .ag-merge-evidence { margin: 6px 0 10px; }
 .ag-merge-evidence li, .ag-merge-evidence .ag-evidence-match { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
 .ag-merge-evidence .ag-evidence-name.is-missed { color: var(--ev-muted); }
+
+.ag-call-params { display: grid; gap: 6px; }
+.ag-call-params > strong { font-size: inherit; font-weight: 600; }
+.ag-call-param-values { display: flex; flex-wrap: wrap; gap: 6px; }
