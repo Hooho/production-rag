@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { SourceTag } from "./Tag";
 
 export type ChunkOriginalSource = {
@@ -9,17 +9,24 @@ export type ChunkOriginal = {
   label: string; sources: ChunkOriginalSource[]; evidence: { number: number; text: string }[];
 };
 
-// 交付列表与检索过程共用的原文浮窗，关闭后焦点回到触发按钮。
-export function ChunkOriginalDialog({ value, onClose }: { value: ChunkOriginal | null; onClose: () => void }) {
+// 原文和推理全文共用右侧弹窗，保留原生对话框的焦点管理与 Escape 关闭。
+export function DetailDialog({ open, title, onClose, children, className = "" }: { open: boolean; title: string; onClose: () => void; children: ReactNode; className?: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
-    if (value && !dialog.current?.open) dialog.current?.showModal();
-    else if (!value && dialog.current?.open) dialog.current.close();
-  }, [value]);
-  return <dialog ref={dialog} className="ag-delivery-dialog" aria-label="分片原文" onClose={onClose}
+    if (open && !dialog.current?.open) dialog.current?.showModal();
+    else if (!open && dialog.current?.open) dialog.current.close();
+  }, [open]);
+  return <dialog ref={dialog} className={`ag-delivery-dialog ${className}`} aria-label={title} onClose={onClose}
     onClick={(event) => { if (event.target === event.currentTarget) dialog.current?.close(); }}>
-    {value && <><div className="ag-delivery-dialog-head"><strong>{value.label} · 原文</strong>
+    <div className="ag-delivery-dialog-head"><strong>{title}</strong>
       <button type="button" className="secondary-button" autoFocus onClick={() => dialog.current?.close()}>关闭</button></div>
+    {children}
+  </dialog>;
+}
+
+export function ChunkOriginalDialog({ value, onClose }: { value: ChunkOriginal | null; onClose: () => void }) {
+  if (!value) return null;
+  return <DetailDialog open title={`${value.label} · 原文`} onClose={onClose}>
       <p className="ag-muted">{value.evidence.length ? `对应证据 ${value.evidence.map((item) => item.number).join("、")}` : "非证据"}</p>
       {value.evidence.map((item) => <blockquote key={item.number}>证据 {item.number}：{item.text}</blockquote>)}
       {value.sources.filter((source, index, all) => all.findIndex((other) => other.text === source.text) === index).map((item) => <section key={item.key}>
@@ -29,8 +36,7 @@ export function ChunkOriginalDialog({ value, onClose }: { value: ChunkOriginal |
         {item.snapshotNote && <p className="ag-muted">{item.snapshotNote}</p>}
         <OriginalText text={item.text} evidence={value.evidence.map((quote) => quote.text)} />
       </section>)}
-    </>}
-  </dialog>;
+    </DetailDialog>;
 }
 
 function OriginalText({ text, evidence }: { text: string; evidence: string[] }) {

@@ -8696,3 +8696,10 @@ input:focus {
 
 .type-direct-stat { display: grid; gap: 4px; }
 .type-direct-stat > small { display: block; font-size: 11px; font-weight: 400; color: var(--ev-muted); }
+
+.ag-reasoning-head { display: flex; align-items: center; gap: 12px; }
+.ag-round-reasoning .ag-tool { font-size: 13px; }
+.ag-round-reasoning .ag-round-text,
+.ag-reasoning-dialog .ag-round-text { font-size: 12px; line-height: 1.65; }
+.ag-reasoning-dialog > .ag-round-text { margin-top: 16px; }
+.ag-reasoning-head .ag-more-link { margin: 0; font-size: 11px; }

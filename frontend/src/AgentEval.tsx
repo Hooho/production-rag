@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ChunkOriginalDialog, type ChunkOriginal } from "./ChunkOriginalDialog";
+import { DetailDialog, ChunkOriginalDialog, type ChunkOriginal } from "./ChunkOriginalDialog";
 import { type EvalAgentCall, type EvalCompareKey, type EvalConfig, type EvalMaterial, type EvalMode, type EvalRetry, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSummary } from "./api";
 import { evidenceLabel, formatDuration as formatMs } from "./format";
 import { SourceTag, Tag, TypeStats, TypeTag, typeHues, type TypeStat } from "./Tag";
@@ -873,6 +873,7 @@ function SufficiencySteps({ question, part }: { question: EvalQuestion; part: "f
 // （资料池逐段列表已去掉，只显示段数；证据怎么拿到的看「证据命中情况」。）
 function AgentLog({ question }: { question: EvalQuestion }) {
   const [expanded, setExpanded] = useState(false);
+  const [reasoningDetail, setReasoningDetail] = useState<{ round: number | null; text: string } | null>(null);
   const agent = question.agent!;
   const rounds = agent.round_logs?.length
     ? agent.round_logs.map((record) => ({ ...record, calls: agent.calls.filter((call) => call.round === record.round) }))
@@ -892,12 +893,11 @@ function AgentLog({ question }: { question: EvalQuestion }) {
       {/* 按轮分组：同一轮里模型同时发出的几次调用放在一个框里，它们彼此看不到对方的结果。 */}
       {rounds.map(({ round, calls, kind, reasoning, content, error }, index) => <details key={`${round}-${index}`} open={index === 0} className={`ag-round ag-collapsible-round ${calls.length > 1 ? "is-parallel" : ""}`}>
         <summary className="ag-round-head">第 {round ?? "—"} 轮{calls.length > 1 ? <Tag size="sm" tone="warning">同时发出 {calls.length} 次，彼此看不到结果</Tag> : null}<span className="ag-round-toggle" aria-hidden="true" /></summary>
-        {reasoning ? <details className="ag-round-reasoning ag-reasoning-collapse">
-          <summary><span className="ag-tool">Agent 推理过程</span><span className="ag-reasoning-toggle" aria-hidden="true" />
-            <span className="ag-round-text ag-reasoning-preview">{reasoning}</span>
-          </summary>
-          <div className="ag-round-text">{reasoning}</div>
-        </details> : <div className="ag-round-reasoning"><div className="ag-tool">Agent 推理过程</div>
+        {reasoning ? <div className="ag-round-reasoning">
+          <div className="ag-reasoning-head"><span className="ag-tool">Agent 推理过程</span>
+            <button type="button" className="ag-more-link" aria-haspopup="dialog" onClick={() => setReasoningDetail({ round, text: reasoning })}>展开更多</button></div>
+          <div className="ag-round-text ag-reasoning-preview">{reasoning}</div>
+        </div> : <div className="ag-round-reasoning"><div className="ag-tool">Agent 推理过程</div>
           <p className="ag-muted">{reasoning === null ? "这条历史记录没有保存本轮推理过程。" : "模型未返回本轮推理过程。"}</p>
         </div>}
         {error && <p className="ag-warn">本轮出错：{error}</p>}
@@ -909,6 +909,9 @@ function AgentLog({ question }: { question: EvalQuestion }) {
       {agent.forced && !agent.round_logs?.length && <details className="ag-round ag-collapsible-round" open={rounds.length === 0}><summary className="ag-round-head">第 {agent.rounds} 轮<span className="ag-round-toggle" aria-hidden="true" /></summary><p className="ag-muted">{agent.stop_reason === "timeout" ? "时间到了" : "工具预算用完"}，不带工具直接回答，没有检索。这条历史记录没有保存本轮推理过程。</p></details>}
       <MaterialLine material={agentMaterial(question)} />
     </>}
+    <DetailDialog open={reasoningDetail !== null} title={`第 ${reasoningDetail?.round ?? "—"} 轮 · Agent 推理过程`} onClose={() => setReasoningDetail(null)} className="ag-reasoning-dialog">
+      <div className="ag-round-text">{reasoningDetail?.text}</div>
+    </DetailDialog>
   </section>;
 }
 
