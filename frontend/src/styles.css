@@ -8681,6 +8681,8 @@ input:focus {
 /* details 的内容容器不会继承外层 grid gap，显式保留相邻工具卡片的间距。 */
 .ag-collapsible-round > .ag-call + .ag-call { margin-top: 10px; }
 
+.ag-evidence-status .ag-delivery-row.is-non-evidence { font-size: 12px; }
 .ag-delivery .ag-delivery-row.is-non-evidence,
-.ag-delivery .ag-delivery-row.is-non-evidence > small { color: #777; }
-.ag-delivery .ag-delivery-row.is-non-evidence .tag { --tag-text: #777; --tag-bg: #f2f2f2; --tag-border: #ddd; }
+.ag-delivery .ag-delivery-row.is-non-evidence > small { color: #999; }
+.ag-delivery .ag-delivery-row.is-non-evidence > small { font-size: 11px; }
+.ag-delivery .ag-delivery-row.is-non-evidence .tag { --tag-text: #999; --tag-bg: #f7f7f7; --tag-border: #e8e8e8; font-size: 11px; }
