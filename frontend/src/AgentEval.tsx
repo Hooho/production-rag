@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChunkOriginalDialog, type ChunkOriginal } from "./ChunkOriginalDialog";
 import { type EvalAgentCall, type EvalCompareKey, type EvalConfig, type EvalMaterial, type EvalMode, type EvalRetry, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSummary } from "./api";
 import { evidenceLabel, formatDuration as formatMs } from "./format";
-import { Tag, TypeStats, TypeTag, typeHues, type TypeStat } from "./Tag";
+import { SourceTag, Tag, TypeStats, TypeTag, typeHues, type TypeStat } from "./Tag";
 import type { Tone } from "./tags";
 import { SCORE_RULE, bandsText, formatPoints, questionScore, summarizeScores } from "./score";
 
@@ -604,18 +604,23 @@ function hitByExtension(item: ChunkItem) {
 function ChunkTabs({ items, empty, question }: { items: ChunkItem[]; empty: string; question: EvalQuestion }) {
   const [selected, setSelected] = useState<ChunkOriginal | null>(null);
   if (items.length === 0) return <p className="ag-muted">{empty}</p>;
+  const groups = [
+    { label: "命中", items: items.filter((item) => item.hit) },
+    { label: "新增", items: items.filter((item) => item.fresh) },
+    { label: items.some((item) => item.fresh !== undefined) ? "已有" : "未命中", items: items.filter((item) => !item.hit && !item.fresh) }
+  ];
   return <div className="ag-chunks">
-    <div className="ag-chunk-tabs">{items.map((item) => <button key={item.key} type="button" aria-haspopup="dialog"
-      className={`ag-chunk-tab ${item.hit ? "is-hit" : ""} ${hitByExtension(item) ? "is-ext-hit" : ""} ${item.fresh ? "is-new" : ""} ${item.fresh === false && !item.hit ? "is-seen" : ""} ${selected?.sources.some((source) => source.key === item.key) ? "is-active" : ""}`}
-      title={[item.hit ? (hitByExtension(item) ? "证据在父块扩展拼进来的分片里，检索命中的这一片本身没有" : "检索命中的这一片就含证据") : item.title ?? "",
-      extendedParts(item).length ? `父块扩展还拼进了 ${extendedParts(item).map((chunkId) => chunkLabel(null, chunkId)).join("、")}` : "",
-      item.fresh ? "这次调用新拿到的" : item.fresh === false ? "前面的调用已经拿到过" : ""].filter(Boolean).join("；")} onClick={() => {
-        const ids = item.parts?.length ? item.parts : item.chunkId ? [item.chunkId] : [];
-        const texts = question.agent?.evidence.length ? question.agent.evidence : question.evidence;
-        const hits = question.answerable ? evidenceChunkLists(question).flatMap((chunks, index) => chunks.some((id) => ids.includes(id)) ? [index] : []) : [];
-        setSelected({ label: chunkLabel(item.position, item.chunkId), sources: [item], evidence: hits.map((index) => ({ number: index + 1, text: texts[index]?.text ?? "" })) });
-      }}>
-      {item.hit && <b className="ag-check" aria-label="含证据">✓</b>}{chunkLabel(item.position, item.chunkId)}<small>{item.id}</small>{extendedParts(item).length > 0 && <em className={`ag-ext-badge ${hitByExtension(item) ? "is-hit" : ""}`}>{hitByExtension(item) ? `证据在扩展的 ${extendedParts(item).length} 片里` : `+扩展 ${extendedParts(item).length} 片`}</em>}</button>)}</div>
+    <ul className="ag-chunk-groups">{groups.filter((group) => group.items.length).map((group) => <li key={group.label}>
+      <span className="ag-chunk-group-label">{group.label}：</span>
+      <span className="ag-chunk-group-sources">{group.items.map((item) => <SourceTag key={item.key} id={item.id}
+        title={[chunkLabel(item.position, item.chunkId), item.title, hitByExtension(item) ? "证据在扩展分片中" : "", "点击查看原文"].filter(Boolean).join(" · ")}
+        onClick={() => {
+          const ids = item.parts?.length ? item.parts : item.chunkId ? [item.chunkId] : [];
+          const texts = question.agent?.evidence.length ? question.agent.evidence : question.evidence;
+          const hits = question.answerable ? evidenceChunkLists(question).flatMap((chunks, index) => chunks.some((id) => ids.includes(id)) ? [index] : []) : [];
+          setSelected({ label: chunkLabel(item.position, item.chunkId), sources: [item], evidence: hits.map((index) => ({ number: index + 1, text: texts[index]?.text ?? "" })) });
+        }} />)}</span>
+    </li>)}</ul>
     <ChunkOriginalDialog value={selected} onClose={() => setSelected(null)} />
   </div>;
 }
@@ -641,7 +646,7 @@ function FinalDelivery({ question, items, unavailable = false }: { question: Eva
         <span className="ag-delivery-origins">{row.sources.filter((item, index, all) => all.findIndex((other) => other.id === item.id && other.chunkId === item.chunkId && other.key.startsWith("context-") === item.key.startsWith("context-")) === index).map((item) => {
           const context = item.key.startsWith("context-");
           const extended = !context && row.chunkId !== item.chunkId;
-          return <span className="ag-delivery-origin" key={item.key}><span>{item.id}</span>
+          return <span className="ag-delivery-origin" key={item.key}><SourceTag id={item.id} />
             <Tag size="sm" tone={context || extended ? "info" : "success"} outline={extended} className={extended ? "is-dashed" : undefined}>{context ? "读前后文" : extended ? "扩展命中" : "检索命中"}</Tag>
           </span>;
         })}</span>
@@ -778,7 +783,7 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
     <EvidenceStatus rows={fixedEvidenceRows(question, config)} expanded={expanded} onToggle={() => setExpanded(!expanded)}>
       <FinalDelivery question={question} items={question.cleared ? [] : usedRetry ? retryItems : items} unavailable={!question.cleared && (usedRetry ? !retry?.sources : !question.sources)} />
     </EvidenceStatus>
-    {expanded && <p className="ag-muted ag-numbering-note">✓ 绿底：含证据　虚线绿框：证据在扩展的分片里　+扩展：父块拼进了相邻分片　S1、S2：这次检索的结果顺序</p>}
+    {expanded && <p className="ag-muted ag-numbering-note">命中：含证据的来源；S1、S2 是本次检索的来源编号，点击查看原文。</p>}
     {expanded && <>
       {question.rewrite && <div className="ag-flow-step is-block">
         <div className="ag-step-head"><span className="ag-tool">改写</span><span>{rewriteLabel(question)}</span>
@@ -866,7 +871,7 @@ function AgentLog({ question }: { question: EvalQuestion }) {
     <EvidenceStatus rows={agentEvidenceRows(question)} expanded={expanded} onToggle={() => setExpanded(!expanded)}>
       <FinalDelivery question={question} items={agentDelivery(question)} />
     </EvidenceStatus>
-    {expanded && <p className="ag-muted ag-numbering-note">✓ 绿底：含证据　虚线绿框：证据在扩展的分片里　小红点：新拿到　灰色：前面拿到过　+扩展：父块拼进了相邻分片</p>}
+    {expanded && <p className="ag-muted ag-numbering-note">命中：含证据的来源；新增：本次新拿到的来源（可能同时命中）；已有：之前拿到且未命中的来源。点击编号查看原文。</p>}
     {expanded && <>
       {agent.question_sent !== question.question && <div className="ag-call-meta">实际提问（多轮追问按规则补全）：{agent.question_sent}</div>}
       {agent.calls.length === 0 && <p className="ag-muted">没有调用任何工具，直接回答了。</p>}

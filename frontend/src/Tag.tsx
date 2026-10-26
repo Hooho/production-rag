@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
-import { hueMap, labelHue } from "./hues";
+import { PRESET_HUES, hueMap, labelHue } from "./hues";
 import type { Tone } from "./tags";
 
 // 公共标签（样式见 tag.css）。颜色二选一：
@@ -36,6 +36,13 @@ export function Tag({ tone, hue, dot, outline, plain, mono, size, title, classNa
     : { "--tag-h": hue === true ? labelHue(String(children)) : hue } as CSSProperties;
   if (onClick) return <button type="button" className={[...classes, "is-button"].join(" ")} style={style} title={title} onClick={onClick} aria-expanded={expanded}>{children}</button>;
   return <span className={classes.join(" ")} style={style} title={title}>{children}</span>;
+}
+
+// 来源编号按数字固定配色，同一 S 编号在交付列表和检索过程里保持一致。
+export function SourceTag({ id, onClick, title }: { id: string; onClick?: () => void; title?: string }) {
+  const number = Number(id.match(/^S(\d+)$/)?.[1]);
+  const hue = number > 0 ? PRESET_HUES[(number - 1) % PRESET_HUES.length] : true;
+  return <Tag hue={hue} size="sm" mono onClick={onClick} title={title}>{id}</Tag>;
 }
 
 // 固定的分类标签（评测类型、运行模式）：颜色按名字固定。

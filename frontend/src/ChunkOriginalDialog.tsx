@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { SourceTag } from "./Tag";
 
 export type ChunkOriginalSource = {
   key: string; id: string; title: string | null; heading: string | null; text: string;
@@ -22,7 +23,7 @@ export function ChunkOriginalDialog({ value, onClose }: { value: ChunkOriginal |
       <p className="ag-muted">{value.evidence.length ? `对应证据 ${value.evidence.map((item) => item.number).join("、")}` : "非证据"}</p>
       {value.evidence.map((item) => <blockquote key={item.number}>证据 {item.number}：{item.text}</blockquote>)}
       {value.sources.filter((source, index, all) => all.findIndex((other) => other.text === source.text) === index).map((item) => <section key={item.key}>
-        <h4>{item.id} · {item.title ?? "来源资料"}</h4>{item.heading && <p>{item.heading}</p>}
+        <h4><SourceTag id={item.id} /> · {item.title ?? "来源资料"}</h4>{item.heading && <p>{item.heading}</p>}
         {item.relevance != null && <p className="ag-muted">相关性 {item.relevance.toFixed(2)}{item.low ? "（较低）" : ""}</p>}
         {(item.parts?.length ?? 0) > 1 && <p className="ag-muted">以下为包含该分片的交付原文（含相邻分片）。</p>}
         {item.snapshotNote && <p className="ag-muted">{item.snapshotNote}</p>}

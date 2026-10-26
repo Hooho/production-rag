@@ -8667,3 +8667,8 @@ input:focus {
 .ag-evidence-status .ag-delivery > ul { gap: 2px; margin-top: 6px; }
 .ag-delivery-origins { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 .ag-delivery-origin { display: inline-flex; align-items: center; gap: 4px; }
+
+.ag-chunk-groups { display: grid; gap: 5px; list-style: none; margin: 8px 0 0; padding: 0; font-size: 13px; }
+.ag-chunk-groups > li { display: flex; align-items: baseline; gap: 4px; }
+.ag-chunk-group-label { flex-shrink: 0; color: var(--ev-muted); }
+.ag-chunk-group-sources { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
