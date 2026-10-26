@@ -682,8 +682,10 @@ function FinalDelivery({ question, items, unavailable = false }: { question: Eva
     }
     groups.set(item.id, rows);
   }
+  const directChunks = new Set(items.filter((item) => !item.key.startsWith("context-")).map((item) => item.chunkId).filter(Boolean));
+  const expandedChunks = new Set(items.filter((item) => !item.key.startsWith("context-")).flatMap(extendedParts).filter((id) => !directChunks.has(id)));
   return <details className="ag-delivery">
-    <summary><span className="ag-tool">最终交付给模型的资料</span><small>{groups.size} 条来源 · {chunks.size} 个分片（含扩展）</small></summary>
+    <summary><span className="ag-tool">最终交付给模型的资料</span><small>{groups.size} 条来源 · {chunks.size} 个分片（含扩展 {expandedChunks.size} 片）</small></summary>
     {unavailable ? <p className="ag-muted">这次评测没有保存最终交付资料。</p> : groups.size === 0 ? <p className="ag-muted">{question.cleared ? "资料已清空，没有最终交付。" : "没有最终交付资料。"}</p> : <ul className="ag-delivery-groups">
       {[...groups].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([id, rows]) => <li className="ag-delivery-group" key={id}>
         <details className="ag-delivery-source" open={[...rows.values()].some((row) => row.hits.length > 0)}>
