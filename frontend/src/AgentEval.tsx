@@ -150,7 +150,7 @@ function EvidenceStatus({ rows, expanded, onToggle, children }: { rows: Evidence
   return <div className="ag-evidence-status">
     <div className="ag-tool">证据命中情况</div>
     {rows.length > 0 ? <ul>{rows.map((row, index) => <li key={index}>
-      <span className="ag-evidence-name">证据 {index + 1}</span>
+      <span className={`ag-evidence-name ${row.tone === "danger" || row.tone === "neutral" ? "is-missed" : ""}`}>证据 {index + 1}</span>
       {row.hitCount !== undefined && <small>累计命中 {row.hitCount} 次</small>}
       {(row.matches ?? [row]).map((match) => <span className="ag-evidence-match" key={match.label}>
         <Tag tone={match.tone} size="sm" outline={match.dashed} className={match.dashed ? "is-dashed" : undefined}>{match.label}{match.count !== undefined ? ` · ${match.count} 次` : ""}</Tag>
