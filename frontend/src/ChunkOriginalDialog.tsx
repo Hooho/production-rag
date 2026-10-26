@@ -31,7 +31,7 @@ export function ChunkOriginalDialog({ value, onClose }: { value: ChunkOriginal |
       {value.evidence.map((item) => <blockquote key={item.number}>证据 {item.number}：{item.text}</blockquote>)}
       {value.sources.filter((source, index, all) => all.findIndex((other) => other.text === source.text) === index).map((item) => <section key={item.key}>
         <h4><SourceTag id={item.id} /> · {item.title ?? "来源资料"}</h4>{item.heading && <p>{item.heading}</p>}
-        {item.relevance != null && <p className="ag-muted">相关性 {item.relevance.toFixed(2)}{item.low ? "（较低）" : ""}</p>}
+        {item.relevance != null && <p className="ag-muted">来源重排分 {item.relevance.toFixed(2)}{item.low ? "（较低）" : ""}</p>}
         {(item.parts?.length ?? 0) > 1 && <p className="ag-muted">以下为包含该分片的交付原文（含相邻分片）。</p>}
         {item.snapshotNote && <p className="ag-muted">{item.snapshotNote}</p>}
         <OriginalText text={item.text} evidence={value.evidence.map((quote) => quote.text)} />

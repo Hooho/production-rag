@@ -1,5 +1,5 @@
 // 来源带上版本号、页码和标题路径，便于确认命中的是当前版本的哪个位置。
-export type Source = { id: string; title: string; text: string; score?: number; version?: number | null; page_start?: number | null; heading?: string | null };
+export type Source = { relevance?: number | null; id: string; title: string; text: string; score?: number; version?: number | null; page_start?: number | null; heading?: string | null };
 export type TraceStep = {
   id: string;
   stage: string;

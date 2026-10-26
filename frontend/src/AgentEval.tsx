@@ -160,11 +160,15 @@ function EvidenceStatus({ rows, expanded, onToggle, children }: { rows: Evidence
 
 // 证据命中情况（两边各一列）：从逐题结果算出每条证据的结果标签和细节。
 // 固定流程按最后交给模型的资料算（补充检索、被清空都考虑），没拿到的写丢在哪一步；Agent 重点写第几轮拿到的。
+function rerankText(value: number | null | undefined, extended = false) {
+  return typeof value === "number" && Number.isFinite(value) ? `${extended ? "来源" : ""}重排分 ${value.toFixed(2)}` : "";
+}
+
 function chunkItemsOf(sources: EvalQuestion["sources"] | EvalRetry["sources"] | undefined) {
   return (sources ?? []).map((source) => {
     const extra = source as { id: string; chunk_id?: string | null; position?: number | null; parent_chunk_ids?: string[] };
     return {
-      id: extra.id, chunkId: extra.chunk_id ?? null, position: extra.position ?? null,
+      id: extra.id, chunkId: extra.chunk_id ?? null, position: extra.position ?? null, relevance: source.relevance,
       parts: extra.parent_chunk_ids ?? (extra.chunk_id ? [extra.chunk_id] : [])
     };
   });
@@ -192,8 +196,9 @@ function fixedEvidenceRows(question: EvalQuestion, config: EvalRun["config"]): E
     const from = usedRetry ? "补充检索的" : "";
     if (carrier) {
       const direct = carrier.chunkId ? chunkIds.includes(carrier.chunkId) : true;
-      return direct ? { label: "检索命中", tone: "success", detail: `${from}${carrier.id} ${chunkLabel(carrier.position, carrier.chunkId)}` }
-        : { label: "父块扩展命中", tone: "success", dashed: true, detail: `${from}${carrier.id} ${chunkLabel(carrier.position, carrier.chunkId)} 拼进来的相邻分片里` };
+      const score = rerankText(carrier.relevance ?? (!usedRetry && direct ? fixed?.rerank_probability : undefined), !direct);
+      return direct ? { label: "检索命中", tone: "success", detail: [`${from}${carrier.id} ${chunkLabel(carrier.position, carrier.chunkId)}`, score].filter(Boolean).join(" · ") }
+        : { label: "父块扩展命中", tone: "success", dashed: true, detail: [`${from}${carrier.id} ${chunkLabel(carrier.position, carrier.chunkId)} 拼进来的相邻分片里`, score].filter(Boolean).join(" · ") };
     }
     const row = lostRow(fixed, config);
     return retry ? { ...row, detail: `${row.detail}${usedRetry ? "；补充检索也没拿到" : "；补充检索没采用"}` } : row;
@@ -204,19 +209,16 @@ function agentEvidenceRows(question: EvalQuestion): EvidenceStatusRow[] {
   const agent = question.agent;
   if (!agent || !question.answerable) return [];
   return agent.evidence.map((evidence): EvidenceStatusRow => {
-    // 重点是第几轮拿到的：按轮列出，每轮写第几次检索的哪一段；第一次拿到的那一轮放最前面。
-    const rounds = new Map<number | null, string[]>();
-    for (const item of evidence.where) {
-      const round = agent.calls.find((call) => call.call === item.call)?.round ?? null;
-      rounds.set(round, [...(rounds.get(round) ?? []), `第 ${item.call} 次的 ${item.evidence_id ?? "—"}`]);
-    }
-    const where = [...rounds.entries()].map(([round, calls]) => `第 ${round ?? "—"} 轮（${calls.join("、")}）`).join("；");
-    const firstRound = [...rounds.keys()][0];
-    if (!evidence.found) return { label: "没拿到", tone: "neutral", detail: "每次检索留下的资料里都没有" };
-    const head = `第 ${firstRound ?? "—"} 轮`;
-    if (evidence.via === "context") return { label: `${head}读前后文拿到`, tone: "info", detail: where };
-    if (evidence.via === "extension") return { label: `${head}父块扩展命中`, tone: "success", dashed: true, detail: where };
-    return { label: `${head}检索命中`, tone: "success", detail: where };
+    if (!evidence.found) return { label: "没拿到", tone: "neutral", detail: "" };
+    const first = [...evidence.where].sort((a, b) => a.call - b.call)[0];
+    const call = agent.calls.find((item) => item.call === first?.call);
+    const source = call?.results?.find((item) => item.evidence_id === first?.evidence_id);
+    const head = `第 ${call?.round ?? "—"} 轮`;
+    if (call?.name === "read_context") return { label: `${head}读前后文拿到`, tone: "info", detail: "" };
+    const extended = first ? viaExtension(agent, first, evidence.chunk_ids) : evidence.via === "extension";
+    const score = rerankText(source?.relevance, extended);
+    return extended ? { label: `${head}父块扩展命中`, tone: "success", dashed: true, detail: score }
+      : { label: `${head}检索命中`, tone: "success", detail: score };
   });
 }
 
@@ -657,10 +659,11 @@ function FinalDelivery({ question, items, unavailable = false }: { question: Eva
             {[...rows].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([key, row]) => {
               const direct = row.sources.some((item) => !item.key.startsWith("context-") && item.chunkId === row.chunkId);
               const extended = !direct && row.sources.some((item) => !item.key.startsWith("context-"));
+              const score = [...new Set(row.sources.map((item) => rerankText(item.relevance, extended)).filter(Boolean))].join("、");
               return <li key={key}><button type="button" className={`ag-delivery-row ${row.hits.length ? "" : "is-non-evidence"}`} aria-haspopup="dialog" onClick={() => setSelected({ label: chunkLabel(row.position, row.chunkId), sources: row.sources, evidence: row.hits.map((index) => ({ number: index + 1, text: evidence[index]?.text ?? "" })) })}>
                 <strong>{row.chunkId ? chunkLabel(row.position, row.chunkId).replace(/第 (\d+) 片/, "第$1分片") : "资料"}</strong>
                 <Tag size="sm" tone={direct ? "success" : "info"} outline={extended} className={extended ? "is-dashed" : undefined}>{direct ? (row.hits.length ? "检索命中" : "检索返回") : extended ? (row.hits.length ? "扩展命中" : "扩展返回") : "读前后文"}</Tag>
-                <Tag size="sm" tone={row.hits.length ? "success" : "neutral"} className={row.hits.length ? undefined : "ag-non-evidence"}>{row.hits.length ? `证据 ${row.hits.map((index) => index + 1).join("、")}` : "非证据"}</Tag><small>查看原文 →</small>
+                <Tag size="sm" tone={row.hits.length ? "success" : "neutral"} className={row.hits.length ? undefined : "ag-non-evidence"}>{row.hits.length ? `证据 ${row.hits.map((index) => index + 1).join("、")}` : "非证据"}</Tag>{score && <span className="ag-delivery-score">{score}</span>}<small>查看原文 →</small>
               </button></li>;
             })}
           </ul></blockquote>
@@ -679,7 +682,7 @@ function agentDelivery(question: EvalQuestion): ChunkItem[] {
       if (!items.has(result.evidence_id)) items.set(result.evidence_id, {
         key: result.evidence_id, id: result.evidence_id, chunkId: result.chunk_id, position: result.position,
         parts: result.parent_chunk_ids, title: result.title, heading: result.heading ?? null,
-        text: result.text, hit: result.hits.length > 0, snapshotNote: call.full_text ? undefined : "历史记录仅保存正文摘要，可能不完整。"
+        text: result.text, relevance: result.relevance, hit: result.hits.length > 0, snapshotNote: call.full_text ? undefined : "历史记录仅保存正文摘要，可能不完整。"
       });
     }
     if (call.name === "read_context" && call.chunk_ids.length) items.set(`context-${call.call}`, {
@@ -767,7 +770,7 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
     const parts = extra.parent_chunk_ids ?? (extra.chunk_id ? [extra.chunk_id] : []);
     return {
       key: source.id, id: source.id, chunkId: extra.chunk_id ?? null, position: extra.position ?? null, parts, title: source.title,
-      heading: source.heading ?? null, text: source.text, evidenceParts: new Set(parts.filter((chunkId) => evidenceChunks.has(chunkId))),
+      heading: source.heading ?? null, text: source.text, relevance: source.relevance, evidenceParts: new Set(parts.filter((chunkId) => evidenceChunks.has(chunkId))),
       hit: hitSources.has(source.id) || parts.some((chunkId) => evidenceChunks.has(chunkId))
     };
   });
@@ -777,7 +780,7 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
     const parts = source.parent_chunk_ids ?? (source.chunk_id ? [source.chunk_id] : []);
     return {
       key: `retry-${source.id}`, id: source.id, chunkId: source.chunk_id ?? null, position: source.position ?? null, parts, title: source.title,
-      heading: source.heading ?? null, text: source.text, evidenceParts: new Set(parts.filter((chunkId) => evidenceChunks.has(chunkId))),
+      heading: source.heading ?? null, text: source.text, relevance: source.relevance, evidenceParts: new Set(parts.filter((chunkId) => evidenceChunks.has(chunkId))),
       hit: parts.some((chunkId) => evidenceChunks.has(chunkId))
     };
   });
