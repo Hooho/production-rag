@@ -832,6 +832,8 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
   const queries = question.queries ?? [];
   // 按扩展查询里的顺序排每一路（旧记录没有 query_routes 时是空的，退回只列检索词）。
   const routes = [...(question.query_routes ?? [])].sort((a, b) => queries.indexOf(a.query) - queries.indexOf(b.query));
+  // 这里展示第一次检索合并后的结果，不受后续补充检索或充分性清空影响。
+  const mergedEvidence = fixedEvidenceRows({ ...question, retry: undefined, sufficiency: undefined, cleared: false }, config);
   return <section className="ag-log">
     <div className="ag-log-title">固定流程<small>检索 {searches} 次{sufficiency?.checked ? ` · 判断 ${sufficiency.calls ?? 1} 次` : ""} · 耗时 {formatMs(question.flow_latency_ms ?? question.latency_ms)}</small></div>
     <EvidenceStatus rows={fixedEvidenceRows(question, config)} expanded={expanded} onToggle={() => setExpanded(!expanded)}>
@@ -875,6 +877,13 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
           </div>)}
         </div>}
         {routes.length > 0 && <div className="ag-merge-label">合并 → 前 {config.pool_size ?? "—"} 段进重排 → 过阈值 {typeof config.min_score === "number" ? config.min_score.toFixed(2) : "—"} → 最多 {config.return_limit ?? "—"} 段交给模型</div>}
+        {mergedEvidence.length > 0 && <ul className="ag-evidence-trace ag-merge-evidence" aria-label="合并过滤后的证据命中情况">{mergedEvidence.map((row, index) => <li key={index}>
+          <span className={`ag-evidence-name ${row.tone === "danger" || row.tone === "neutral" ? "is-missed" : ""}`}>证据 {index + 1}</span>
+          {(row.matches ?? [row]).map((match) => <span className="ag-evidence-match" key={match.label}>
+            <Tag tone={match.tone} size="sm" outline={match.dashed} className={match.dashed ? "is-dashed" : undefined}>{match.label}</Tag>
+            {match.detail && <small>{match.detail}</small>}
+          </span>)}
+        </li>)}</ul>}
         <ChunkTabs question={question} items={items} empty="过滤后没有分块。" />
       </div>
       {sufficiency && <SufficiencySteps question={question} part="first" />}

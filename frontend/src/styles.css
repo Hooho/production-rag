@@ -8739,3 +8739,7 @@ input:focus {
 
 .ag-retrieval-content { display: grid; gap: 10px; margin-top: 16px; min-width: 0; }
 .ag-retrieval-content .ag-round + .ag-round { margin-top: 0; }
+
+.ag-merge-evidence { margin: 6px 0 10px; }
+.ag-merge-evidence li, .ag-merge-evidence .ag-evidence-match { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
+.ag-merge-evidence .ag-evidence-name.is-missed { color: var(--ev-muted); }
