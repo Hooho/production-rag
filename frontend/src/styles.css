@@ -8656,3 +8656,10 @@ input:focus {
 .ag-reasoning-collapse[open] > .ag-round-text { margin-top: 8px; }
 .ag-collapsible-round > summary:focus-visible,
 .ag-reasoning-collapse > summary:focus-visible { outline: 2px solid #3c8655; outline-offset: 4px; border-radius: 4px; }
+
+.ag-evidence-status .ag-delivery { margin-top: 12px; padding-top: 12px; margin-bottom: 12px; }
+.ag-evidence-status .ag-delivery-row,
+.ag-eval .ag-chunk-tab { font-size: 13px; }
+.ag-evidence-status .ag-delivery-row { padding: 6px 4px; }
+.ag-evidence-status .ag-delivery-row strong { font-size: inherit; font-weight: 600; }
+.ag-evidence-status .ag-delivery > summary .ag-tool { font-size: 13px; }

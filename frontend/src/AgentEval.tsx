@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ChunkOriginalDialog, type ChunkOriginal } from "./ChunkOriginalDialog";
 import { type EvalAgentCall, type EvalCompareKey, type EvalConfig, type EvalMaterial, type EvalMode, type EvalRetry, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSummary } from "./api";
 import { evidenceLabel, formatDuration as formatMs } from "./format";
 import { Tag, TypeStats, TypeTag, typeHues, type TypeStat } from "./Tag";
@@ -144,7 +145,7 @@ function MaterialLine({ material }: { material: EvalMaterial | null }) {
 type EvidenceStatusRow = { label: string; tone: "success" | "danger" | "neutral" | "info"; dashed?: boolean; detail: string };
 
 // 每张卡片的第一块：证据命中情况，每条证据一个结果标签加细节；下面「详情」按钮展开这张卡片原来的检索过程。
-function EvidenceStatus({ rows, expanded, onToggle }: { rows: EvidenceStatusRow[]; expanded: boolean; onToggle: () => void }) {
+function EvidenceStatus({ rows, expanded, onToggle, children }: { rows: EvidenceStatusRow[]; expanded: boolean; onToggle: () => void; children?: ReactNode }) {
   return <div className="ag-evidence-status">
     <div className="ag-tool">证据命中情况</div>
     {rows.length > 0 ? <ul>{rows.map((row, index) => <li key={index}>
@@ -152,6 +153,7 @@ function EvidenceStatus({ rows, expanded, onToggle }: { rows: EvidenceStatusRow[
       <Tag tone={row.tone} size="sm" outline={row.dashed} className={row.dashed ? "is-dashed" : undefined}>{row.label}</Tag>
       {row.detail && <small>{row.detail}</small>}
     </li>)}</ul> : <p className="ag-muted">没有答案的题，不看证据。</p>}
+    {children}
     <button type="button" className="secondary-button ag-detail-button" aria-expanded={expanded} onClick={onToggle}>{expanded ? "收起详情" : "详情"}</button>
   </div>;
 }
@@ -585,7 +587,7 @@ function chunkLabel(position: number | null | undefined, chunkId?: string | null
   return chunkId ?? "—";
 }
 
-// 一个分块：编号做成标签，命中证据的标签有背景色；点标签才显示内容。
+// 一个分块：命中证据的标签有背景色；点标签打开共用的原文浮窗。
 type ChunkItem = { key: string; id: string; chunkId?: string | null; position?: number | null; parts?: string[]; evidenceParts?: Set<string>; fresh?: boolean; snapshotNote?: string; title: string | null; heading: string | null; text: string; relevance?: number | null; low?: boolean; hit: boolean };
 
 // 父块扩展：检索命中的是一片，父块扩展会把同一父块里相邻的几片一起拼进来交给模型。
@@ -594,80 +596,33 @@ function extendedParts(item: ChunkItem) {
   return (item.parts ?? []).filter((chunkId) => chunkId !== item.chunkId);
 }
 
-function chunkIndex(chunkId: string) {
-  const index = Number(chunkId.match(/:(\d+)$/)?.[1]);
-  return Number.isFinite(index) ? index : Number.MAX_SAFE_INTEGER;
-}
-
-function PartsRow({ item }: { item: ChunkItem }) {
-  const parts = [...(item.parts ?? [])].sort((a, b) => chunkIndex(a) - chunkIndex(b));
-  return <div className="ag-parts">
-    <span>交给模型的是这几片拼起来的内容：</span>
-    {parts.map((chunkId) => {
-      const extended = chunkId !== item.chunkId;
-      const evidence = item.evidenceParts?.has(chunkId);
-      return <span key={chunkId} title={chunkId} className={`ag-part ${extended ? "is-ext" : "is-main"} ${evidence ? "is-hit" : ""}`}>
-        {chunkLabel(null, chunkId)}<small>{extended ? "扩展" : "检索命中"}{evidence ? " · 含证据" : ""}</small></span>;
-    })}
-  </div>;
-}
-
 // 证据是不是只在父块扩展拼进来的分片里（检索命中的那一片本身不含证据）。
 function hitByExtension(item: ChunkItem) {
   return item.hit && extendedParts(item).some((chunkId) => item.evidenceParts?.has(chunkId)) && !(item.chunkId && item.evidenceParts?.has(item.chunkId));
 }
 
-function ChunkTabs({ items, empty }: { items: ChunkItem[]; empty: string }) {
-  const [selected, setSelected] = useState<string | null>(null);
-  // 分块正文默认只显示前 3 行，点「展开更多」看全文；换一个分块时收起。
-  const [fullText, setFullText] = useState(false);
+function ChunkTabs({ items, empty, question }: { items: ChunkItem[]; empty: string; question: EvalQuestion }) {
+  const [selected, setSelected] = useState<ChunkOriginal | null>(null);
   if (items.length === 0) return <p className="ag-muted">{empty}</p>;
-  const current = items.find((item) => item.key === selected) ?? null;
   return <div className="ag-chunks">
-    <div className="ag-chunk-tabs" role="tablist">{items.map((item) => <button key={item.key} type="button" role="tab" aria-selected={selected === item.key}
-      className={`ag-chunk-tab ${item.hit ? "is-hit" : ""} ${hitByExtension(item) ? "is-ext-hit" : ""} ${item.fresh ? "is-new" : ""} ${item.fresh === false && !item.hit ? "is-seen" : ""} ${selected === item.key ? "is-active" : ""}`}
+    <div className="ag-chunk-tabs">{items.map((item) => <button key={item.key} type="button" aria-haspopup="dialog"
+      className={`ag-chunk-tab ${item.hit ? "is-hit" : ""} ${hitByExtension(item) ? "is-ext-hit" : ""} ${item.fresh ? "is-new" : ""} ${item.fresh === false && !item.hit ? "is-seen" : ""} ${selected?.sources.some((source) => source.key === item.key) ? "is-active" : ""}`}
       title={[item.hit ? (hitByExtension(item) ? "证据在父块扩展拼进来的分片里，检索命中的这一片本身没有" : "检索命中的这一片就含证据") : item.title ?? "",
       extendedParts(item).length ? `父块扩展还拼进了 ${extendedParts(item).map((chunkId) => chunkLabel(null, chunkId)).join("、")}` : "",
-      item.fresh ? "这次调用新拿到的" : item.fresh === false ? "前面的调用已经拿到过" : ""].filter(Boolean).join("；")} onClick={() => { setSelected(selected === item.key ? null : item.key); setFullText(false); }}>
+      item.fresh ? "这次调用新拿到的" : item.fresh === false ? "前面的调用已经拿到过" : ""].filter(Boolean).join("；")} onClick={() => {
+        const ids = item.parts?.length ? item.parts : item.chunkId ? [item.chunkId] : [];
+        const texts = question.agent?.evidence.length ? question.agent.evidence : question.evidence;
+        const hits = question.answerable ? evidenceChunkLists(question).flatMap((chunks, index) => chunks.some((id) => ids.includes(id)) ? [index] : []) : [];
+        setSelected({ label: chunkLabel(item.position, item.chunkId), sources: [item], evidence: hits.map((index) => ({ number: index + 1, text: texts[index]?.text ?? "" })) });
+      }}>
       {item.hit && <b className="ag-check" aria-label="含证据">✓</b>}{chunkLabel(item.position, item.chunkId)}<small>{item.id}</small>{extendedParts(item).length > 0 && <em className={`ag-ext-badge ${hitByExtension(item) ? "is-hit" : ""}`}>{hitByExtension(item) ? `证据在扩展的 ${extendedParts(item).length} 片里` : `+扩展 ${extendedParts(item).length} 片`}</em>}</button>)}</div>
-    {current && <div className={`ag-chunk-body ${current.hit ? "is-hit" : ""}`}>
-      <div className="ag-chunk-meta"><strong>{chunkLabel(current.position, current.chunkId)}</strong><small>本次检索的 {current.id}</small>{current.title ?? "—"}{current.heading ? ` · ${current.heading}` : ""}{current.relevance !== undefined && current.relevance !== null && <small> · 相关性 {current.relevance.toFixed(2)}{current.low ? "（较低）" : ""}</small>}{current.hit && <Tag tone="success" dot>{hitByExtension(current) ? "证据在扩展的分片里" : "含证据"}</Tag>}</div>
-      {extendedParts(current).length > 0 && <PartsRow item={current} />}
-      <p className={fullText ? "" : "is-clamped"}>{current.text}</p>
-      <button type="button" className="ag-more-link" onClick={() => setFullText(!fullText)}>{fullText ? "收起" : "展开更多"}</button>
-    </div>}
+    <ChunkOriginalDialog value={selected} onClose={() => setSelected(null)} />
   </div>;
-}
-
-function DeliveryText({ text, evidence }: { text: string; evidence: string[] }) {
-  const ranges: [number, number][] = [];
-  for (const quote of evidence) {
-    if (!quote) continue;
-    let start = text.indexOf(quote);
-    while (start >= 0) {
-      ranges.push([start, start + quote.length]);
-      start = text.indexOf(quote, start + quote.length);
-    }
-  }
-  ranges.sort((a, b) => a[0] - b[0]);
-  const merged: [number, number][] = [];
-  for (const range of ranges) {
-    const last = merged[merged.length - 1];
-    if (last && range[0] <= last[1]) last[1] = Math.max(last[1], range[1]);
-    else merged.push([...range]);
-  }
-  let end = 0;
-  return <div className="ag-delivery-text">{merged.map(([start, to]) => {
-    const prefix = text.slice(end, start);
-    end = to;
-    return <span key={start}>{prefix}<mark>{text.slice(start, to)}</mark></span>;
-  })}{text.slice(end)}</div>;
 }
 
 // 最终交付按分片去重，保留各个来源编号及评测时保存的正文。
 function FinalDelivery({ question, items, unavailable = false }: { question: EvalQuestion; items: ChunkItem[]; unavailable?: boolean }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<ChunkOriginal | null>(null);
   const lists = question.answerable ? evidenceChunkLists(question) : [];
   const evidence = question.agent?.evidence.length ? question.agent.evidence : question.evidence;
   const rows = new Map<string, { chunkId: string | null; position?: number | null; sources: ChunkItem[]; hits: number[] }>();
@@ -678,26 +633,16 @@ function FinalDelivery({ question, items, unavailable = false }: { question: Eva
     if (!row.sources.some((source) => source.key === item.key)) row.sources.push(item);
     rows.set(key, row);
   }
-  const current = selected ? rows.get(selected) : undefined;
   return <details className="ag-delivery">
     <summary><span className="ag-tool">最终交付情况</span><small>{rows.size} 个分片</small></summary>
     {unavailable ? <p className="ag-muted">这次评测没有保存最终交付资料。</p> : rows.size === 0 ? <p className="ag-muted">{question.cleared ? "资料已清空，没有最终交付。" : "没有最终交付资料。"}</p> : <ul>
-      {[...rows].map(([key, row]) => <li key={key}><button type="button" className="ag-delivery-row" onClick={() => { setSelected(key); dialog.current?.showModal(); }}>
+      {[...rows].map(([key, row]) => <li key={key}><button type="button" className="ag-delivery-row" aria-haspopup="dialog" onClick={() => setSelected({ label: chunkLabel(row.position, row.chunkId), sources: row.sources, evidence: row.hits.map((index) => ({ number: index + 1, text: evidence[index]?.text ?? "" })) })}>
         <strong>{row.chunkId ? chunkLabel(row.position, row.chunkId).replace(/第 (\d+) 片/, "第$1分片") : "资料"}：</strong>
         <span>{row.sources.map((item) => `${item.id} ${item.key.startsWith("context-") ? "（读前后文）" : row.chunkId !== item.chunkId ? "（扩展命中）" : "检索命中"}`).filter((value, index, all) => all.indexOf(value) === index).join("、")}</span>
         <Tag size="sm" tone={row.hits.length ? "success" : "neutral"}>{row.hits.length ? `证据 ${row.hits.map((index) => index + 1).join("、")}` : "非证据"}</Tag><small>查看原文 →</small>
       </button></li>)}
     </ul>}
-    <dialog ref={dialog} className="ag-delivery-dialog" aria-label="交付分片原文" onClick={(event) => { if (event.target === event.currentTarget) dialog.current?.close(); }}>
-      {current && <><div className="ag-delivery-dialog-head"><strong>{chunkLabel(current.position, current.chunkId)} · 原文</strong><button type="button" className="secondary-button" autoFocus onClick={() => dialog.current?.close()}>关闭</button></div>
-        <p className="ag-muted">{current.hits.length ? `对应证据 ${current.hits.map((index) => index + 1).join("、")}` : "非证据"}</p>
-        {current.hits.map((index) => <blockquote key={index}>证据 {index + 1}：{evidence[index]?.text}</blockquote>)}
-        {current.sources.filter((source, index, all) => all.findIndex((other) => other.text === source.text) === index).map((item) => <section key={item.key}>
-          <h4>{item.id} · {item.title ?? "来源资料"}</h4>{item.heading && <p>{item.heading}</p>}
-          {(item.parts?.length ?? 0) > 1 && <p className="ag-muted">以下为包含该分片的交付原文（含相邻分片）。</p>}
-          {item.snapshotNote && <p className="ag-muted">{item.snapshotNote}</p>}<DeliveryText text={item.text} evidence={current.hits.map((index) => evidence[index]?.text ?? "")} />
-        </section>)}</>}
-    </dialog>
+    <ChunkOriginalDialog value={selected} onClose={() => setSelected(null)} />
   </details>;
 }
 
@@ -824,8 +769,9 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
   const routes = [...(question.query_routes ?? [])].sort((a, b) => queries.indexOf(a.query) - queries.indexOf(b.query));
   return <section className="ag-log">
     <div className="ag-log-title">固定流程<small>检索 {searches} 次{sufficiency?.checked ? ` · 判断 ${sufficiency.calls ?? 1} 次` : ""} · 耗时 {formatMs(question.flow_latency_ms ?? question.latency_ms)}</small></div>
-    <EvidenceStatus rows={fixedEvidenceRows(question, config)} expanded={expanded} onToggle={() => setExpanded(!expanded)} />
-    <FinalDelivery question={question} items={question.cleared ? [] : usedRetry ? retryItems : items} unavailable={!question.cleared && (usedRetry ? !retry?.sources : !question.sources)} />
+    <EvidenceStatus rows={fixedEvidenceRows(question, config)} expanded={expanded} onToggle={() => setExpanded(!expanded)}>
+      <FinalDelivery question={question} items={question.cleared ? [] : usedRetry ? retryItems : items} unavailable={!question.cleared && (usedRetry ? !retry?.sources : !question.sources)} />
+    </EvidenceStatus>
     {expanded && <p className="ag-muted ag-numbering-note">✓ 绿底：含证据　虚线绿框：证据在扩展的分片里　+扩展：父块拼进了相邻分片　S1、S2：这次检索的结果顺序</p>}
     {expanded && <>
       {question.rewrite && <div className="ag-flow-step is-block">
@@ -862,7 +808,7 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
           </div>)}
         </div>}
         {routes.length > 0 && <div className="ag-merge-label">合并 → 前 {config.pool_size ?? "—"} 段进重排 → 过阈值 {typeof config.min_score === "number" ? config.min_score.toFixed(2) : "—"} → 最多 {config.return_limit ?? "—"} 段交给模型</div>}
-        <ChunkTabs items={items} empty="过滤后没有分块。" />
+        <ChunkTabs question={question} items={items} empty="过滤后没有分块。" />
       </div>
       {sufficiency && <SufficiencySteps question={question} part="first" />}
       {retry && <div className={`ag-call ${usedRetry ? "" : "is-unused"}`}>
@@ -870,7 +816,7 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
           <HitTag hits={hitEvidence(retryItems, evidenceLists)} total={total} /><Tag outline plain>{usedRetry ? "采用了" : "没变好，沿用第一次的"}</Tag></div>
         <ul className="ag-query-list">{queries.map((query) => <li key={query}>{query}</li>)}{sufficiency?.retry_query && <li className="is-added">{sufficiency.retry_query}<small>补充的</small></li>}</ul>
         <div className="ag-call-params">{params.join(" · ")} · 返回 {retry.returned} 段</div>
-        {retry.sources ? <ChunkTabs items={retryItems} empty="补充检索没有返回分块。" /> : <p className="ag-muted">这次评测没有保存补充检索的分块。</p>}
+        {retry.sources ? <ChunkTabs question={question} items={retryItems} empty="补充检索没有返回分块。" /> : <p className="ag-muted">这次评测没有保存补充检索的分块。</p>}
       </div>}
       {sufficiency && retry && <SufficiencySteps question={question} part="rest" />}
       {question.cleared && <div className="ag-flow-cleared">判断资料不足，已清空：线上会直接拒答。</div>}
@@ -911,8 +857,9 @@ function AgentLog({ question }: { question: EvalQuestion }) {
   for (const item of agent.evidence ?? []) for (const chunkId of item.chunk_ids ?? []) evidenceChunks.add(chunkId);
   return <section className="ag-log">
     <div className="ag-log-title">Agent<small>检索 {agent.searches} 次{fresh.wasted > 0 ? `（${fresh.wasted} 次无新增）` : ""} · {agent.rounds} 轮 · {agent.prompt_tokens} token · {agent.search_ms !== undefined ? `检索 ${formatMs(agent.search_ms)} + 写回答 ${formatMs(agent.answer_ms)}` : `耗时 ${formatMs(agent.latency_ms)}`} · {STOP_LABELS[agent.stop_reason ?? ""] ?? agent.stop_reason ?? "—"}</small></div>
-    <EvidenceStatus rows={agentEvidenceRows(question)} expanded={expanded} onToggle={() => setExpanded(!expanded)} />
-    <FinalDelivery question={question} items={agentDelivery(question)} />
+    <EvidenceStatus rows={agentEvidenceRows(question)} expanded={expanded} onToggle={() => setExpanded(!expanded)}>
+      <FinalDelivery question={question} items={agentDelivery(question)} />
+    </EvidenceStatus>
     {expanded && <p className="ag-muted ag-numbering-note">✓ 绿底：含证据　虚线绿框：证据在扩展的分片里　小红点：新拿到　灰色：前面拿到过　+扩展：父块拼进了相邻分片</p>}
     {expanded && <>
       {agent.question_sent !== question.question && <div className="ag-call-meta">实际提问（多轮追问按规则补全）：{agent.question_sent}</div>}
@@ -931,7 +878,7 @@ function AgentLog({ question }: { question: EvalQuestion }) {
         {error && <p className="ag-warn">本轮出错：{error}</p>}
         {kind === "forced" && <p className="ag-muted">{agent.stop_reason === "timeout" ? "时间到了" : "工具预算用完"}，不带工具直接回答。</p>}
         {content && <details className="ag-round-output"><summary>{calls.length ? "本轮模型说明" : "本轮回答"}</summary><div className="ag-round-text">{content}</div></details>}
-        {calls.map((call) => <AgentCall key={call.call} call={call} fresh={fresh.perCall.get(call.call) ?? new Set()} evidenceChunks={evidenceChunks} />)}
+        {calls.map((call) => <AgentCall question={question} key={call.call} call={call} fresh={fresh.perCall.get(call.call) ?? new Set()} evidenceChunks={evidenceChunks} />)}
       </details>)}
       {/* 预算用完或超时后，程序再让模型跑一轮不带工具的，直接写回答；这一轮没有检索。 */}
       {agent.forced && !agent.round_logs?.length && <details className="ag-round ag-collapsible-round" open={rounds.length === 0}><summary className="ag-round-head">第 {agent.rounds} 轮<span className="ag-round-toggle" aria-hidden="true" /></summary><p className="ag-muted">{agent.stop_reason === "timeout" ? "时间到了" : "工具预算用完"}，不带工具直接回答，没有检索。这条历史记录没有保存本轮推理过程。</p></details>}
@@ -951,7 +898,7 @@ function groupByRound(calls: EvalAgentCall[]) {
   return groups;
 }
 
-function AgentCall({ call, fresh, evidenceChunks }: { call: EvalAgentCall; fresh: Set<string>; evidenceChunks: Set<string> }) {
+function AgentCall({ call, fresh, evidenceChunks, question }: { question: EvalQuestion; call: EvalAgentCall; fresh: Set<string>; evidenceChunks: Set<string> }) {
   const status = CALL_STATUS[call.status] ?? call.status;
   const hit = call.hits.length > 0;
   const executed = call.status === "ok" || call.status === "error";
@@ -960,13 +907,15 @@ function AgentCall({ call, fresh, evidenceChunks }: { call: EvalAgentCall; fresh
   if (call.results) items = call.results.map((result) => ({
     key: `${call.call}-${result.evidence_id}`, id: result.evidence_id, chunkId: result.chunk_id, position: result.position ?? null, parts: result.parent_chunk_ids, evidenceParts: new Set((result.parent_chunk_ids ?? []).filter((chunkId) => evidenceChunks.has(chunkId))), title: result.title,
     heading: result.heading ?? null, text: result.text, relevance: result.relevance, low: result.low_relevance, hit: result.hits.length > 0,
-    fresh: Boolean(result.chunk_id) && fresh.has(result.chunk_id as string)
+    fresh: Boolean(result.chunk_id) && fresh.has(result.chunk_id as string),
+    snapshotNote: call.full_text ? undefined : "历史记录仅保存正文摘要，可能不完整。"
   }));
   else if (call.name === "read_context" && call.text) items = [{
     key: `${call.call}-read`, id: `${call.source_id ?? ""} ${call.direction === "before" ? "前文" : "后文"}`,
     position: call.positions?.length ? call.positions[0] : null, chunkId: call.chunk_ids[0] ?? null,
     fresh: call.chunk_ids.some((chunkId) => fresh.has(chunkId)),
-    title: null, heading: null, text: call.text, hit: (call.read_hits ?? []).length > 0
+    title: null, heading: null, text: call.text, hit: (call.read_hits ?? []).length > 0,
+    snapshotNote: call.full_text ? undefined : "历史记录仅保存正文摘要，可能不完整。"
   }];
   return <div className={`ag-call ${call.status !== "ok" ? "is-off" : ""} ${hit ? "is-hit" : ""}`}>
     {/* 标题行放结果（耗时、命中、新增）；下面一行是检索的问题，再下一行是参数。 */}
@@ -986,7 +935,7 @@ function AgentCall({ call, fresh, evidenceChunks }: { call: EvalAgentCall; fresh
         : <div className="ag-call-query"><code>{JSON.stringify(call.arguments)}</code></div>}
     {status && <div className="ag-call-meta">{status}{call.error ? `：${call.error}` : ""}</div>}
     {call.note && call.status !== "ok" && <div className="ag-call-meta">{call.note}</div>}
-    {(call.results || call.name === "read_context") && <ChunkTabs items={items} empty={call.results ? "没有返回分块（空检索）。" : "没有读到内容。"} />}
+    {(call.results || call.name === "read_context") && <ChunkTabs question={question} items={items} empty={call.results ? "没有返回分块（空检索）。" : "没有读到内容。"} />}
   </div>;
 }
 
