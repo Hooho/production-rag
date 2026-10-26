@@ -8677,3 +8677,6 @@ input:focus {
 .ag-delivery-group-head { display: flex; align-items: center; gap: 8px; }
 .ag-delivery-quote { margin: 6px 0 8px 10px; padding: 0 0 0 12px; border-left: 2px solid var(--ev-line, #d9e5dc); }
 .ag-evidence-status .ag-delivery-quote > ul { margin: 0; gap: 2px; }
+
+/* details 的内容容器不会继承外层 grid gap，显式保留相邻工具卡片的间距。 */
+.ag-collapsible-round > .ag-call + .ag-call { margin-top: 10px; }
