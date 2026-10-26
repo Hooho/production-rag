@@ -879,7 +879,7 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
               return route.evidence.includes(evidence)
                 ? <li key={evidence} className="is-hit"><b>✓</b>证据 {evidence + 1}<small>召回到了</small>
                   {(best?.dense ?? 0) > 0 && <Tag size="sm" tone="info" plain>向量第 {best?.dense} 名</Tag>}
-                  {(best?.keyword ?? 0) > 0 && <Tag size="sm" tone="warning" outline plain>关键词第 {best?.keyword} 名</Tag>}</li>
+                  {(best?.keyword ?? 0) > 0 && <Tag size="sm" tone="warning" plain>关键词第 {best?.keyword} 名</Tag>}</li>
                 : <li key={evidence} className="is-miss"><b>—</b>证据 {evidence + 1}<small>这一路没召回</small></li>;
             })}</ul>}
           </div>)}
