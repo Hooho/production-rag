@@ -8639,3 +8639,20 @@ input:focus {
 .ag-round-output { margin: 10px 0 14px; }
 .ag-round-output > summary { cursor: pointer; color: var(--muted, #718675); }
 .ag-round-output > .ag-round-text { margin-top: 10px; }
+
+.ag-collapsible-round > summary { cursor: pointer; margin-bottom: 0; list-style: none; }
+.ag-collapsible-round > summary::-webkit-details-marker,
+.ag-reasoning-collapse > summary::-webkit-details-marker { display: none; }
+.ag-collapsible-round[open] > summary { margin-bottom: 10px; }
+.ag-round-toggle { margin-left: auto; font-size: 12px; font-weight: 400; }
+.ag-round-toggle::after { content: "展开 ＋"; }
+.ag-collapsible-round[open] > summary .ag-round-toggle::after { content: "收起 −"; }
+.ag-reasoning-collapse > summary { cursor: pointer; list-style: none; }
+.ag-reasoning-toggle { margin-left: 12px; font-size: 12px; color: var(--muted, #718675); }
+.ag-reasoning-toggle::after { content: "展开更多"; }
+.ag-reasoning-collapse[open] .ag-reasoning-toggle::after { content: "收起"; }
+.ag-reasoning-preview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; margin-top: 8px; font-weight: 400; }
+.ag-reasoning-collapse[open] .ag-reasoning-preview { display: none; }
+.ag-reasoning-collapse[open] > .ag-round-text { margin-top: 8px; }
+.ag-collapsible-round > summary:focus-visible,
+.ag-reasoning-collapse > summary:focus-visible { outline: 2px solid #3c8655; outline-offset: 4px; border-radius: 4px; }

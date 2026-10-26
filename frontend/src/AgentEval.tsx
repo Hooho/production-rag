@@ -918,19 +918,23 @@ function AgentLog({ question }: { question: EvalQuestion }) {
       {agent.question_sent !== question.question && <div className="ag-call-meta">实际提问（多轮追问按规则补全）：{agent.question_sent}</div>}
       {agent.calls.length === 0 && <p className="ag-muted">没有调用任何工具，直接回答了。</p>}
       {/* 按轮分组：同一轮里模型同时发出的几次调用放在一个框里，它们彼此看不到对方的结果。 */}
-      {rounds.map(({ round, calls, kind, reasoning, content, error }, index) => <div key={`${round}-${index}`} className={`ag-round ${calls.length > 1 ? "is-parallel" : ""}`}>
-        <div className="ag-round-head">第 {round ?? "—"} 轮{calls.length > 1 ? <Tag size="sm" tone="warning">同时发出 {calls.length} 次，彼此看不到结果</Tag> : null}</div>
-        <div className="ag-round-reasoning">
-          <div className="ag-tool">Agent 推理过程</div>
-          {reasoning ? <div className="ag-round-text">{reasoning}</div> : <p className="ag-muted">{reasoning === null ? "这条历史记录没有保存本轮推理过程。" : "模型未返回本轮推理过程。"}</p>}
-        </div>
+      {rounds.map(({ round, calls, kind, reasoning, content, error }, index) => <details key={`${round}-${index}`} open={index === 0} className={`ag-round ag-collapsible-round ${calls.length > 1 ? "is-parallel" : ""}`}>
+        <summary className="ag-round-head">第 {round ?? "—"} 轮{calls.length > 1 ? <Tag size="sm" tone="warning">同时发出 {calls.length} 次，彼此看不到结果</Tag> : null}<span className="ag-round-toggle" aria-hidden="true" /></summary>
+        {reasoning ? <details className="ag-round-reasoning ag-reasoning-collapse">
+          <summary><span className="ag-tool">Agent 推理过程</span><span className="ag-reasoning-toggle" aria-hidden="true" />
+            <span className="ag-round-text ag-reasoning-preview">{reasoning}</span>
+          </summary>
+          <div className="ag-round-text">{reasoning}</div>
+        </details> : <div className="ag-round-reasoning"><div className="ag-tool">Agent 推理过程</div>
+          <p className="ag-muted">{reasoning === null ? "这条历史记录没有保存本轮推理过程。" : "模型未返回本轮推理过程。"}</p>
+        </div>}
         {error && <p className="ag-warn">本轮出错：{error}</p>}
         {kind === "forced" && <p className="ag-muted">{agent.stop_reason === "timeout" ? "时间到了" : "工具预算用完"}，不带工具直接回答。</p>}
         {content && <details className="ag-round-output"><summary>{calls.length ? "本轮模型说明" : "本轮回答"}</summary><div className="ag-round-text">{content}</div></details>}
         {calls.map((call) => <AgentCall key={call.call} call={call} fresh={fresh.perCall.get(call.call) ?? new Set()} evidenceChunks={evidenceChunks} />)}
-      </div>)}
+      </details>)}
       {/* 预算用完或超时后，程序再让模型跑一轮不带工具的，直接写回答；这一轮没有检索。 */}
-      {agent.forced && !agent.round_logs?.length && <div className="ag-round"><div className="ag-round-head">第 {agent.rounds} 轮<Tag size="sm" outline plain>{agent.stop_reason === "timeout" ? "时间到了" : "工具预算用完"}，不带工具直接回答，没有检索</Tag></div></div>}
+      {agent.forced && !agent.round_logs?.length && <details className="ag-round ag-collapsible-round" open={rounds.length === 0}><summary className="ag-round-head">第 {agent.rounds} 轮<span className="ag-round-toggle" aria-hidden="true" /></summary><p className="ag-muted">{agent.stop_reason === "timeout" ? "时间到了" : "工具预算用完"}，不带工具直接回答，没有检索。这条历史记录没有保存本轮推理过程。</p></details>}
       <MaterialLine material={agentMaterial(question)} />
     </>}
   </section>;
