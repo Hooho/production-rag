@@ -251,6 +251,7 @@ function modeRows(questions: EvalQuestion[], config: EvalConfig | undefined, has
     fixed = {
       passed: ran.filter((question, index) => question.evidence_count > 0 && hits[index] >= question.evidence_count).length,
       count: ran.length, hits: hits.reduce((sum, value) => sum + value, 0), ext: ran.reduce((sum, question) => sum + fixedExtHits(question), 0),
+      direct: ran.reduce((sum, question, index) => sum + hits[index] - fixedExtHits(question), 0),
       retried: questions.filter((question) => question.retry?.used).length, cleared: answerable.filter((question) => question.cleared).length,
       rejected: ran.filter((question) => question.cleared || question.returned === 0).length,
       accepted: unanswerable.filter((question) => question.stages && !question.cleared && question.returned > 0).length,
@@ -266,6 +267,7 @@ function modeRows(questions: EvalQuestion[], config: EvalConfig | undefined, has
       count: ran.length, hits: found.reduce((sum, value) => sum + value, 0),
       ext: ran.reduce((sum, question) => sum + question.agent!.evidence.filter((item) => item.found && item.via === "extension").length, 0),
       context: ran.reduce((sum, question) => sum + question.agent!.evidence.filter((item) => item.found && item.via === "context").length, 0),
+      direct: ran.reduce((sum, question) => sum + question.agent!.evidence.filter((item) => item.found && item.via === "direct").length, 0),
       searches, wasted: all.reduce((sum, item) => sum + (item.wasted_searches ?? 0), 0), forced: all.filter((item) => item.forced).length,
       failed: all.filter((item) => item.status !== "completed").length,
       rejected: ran.filter((question) => question.agent!.returned === 0).length,
@@ -302,6 +304,12 @@ function modeRows(questions: EvalQuestion[], config: EvalConfig | undefined, has
   const fixedVia = answerable.some((question) => question.ext_hits !== undefined && question.ext_hits !== null || question.evidence.some((item) => item.via !== undefined && item.via !== null));
   const agentVia = answerable.some((question) => (question.agent?.evidence ?? []).some((item) => item.via !== undefined && item.via !== null));
   const noVia = { value: "—", note: "这次评测没记录（加扩展命中统计之前跑的），重跑后才有" };
+  // 检索命中：证据命中里去掉靠扩展（和读前后文）拿到的，只算检索本身命中的；没有 via 记录的旧评测显示「—」。
+  rows.push({
+    group: "result", label: "检索命中", ...pick(
+      fixedVia ? { value: ratio(fixed.direct, evidenceTotal), note: "不算父块扩展，检索本身命中的证据", best: best("direct", "fixed") } : noVia,
+      agentVia ? { value: ratio(agent.direct, evidenceTotal), note: "不算父块扩展和读前后文，检索本身命中的证据", best: best("direct", "agent") } : noVia)
+  });
   rows.push({
     group: "result", label: "扩展命中", ...pick(
       fixedVia ? { value: `${fixed.ext} 条`, note: "只在父块扩展的分片里" } : noVia,
@@ -447,6 +455,7 @@ export function AgentPanel({ run }: { run: EvalRun }) {
     <div className="ev-cards">
       <Card label="得分" value={formatPoints(summary.agent_score)} note={summary.agent_score_bands ? bandsText(summary.agent_score_bands as unknown as Record<string, number>) : SCORE_RULE} />
       <Card label="资料命中率" value={percent(summary.agent_recall)} note={agentQuestions.length ? `共 ${evidenceTotal} 条证据，Agent 找到的资料里有 ${evidenceFound} 条` : "Agent 找到资料，包含题目的证据的比例"} />
+      <Card label="检索命中率" value={hasVia ? percent(summary.agent_direct_recall) : "—"} note={hasVia ? `共 ${evidenceTotal} 条证据，有 ${viaCount("direct")} 条是检索本身命中的（不算扩展和读前后文）` : "这次评测没记录（加扩展命中统计之前跑的），重跑后才有"} />
       <Card label="扩展命中率" value={percent(summary.agent_ext_hit_rate)} note={hasVia ? `拿到的 ${evidenceFound} 条证据里，有 ${viaCount("extension")} 条在扩展的分片里${viaCount("context") ? `，${viaCount("context")} 条靠读前后文` : ""}` : "拿到的证据里，只在父块扩展拼进来的分片里的比例"} />
       <Card label="误杀率" value={percent(summary.agent_false_reject_rate)} note={agentQuestions.length ? `${answerable.length} 道有答案的题，有 ${rejected} 道一段资料都没拿到` : "有答案却没拿到资料"} />
       <Card label="漏放率" value={percent(summary.agent_false_accept_rate)} note={agentQuestions.length ? `${unanswerable.length} 道没答案的题，有 ${accepted} 道还拿到了资料` : "没答案却拿到资料"} />

@@ -342,6 +342,9 @@ def summarize(rows):
     counted = [row for row in answerable if "ext_hits" in row]
     given_total = sum(row["given_hits"] for row in counted)
     summary["ext_hit_rate"] = round(sum(row["ext_hits"] for row in counted) / given_total, 4) if given_total else None
+    # 检索命中率：证据命中里去掉靠父块扩展拿到的，只算检索本身命中的那一片（分母和资料命中率一样，是全部证据条数）。
+    evidence_total = sum(row["evidence_count"] for row in counted)
+    summary["recall_direct"] = round(sum(row["given_hits"] - row["ext_hits"] for row in counted) / evidence_total, 4) if evidence_total else None
     rejected = 0
     for row in answerable:
         if row["returned"] == 0:

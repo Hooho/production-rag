@@ -503,6 +503,8 @@ def test_retrieval_full_flow_rewrite_cache_and_sufficiency(setup, eval_dir, monk
     assert summary["wrong_clear_rate"] == 0.5
     # 证据都在检索命中的那一片里：扩展命中率是 0（被清空的题不算拿到）。
     assert summary["ext_hit_rate"] == 0.0 and first["evidence"][0]["via"] == "direct" and cleared["given_hits"] == 0
+    # 检索命中率 = 证据命中去掉扩展命中：没有靠扩展的，就等于资料命中率。
+    assert summary["recall_direct"] == summary["recall_given"] == 0.5
     assert run["config"]["flow"]["name"] == "full" and run["config"]["flow"]["rewrite_fresh"] == 3
     # 第二次跑：改写全部用缓存，不再调用模型，检索词不变。
     called = len(rewrites)

@@ -232,6 +232,10 @@ def summarize_agent(rows):
         "agent_ext_hit_rate": (round(sum(agent["ext_hits"] for agent in answerable if "ext_hits" in agent)
             / sum(agent["found_count"] for agent in answerable if "ext_hits" in agent), 4)
             if sum(agent.get("found_count", 0) for agent in answerable if "ext_hits" in agent) else None),
+        # 检索命中率：拿到的证据里去掉父块扩展、读前后文拿到的，只算检索本身命中的（分母是全部证据条数）。
+        "agent_direct_recall": (round(sum(agent["found_count"] - agent["ext_hits"] - agent.get("context_hits", 0)
+            for agent in answerable if "ext_hits" in agent) / sum(len(agent["evidence"]) for agent in answerable if "ext_hits" in agent), 4)
+            if sum(len(agent["evidence"]) for agent in answerable if "ext_hits" in agent) else None),
         "agent_false_accept_rate": rate(unanswerable, lambda agent: agent["returned"] > 0),
         "agent_avg_searches": average("searches"), "agent_avg_empty_searches": average("empty_searches"),
         # 无新增检索：一个新分块都没拿到的检索。比例 = 无新增检索次数 / 全部检索次数，越低越好。
