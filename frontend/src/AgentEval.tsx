@@ -649,7 +649,8 @@ function FinalDelivery({ question, items, unavailable = false }: { question: Eva
     <summary><span className="ag-tool">最终交付情况</span><small>{groups.size} 条来源 · {chunks.size} 个分片（含扩展）</small></summary>
     {unavailable ? <p className="ag-muted">这次评测没有保存最终交付资料。</p> : groups.size === 0 ? <p className="ag-muted">{question.cleared ? "资料已清空，没有最终交付。" : "没有最终交付资料。"}</p> : <ul className="ag-delivery-groups">
       {[...groups].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([id, rows]) => <li className="ag-delivery-group" key={id}>
-        <div className="ag-delivery-group-head"><SourceTag id={id} /><small>{rows.size} 个分片</small></div>
+        <details className="ag-delivery-source" open={[...rows.values()].some((row) => row.hits.length > 0)}>
+        <summary className="ag-delivery-group-head"><SourceTag id={id} /><small>{rows.size} 个分片</small><span className="ag-delivery-source-toggle" aria-hidden="true" /></summary>
         <blockquote className="ag-delivery-quote"><ul>
           {[...rows].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([key, row]) => {
             const direct = row.sources.some((item) => !item.key.startsWith("context-") && item.chunkId === row.chunkId);
@@ -661,6 +662,7 @@ function FinalDelivery({ question, items, unavailable = false }: { question: Eva
             </button></li>;
           })}
         </ul></blockquote>
+        </details>
       </li>)}
     </ul>}
     <ChunkOriginalDialog value={selected} onClose={() => setSelected(null)} />

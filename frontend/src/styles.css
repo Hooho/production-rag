@@ -8686,3 +8686,10 @@ input:focus {
 .ag-delivery .ag-delivery-row.is-non-evidence > small { color: #999; }
 .ag-delivery .ag-delivery-row.is-non-evidence > small { font-size: 11px; }
 .ag-delivery .ag-delivery-row.is-non-evidence .tag { --tag-text: #999; --tag-bg: #f7f7f7; --tag-border: #e8e8e8; font-size: 11px; }
+
+.ag-delivery-source > summary { cursor: pointer; list-style: none; }
+.ag-delivery-source > summary::-webkit-details-marker { display: none; }
+.ag-delivery-source-toggle { margin-left: auto; font-size: 11px; color: var(--ev-muted); }
+.ag-delivery-source-toggle::after { content: "展开 ＋"; }
+.ag-delivery-source[open] > summary .ag-delivery-source-toggle::after { content: "收起 −"; }
+.ag-delivery-source > summary:focus-visible { outline: 2px solid #3c8655; outline-offset: 3px; border-radius: 4px; }
