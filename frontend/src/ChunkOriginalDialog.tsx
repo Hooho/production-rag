@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { evidenceRanges } from "./evidenceRanges";
 import { SourceTag } from "./Tag";
 
 export type ChunkOriginalSource = {
@@ -6,7 +7,7 @@ export type ChunkOriginalSource = {
   parts?: string[]; snapshotNote?: string; relevance?: number | null; low?: boolean;
 };
 export type ChunkOriginal = {
-  label: string; sources: ChunkOriginalSource[]; evidence: { number: number; text: string }[];
+  label: string; note?: string; sources: ChunkOriginalSource[]; evidence: { number: number; text: string }[];
 };
 
 // 原文和推理全文共用右侧弹窗，保留原生对话框的焦点管理与 Escape 关闭。
@@ -28,6 +29,7 @@ export function ChunkOriginalDialog({ value, onClose }: { value: ChunkOriginal |
   if (!value) return null;
   return <DetailDialog open title={`${value.label} · 原文`} onClose={onClose}>
       <p className="ag-muted">{value.evidence.length ? `对应证据 ${value.evidence.map((item) => item.number).join("、")}` : "非证据"}</p>
+      {value.note && <p role="status" className="ag-muted">{value.note}</p>}
       {value.evidence.map((item) => <blockquote key={item.number}>证据 {item.number}：{item.text}</blockquote>)}
       {value.sources.filter((source, index, all) => all.findIndex((other) => other.text === source.text) === index).map((item) => <section key={item.key}>
         <h4><SourceTag id={item.id} /> · {item.title ?? "来源资料"}</h4>{item.heading && <p>{item.heading}</p>}
@@ -40,15 +42,7 @@ export function ChunkOriginalDialog({ value, onClose }: { value: ChunkOriginal |
 }
 
 function OriginalText({ text, evidence }: { text: string; evidence: string[] }) {
-  const ranges: [number, number][] = [];
-  for (const quote of evidence) {
-    if (!quote) continue;
-    let start = text.indexOf(quote);
-    while (start >= 0) {
-      ranges.push([start, start + quote.length]);
-      start = text.indexOf(quote, start + quote.length);
-    }
-  }
+  const ranges = evidenceRanges(text, evidence);
   ranges.sort((a, b) => a[0] - b[0]);
   const merged: [number, number][] = [];
   for (const range of ranges) {

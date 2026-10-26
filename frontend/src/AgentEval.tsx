@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { DetailDialog, ChunkOriginalDialog, type ChunkOriginal } from "./ChunkOriginalDialog";
 import { type EvalAgentCall, type EvalCompareKey, type EvalConfig, type EvalMaterial, type EvalMode, type EvalRetry, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSummary } from "./api";
+import { EvidenceChunkDialog, type EvidenceChunkSelection } from "./EvidenceChunkDialog";
 import { evidenceLabel, formatDuration as formatMs } from "./format";
 import { SourceTag, Tag, TypeStats, TypeTag, typeHues, type TypeStat } from "./Tag";
 import type { Tone } from "./tags";
@@ -770,6 +771,7 @@ function mergeOutcome(fixed: EvalQuestion["evidence"][number] | undefined, given
 
 function QuestionDetail({ question, hasFixed, params, config }: { question: EvalQuestion; hasFixed: boolean; params: string[]; config: EvalRun["config"] }) {
   const agent = question.agent;
+  const [selected, setSelected] = useState<EvidenceChunkSelection | null>(null);
   // 上面只列证据原文和所在分块；两边各自拿没拿到、怎么拿到的，看下面两张卡片里的「证据命中情况」。
   const texts = (agent?.evidence ?? []).length ? agent!.evidence : question.evidence;
   return <div className="ev-question-body">
@@ -780,9 +782,10 @@ function QuestionDetail({ question, hasFixed, params, config }: { question: Eval
       const positions = "positions" in evidence ? evidence.positions : undefined;
       return <div className="ag-evidence" key={index}>
         <p>证据 {index + 1}：“{evidenceLabel(evidence.text)}”</p>
-        <span className="ag-evidence-chunk">所在分块 {chunkIds.length ? chunkIds.map((chunkId, order) => <code key={chunkId} title={chunkId}>{chunkLabel(positions?.[order], chunkId)}</code>) : "知识库里没找到"}</span>
+        <span className="ag-evidence-chunk">所在分块 {chunkIds.length ? chunkIds.map((chunkId, order) => <button type="button" className="ag-evidence-chunk-button" key={chunkId} title={`${chunkId} · 点击查看原文`} aria-haspopup="dialog" onClick={() => setSelected({ chunkId, label: chunkLabel(positions?.[order], chunkId), evidence: { number: index + 1, text: evidence.text } })}>{chunkLabel(positions?.[order], chunkId)}</button>) : "知识库里没找到"}</span>
       </div>;
     })}</div> : <p className="ev-muted-note">没有答案的题，拿到的资料越少越好。</p>}
+    {selected && <EvidenceChunkDialog key={`${selected.chunkId}:${selected.evidence.number}`} selection={selected} onClose={() => setSelected(null)} />}
     <div className={`ag-columns ${hasFixed ? "" : "is-single"}`}>
       {hasFixed && <FixedLog question={question} params={params} config={config} />}
       {agent && <AgentLog question={question} />}
