@@ -876,9 +876,10 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
             {/* 这一路召回到了哪几条证据、各排第几（向量、关键词两张排名表）。 */}
             {total > 0 && <ul className="ag-evidence-trace">{Array.from({ length: total }, (_, evidence) => {
               const best = route.best.find((item) => item.evidence === evidence);
-              const ranks = [best?.dense ? `向量第 ${best.dense} 名` : "", best?.keyword ? `关键词第 ${best.keyword} 名` : ""].filter(Boolean).join("、");
               return route.evidence.includes(evidence)
-                ? <li key={evidence} className="is-hit"><b>✓</b>证据 {evidence + 1}<small>召回到了{ranks ? ` · ${ranks}` : ""}</small></li>
+                ? <li key={evidence} className="is-hit"><b>✓</b>证据 {evidence + 1}<small>召回到了</small>
+                  {(best?.dense ?? 0) > 0 && <Tag size="sm" tone="info" plain>向量第 {best?.dense} 名</Tag>}
+                  {(best?.keyword ?? 0) > 0 && <Tag size="sm" tone="warning" outline plain>关键词第 {best?.keyword} 名</Tag>}</li>
                 : <li key={evidence} className="is-miss"><b>—</b>证据 {evidence + 1}<small>这一路没召回</small></li>;
             })}</ul>}
           </div>)}
