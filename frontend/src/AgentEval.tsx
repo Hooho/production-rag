@@ -997,10 +997,10 @@ function fromSpecial(question: EvalSpecialQuestion, hasFixed: boolean, seq: numb
 
 // 按类型统计：从逐题结果现算（通过数、证据命中条数、得分），旧记录后端没存证据命中和得分也能显示。
 function specialTypeStats(questions: EvalSpecialQuestion[], hasFixed: boolean, hasAgent: boolean): TypeStat[] | null {
-  const groups = new Map<string, TypeStat & { fixedScores: number[]; agentScores: number[]; fixedMaterials: EvalMaterial[]; agentMaterials: EvalMaterial[] }>();
+  const groups = new Map<string, TypeStat & { fixedDirectKnown: boolean; agentDirectKnown: boolean; fixedScores: number[]; agentScores: number[]; fixedMaterials: EvalMaterial[]; agentMaterials: EvalMaterial[] }>();
   for (const question of questions) {
     if (!question.type) continue;
-    const group = groups.get(question.type) ?? { type: question.type, count: 0, passed: 0, fixedScores: [], agentScores: [], fixedMaterials: [], agentMaterials: [] };
+    const group = groups.get(question.type) ?? { type: question.type, count: 0, passed: 0, fixedDirectKnown: true, agentDirectKnown: true, fixedScores: [], agentScores: [], fixedMaterials: [], agentMaterials: [] };
     if (hasFixed && question.material) group.fixedMaterials.push(question.material);
     else if (hasFixed && question.cleared) group.fixedMaterials.push({ count: 0, chars: 0, tokens: 0 });
     else if (hasFixed && question.sources) group.fixedMaterials.push({
@@ -1017,6 +1017,10 @@ function specialTypeStats(questions: EvalSpecialQuestion[], hasFixed: boolean, h
       const hits = question.cleared ? 0 : question.fixed_evidence?.length ? question.fixed_evidence.filter((item) => item.given).length : question.given_hits ?? 0;
       group.fixed_passed = (group.fixed_passed ?? 0) + (question.fixed_passed ? 1 : 0);
       group.fixed_hits = (group.fixed_hits ?? 0) + hits;
+      const found = (question.fixed_evidence ?? []).filter((item) => item.given);
+      if (hits > 0 && (found.length !== hits || found.some((item) => !item.via))) group.fixedDirectKnown = false;
+      group.fixed_direct = (group.fixed_direct ?? 0) + (question.cleared ? 0 : found.filter((item) => item.via === "direct").length);
+      group.fixed_extension = (group.fixed_extension ?? 0) + (question.cleared ? 0 : found.filter((item) => item.via === "extension").length);
       const score = questionScore(true, hits, total);
       if (score !== null) group.fixedScores.push(score);
     }
@@ -1024,13 +1028,19 @@ function specialTypeStats(questions: EvalSpecialQuestion[], hasFixed: boolean, h
       const hits = question.agent.evidence.filter((item) => item.found).length;
       group.agent_passed = (group.agent_passed ?? 0) + (question.agent_passed ? 1 : 0);
       group.agent_hits = (group.agent_hits ?? 0) + hits;
+      const found = question.agent.evidence.filter((item) => item.found);
+      if (found.some((item) => !item.via)) group.agentDirectKnown = false;
+      group.agent_direct = (group.agent_direct ?? 0) + found.filter((item) => item.via === "direct").length;
+      group.agent_extension = (group.agent_extension ?? 0) + found.filter((item) => item.via === "extension").length;
       const score = questionScore(true, hits, question.agent.evidence.length || total);
       if (score !== null) group.agentScores.push(score);
     }
   }
   const average = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : undefined;
-  const stats = [...groups.values()].map(({ fixedScores, agentScores, fixedMaterials, agentMaterials, ...group }) => ({
+  const stats = [...groups.values()].map(({ fixedDirectKnown, agentDirectKnown, fixedScores, agentScores, fixedMaterials, agentMaterials, ...group }) => ({
     ...group,
+    fixed_direct: fixedDirectKnown ? group.fixed_direct : undefined, fixed_extension: fixedDirectKnown ? group.fixed_extension : undefined,
+    agent_direct: agentDirectKnown ? group.agent_direct : undefined, agent_extension: agentDirectKnown ? group.agent_extension : undefined,
     fixed_score: average(fixedScores), agent_score: average(agentScores),
     fixed_material_count: average(fixedMaterials.map((item) => item.count)), fixed_material_tokens: average(fixedMaterials.map((item) => item.tokens)),
     agent_material_count: average(agentMaterials.map((item) => item.count)), agent_material_tokens: average(agentMaterials.map((item) => item.tokens))

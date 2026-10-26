@@ -61,6 +61,7 @@ export { hueMap as typeHues };
 export type TypeStat = { type: string; count: number; passed: number; fixed_passed?: number; agent_passed?: number;
   // 证据命中：一共几条证据、两边各命中几条（旧记录没有）。
   evidence_total?: number; fixed_hits?: number; agent_hits?: number;
+  fixed_direct?: number; fixed_extension?: number; agent_direct?: number; agent_extension?: number;
   // 两边每题得分的平均（规则见 score.ts，旧记录没有）。
   fixed_score?: number; agent_score?: number;
   // 平均交给模型的资料：段数和约多少 token。
@@ -90,6 +91,10 @@ export function TypeStats({ stats, hues, both }: { stats: TypeStat[]; hues: Map<
   const sum = (key: keyof TypeStat) => stats.some((row) => row[key] !== undefined) ? stats.reduce((value, row) => value + (Number(row[key]) || 0), 0) : undefined;
   const total: TypeStat = { type: "合计", count: sum("count") ?? 0, passed: sum("passed") ?? 0, fixed_passed: sum("fixed_passed"), agent_passed: sum("agent_passed"),
     evidence_total: sum("evidence_total"), fixed_hits: sum("fixed_hits"), agent_hits: sum("agent_hits"),
+    fixed_direct: stats.every((row) => row.fixed_direct !== undefined) ? sum("fixed_direct") : undefined,
+    agent_direct: stats.every((row) => row.agent_direct !== undefined) ? sum("agent_direct") : undefined,
+    fixed_extension: stats.every((row) => row.fixed_extension !== undefined) ? sum("fixed_extension") : undefined,
+    agent_extension: stats.every((row) => row.agent_extension !== undefined) ? sum("agent_extension") : undefined,
     fixed_score: weighted("fixed_score"), agent_score: weighted("agent_score"),
     fixed_material_count: weighted("fixed_material_count"), fixed_material_tokens: weighted("fixed_material_tokens"),
     agent_material_count: weighted("agent_material_count"), agent_material_tokens: weighted("agent_material_tokens") };
@@ -98,24 +103,28 @@ export function TypeStats({ stats, hues, both }: { stats: TypeStat[]; hues: Map<
   const material = (count: number | undefined, tokens: number | undefined) => count === undefined ? "—"
     : <span className="type-stat">{Math.round(count * 10) / 10} 段<small>{tokens === undefined ? "" : `约 ${Math.round(tokens).toLocaleString()} token`}</small></span>;
   const hasEvidence = stats.some((row) => row.evidence_total);
+  const hasDirect = stats.some((row) => row.fixed_direct !== undefined || row.agent_direct !== undefined);
+  const direct = (hits: number | undefined, extension: number | undefined, total: number | undefined) => <div className="type-direct-stat">
+    {evidence(hits, total)}<small>{extension === undefined ? "未记录扩展命中" : `扩展命中 ${extension} 条证据`}</small>
+  </div>;
   const row = (item: TypeStat, isTotal = false) => <tr key={item.type} className={isTotal ? "is-total" : ""}>
     <td>{isTotal ? "合计" : <TypeTag type={item.type} hues={hues} />}</td><td className="num">{item.count}</td>
     {both ? <>
-      {hasScore && <td className="num is-fixed">{points(item.fixed_score)}</td>}<td className="num is-fixed">{cell(item.fixed_passed, item.count)}</td>{hasEvidence && <td className="num is-fixed">{evidence(item.fixed_hits, item.evidence_total)}</td>}{hasMaterial && <td className="num is-fixed">{material(item.fixed_material_count, item.fixed_material_tokens)}</td>}
-      {hasScore && <td className="num is-agent">{points(item.agent_score)}</td>}<td className="num is-agent">{cell(item.agent_passed, item.count)}</td>{hasEvidence && <td className="num is-agent">{evidence(item.agent_hits, item.evidence_total)}</td>}{hasMaterial && <td className="num is-agent">{material(item.agent_material_count, item.agent_material_tokens)}</td>}
+      {hasScore && <td className="num is-fixed">{points(item.fixed_score)}</td>}<td className="num is-fixed">{cell(item.fixed_passed, item.count)}</td>{hasEvidence && <td className="num is-fixed">{evidence(item.fixed_hits, item.evidence_total)}</td>}{hasDirect && <td className="num is-fixed">{direct(item.fixed_direct, item.fixed_extension, item.evidence_total)}</td>}{hasMaterial && <td className="num is-fixed">{material(item.fixed_material_count, item.fixed_material_tokens)}</td>}
+      {hasScore && <td className="num is-agent">{points(item.agent_score)}</td>}<td className="num is-agent">{cell(item.agent_passed, item.count)}</td>{hasEvidence && <td className="num is-agent">{evidence(item.agent_hits, item.evidence_total)}</td>}{hasDirect && <td className="num is-agent">{direct(item.agent_direct, item.agent_extension, item.evidence_total)}</td>}{hasMaterial && <td className="num is-agent">{material(item.agent_material_count, item.agent_material_tokens)}</td>}
     </> : <>
-      {hasScore && <td className="num">{points(item.fixed_score ?? item.agent_score)}</td>}<td className="num">{cell(item.passed, item.count)}</td>{hasEvidence && <td className="num">{evidence(item.fixed_hits ?? item.agent_hits, item.evidence_total)}</td>}
+      {hasScore && <td className="num">{points(item.fixed_score ?? item.agent_score)}</td>}<td className="num">{cell(item.passed, item.count)}</td>{hasEvidence && <td className="num">{evidence(item.fixed_hits ?? item.agent_hits, item.evidence_total)}</td>}{hasDirect && <td className="num">{direct(item.fixed_direct ?? item.agent_direct, item.fixed_extension ?? item.agent_extension, item.evidence_total)}</td>}
     </>}
   </tr>;
   return <div className="diag-table-wrap type-stats-wrap"><table className="diag-table ev-table type-stats">
     {/* 两种模式一起跑时表头分两行：上面一行写模式，下面是各自的得分、通过、证据命中率；两边用不同底色区分。 */}
     <thead>{both ? <>
       <tr><th rowSpan={2}>类型</th><th className="num" rowSpan={2}>题数</th>
-        <th className="is-fixed is-group" colSpan={1 + (hasScore ? 1 : 0) + (hasEvidence ? 1 : 0) + (hasMaterial ? 1 : 0)}>固定流程</th>
-        <th className="is-agent is-group" colSpan={1 + (hasScore ? 1 : 0) + (hasEvidence ? 1 : 0) + (hasMaterial ? 1 : 0)}>Agent</th></tr>
-      <tr>{hasScore && <th className="num is-fixed">得分</th>}<th className="num is-fixed">通过</th>{hasEvidence && <th className="num is-fixed">证据命中率</th>}{hasMaterial && <th className="num is-fixed">交给模型的资料</th>}
-        {hasScore && <th className="num is-agent">得分</th>}<th className="num is-agent">通过</th>{hasEvidence && <th className="num is-agent">证据命中率</th>}{hasMaterial && <th className="num is-agent">交给模型的资料</th>}</tr>
-    </> : <tr><th>类型</th><th className="num">题数</th>{hasScore && <th className="num">得分</th>}<th className="num">通过</th>{hasEvidence && <th className="num">证据命中率</th>}</tr>}</thead>
+        <th className="is-fixed is-group" colSpan={1 + (hasScore ? 1 : 0) + (hasEvidence ? 1 : 0) + (hasDirect ? 1 : 0) + (hasMaterial ? 1 : 0)}>固定流程</th>
+        <th className="is-agent is-group" colSpan={1 + (hasScore ? 1 : 0) + (hasEvidence ? 1 : 0) + (hasDirect ? 1 : 0) + (hasMaterial ? 1 : 0)}>Agent</th></tr>
+      <tr>{hasScore && <th className="num is-fixed">得分</th>}<th className="num is-fixed">通过</th>{hasEvidence && <th className="num is-fixed">证据命中率</th>}{hasDirect && <th className="num is-fixed" title="直接检索命中的证据数 / 全部证据数，不计扩展和读前后文">纯检索命中率</th>}{hasMaterial && <th className="num is-fixed">交给模型的资料</th>}
+        {hasScore && <th className="num is-agent">得分</th>}<th className="num is-agent">通过</th>{hasEvidence && <th className="num is-agent">证据命中率</th>}{hasDirect && <th className="num is-agent" title="直接检索命中的证据数 / 全部证据数，不计扩展和读前后文">纯检索命中率</th>}{hasMaterial && <th className="num is-agent">交给模型的资料</th>}</tr>
+    </> : <tr><th>类型</th><th className="num">题数</th>{hasScore && <th className="num">得分</th>}<th className="num">通过</th>{hasEvidence && <th className="num">证据命中率</th>}{hasDirect && <th className="num">纯检索命中率</th>}</tr>}</thead>
     <tbody>{stats.map((item) => row(item))}{stats.length > 1 && row(total, true)}</tbody>
   </table></div>;
 }

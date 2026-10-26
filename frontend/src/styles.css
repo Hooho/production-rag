@@ -8693,3 +8693,6 @@ input:focus {
 .ag-delivery-source-toggle::after { content: "展开 ＋"; }
 .ag-delivery-source[open] > summary .ag-delivery-source-toggle::after { content: "收起 −"; }
 .ag-delivery-source > summary:focus-visible { outline: 2px solid #3c8655; outline-offset: 3px; border-radius: 4px; }
+
+.type-direct-stat { display: grid; gap: 4px; }
+.type-direct-stat > small { display: block; font-size: 11px; font-weight: 400; color: var(--ev-muted); }
