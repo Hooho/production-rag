@@ -961,7 +961,7 @@ function AgentLog({ question }: { question: EvalQuestion }) {
     </EvidenceStatus>
     <DetailDialog open={expanded} title="Agent · 检索详情" onClose={() => setExpanded(false)} className="ag-retrieval-dialog">
     <div className="ag-retrieval-content">
-    {expanded && <p className="ag-muted ag-numbering-note">标签显示分片在文档中的位置；命中：包含证据；新增：本次新拿到的资料（可能同时命中）；重复返回：之前已拿到且本次未命中证据的资料。点击分片查看原文。</p>}
+    {expanded && <p className="ag-muted ag-numbering-note">每次调用按证据列出命中情况和实际所在分片；“扩展分片”表示通过相邻分片扩展拿到。点击分片查看原文。</p>}
     {expanded && <>
       {agent.question_sent !== question.question && <div className="ag-call-meta">实际提问（多轮追问按规则补全）：{agent.question_sent}</div>}
       {agent.calls.length === 0 && <p className="ag-muted">没有调用任何工具，直接回答了。</p>}
@@ -1003,6 +1003,41 @@ function groupByRound(calls: EvalAgentCall[]) {
   return groups;
 }
 
+// 每次工具调用按证据展示，标签指向实际含有该证据的分片。
+function AgentCallEvidence({ question, call, items }: { question: EvalQuestion; call: EvalAgentCall; items: ChunkItem[] }) {
+  const [selected, setSelected] = useState<ChunkOriginal | null>(null);
+  const evidence = question.agent?.evidence ?? [];
+  if (!question.answerable || !evidence.length) return null;
+  return <>
+    <ul className="ag-evidence-trace ag-call-evidence">{evidence.map((quote, index) => {
+      const rows = new Map<string, { item: ChunkItem; chunkId: string | null; position?: number | null; extended: boolean }>();
+      for (const item of items) {
+        const ids = item.parts?.length ? item.parts : item.chunkId ? [item.chunkId] : [];
+        const matched = ids.filter((id) => quote.chunk_ids?.includes(id));
+        for (const chunkId of matched) if (!rows.has(chunkId) || chunkId === item.chunkId) rows.set(chunkId, {
+          item, chunkId, position: quote.positions?.[quote.chunk_ids!.indexOf(chunkId)] ?? (chunkId === item.chunkId ? item.position : undefined),
+          extended: call.name !== "read_context" && chunkId !== item.chunkId
+        });
+        // 旧记录未保存证据分片 ID 时，使用这次调用保存的逐证据命中记录。
+        if (!matched.length && !quote.chunk_ids?.length && (call.results?.find((result) => result.evidence_id === item.id)?.hits.includes(index) || call.read_hits?.includes(index))) {
+          rows.set(item.key, { item, chunkId: item.chunkId ?? null, position: item.position, extended: false });
+        }
+      }
+      const hit = rows.size > 0 || call.hits.includes(index) || Boolean(call.read_hits?.includes(index));
+      return <li key={index} className={hit ? "is-hit" : "is-miss"}>
+        <b>{hit ? "✓" : "—"}</b><span>证据 {index + 1}</span><small>{hit ? "命中了" : "本次没命中"}</small>
+        {[...rows].map(([key, row]) => <Tag key={key} size="sm" tone={row.extended ? "accent" : "info"} outline={row.extended} className={row.extended ? "is-dashed" : undefined}
+          title={[row.item.title, row.extended ? "通过相邻分片扩展拿到" : "", "点击查看原文"].filter(Boolean).join(" · ")}
+          onClick={() => setSelected({ label: chunkLabel(row.position, row.chunkId), chunkId: row.chunkId, sources: [row.item], evidence: [{ number: index + 1, text: quote.text }] })}>
+          {row.extended ? "扩展分片 · " : ""}{row.chunkId || row.position != null ? chunkLabel(row.position, row.chunkId) : "查看原文"}
+        </Tag>)}
+        {hit && !rows.size && <small>历史记录未保存对应分片</small>}
+      </li>;
+    })}</ul>
+    <ChunkOriginalDialog value={selected} onClose={() => setSelected(null)} />
+  </>;
+}
+
 function AgentCall({ call, fresh, evidenceChunks, question }: { question: EvalQuestion; call: EvalAgentCall; fresh: Set<string>; evidenceChunks: Set<string> }) {
   const status = CALL_STATUS[call.status] ?? call.status;
   const hit = call.hits.length > 0;
@@ -1040,7 +1075,7 @@ function AgentCall({ call, fresh, evidenceChunks, question }: { question: EvalQu
         : <div className="ag-call-query"><code>{JSON.stringify(call.arguments)}</code></div>}
     {status && <div className="ag-call-meta">{status}{call.error ? `：${call.error}` : ""}</div>}
     {call.note && call.status !== "ok" && <div className="ag-call-meta">{call.note}</div>}
-    {(call.results || call.name === "read_context") && <ChunkTabs question={question} items={items} empty={call.results ? "没有返回分块（空检索）。" : "没有读到内容。"} />}
+    {(call.results || call.name === "read_context") && <AgentCallEvidence question={question} call={call} items={items} />}
   </div>;
 }
 
