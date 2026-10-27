@@ -647,7 +647,7 @@ export type EvalSufficiency = { checked: boolean; verdict: "sufficient" | "parti
 // fallback_reason：没用上大模型改写的原因（调用失败、格式不对、命中规则等），旧记录没有。
 export type EvalRewrite = { classifier: string; route?: string | null; intent?: string | null; cached?: boolean; duration_ms?: number; fallback_reason?: string | null };
 // 补充检索：返回几段、是否被采用、补充检索的资料命中率和来源。
-export type EvalRetry = { returned: number; used: boolean; given_recall: number | null; found?: number[]; sources?: (Source & { chunk_id?: string | null; position?: number | null; parent_chunk_ids?: string[] })[] };
+export type EvalRetry = { queries?: string[]; query_routes?: EvalQueryRoute[]; evidence?: EvalEvidence[]; latency_ms?: number | null; recall_ms?: number | null; rerank_ms?: number | null; returned: number; used: boolean; given_recall: number | null; found?: number[]; sources?: (Source & { chunk_id?: string | null; position?: number | null; parent_chunk_ids?: string[] })[] };
 // 和完整检索流程有关的逐题字段，调参评测和专项评测共用。
 // 固定流程每一路检索词各自召回的情况：召回几段、留到最后几段、含哪几条证据（从 0 开始）、证据在向量 / 关键词排名表里最好排第几。
 export type EvalQueryRoute = { query: string; recalled: number; kept: number; kept_ids?: string[]; evidence: number[]; best: { evidence: number; dense?: number; keyword?: number }[] };

@@ -597,6 +597,13 @@ def evaluate_items(store, models, items, chunk_texts, options, keep_diagnostics,
             check_ms = round((time.monotonic() - started) * 1000)
             apply_sufficiency(row, check, lambda sources: evidence_found(sources, evidence, chunk_texts),
                 retrieval["sources"], len(evidence), keep_diagnostics)
+            if check.get("retried"):
+                retry = check["retry_retrieval"]
+                retry_score = score_question(item, retry, chunk_texts, pool_size)
+                mark_extension(retry_score, retry["sources"], evidence, chunk_texts)
+                row["retry"].update({"queries": [*queries, check["retry_query"]],
+                    "query_routes": retry_score["query_routes"], "evidence": retry_score["evidence"],
+                    "recall_ms": retry_score["recall_ms"], "rerank_ms": retry_score["rerank_ms"]})
             row["check_ms"] = check_ms
             mark_extension(row, check["sources"], evidence, chunk_texts)
             row["material"] = material(check["sources"])

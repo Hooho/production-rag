@@ -194,7 +194,7 @@ function chunkItemsOf(sources: EvalQuestion["sources"] | EvalRetry["sources"] | 
 function evidenceChunkLists(question: EvalQuestion) {
   return (question.agent?.evidence ?? []).length
     ? (question.agent?.evidence ?? []).map((item) => item.chunk_ids ?? [])
-    : (question.evidence ?? []).map((item) => (item.chunk_id ? [item.chunk_id] : []));
+    : (question.evidence ?? []).map((item, index) => [...new Set([item.chunk_id, question.retry?.evidence?.[index]?.chunk_id].filter((id): id is string => Boolean(id)))]);
 }
 
 function fixedEvidenceRows(question: EvalQuestion, config: EvalRun["config"]): EvidenceStatusRow[] {
@@ -205,7 +205,7 @@ function fixedEvidenceRows(question: EvalQuestion, config: EvalRun["config"]): E
   const retryItems = chunkItemsOf(retry?.sources);
   const usedRetry = Boolean(question.sufficiency?.retry_used);
   return Array.from({ length: total }, (_, evidence): EvidenceStatusRow => {
-    const fixed = question.evidence?.[evidence];
+    const fixed = usedRetry ? retry?.evidence?.[evidence] : question.evidence?.[evidence];
     if (question.cleared) return { label: "被过滤", tone: "danger", detail: "（被充分性判断清空，线上会直接拒答）" };
     const finalItems = usedRetry ? retryItems : items;
     const chunkIds = evidenceLists[evidence] ?? [];
@@ -230,8 +230,9 @@ function fixedEvidenceRows(question: EvalQuestion, config: EvalRun["config"]): E
       }
       return { ...matches[0], matches };
     }
-    const row = lostRow(fixed, config);
-    return retry ? { ...row, detail: `${row.detail}${usedRetry ? "；补充检索也没拿到" : "；补充检索没采用"}` } : row;
+    const row = usedRetry && !retry?.evidence
+      ? { label: "没拿到", tone: "danger" as const, detail: "补充检索未命中，历史记录未保存过滤原因" } : lostRow(fixed, config);
+    return retry && !usedRetry ? { ...row, detail: `${row.detail}；补充检索没采用` } : row;
   });
 }
 
@@ -814,9 +815,9 @@ function QuestionDetail({ question, hasFixed, params, config }: { question: Eval
   </div>;
 }
 
-function FixedSearchResults({ question, items, config, queries, queryRoutes, mergedEvidence, retryQuery }: {
+function FixedSearchResults({ question, items, config, queries, queryRoutes, mergedEvidence, retryQuery, sourcesAvailable = true }: {
   question: EvalQuestion; items: ChunkItem[]; config: EvalRun["config"]; queries: string[];
-  queryRoutes?: EvalQuestion["query_routes"]; mergedEvidence?: EvidenceStatusRow[]; retryQuery?: string | null;
+  queryRoutes?: EvalQuestion["query_routes"]; mergedEvidence?: EvidenceStatusRow[]; retryQuery?: string | null; sourcesAvailable?: boolean;
 }) {
   const total = question.answerable ? evidenceChunkLists(question).length : 0;
   const routes = queryRoutes == null ? [] : queries.map((query) => queryRoutes.find((route) => route.query === query)
@@ -826,34 +827,34 @@ function FixedSearchResults({ question, items, config, queries, queryRoutes, mer
       <strong className="ag-query-title">{query === retryQuery ? "补充查询" : queries.length > 1 ? "扩展查询" : "检索查询"}</strong>{query}
     </li>)}</ul>}
     {retryQuery && queryRoutes == null && <p className="ag-muted">这条历史记录未保存补充检索的逐路召回与过滤详情，重新评测后可查看。</p>}
-        {/* 每一路检索词分别检索（和 Agent 同一轮同时发出的几次检索对应），再合并、重排、过滤成最后的结果。 */}
-        {/* 只有 1 路时不再套一层「检索」框（外面已经是检索这一步），直接列这一路。 */}
-        {routes.length > 0 && <div className={routes.length > 1 ? "ag-round is-parallel" : "ag-single-route"}>
-          {routes.length > 1 && <div className="ag-round-head">同时检索 {routes.length} 路<Tag size="sm" tone="warning">每路分别检索，合并后重排</Tag></div>}
-          {routes.map((route, index) => <div className="ag-route" key={route.query}>
-            <div className="ag-call-head"><span className="ag-tool">第 {index + 1} 路</span>
-              <Tag outline plain>召回 {route.recalled} 段</Tag><Tag outline plain>留到最后 {route.kept} 段</Tag></div>
-            <div className="ag-call-query"><strong className="ag-query-title">{route.query === retryQuery ? "补充查询" : routes.length > 1 ? "扩展查询" : "检索查询"}</strong><span>{route.query}</span></div>
-            {/* 这一路召回到了哪几条证据、各排第几（向量、关键词两张排名表）。 */}
-            {total > 0 && <ul className="ag-evidence-trace">{Array.from({ length: total }, (_, evidence) => {
-              const best = route.best.find((item) => item.evidence === evidence);
-              return route.evidence.includes(evidence)
-                ? <li key={evidence} className="is-hit"><b>✓</b>证据 {evidence + 1}<small>召回到了</small>
-                  {(best?.dense ?? 0) > 0 && <Tag size="sm" tone="info" plain>向量第 {best?.dense} 名</Tag>}
-                  {(best?.keyword ?? 0) > 0 && <Tag size="sm" tone="warning" plain>关键词第 {best?.keyword} 名</Tag>}</li>
-                : <li key={evidence} className="is-miss"><b>—</b>证据 {evidence + 1}<small>这一路没召回</small></li>;
-            })}</ul>}
-          </div>)}
-        </div>}
-        {<div className="ag-merge-label">合并 → 前 {config.pool_size ?? "—"} 段进重排 → 过阈值 {typeof config.min_score === "number" ? config.min_score.toFixed(2) : "—"} → 最多 {config.return_limit ?? "—"} 段交给模型</div>}
-        {mergedEvidence && mergedEvidence.length > 0 && <ul className="ag-evidence-trace ag-merge-evidence" aria-label="合并过滤后的证据命中情况">{mergedEvidence.map((row, index) => <li key={index}>
-          <span className={`ag-evidence-name ${row.tone === "danger" || row.tone === "neutral" ? "is-missed" : ""}`}>证据 {index + 1}</span>
-          {(row.matches ?? [row]).map((match) => <span className="ag-evidence-match" key={match.label}>
-            <Tag tone={match.tone} hue={match.hue} size="sm" outline={match.dashed} className={match.dashed ? "is-dashed" : undefined}>{match.label}</Tag>
-            {match.detail && <small>{match.detail}</small>}
-          </span>)}
-        </li>)}</ul>}
-        <ChunkTabs question={question} items={items} empty="过滤后没有分块。" />
+    {/* 每一路检索词分别检索（和 Agent 同一轮同时发出的几次检索对应），再合并、重排、过滤成最后的结果。 */}
+    {/* 只有 1 路时不再套一层「检索」框（外面已经是检索这一步），直接列这一路。 */}
+    {routes.length > 0 && <div className={routes.length > 1 ? "ag-round is-parallel" : "ag-single-route"}>
+      {routes.length > 1 && <div className="ag-round-head">同时检索 {routes.length} 路<Tag size="sm" tone="warning">每路分别检索，合并后重排</Tag></div>}
+      {routes.map((route, index) => <div className="ag-route" key={route.query}>
+        <div className="ag-call-head"><span className="ag-tool">第 {index + 1} 路</span>
+          <Tag outline plain>召回 {route.recalled} 段</Tag><Tag outline plain>留到最后 {route.kept} 段</Tag></div>
+        <div className="ag-call-query"><strong className="ag-query-title">{route.query === retryQuery ? "补充查询" : routes.length > 1 ? "扩展查询" : "检索查询"}</strong><span>{route.query}</span></div>
+        {/* 这一路召回到了哪几条证据、各排第几（向量、关键词两张排名表）。 */}
+        {total > 0 && <ul className="ag-evidence-trace">{Array.from({ length: total }, (_, evidence) => {
+          const best = route.best.find((item) => item.evidence === evidence);
+          return route.evidence.includes(evidence)
+            ? <li key={evidence} className="is-hit"><b>✓</b>证据 {evidence + 1}<small>召回到了</small>
+              {(best?.dense ?? 0) > 0 && <Tag size="sm" tone="info" plain>向量第 {best?.dense} 名</Tag>}
+              {(best?.keyword ?? 0) > 0 && <Tag size="sm" tone="warning" plain>关键词第 {best?.keyword} 名</Tag>}</li>
+            : <li key={evidence} className="is-miss"><b>—</b>证据 {evidence + 1}<small>这一路没召回</small></li>;
+        })}</ul>}
+      </div>)}
+    </div>}
+    <div className="ag-merge-label">合并 → 前 {config.pool_size ?? "—"} 段进重排 → 过阈值 {typeof config.min_score === "number" ? config.min_score.toFixed(2) : "—"} → 最多 {config.return_limit ?? "—"} 段交给模型</div>
+    {mergedEvidence && mergedEvidence.length > 0 && <ul className="ag-evidence-trace ag-merge-evidence" aria-label="合并过滤后的证据命中情况">{mergedEvidence.map((row, index) => <li key={index}>
+      <span className={`ag-evidence-name ${row.tone === "danger" || row.tone === "neutral" ? "is-missed" : ""}`}>证据 {index + 1}</span>
+      {(row.matches ?? [row]).map((match) => <span className="ag-evidence-match" key={match.label}>
+        <Tag tone={match.tone} hue={match.hue} size="sm" outline={match.dashed} className={match.dashed ? "is-dashed" : undefined}>{match.label}</Tag>
+        {match.detail && <small>{match.detail}</small>}
+      </span>)}
+    </li>)}</ul>}
+    {sourcesAvailable && <ChunkTabs question={question} items={items} empty="过滤后没有分块。" />}
   </>;
 }
 
@@ -862,7 +863,7 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
   // 证据所在的分片（Agent 记的所在分块，或固定流程命中的分片）；来源是父块，父块里任何一片含证据都算命中。
   const evidenceChunks = new Set<string>();
   for (const item of question.agent?.evidence ?? []) for (const chunkId of item.chunk_ids ?? []) evidenceChunks.add(chunkId);
-  for (const item of question.evidence ?? []) if (item.chunk_id) evidenceChunks.add(item.chunk_id);
+  for (const item of [...(question.evidence ?? []), ...(question.retry?.evidence ?? [])]) if (item.chunk_id) evidenceChunks.add(item.chunk_id);
   const hitSources = new Set((question.evidence ?? []).filter((item) => item.status === "returned").map((item) => item.source_id));
   const items: ChunkItem[] = (question.sources ?? []).map((source) => {
     const extra = source as { chunk_id?: string; position?: number | null; parent_chunk_ids?: string[] };
@@ -887,15 +888,13 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
   const searches = 1 + (sufficiency?.retried ? 1 : 0);
   const usedRetry = Boolean(sufficiency?.retry_used);
   // 每条证据所在的分片（Agent 记的所在分块，旧记录用固定流程命中的分片），用来算每次检索命中了第几条证据。
-  const evidenceLists = (question.agent?.evidence ?? []).length
-    ? (question.agent?.evidence ?? []).map((item) => item.chunk_ids ?? [])
-    : (question.evidence ?? []).map((item) => (item.chunk_id ? [item.chunk_id] : []));
+  const evidenceLists = evidenceChunkLists(question);
   const total = question.answerable ? evidenceLists.length : 0;
   const queries = question.queries ?? [];
   // 按扩展查询里的顺序排每一路（旧记录没有 query_routes 时是空的，退回只列检索词）。
   const routes = [...(question.query_routes ?? [])].sort((a, b) => queries.indexOf(a.query) - queries.indexOf(b.query));
   const retryQueries = retry?.queries ?? [...queries, ...(sufficiency?.retry_query ? [sufficiency.retry_query] : [])];
-  const retryEvidence = retry?.evidence ? fixedEvidenceRows({ ...question, sources: retry.sources, evidence: retry.evidence, retry: undefined, sufficiency: undefined, cleared: false }, config) : undefined;
+  const retryEvidence = retry?.evidence && retry.sources ? fixedEvidenceRows({ ...question, sources: retry.sources, evidence: retry.evidence, retry: undefined, sufficiency: undefined, cleared: false }, config) : undefined;
   // 这里展示第一次检索合并后的结果，不受后续补充检索或充分性清空影响。
   const mergedEvidence = fixedEvidenceRows({ ...question, retry: undefined, sufficiency: undefined, cleared: false }, config);
   return <section className="ag-log">
@@ -926,10 +925,10 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
       {sufficiency && <SufficiencySteps question={question} part="first" />}
       {retry && <div className={`ag-call ${usedRetry ? "" : "is-unused"}`}>
         <div className="ag-call-head"><span className="ag-tool">第 2 次 · 补充检索</span>
+          {retry.latency_ms != null && <Tag outline plain>耗时 {formatMs(retry.latency_ms)}</Tag>}
           <HitTag hits={hitEvidence(retryItems, evidenceLists)} total={total} /><Tag outline plain>{usedRetry ? "采用了" : "没变好，沿用第一次的"}</Tag></div>
-        {retry.latency_ms != null && <p className="ag-muted">检索耗时 {formatMs(retry.latency_ms)}</p>}
         <SearchParams values={params} />
-        <FixedSearchResults question={question} items={retryItems} config={config} queries={retryQueries} queryRoutes={retry.query_routes} mergedEvidence={retryEvidence} retryQuery={sufficiency?.retry_query} />
+        <FixedSearchResults question={question} items={retryItems} config={config} queries={retryQueries} queryRoutes={retry.query_routes} mergedEvidence={retryEvidence} retryQuery={sufficiency?.retry_query} sourcesAvailable={Boolean(retry.sources)} />
         {!retry.sources && <p className="ag-muted">这次评测没有保存补充检索的分块。</p>}
       </div>}
       {sufficiency && retry && <SufficiencySteps question={question} part="rest" />}

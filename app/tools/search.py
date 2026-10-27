@@ -278,7 +278,9 @@ class DocumentSearchTool:
         if judgement["verdict"] in {"insufficient", "partial"} and rewrite and rewrite not in queries:
             retry_queries = list(queries)
             retry_queries.append(rewrite)
+            retry_started = time.monotonic()
             retry = self.execute(store, models, owner, retry_queries, rerank_query, **options)
+            result["retry_ms"] = round((time.monotonic() - retry_started) * 1000)
             result.update({"retried": True, "retry_query": rewrite, "retry_retrieval": retry})
             if retry["sources"]:
                 second = models.judge_sufficiency(rerank_query, retry["sources"])

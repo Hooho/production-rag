@@ -498,6 +498,13 @@ def test_retrieval_full_flow_rewrite_cache_and_sufficiency(setup, eval_dir, monk
     assert cleared["cleared"] is True and cleared["given_recall"] == 0
     assert cleared["evidence"][0]["first_given"] is True and cleared["evidence"][0]["given"] is False
     assert cleared["retry"]["sources"]
+    retry = cleared["retry"]
+    assert retry["queries"] == [*cleared["queries"], "人为损坏"]
+    assert retry["latency_ms"] >= 0
+    assert len(retry["evidence"]) == len(cleared["evidence"])
+    assert retry["query_routes"]
+    assert all(route["query"] in retry["queries"] for route in retry["query_routes"])
+    assert "recall_ms" in retry and "rerank_ms" in retry
     summary = run["summary"]
     assert summary["recall_given_first"] == 1.0 and summary["recall_given"] == 0.5
     assert summary["wrong_clear_rate"] == 0.5

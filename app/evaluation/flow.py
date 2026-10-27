@@ -126,7 +126,7 @@ def apply_sufficiency(row, check, found, first_sources, evidence_count, keep_sou
     if check["retried"]:
         retry = check["retry_retrieval"]
         retry_found = found(retry["sources"])
-        row["retry"] = {"returned": len(retry["sources"]), "used": check.get("retry_used", False),
+        row["retry"] = {"latency_ms": check.get("retry_ms"), "returned": len(retry["sources"]), "used": check.get("retry_used", False),
             "given_recall": len(retry_found) / evidence_count if evidence_count else None,
             "found": sorted(retry_found)}
         if keep_sources:
