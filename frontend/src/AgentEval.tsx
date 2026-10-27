@@ -774,7 +774,7 @@ function hitEvidence(items: ChunkItem[], evidenceLists: string[][]) {
 // 标题行上的结果：命中了哪几条证据，或者没命中。
 function HitTag({ hits, total }: { hits: number[]; total: number }) {
   if (total === 0) return null;
-  return hits.length ? <Tag tone="success" dot>命中证据 {hits.map((index) => index + 1).join("、")}</Tag> : <Tag outline plain>没命中证据</Tag>;
+  return hits.length ? <Tag tone="success" dot>命中证据 {hits.map((index) => index + 1).join("、")}</Tag> : <Tag tone="danger" plain>没命中证据</Tag>;
 }
 
 // 第一次检索里，一条证据合并之后的去向：交给模型了，或者丢在哪一步（没召回 / 没进候选池 / 重排分低于阈值 / 超出返回段数）。
@@ -1028,7 +1028,7 @@ function AgentCall({ call, fresh, evidenceChunks, question }: { question: EvalQu
       <span className="ag-tool">第 {call.call} 次 · {TOOL_LABELS[call.name] ?? call.name}</span>
       {call.duration_ms !== undefined && call.duration_ms !== null && <Tag outline plain>耗时 {formatMs(call.duration_ms)}</Tag>}
       {hit ? <Tag tone="success" dot>命中证据 {call.hits.map((index) => index + 1).join("、")}</Tag>
-        : executed && (call.name === "search_knowledge" || call.name === "read_context") ? <Tag outline plain>没命中证据</Tag> : null}
+        : executed && (call.name === "search_knowledge" || call.name === "read_context") ? <Tag tone="danger" plain>没命中证据</Tag> : null}
       {executed && (call.name === "search_knowledge" || call.name === "read_context") && (newCount > 0
         ? <Tag>新增 {newCount} 片</Tag>
         : <Tag tone="warning" title="这次拿回的分块，前面的调用都已经拿到过">无新增</Tag>)}
