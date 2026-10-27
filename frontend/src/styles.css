@@ -8735,6 +8735,14 @@ input:focus {
 
 .ag-retrieval-content { display: grid; gap: 10px; margin-top: 16px; min-width: 0; }
 .ag-retrieval-content .ag-round + .ag-round { margin-top: 0; }
+.ag-round-steps { display: flex; overflow-x: auto; padding: 4px 2px 12px; }
+.ag-round-steps button { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; border: 0; background: transparent; color: var(--ev-muted); padding: 6px 0; cursor: pointer; font: inherit; font-size: 13px; }
+.ag-round-steps button + button::before { content: ""; width: 28px; height: 1px; margin: 0 10px; background: var(--ev-line); }
+.ag-round-steps button > span { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid var(--ev-line); border-radius: 50%; font-size: 12px; }
+.ag-round-steps button.is-active { color: var(--ev-ink, #234c31); font-weight: 600; }
+.ag-round-steps button.is-active > span { background: #234c31; border-color: #234c31; color: #fff; }
+.ag-round-steps button:hover > span { border-color: currentColor; }
+.ag-round-steps button:focus-visible { outline: 2px solid #718675; outline-offset: 2px; border-radius: 4px; }
 
 .ag-merge-evidence { margin: 6px 0 10px; }
 .ag-merge-evidence li, .ag-merge-evidence .ag-evidence-match { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }

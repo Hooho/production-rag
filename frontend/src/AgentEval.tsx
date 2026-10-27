@@ -964,11 +964,16 @@ function SufficiencySteps({ question, part }: { question: EvalQuestion; part: "f
 // （资料池逐段列表已去掉，只显示段数；证据怎么拿到的看「证据命中情况」。）
 function AgentLog({ question }: { question: EvalQuestion }) {
   const [expanded, setExpanded] = useState(false);
+  const [selectedStep, setSelectedStep] = useState(0);
   const [reasoningDetail, setReasoningDetail] = useState<{ round: number | null; text: string } | null>(null);
   const agent = question.agent!;
-  const rounds = agent.round_logs?.length
+  const rounds = [...(agent.round_logs?.length
     ? agent.round_logs.map((record) => ({ ...record, calls: agent.calls.filter((call) => call.round === record.round) }))
-    : groupByRound(agent.calls).map(([round, calls]) => ({ round, calls, kind: "normal", reasoning: null, content: "", error: null }));
+    : groupByRound(agent.calls).map(([round, calls]) => ({ round, calls, kind: "normal", reasoning: null, content: "", error: null })))];
+  if (agent.forced && !agent.round_logs?.length) {
+    rounds.push({ round: agent.rounds, calls: [], kind: "forced", reasoning: null, content: "", error: null });
+  }
+  const activeStep = Math.min(selectedStep, rounds.length);
   const fresh = freshness(question);
   const evidenceChunks = new Set<string>();
   for (const item of agent.evidence ?? []) for (const chunkId of item.chunk_ids ?? []) evidenceChunks.add(chunkId);
@@ -983,9 +988,12 @@ function AgentLog({ question }: { question: EvalQuestion }) {
     {expanded && <>
       {agent.question_sent !== question.question && <div className="ag-call-meta">实际提问（多轮追问按规则补全）：{agent.question_sent}</div>}
       {agent.calls.length === 0 && <p className="ag-muted">没有调用任何工具，直接回答了。</p>}
-      {/* 按轮分组：同一轮里模型同时发出的几次调用放在一个框里，它们彼此看不到对方的结果。 */}
-      {rounds.map(({ round, calls, kind, reasoning, content, error }, index) => <details key={`${round}-${index}`} open={index === 0} className={`ag-round ag-collapsible-round ${calls.length > 1 ? "is-parallel" : ""}`}>
-        <summary className="ag-round-head">第 {round ?? "—"} 轮{calls.length > 1 ? <Tag size="sm" tone="warning">同时发出 {calls.length} 次，彼此看不到结果</Tag> : null}<span className="ag-round-toggle" aria-hidden="true" /></summary>
+      <nav className="ag-round-steps" aria-label="Agent 检索步骤">
+        {rounds.map(({ round }, index) => <button type="button" key={`${round}-${index}`} className={activeStep === index ? "is-active" : ""} aria-current={activeStep === index ? "step" : undefined} onClick={() => setSelectedStep(index)}><span>{index + 1}</span>第 {round ?? "—"} 轮</button>)}
+        <button type="button" className={activeStep === rounds.length ? "is-active" : ""} aria-current={activeStep === rounds.length ? "step" : undefined} onClick={() => setSelectedStep(rounds.length)}><span>✓</span>结束</button>
+      </nav>
+      {rounds.map(({ round, calls, kind, reasoning, content, error }, index) => activeStep === index && <div key={`${round}-${index}`} className={`ag-round ${calls.length > 1 ? "is-parallel" : ""}`}>
+        <div className="ag-round-head">第 {round ?? "—"} 轮{calls.length > 1 ? <Tag size="sm" tone="warning">同时发出 {calls.length} 次，彼此看不到结果</Tag> : null}</div>
         {reasoning ? <div className="ag-round-reasoning">
           <div className="ag-reasoning-head"><span className="ag-tool">Agent 推理过程</span>
             <button type="button" className="ag-more-link" aria-haspopup="dialog" onClick={() => setReasoningDetail({ round, text: reasoning })}>展开更多</button></div>
@@ -997,10 +1005,8 @@ function AgentLog({ question }: { question: EvalQuestion }) {
         {kind === "forced" && <p className="ag-muted">{agent.stop_reason === "timeout" ? "时间到了" : "工具预算用完"}，不带工具直接回答。</p>}
         {content && <details className="ag-round-output"><summary>{calls.length ? "本轮模型说明" : "本轮回答"}</summary><div className="ag-round-text">{content}</div></details>}
         {calls.map((call) => <AgentCall question={question} key={call.call} call={call} fresh={fresh.perCall.get(call.call) ?? new Set()} evidenceChunks={evidenceChunks} />)}
-      </details>)}
-      {/* 预算用完或超时后，程序再让模型跑一轮不带工具的，直接写回答；这一轮没有检索。 */}
-      {agent.forced && !agent.round_logs?.length && <details className="ag-round ag-collapsible-round" open={rounds.length === 0}><summary className="ag-round-head">第 {agent.rounds} 轮<span className="ag-round-toggle" aria-hidden="true" /></summary><p className="ag-muted">{agent.stop_reason === "timeout" ? "时间到了" : "工具预算用完"}，不带工具直接回答，没有检索。这条历史记录没有保存本轮推理过程。</p></details>}
-      <MaterialLine material={agentMaterial(question)} />
+      </div>)}
+      {activeStep === rounds.length && <MaterialLine material={agentMaterial(question)} />}
     </>}
     </div>
     </DetailDialog>
