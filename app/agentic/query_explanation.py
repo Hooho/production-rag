@@ -36,8 +36,6 @@ def query_explanation(arguments):
     assumptions = value.get("assumptions")
     if not isinstance(assumptions, list) or any(not isinstance(item, str) or not item.strip() for item in assumptions):
         raise ValueError("query_explanation.assumptions 应为字符串数组")
-    if "previous_results" in basis and not references:
-        raise ValueError("依据此前返回资料时，请在 references 中提供已返回的 source_id 和真实原文 quote")
     if "hypothesis" in basis and not assumptions:
         raise ValueError("依据待验证假设时，请填写 assumptions")
     return {"purpose": value["purpose"], "basis": basis, "references": references, "assumptions": assumptions}

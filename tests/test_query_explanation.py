@@ -9,8 +9,8 @@ class QueryExplanationTest(unittest.TestCase):
             "assumptions": ["买入发生在某一年（待验证）"]}
         self.assertEqual(query_explanation({"query_explanation": explanation}), {**explanation, "references": []})
         self.assertNotIn("references", explanation)
-        with self.assertRaisesRegex(ValueError, "依据此前返回资料"):
-            query_explanation({"query_explanation": {**explanation, "basis": ["previous_results"]}})
+        previous = {**explanation, "basis": ["previous_results"]}
+        self.assertEqual(query_explanation({"query_explanation": previous}), {**previous, "references": []})
         for references in (None, {}, "", [{"source_id": "S1"}]):
             with self.subTest(references=references), self.assertRaises(ValueError):
                 query_explanation({"query_explanation": {**explanation, "references": references}})
@@ -28,8 +28,7 @@ class QueryExplanationTest(unittest.TestCase):
 
     def test_required_support_and_types(self):
         base = {"purpose": "查询原因", "basis": ["previous_results"], "references": [], "assumptions": []}
-        with self.assertRaises(ValueError):
-            query_explanation({"query_explanation": base})
+        self.assertEqual(query_explanation({"query_explanation": base}), base)
         valid = {**base, "references": [{"source_id": "S1", "quote": "书中提到了这家公司"}]}
         self.assertEqual(query_explanation({"query_explanation": valid}), valid)
         for change in [{"basis": ["hypothesis"]}, {"purpose": " "}, {"references": ["S1"]}, {"basis": ["unknown"]}, {"assumptions": "猜测"}]:
