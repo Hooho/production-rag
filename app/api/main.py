@@ -38,7 +38,7 @@ from ..evaluation.retrieval import SUITES, VARIANTS, import_corpus
 from ..evaluation import corpus as eval_corpus, regression, suites as special_suites
 from ..evaluation.retrieval import EVAL_OWNER
 from ..tools.search import limit_titles
-from ..evaluation.evidence import locate_evidence
+from ..evaluation.evidence import locate_evidence, load_chunk
 from .. import prompts, runtime_config
 from ..ingestion.parser import ALLOWED_EXTENSIONS, UNSUPPORTED_MESSAGE
 from ..inspection.diagnosis import CATEGORIES as DIAGNOSIS_CATEGORIES
@@ -1647,6 +1647,13 @@ def create_app(store=None, models=None, jwt_secret=None):
     def eval_evidence(body: EvalEvidenceInput):
         texts = [text.strip()[:1000] for text in body.texts if text.strip()]
         return locate_evidence(app.state.store, app.state.models, texts)
+
+    @app.get("/eval/chunks/{chunk_id}", dependencies=[Depends(require_admin)])
+    def eval_chunk(chunk_id: str):
+        result = load_chunk(app.state.store, chunk_id)
+        if result is None:
+            raise HTTPException(404, "该分片已不存在，无法读取原文")
+        return result
 
     # 手动新增评测题：先验证题型、证据和语料一致性，再追加到项目评测集。
     @app.post("/eval/dataset/items", status_code=201, dependencies=[Depends(require_admin)])

@@ -7,7 +7,7 @@ import unicodedata
 from sqlalchemy import select
 
 from ..ingestion.chunking import chunk_document_records
-from ..mysql.store import chunks, document_chunks, document_heads
+from ..mysql.store import chunks, document_chunks, document_heads, documents
 from .dataset import EVIDENCE_OR, normalize
 from .retrieval import EVAL_OWNER
 
@@ -96,3 +96,18 @@ def locate_evidence(store, models, texts):
         entry["truncated"] = cut["cut"] is not None
         entry["cut"] = None if cut["cut"] is None else max(0, cut["cut"] - prefix_length)
     return {"imported": imported, "cuts_available": cuts is not None, "items": items}
+
+
+# 仅返回指定评测分片的正文，避免把父块扩展后的交付文本当作单片原文。
+def load_chunk(store, chunk_id):
+    joined = document_chunks.join(chunks, document_chunks.c.chunk_id == chunks.c.id).join(
+        documents, document_chunks.c.document_id == documents.c.id)
+    with store.engine.connect() as connection:
+        row = connection.execute(select(chunks.c.id, chunks.c.title, chunks.c.content,
+            chunks.c.text, document_chunks.c.chunk_metadata).select_from(joined).where(
+                chunks.c.id == chunk_id, documents.c.owner == EVAL_OWNER).limit(1)).first()
+    if row is None:
+        return None
+    metadata = row[4] or {}
+    return {"chunk_id": row[0], "title": row[1], "content": row[2] if row[2] is not None else row[3],
+        "heading": " / ".join(metadata.get("heading_path") or []) or None}

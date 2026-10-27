@@ -1757,3 +1757,8 @@ export async function fileSha256(file: File) {
   const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
   return Array.from(new Uint8Array(digest)).map((value) => value.toString(16).padStart(2, "0")).join("");
 }
+
+export type EvalChunkOriginal = { chunk_id: string; title: string | null; heading: string | null; content: string };
+export function getEvalChunkOriginal(chunkId: string) {
+  return request<EvalChunkOriginal>(`/eval/chunks/${encodeURIComponent(chunkId)}`);
+}
