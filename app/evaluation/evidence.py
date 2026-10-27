@@ -104,10 +104,10 @@ def load_chunk(store, chunk_id):
         documents, document_chunks.c.document_id == documents.c.id)
     with store.engine.connect() as connection:
         row = connection.execute(select(chunks.c.id, chunks.c.title, chunks.c.content,
-            chunks.c.text, document_chunks.c.chunk_metadata).select_from(joined).where(
+            chunks.c.text, document_chunks.c.chunk_metadata, document_chunks.c.position).select_from(joined).where(
                 chunks.c.id == chunk_id, documents.c.owner == EVAL_OWNER).limit(1)).first()
     if row is None:
         return None
     metadata = row[4] or {}
-    return {"chunk_id": row[0], "title": row[1], "content": row[2] if row[2] is not None else row[3],
+    return {"chunk_id": row[0], "position": row[5], "title": row[1], "content": row[2] if row[2] is not None else row[3],
         "heading": " / ".join(metadata.get("heading_path") or []) or None}

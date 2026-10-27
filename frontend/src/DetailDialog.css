@@ -9,3 +9,8 @@
 .ag-dialog-companion::backdrop { background: transparent; }
 .ag-dialog-connector { position: fixed; width: 12px; height: 20px; pointer-events: none; overflow: visible; filter: drop-shadow(3px 2px 3px #16362218); }
 .ag-dialog-anchor { outline: 2px solid #3c8655; outline-offset: 3px; border-radius: 4px; }
+
+.ag-delivery-dialog section.ag-original-chunk { border: 1px dashed var(--border, #b2cdb7); border-radius: 8px; padding: 14px; margin-top: 14px; scroll-margin: 16px; }
+.ag-delivery-dialog section.ag-original-chunk.is-selected { border: 2px dashed #3c8655; background: #f3f8f4; }
+.ag-original-chunk-heading { display: flex; align-items: center; gap: 10px; color: #3c8655; font-size: 12px; }
+.ag-original-chunk-heading > span { font-size: 11px; }

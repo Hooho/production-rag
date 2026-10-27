@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getEvalChunkOriginal, type EvalChunkOriginal } from "./api";
 import { DetailDialog } from "./DetailDialog";
 import { evidenceRanges } from "./evidenceRanges";
@@ -13,32 +13,42 @@ export type ChunkOriginal = {
 };
 
 export function ChunkOriginalDialog({ value, onClose }: { value: ChunkOriginal | null; onClose: () => void }) {
-  const [loaded, setLoaded] = useState<{ id: string; data?: EvalChunkOriginal; error?: string } | null>(null);
+  const [loaded, setLoaded] = useState<{ id: string; data?: EvalChunkOriginal[]; error?: string } | null>(null);
+  const selected = useRef<HTMLElement>(null);
   const chunkId = value?.chunkId;
+  const ids = chunkId ? [...new Set([...(value?.sources.flatMap((source) => source.parts?.length ? source.parts : source.chunkId ? [source.chunkId] : []) ?? []), chunkId])] : [];
+  const requestKey = JSON.stringify(ids);
   useEffect(() => {
-    if (!chunkId) return;
+    const chunkIds = JSON.parse(requestKey) as string[];
+    if (!chunkIds.length) return;
     let cancelled = false;
-    getEvalChunkOriginal(chunkId).then((data) => {
-      if (!cancelled) setLoaded({ id: chunkId, data });
+    Promise.all(chunkIds.map(getEvalChunkOriginal)).then((data) => {
+      if (!cancelled) setLoaded({ id: requestKey, data: data.sort((a, b) => a.position - b.position) });
     }).catch((error: unknown) => {
-      if (!cancelled) setLoaded({ id: chunkId, error: error instanceof Error ? error.message : "读取分片失败，请关闭后重试" });
+      if (!cancelled) setLoaded({ id: requestKey, error: error instanceof Error ? error.message : "读取分片失败，请关闭后重试" });
     });
     return () => { cancelled = true; };
-  }, [chunkId]);
+  }, [requestKey]);
+  useEffect(() => {
+    if (loaded?.id === requestKey) selected.current?.scrollIntoView({ block: "center" });
+  }, [loaded, requestKey, chunkId]);
   if (!value) return null;
-  const current = loaded?.id === chunkId ? loaded : null;
-  const sources = chunkId ? current?.data ? [{ ...value.sources[0], key: chunkId, id: value.sources[0]?.id ?? value.label,
-    chunkId, title: current.data.title, heading: current.data.heading, text: current.data.content,
-    parts: [], snapshotNote: undefined, relevance: value.sources[0]?.chunkId === chunkId ? value.sources[0].relevance : undefined
-  }] : [] : value.sources;
+  const current = loaded?.id === requestKey ? loaded : null;
   return <DetailDialog open title={`${value.label} · 原文`} onClose={onClose}>
       <p className="ag-muted">{value.evidence.length ? `对应证据 ${value.evidence.map((item) => item.number).join("、")}` : "非证据"}</p>
-      {chunkId && !current?.data && <p role="status" className="ag-muted">{current?.error ?? "正在读取该分片原文…"}</p>}
+      {chunkId && !current?.data && <p role="status" className="ag-muted">{current?.error ?? "正在读取原文分片…"}</p>}
       {value.note && <p role="status" className="ag-muted">{value.note}</p>}
       {value.evidence.map((item) => <blockquote key={item.number}>证据 {item.number}：{item.text}</blockquote>)}
-      {sources.filter((source, index, all) => all.findIndex((other) => other.text === source.text) === index).map((item) => <section key={item.key}>
+      {current?.data && <p className="ag-muted">虚线框标出各分片边界，已定位到{value.label}。</p>}
+      {current?.data?.map((chunk) => <section key={chunk.chunk_id} ref={chunk.chunk_id === chunkId ? selected : undefined}
+        className={`ag-original-chunk ${chunk.chunk_id === chunkId ? "is-selected" : ""}`} aria-label={`第 ${chunk.position + 1} 片`}>
+        <div className="ag-original-chunk-heading"><strong>第 {chunk.position + 1} 片</strong>{chunk.chunk_id === chunkId && <span>当前查看</span>}</div>
+        <h4>{chunk.title ?? "来源资料"}</h4>{chunk.heading && <p className="ag-muted">{chunk.heading}</p>}
+        {value.sources.find((source) => source.chunkId === chunk.chunk_id)?.relevance != null && <p className="ag-muted">重排分 {value.sources.find((source) => source.chunkId === chunk.chunk_id)?.relevance?.toFixed(2)}</p>}
+        <OriginalText text={chunk.content} evidence={value.evidence.map((quote) => quote.text)} />
+      </section>)}
+      {!chunkId && value.sources.map((item) => <section key={item.key}>
         <h4><SourceTag id={item.id} /> · {item.title ?? "来源资料"}</h4>{item.heading && <p>{item.heading}</p>}
-        {value.chunkId && item.chunkId === value.chunkId && item.relevance != null && <p className="ag-muted">重排分 {item.relevance.toFixed(2)}{item.low ? "（较低）" : ""}</p>}
         {item.snapshotNote && <p className="ag-muted">{item.snapshotNote}</p>}
         <OriginalText text={item.text} evidence={value.evidence.map((quote) => quote.text)} />
       </section>)}

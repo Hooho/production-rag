@@ -34,6 +34,7 @@ class ChunkOriginalTest(unittest.TestCase):
             result = evidence.load_chunk(store, "eval:68")
             self.assertEqual(result["content"], "第69片正文")
             self.assertEqual(result["heading"], "章节")
+            self.assertEqual(result["position"], 68)
             self.assertIsNone(evidence.load_chunk(store, "missing"))
             self.assertIsNone(evidence.load_chunk(store, "private:0"))
         engine.dispose()
