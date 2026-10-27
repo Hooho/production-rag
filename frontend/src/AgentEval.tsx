@@ -5,6 +5,7 @@ import { EvidenceChunkDialog, type EvidenceChunkSelection } from "./EvidenceChun
 import { evidenceLabel, formatDuration as formatMs } from "./format";
 import { SourceTag, Tag, TypeStats, TypeTag, typeHues, type TypeStat } from "./Tag";
 import type { Tone } from "./tags";
+import { PRESET_HUES } from "./hues";
 import { SCORE_RULE, bandsText, formatPoints, questionScore, summarizeScores } from "./score";
 
 // Agent 检索评测的结果页（后端 app/evaluation/agent_retrieval.py）。
@@ -143,7 +144,7 @@ function MaterialLine({ material }: { material: EvalMaterial | null }) {
 }
 
 // 证据命中情况：每条证据一个结果标签（检索命中 / 父块扩展命中 / 读前后文拿到 / 被过滤 / 没召回 / 没拿到），后面写细节。
-type EvidenceStatusEntry = { label: string; tone: "success" | "danger" | "neutral" | "info"; dashed?: boolean; detail: string; count?: number };
+type EvidenceStatusEntry = { label: string; tone: "success" | "danger" | "neutral" | "info"; dashed?: boolean; hue?: number; detail: string; count?: number };
 type EvidenceStatusRow = EvidenceStatusEntry & { matches?: EvidenceStatusEntry[]; hitCount?: number };
 
 // 卡片显示简洁摘要，完整证据命中记录通过标题旁的详情按钮查看。
@@ -154,7 +155,7 @@ function EvidenceStatus({ rows, expanded, onToggle, children, agent = false }: {
       <button type="button" className="secondary-button ag-evidence-details-button" aria-haspopup="dialog" onClick={() => setDetailOpen(true)}>详情</button></div>
     {rows.length > 0 ? <ul>{rows.map((row, index) => <li key={index}>
       <span className={`ag-evidence-name ${row.tone === "danger" || row.tone === "neutral" ? "is-missed" : ""}`}>证据 {index + 1}</span>
-      <Tag tone={row.tone} size="sm" outline={row.dashed} className={row.dashed ? "is-dashed" : undefined}>{row.label}</Tag>
+      <Tag tone={row.tone} hue={row.hue} size="sm" outline={row.dashed} className={row.dashed ? "is-dashed" : undefined}>{row.label}</Tag>
       {!agent && (row.tone === "danger" || row.tone === "neutral") && row.detail && <small>{row.detail}</small>}
     </li>)}</ul> : <p className="ag-muted">没有答案的题，不看证据。</p>}
     {children}
@@ -165,7 +166,7 @@ function EvidenceStatus({ rows, expanded, onToggle, children, agent = false }: {
         <div className="ag-evidence-hit-heading"><h4 className={row.tone === "danger" || row.tone === "neutral" ? "ag-evidence-missed" : undefined}>证据 {index + 1}</h4>
           {row.hitCount !== undefined && <small className="ag-muted">累计命中 {row.hitCount} 次</small>}</div>
         <ul className="ag-evidence-hit-list">{(row.matches ?? [row]).map((match) => <li key={match.label}>
-          <Tag tone={match.tone} size="sm" outline={match.dashed} className={match.dashed ? "is-dashed" : undefined}>{match.label}{match.count !== undefined ? ` · ${match.count} 次` : ""}</Tag>
+          <Tag tone={match.tone} hue={match.hue} size="sm" outline={match.dashed} className={match.dashed ? "is-dashed" : undefined}>{match.label}{match.count !== undefined ? ` · ${match.count} 次` : ""}</Tag>
           {match.detail && <small>{match.detail}</small>}
         </li>)}</ul>
       </section>)}
@@ -246,7 +247,7 @@ function agentEvidenceRows(question: EvalQuestion): EvidenceStatusRow[] {
       if (previous) {
         previous.count = (previous.count ?? 0) + 1;
         previous.detail = [...new Set([...previous.detail.split("；"), score].filter(Boolean))].join("；");
-      } else matches.set(label, { label, tone: context ? "info" : "success", dashed: extended, detail: score, count: 1 });
+      } else matches.set(label, { label, hue: call?.round != null && call.round > 0 ? PRESET_HUES[(call.round - 1) % PRESET_HUES.length] : undefined, tone: context ? "info" : "success", dashed: extended, detail: score, count: 1 });
     }
     const entries = [...matches.values()];
     return entries.length ? { ...entries[0], matches: entries, hitCount: entries.reduce((sum, entry) => sum + (entry.count ?? 0), 0) } : {
@@ -888,7 +889,7 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
         {mergedEvidence.length > 0 && <ul className="ag-evidence-trace ag-merge-evidence" aria-label="合并过滤后的证据命中情况">{mergedEvidence.map((row, index) => <li key={index}>
           <span className={`ag-evidence-name ${row.tone === "danger" || row.tone === "neutral" ? "is-missed" : ""}`}>证据 {index + 1}</span>
           {(row.matches ?? [row]).map((match) => <span className="ag-evidence-match" key={match.label}>
-            <Tag tone={match.tone} size="sm" outline={match.dashed} className={match.dashed ? "is-dashed" : undefined}>{match.label}</Tag>
+            <Tag tone={match.tone} hue={match.hue} size="sm" outline={match.dashed} className={match.dashed ? "is-dashed" : undefined}>{match.label}</Tag>
             {match.detail && <small>{match.detail}</small>}
           </span>)}
         </li>)}</ul>}

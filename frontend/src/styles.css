@@ -8751,3 +8751,6 @@ input:focus {
 
 .ag-call-params > strong { flex-shrink: 0; }
 .ag-query-title { display: inline-block; margin-right: 10px; color: var(--ev-muted); font-size: 12px; font-weight: 600; }
+
+.ag-evidence-hit-list .tag.is-hue.is-dashed,
+.ag-evidence-status .tag.is-hue.is-dashed { background: #fff; }
