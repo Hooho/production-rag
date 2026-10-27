@@ -1068,12 +1068,17 @@ function AgentCallEvidence({ question, call, items }: { question: EvalQuestion; 
     })}</ul>
     <div className="ag-returned-chunks">
       <strong>{call.name === "read_context" ? "本次读取到的分片" : "本次检索到的分片"}</strong>
-      <div className="ag-returned-groups">{returned.size ? items.map((item) => <div key={item.key} className="ag-call-param-values">{[...returned].filter(([, row]) => row.item.key === item.key).map(([key, row]) => <Tag key={key} size="sm" tone={row.extended ? "accent" : "info"} outline={row.extended} className={row.extended ? "is-dashed" : undefined}
+      <div className="ag-returned-groups">{returned.size ? items.map((item) => <div key={item.key}><div className="ag-call-param-values">{[...returned].filter(([, row]) => row.item.key === item.key).map(([key, row]) => <Tag key={key} size="sm" tone={row.extended ? "accent" : "info"} outline={row.extended} className={row.extended ? "is-dashed" : undefined}
         title={[row.item.title, "点击查看原文"].filter(Boolean).join(" · ")}
         onClick={() => {
           const hits = evidence.flatMap((quote, index) => row.chunkId && quote.chunk_ids?.includes(row.chunkId) ? [{ number: index + 1, text: quote.text }] : []);
           setSelected({ label: chunkLabel(row.position, row.chunkId), chunkId: row.chunkId, sources: [row.item], evidence: hits });
-        }}>{row.extended ? "扩展 " : ""}{row.chunkId || row.position != null ? chunkLabel(row.position, row.chunkId) : "查看原文"}</Tag>)}</div>)
+        }}>{row.extended ? "扩展 " : ""}{row.chunkId || row.position != null ? chunkLabel(row.position, row.chunkId) : "查看原文"}</Tag>)}</div>
+        {call.name === "search_knowledge" && (() => {
+          const result = call.results?.find((source) => source.chunk_id === item.chunkId);
+          const absent = result?.retrieval_recorded ? "未召回" : "未记录";
+          return <blockquote className="ag-chunk-ranks">向量排名：{result?.vector_rank ?? absent} · 关键词排名：{result?.keyword_rank ?? absent} · 重排分数：{(result?.rerank_score ?? result?.relevance)?.toFixed(4) ?? "未记录"}</blockquote>;
+        })()}</div>)
         : <small className="ag-muted">没有返回分片</small>}</div>
     </div>
     <ChunkOriginalDialog value={selected} onClose={() => setSelected(null)} />

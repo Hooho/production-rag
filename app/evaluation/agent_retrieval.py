@@ -81,6 +81,8 @@ def call_log(number, round_no, call, evidence, chunk_texts):
     if name == "search_knowledge" and "retrieval" in trace:
         sources = (trace.get("retrieval") or {}).get("sources") or []
         sources = sources[:trace.get("top_k") or len(sources)]
+        diagnostics = (trace.get("retrieval") or {}).get("diagnostics")
+        candidates = {str(row["chunk_id"]): row for row in (diagnostics or {}).get("candidates", [])}
         ids = []
         results = []
         for evidence_id, source in zip(trace.get("evidence_ids") or [], sources):
@@ -91,7 +93,11 @@ def call_log(number, round_no, call, evidence, chunk_texts):
             main = str(source.get("chunk_id")) if source.get("chunk_id") is not None else None
             main_hits = part_hits.get(main, []) if main in part_hits else (chunk_hits([main], evidence, chunk_texts)[main] if main else [])
             ids.extend(chunk_id for chunk_id in parts if chunk_id not in ids)
-            results.append({"evidence_id": evidence_id, "title": source.get("title"), "heading": source.get("heading"),
+            candidate = candidates.get(main, {})
+            ranks = {method: min((part["rank"] for part in candidate.get("contributions", []) if part["method"] == method), default=None) for method in ("dense", "keyword")}
+            results.append({"vector_rank": ranks["dense"], "keyword_rank": ranks["keyword"],
+                "retrieval_recorded": diagnostics is not None, "rerank_score": candidate.get("rerank_probability"),
+                "evidence_id": evidence_id, "title": source.get("title"), "heading": source.get("heading"),
                 "chunk_id": source.get("chunk_id"), "position": source.get("position"), "parent_chunk_ids": parts,
                 "relevance": source.get("relevance"), "low_relevance": bool(source.get("low_relevance")),
                 "text": (source.get("text") or ""),

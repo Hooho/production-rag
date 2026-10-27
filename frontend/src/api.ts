@@ -692,7 +692,7 @@ export type EvalQuestion = {
 // Agent 检索评测（app/evaluation/agent_retrieval.py）：只看最后命中，口径和固定流程的过滤后 Recall 一致。
 export type EvalMode = "fixed" | "agent";
 export type EvalCompareKey = "both" | "fixed_only" | "agent_only" | "neither";
-export type EvalAgentResult = { evidence_id: string; title: string | null; heading?: string | null; chunk_id: string | null; position?: number | null; parent_chunk_ids?: string[]; relevance: number | null; low_relevance: boolean; text: string; hits: number[]; main_hits?: number[] };
+export type EvalAgentResult = { vector_rank?: number | null; keyword_rank?: number | null; rerank_score?: number | null; retrieval_recorded?: boolean; evidence_id: string; title: string | null; heading?: string | null; chunk_id: string | null; position?: number | null; parent_chunk_ids?: string[]; relevance: number | null; low_relevance: boolean; text: string; hits: number[]; main_hits?: number[] };
 export type AgentQueryExplanation = {
   purpose: string;
   basis: ("user_question" | "previous_results" | "hypothesis")[];

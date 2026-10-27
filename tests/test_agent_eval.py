@@ -182,3 +182,18 @@ def test_call_log_preserves_query_explanation_for_skipped_calls():
         "arguments": {"query": "乐视", "query_explanation": explanation}, "content": "重复调用"}, [], {})
     assert row["query_explanation"] == explanation
     assert row["note"] == "重复调用"
+
+
+def test_call_log_preserves_retrieval_ranks():
+    from app.evaluation.agent_retrieval import call_log
+    row = call_log(1, 1, {"name": "search_knowledge", "status": "ok", "trace": {
+        "evidence_ids": ["S1"], "retrieval": {
+            "sources": [{"chunk_id": "chunk-1", "text": "原文"}],
+            "diagnostics": {"candidates": [{"chunk_id": "chunk-1", "contributions": [
+                {"method": "dense", "rank": 3}, {"method": "keyword", "rank": 1}],
+                "rerank_probability": 0.876543}]}}}}, [], {})
+    result = row["results"][0]
+    assert result["vector_rank"] == 3
+    assert result["keyword_rank"] == 1
+    assert result["rerank_score"] == 0.876543
+    assert result["retrieval_recorded"] is True
