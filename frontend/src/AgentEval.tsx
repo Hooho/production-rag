@@ -1058,6 +1058,28 @@ function AgentCallEvidence({ question, call, items }: { question: EvalQuestion; 
   </>;
 }
 
+function QueryExplanation({ call, question }: { call: EvalAgentCall; question: EvalQuestion }) {
+  const explanation = call.query_explanation;
+  if (!explanation) return <p className="ag-muted">此记录未保存查询说明，新评测会要求模型提供。</p>;
+  const labels = { user_question: "用户问题", previous_results: "此前返回资料", hypothesis: "待验证假设" };
+  return <div className="ag-query-explanation">
+    <div className="ag-query-explanation-head"><strong>查询说明</strong><small>模型自述，引用与依据尚未核验</small></div>
+    <dl>
+      <dt>查询目的</dt><dd>{explanation.purpose}</dd>
+      <dt>查询依据</dt><dd className="ag-call-param-values">{explanation.basis.map((basis) => <Tag key={basis} size="sm" tone={basis === "hypothesis" ? "warning" : "info"} plain>{labels[basis]}</Tag>)}</dd>
+      {explanation.references.length > 0 && <><dt>参考资料</dt><dd>{explanation.references.map((reference, index) => {
+        const previous = question.agent?.calls.find((item) => item.round != null && call.round != null && item.round < call.round && item.results?.some((source) => source.evidence_id === reference.source_id));
+        const source = previous?.results?.find((item) => item.evidence_id === reference.source_id);
+        return <div className="ag-query-reference" key={index}>
+          <small>{source ? `第 ${previous?.round} 轮返回 · ${chunkLabel(source.position, source.chunk_id)} · ${source.title ?? "来源资料"}` : "未定位到此前轮次的引用资料"}</small>
+          <p>“{reference.quote}”</p>
+        </div>;
+      })}</dd></>}
+      {explanation.assumptions.length > 0 && <><dt>待验证假设</dt><dd><ul>{explanation.assumptions.map((item, index) => <li key={index}>{item}</li>)}</ul></dd></>}
+    </dl>
+  </div>;
+}
+
 function AgentCall({ call, fresh, evidenceChunks, question }: { question: EvalQuestion; call: EvalAgentCall; fresh: Set<string>; evidenceChunks: Set<string> }) {
   const status = CALL_STATUS[call.status] ?? call.status;
   const hit = call.hits.length > 0;
@@ -1093,6 +1115,7 @@ function AgentCall({ call, fresh, evidenceChunks, question }: { question: EvalQu
       <SearchParams values={[SEARCH_MODE_LABELS[call.mode ?? ""] ?? call.mode ?? "默认检索", `Top K ${call.top_k ?? "—"}`]} /></>
       : call.name === "read_context" && call.source_id ? <div className="ag-call-query">{call.source_id} 的{call.direction === "before" ? "前文" : "后文"}</div>
         : <div className="ag-call-query"><code>{JSON.stringify(call.arguments)}</code></div>}
+    {(call.name === "search_knowledge" || call.name === "read_context") && <QueryExplanation call={call} question={question} />}
     {status && <div className="ag-call-meta">{status}{call.error ? `：${call.error}` : ""}</div>}
     {call.note && call.status !== "ok" && <div className="ag-call-meta">{call.note}</div>}
     {(call.results || call.name === "read_context") && <AgentCallEvidence question={question} call={call} items={items} />}

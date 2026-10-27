@@ -8760,3 +8760,13 @@ input:focus {
 
 .ag-returned-chunks { display: grid; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--ev-line); }
 .ag-returned-chunks > strong { color: var(--ev-muted); font-size: 12px; font-weight: 600; }
+
+.ag-query-explanation { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--ev-line); border-radius: 6px; background: rgba(255, 255, 255, .65); font-size: 12px; }
+.ag-query-explanation-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
+.ag-query-explanation-head small, .ag-query-reference > small { color: var(--ev-muted); font-size: 11px; }
+.ag-query-explanation dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 12px; margin: 10px 0 0; }
+.ag-query-explanation dt { color: var(--ev-muted); }
+.ag-query-explanation dd { margin: 0; overflow-wrap: anywhere; }
+.ag-query-explanation dd ul { margin: 0; padding-left: 16px; }
+.ag-query-reference + .ag-query-reference { margin-top: 8px; }
+.ag-query-reference p { margin: 4px 0 0; white-space: pre-wrap; }

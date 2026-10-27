@@ -172,3 +172,13 @@ def test_delivery_keeps_full_source_and_context_text():
         "trace": {"source_id": "S1", "chunk_ids": ["doc:1"], "positions": [1]}}, ["末尾证据"], {"doc:1": "末尾证据"})
     assert context["text"] == text and context["full_text"] is True
     assert context["read_hits"] == [0]
+
+
+def test_call_log_preserves_query_explanation_for_skipped_calls():
+    from app.evaluation.agent_retrieval import call_log
+
+    explanation = {"purpose": "核实公司名称", "basis": ["hypothesis"], "references": [], "assumptions": ["书中可能提到这家公司"]}
+    row = call_log(2, 2, {"name": "search_knowledge", "status": "duplicate",
+        "arguments": {"query": "乐视", "query_explanation": explanation}, "content": "重复调用"}, [], {})
+    assert row["query_explanation"] == explanation
+    assert row["note"] == "重复调用"

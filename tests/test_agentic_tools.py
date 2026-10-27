@@ -120,3 +120,14 @@ def test_tool_definitions_follow_permissions(setup):
     assert "delivered_at" in data["description"]
     assert '"phone"' not in data["description"]
     assert "shipments" in data["parameters"]["properties"]["data_type"]["enum"]
+
+
+def test_search_explanation_is_logged_without_affecting_search():
+    ctx = knowledge_context()
+    explanation = {"purpose": "确认退货条件", "basis": ["user_question"], "references": [], "assumptions": []}
+    outcome = call(ctx, "search_knowledge", query="退货需要什么条件？", mode="vector", query_explanation=explanation)
+    assert outcome["ok"]
+    assert outcome["trace"]["arguments"]["query_explanation"] == explanation
+    assert outcome["trace"]["query"] == "退货需要什么条件？"
+    invalid = call(ctx, "search_knowledge", query="退货", query_explanation={"purpose": ""})
+    assert not invalid["ok"]

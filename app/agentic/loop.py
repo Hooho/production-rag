@@ -24,6 +24,7 @@ from ..runtime_config import snapshot as runtime_snapshot
 from .citations import CITATION, check_citations, fix_prompt, sort_key
 from .llm import cached_tokens, parse_message
 from .tools import execute_tool, tool_definitions
+from .query_explanation import retrieval_arguments
 
 logger = logging.getLogger("production-rag-agentic")
 
@@ -39,7 +40,7 @@ def force_prompt(reason):
 # 同一次调用的判断：工具名相同、参数解析后完全相同（参数顺序和空格不同也算同一次）。
 def call_key(name, arguments):
     try:
-        normalized = json.dumps(json.loads(arguments or "{}"), ensure_ascii=False, sort_keys=True)
+        normalized = json.dumps(retrieval_arguments(name, json.loads(arguments or "{}")), ensure_ascii=False, sort_keys=True)
     except (TypeError, ValueError):
         normalized = str(arguments)
     return name, normalized

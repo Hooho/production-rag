@@ -21,6 +21,7 @@ import json
 import time
 from uuid import uuid4
 
+from ..agentic.query_explanation import query_explanation
 from .. import prompts
 from ..runtime_config import snapshot as runtime_snapshot
 from .dataset import QUESTION_TYPES, select_split
@@ -67,6 +68,12 @@ def call_log(number, round_no, call, evidence, chunk_texts):
     trace = call.get("trace") or {}
     entry = {"call": number, "round": round_no, "name": name, "arguments": parse_arguments(call.get("arguments")),
         "status": call.get("status"), "duration_ms": call.get("duration_ms"), "chunk_ids": [], "hits": [], "full_text": True}
+    try:
+        explanation = query_explanation(entry["arguments"])
+    except ValueError:
+        explanation = None
+    if explanation:
+        entry["query_explanation"] = explanation
     if call.get("status") not in ("ok", "error"):
         # duplicate（和之前的调用完全相同，没有执行）、skipped（预算用完）：只记状态和给模型的说明。
         entry["note"] = (call.get("content") or "")[:200]

@@ -268,3 +268,12 @@ def test_history_citations_force_lookup(runtime):
     assert "来自历史消息" in first["citation_fix_prompt"]
     assert result["rounds"][1]["kind"] == "normal" and model.calls[1]["tools"]
     assert result["answer"] == "签收后可以退货 [S1]。" and result["stop_reason"] == "answered" and result["citation"]["passed"]
+
+
+def test_query_explanation_does_not_bypass_duplicate_detection():
+    from app.agentic.loop import call_key
+
+    first = {"query": "退货条件", "query_explanation": {"purpose": "第一次说明"}}
+    second = {"query": "退货条件", "query_explanation": {"purpose": "换一种说明"}}
+    assert call_key("search_knowledge", json.dumps(first)) == call_key("search_knowledge", json.dumps(second))
+    assert call_key("read_context", json.dumps({"source_id": "S1", **first})) == call_key("read_context", json.dumps({"source_id": "S1", **second}))

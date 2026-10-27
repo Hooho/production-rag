@@ -693,7 +693,14 @@ export type EvalQuestion = {
 export type EvalMode = "fixed" | "agent";
 export type EvalCompareKey = "both" | "fixed_only" | "agent_only" | "neither";
 export type EvalAgentResult = { evidence_id: string; title: string | null; heading?: string | null; chunk_id: string | null; position?: number | null; parent_chunk_ids?: string[]; relevance: number | null; low_relevance: boolean; text: string; hits: number[]; main_hits?: number[] };
+export type AgentQueryExplanation = {
+  purpose: string;
+  basis: ("user_question" | "previous_results" | "hypothesis")[];
+  references: { source_id: string; quote: string }[];
+  assumptions: string[];
+};
 export type EvalAgentCall = {
+  query_explanation?: AgentQueryExplanation;
   full_text?: boolean;
   call: number;
   round: number | null;

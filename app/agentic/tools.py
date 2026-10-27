@@ -10,6 +10,8 @@ import inspect
 import json
 from dataclasses import dataclass, field
 
+from .query_explanation import QUERY_EXPLANATION_SCHEMA, RETRIEVAL_TOOLS, query_explanation, retrieval_arguments
+
 from ..business.service import DataError
 from ..runtime_config import snapshot as runtime_snapshot
 from ..security import sanitize_source
@@ -234,15 +236,17 @@ def tool_definitions(ctx):
                 "keyword 模式只写要精确匹配的词，如名称、编号、原话。"},
              "mode": {"type": "string", "enum": list(SEARCH_MODES), "description": "检索方式，默认 hybrid。"},
              "top_k": {"type": "integer", "minimum": 1, "maximum": TOP_K_MAX,
-                "description": f"最多返回几条，默认 {TOP_K_DEFAULT}。"}},
-            ["query"]),
+                "description": f"最多返回几条，默认 {TOP_K_DEFAULT}。"},
+             "query_explanation": QUERY_EXPLANATION_SCHEMA},
+            ["query", "query_explanation"]),
         function("read_context",
             "读取一条已检索到的知识库资料的前文或后文，用于资料被截断、需要看上下文的情况。读到的内容沿用原编号。",
             {"source_id": {"type": "string", "description": "已检索到的资料编号，如 S1。"},
              "direction": {"type": "string", "enum": ["before", "after"], "description": "before 前文，after 后文。"},
              "count": {"type": "integer", "minimum": 1, "maximum": CONTEXT_COUNT_MAX,
-                "description": "读几个相邻分片，默认 1。"}},
-            ["source_id", "direction"]),
+                "description": "读几个相邻分片，默认 1。"},
+             "query_explanation": QUERY_EXPLANATION_SCHEMA},
+            ["source_id", "direction", "query_explanation"]),
         function("lookup_order",
             "按订单号查询单个订单的状态和预计送达时间，返回 [O1]…。",
             {"order_id": {"type": "string", "description": "订单号，如 A1001。"}},
@@ -298,12 +302,18 @@ def execute_tool(ctx, name, arguments):
         return invalid(f"arguments 不是合法的 JSON：{error.msg}")
     if not isinstance(parsed, dict):
         return invalid("arguments 应为 JSON 对象")
+    if name in RETRIEVAL_TOOLS:
+        try:
+            query_explanation(parsed)
+        except ValueError as error:
+            return invalid(str(error))
+    execution = retrieval_arguments(name, parsed)
     # 先按函数签名核对参数名，缺少必填参数或多了参数时直接告诉模型；不用 try 包住整个调用，
     # 以免把工具内部的程序错误误报成"参数不正确"。
     try:
-        inspect.signature(handler).bind(ctx, **parsed)
+        inspect.signature(handler).bind(ctx, **execution)
     except TypeError as error:
         return invalid(f"{name} 的参数不正确：{error}")
-    outcome = handler(ctx, **parsed)
+    outcome = handler(ctx, **execution)
     outcome["trace"]["arguments"] = parsed
     return outcome
