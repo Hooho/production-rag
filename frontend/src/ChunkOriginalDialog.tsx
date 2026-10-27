@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { evidenceRanges } from "./evidenceRanges";
 import { SourceTag } from "./Tag";
 
@@ -15,8 +15,7 @@ const dialogTriggers = new WeakMap<HTMLDialogElement, HTMLElement>();
 // 从弹窗内打开详情时，左右并排显示，并用箭头连接到触发入口。
 export function DetailDialog({ open, title, onClose, children, className = "" }: { open: boolean; title: string; onClose: () => void; children: ReactNode; className?: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const arrowId = useId();
-  const [connector, setConnector] = useState<{ from: number; to: number; y: number } | null>(null);
+  const [connector, setConnector] = useState<{ x: number; y: number } | null>(null);
   useEffect(() => {
     const element = dialog.current;
     if (!element || !open) {
@@ -43,15 +42,23 @@ export function DetailDialog({ open, title, onClose, children, className = "" }:
       if (!companion || !trigger || !element) return;
       const anchor = trigger.getBoundingClientRect();
       const container = companion.getBoundingClientRect();
+      const height = element.getBoundingClientRect().height;
+      const center = anchor.top + anchor.height / 2;
+      const top = Math.max(16, Math.min(center - height / 2, window.innerHeight - height - 16));
+      element.style.top = `${top}px`;
       const panel = element.getBoundingClientRect();
-      const y = anchor.top + anchor.height / 2;
+      const y = Math.max(panel.top + 20, Math.min(center, panel.bottom - 20));
       setConnector(anchor.bottom > container.top && anchor.top < container.bottom && panel.right < anchor.left
-        ? { from: panel.right, to: anchor.left - 5, y } : null);
+        ? { x: panel.right - 1, y: y - 10 } : null);
     }
     updateConnector();
+    const observer = new ResizeObserver(updateConnector);
+    observer.observe(element);
     window.addEventListener("resize", updateConnector);
     companion?.addEventListener("scroll", updateConnector, true);
     return () => {
+      observer.disconnect();
+      element.style.removeProperty("top");
       window.removeEventListener("resize", updateConnector);
       companion?.removeEventListener("scroll", updateConnector, true);
       companion?.classList.remove("ag-dialog-has-companion");
@@ -66,9 +73,8 @@ export function DetailDialog({ open, title, onClose, children, className = "" }:
     if (target && target.closest("dialog") === event.currentTarget) dialogTriggers.set(event.currentTarget, target);
   }} className={`ag-delivery-dialog ${className}`} aria-label={title} onClose={(event) => { event.stopPropagation(); onClose(); }}
     onClick={(event) => { if (event.target === event.currentTarget) dialog.current?.close(); }}>
-    {connector && <svg className="ag-dialog-connector" aria-hidden="true">
-      <defs><marker id={arrowId} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="currentColor" /></marker></defs>
-      <path d={`M ${connector.from} ${connector.y} H ${connector.to}`} fill="none" stroke="currentColor" strokeWidth="1.5" markerEnd={`url(#${arrowId})`} />
+    {connector && <svg className="ag-dialog-connector" style={{ left: connector.x, top: connector.y }} viewBox="0 0 12 20" aria-hidden="true">
+      <path d="M0 0 L11 10 L0 20" fill="white" stroke="#d9e5dc" strokeWidth="1.5" />
     </svg>}
     <div className="ag-delivery-dialog-head"><strong>{title}</strong>
       <button type="button" className="secondary-button" autoFocus onClick={() => dialog.current?.close()}>关闭</button></div>

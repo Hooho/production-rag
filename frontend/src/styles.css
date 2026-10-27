@@ -8755,11 +8755,11 @@ input:focus {
 .ag-evidence-hit-list .tag.is-hue.is-dashed,
 .ag-evidence-status .tag.is-hue.is-dashed { background: #fff; }
 
-/* 详情浮窗位于原弹窗左侧，共享屏幕宽度；连接线属于浮窗的顶层内容。 */
+/* 详情浮窗位于原弹窗左侧，共享屏幕宽度；小箭头指向触发入口。 */
 .ag-delivery-dialog.ag-dialog-has-companion { width: min(600px, calc(50vw - 32px)); }
-.ag-delivery-dialog.ag-dialog-companion { left: auto; right: calc(min(600px, 50vw - 32px) + 48px); width: calc(100vw - min(600px, 50vw - 32px) - 64px); }
+.ag-delivery-dialog.ag-dialog-companion { height: auto; max-height: calc(100dvh - 32px); bottom: auto; left: auto; right: calc(min(600px, 50vw - 32px) + 48px); width: calc(100vw - min(600px, 50vw - 32px) - 64px); }
 .ag-dialog-companion::backdrop { background: transparent; }
-.ag-dialog-connector { position: fixed; inset: 0; width: 100vw; height: 100dvh; pointer-events: none; overflow: visible; color: #3c8655; }
+.ag-dialog-connector { position: fixed; width: 12px; height: 20px; pointer-events: none; overflow: visible; }
 .ag-dialog-anchor { outline: 2px solid #3c8655; outline-offset: 3px; border-radius: 4px; }
 @media (max-width: 640px) {
   .ag-delivery-dialog.ag-dialog-has-companion { width: calc(50vw - 20px); padding: 12px; right: 8px; }
