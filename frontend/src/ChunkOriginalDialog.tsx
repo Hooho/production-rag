@@ -12,7 +12,7 @@ export type ChunkOriginal = {
 
 const dialogTriggers = new WeakMap<HTMLDialogElement, HTMLElement>();
 
-// 从弹窗内打开详情时，左右并排显示，并用箭头连接到触发入口。
+// 从弹窗内打开详情时，以点击入口为锚点，在其左侧显示固定宽度的浮窗。
 export function DetailDialog({ open, title, onClose, children, className = "" }: { open: boolean; title: string; onClose: () => void; children: ReactNode; className?: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [connector, setConnector] = useState<{ x: number; y: number } | null>(null);
@@ -27,7 +27,6 @@ export function DetailDialog({ open, title, onClose, children, className = "" }:
     const companion = parent && trigger ? parent : null;
     const previousScroll = companion?.scrollTop ?? 0;
     if (companion) {
-      companion.classList.add("ag-dialog-has-companion");
       element.classList.add("ag-dialog-companion");
       trigger?.classList.add("ag-dialog-anchor");
       if (trigger) {
@@ -42,7 +41,9 @@ export function DetailDialog({ open, title, onClose, children, className = "" }:
       if (!companion || !trigger || !element) return;
       const anchor = trigger.getBoundingClientRect();
       const container = companion.getBoundingClientRect();
-      const height = element.getBoundingClientRect().height;
+      const { width, height } = element.getBoundingClientRect();
+      const left = Math.max(16, Math.min(anchor.left - width - 16, window.innerWidth - width - 16));
+      element.style.left = `${left}px`;
       const center = anchor.top + anchor.height / 2;
       const top = Math.max(16, Math.min(center - height / 2, window.innerHeight - height - 16));
       element.style.top = `${top}px`;
@@ -59,9 +60,9 @@ export function DetailDialog({ open, title, onClose, children, className = "" }:
     return () => {
       observer.disconnect();
       element.style.removeProperty("top");
+      element.style.removeProperty("left");
       window.removeEventListener("resize", updateConnector);
       companion?.removeEventListener("scroll", updateConnector, true);
-      companion?.classList.remove("ag-dialog-has-companion");
       if (companion) companion.scrollTop = previousScroll;
       element.classList.remove("ag-dialog-companion");
       trigger?.classList.remove("ag-dialog-anchor");
