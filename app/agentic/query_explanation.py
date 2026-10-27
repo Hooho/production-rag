@@ -29,18 +29,18 @@ def query_explanation(arguments):
     basis = value.get("basis")
     if not isinstance(basis, list) or not basis or any(item not in BASIS for item in basis):
         raise ValueError("query_explanation.basis 应为有效依据类型的非空数组")
-    references = value.get("references")
+    references = value.get("references", [])
     if not isinstance(references, list) or any(not isinstance(item, dict) or
         any(not isinstance(item.get(key), str) or not item[key].strip() for key in ("source_id", "quote")) for item in references):
-        raise ValueError("query_explanation.references 应包含资料编号和引用原文")
+        raise ValueError("query_explanation.references 应为数组，每项包含 source_id 和 quote；没有参考资料时填空数组 []")
     assumptions = value.get("assumptions")
     if not isinstance(assumptions, list) or any(not isinstance(item, str) or not item.strip() for item in assumptions):
         raise ValueError("query_explanation.assumptions 应为字符串数组")
     if "previous_results" in basis and not references:
-        raise ValueError("依据此前返回资料时，请提供 references")
+        raise ValueError("依据此前返回资料时，请在 references 中提供已返回的 source_id 和真实原文 quote")
     if "hypothesis" in basis and not assumptions:
         raise ValueError("依据待验证假设时，请填写 assumptions")
-    return {key: value[key] for key in ("purpose", "basis", "references", "assumptions")}
+    return {"purpose": value["purpose"], "basis": basis, "references": references, "assumptions": assumptions}
 
 
 def retrieval_arguments(name, arguments):

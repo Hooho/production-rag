@@ -4,6 +4,17 @@ from app.agentic.query_explanation import query_explanation, retrieval_arguments
 
 
 class QueryExplanationTest(unittest.TestCase):
+    def test_missing_references_without_previous_results(self):
+        explanation = {"purpose": "确认买入苹果股票的年份", "basis": ["user_question", "hypothesis"],
+            "assumptions": ["买入发生在某一年（待验证）"]}
+        self.assertEqual(query_explanation({"query_explanation": explanation}), {**explanation, "references": []})
+        self.assertNotIn("references", explanation)
+        with self.assertRaisesRegex(ValueError, "依据此前返回资料"):
+            query_explanation({"query_explanation": {**explanation, "basis": ["previous_results"]}})
+        for references in (None, {}, "", [{"source_id": "S1"}]):
+            with self.subTest(references=references), self.assertRaises(ValueError):
+                query_explanation({"query_explanation": {**explanation, "references": references}})
+
     def test_recorded_reason_is_separate_from_execution(self):
         explanation = {"purpose": "核实乐视是否是书中的反面案例", "basis": ["hypothesis"],
             "references": [], "assumptions": ["书中可能提到乐视，尚未确认"]}
