@@ -217,11 +217,16 @@ function fixedEvidenceRows(question: EvalQuestion, config: EvalRun["config"]): E
         const sources = carriers.filter((item) => (item.chunkId ? chunkIds.includes(item.chunkId) : fixed?.via !== "extension") === direct);
         if (!sources.length) continue;
         matches.push({ label: direct ? "检索命中" : "扩展命中", tone: "success", dashed: !direct,
-          detail: sources.map((item) => [
-            direct ? `${from}${chunkLabel(item.position, item.chunkId)}`
-              : `${from}${chunkLabel(item.position, item.chunkId)}的扩展分片：${item.parts.filter((chunkId) => chunkId !== item.chunkId && chunkIds.includes(chunkId)).map((chunkId) => chunkLabel(question.agent?.evidence[evidence]?.positions?.[chunkIds.indexOf(chunkId)], chunkId)).join("、")}`,
-            rerankText(item.relevance ?? (!usedRetry && direct ? fixed?.rerank_probability : undefined), !direct)
-          ].filter(Boolean).join(" · ")).join("；") });
+          detail: sources.map((item) => {
+            const chunk = `${from}${chunkLabel(item.position, item.chunkId)}`;
+            if (direct) {
+              const score = rerankText(item.relevance ?? (!usedRetry ? fixed?.rerank_probability : undefined));
+              return `${chunk}${score ? `（${score}）` : ""}`;
+            }
+            const extended = item.parts.filter((chunkId) => chunkId !== item.chunkId && chunkIds.includes(chunkId))
+              .map((chunkId) => chunkLabel(question.agent?.evidence[evidence]?.positions?.[chunkIds.indexOf(chunkId)], chunkId)).join("、");
+            return `${chunk}（扩展分片：${extended}）`;
+          }).join("；") });
       }
       return { ...matches[0], matches };
     }
