@@ -650,19 +650,19 @@ function ChunkTabs({ items, empty, question }: { items: ChunkItem[]; empty: stri
   const groups = [
     { label: "命中", items: items.filter((item) => item.hit) },
     { label: "新增", items: items.filter((item) => item.fresh) },
-    { label: items.some((item) => item.fresh !== undefined) ? "已有" : "未命中", items: items.filter((item) => !item.hit && !item.fresh) }
+    { label: items.some((item) => item.fresh !== undefined) ? "重复返回" : "未命中", items: items.filter((item) => !item.hit && !item.fresh) }
   ];
   return <div className="ag-chunks">
     <ul className="ag-chunk-groups">{groups.filter((group) => group.items.length).map((group) => <li key={group.label}>
       <span className="ag-chunk-group-label">{group.label}：</span>
-      <span className="ag-chunk-group-sources">{group.items.map((item) => <SourceTag key={item.key} id={item.id}
+      <span className="ag-chunk-group-sources">{group.items.map((item) => <Tag key={item.key} hue size="sm"
         title={[chunkLabel(item.position, item.chunkId), item.title, hitByExtension(item) ? "证据在扩展分片中" : "", "点击查看原文"].filter(Boolean).join(" · ")}
         onClick={() => {
           const ids = item.parts?.length ? item.parts : item.chunkId ? [item.chunkId] : [];
           const texts = question.agent?.evidence.length ? question.agent.evidence : question.evidence;
           const hits = question.answerable ? evidenceChunkLists(question).flatMap((chunks, index) => chunks.some((id) => ids.includes(id)) ? [index] : []) : [];
           setSelected({ label: chunkLabel(item.position, item.chunkId), chunkId: item.chunkId, sources: [item], evidence: hits.map((index) => ({ number: index + 1, text: texts[index]?.text ?? "" })) });
-        }} />)}</span>
+        }}>{item.chunkId || item.position != null ? chunkLabel(item.position, item.chunkId) : item.parts?.length ? item.parts.map((id) => chunkLabel(null, id)).join("、") : "查看原文"}</Tag>)}</span>
     </li>)}</ul>
     <ChunkOriginalDialog value={selected} onClose={() => setSelected(null)} />
   </div>;
@@ -860,7 +860,7 @@ function FixedLog({ question, params, config }: { question: EvalQuestion; params
     </EvidenceStatus>
     <DetailDialog open={expanded} title="固定流程 · 检索详情" onClose={() => setExpanded(false)} className="ag-retrieval-dialog">
     <div className="ag-retrieval-content">
-    {expanded && <p className="ag-muted ag-numbering-note">命中：含证据的来源；S1、S2 是本次检索的来源编号，点击查看原文。</p>}
+    {expanded && <p className="ag-muted ag-numbering-note">标签显示分片在文档中的位置；命中表示包含证据，点击分片查看原文。</p>}
     {expanded && <>
       {question.rewrite && <div className="ag-flow-step is-block">
         <div className="ag-step-head"><span className="ag-tool">改写</span><span>{rewriteLabel(question)}</span>
@@ -961,7 +961,7 @@ function AgentLog({ question }: { question: EvalQuestion }) {
     </EvidenceStatus>
     <DetailDialog open={expanded} title="Agent · 检索详情" onClose={() => setExpanded(false)} className="ag-retrieval-dialog">
     <div className="ag-retrieval-content">
-    {expanded && <p className="ag-muted ag-numbering-note">命中：含证据的来源；新增：本次新拿到的来源（可能同时命中）；已有：之前拿到且未命中的来源。点击编号查看原文。</p>}
+    {expanded && <p className="ag-muted ag-numbering-note">标签显示分片在文档中的位置；命中：包含证据；新增：本次新拿到的资料（可能同时命中）；重复返回：之前已拿到且本次未命中证据的资料。点击分片查看原文。</p>}
     {expanded && <>
       {agent.question_sent !== question.question && <div className="ag-call-meta">实际提问（多轮追问按规则补全）：{agent.question_sent}</div>}
       {agent.calls.length === 0 && <p className="ag-muted">没有调用任何工具，直接回答了。</p>}
