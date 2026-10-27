@@ -218,7 +218,9 @@ function fixedEvidenceRows(question: EvalQuestion, config: EvalRun["config"]): E
         if (!sources.length) continue;
         matches.push({ label: direct ? "检索命中" : "扩展命中", tone: "success", dashed: !direct,
           detail: sources.map((item) => [
-            `${from}${item.id} ${chunkLabel(item.position, item.chunkId)}`,
+            `${from}来源 ${item.id}`,
+            direct ? `证据在直接检索到的${chunkLabel(item.position, item.chunkId)}`
+              : `直接检索到${chunkLabel(item.position, item.chunkId)}，证据在随附的相邻扩展分片中`,
             rerankText(item.relevance ?? (!usedRetry && direct ? fixed?.rerank_probability : undefined), !direct)
           ].filter(Boolean).join(" · ")).join("；") });
       }
