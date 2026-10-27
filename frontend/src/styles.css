@@ -8757,3 +8757,6 @@ input:focus {
 .ag-delivery-open:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
 
 .ag-call-evidence .is-miss, .ag-call-evidence .is-miss small { color: var(--tone-danger-text); }
+
+.ag-returned-chunks { display: grid; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--ev-line); }
+.ag-returned-chunks > strong { color: var(--ev-muted); font-size: 12px; font-weight: 600; }
