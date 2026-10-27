@@ -992,8 +992,7 @@ function AgentLog({ question }: { question: EvalQuestion }) {
         {rounds.map(({ round }, index) => <button type="button" key={`${round}-${index}`} className={activeStep === index ? "is-active" : ""} aria-current={activeStep === index ? "step" : undefined} onClick={() => setSelectedStep(index)}><span>{index + 1}</span>第 {round ?? "—"} 轮</button>)}
         <button type="button" className={activeStep === rounds.length ? "is-active" : ""} aria-current={activeStep === rounds.length ? "step" : undefined} onClick={() => setSelectedStep(rounds.length)}><span>✓</span>结束</button>
       </nav>
-      {rounds.map(({ round, calls, kind, reasoning, content, error }, index) => activeStep === index && <div key={`${round}-${index}`} className={`ag-round ${calls.length > 1 ? "is-parallel" : ""}`}>
-        <div className="ag-round-head">第 {round ?? "—"} 轮{calls.length > 1 ? <Tag size="sm" tone="warning">同时发出 {calls.length} 次，彼此看不到结果</Tag> : null}</div>
+      {rounds.map(({ round, calls, kind, reasoning, content, error }, index) => activeStep === index && <div key={`${round}-${index}`} className="ag-round-detail">
         {reasoning ? <div className="ag-round-reasoning">
           <div className="ag-reasoning-head"><span className="ag-tool">Agent 推理过程</span>
             <button type="button" className="ag-more-link" aria-haspopup="dialog" onClick={() => setReasoningDetail({ round, text: reasoning })}>展开更多</button></div>
