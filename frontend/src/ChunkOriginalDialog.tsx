@@ -30,7 +30,7 @@ export function ChunkOriginalDialog({ value, onClose }: { value: ChunkOriginal |
     return () => { cancelled = true; };
   }, [requestKey]);
   useEffect(() => {
-    if (loaded?.id === requestKey) selected.current?.scrollIntoView({ block: "center" });
+    if (loaded?.id === requestKey) selected.current?.scrollIntoView({ block: "start" });
   }, [loaded, requestKey, chunkId]);
   if (!value) return null;
   const current = loaded?.id === requestKey ? loaded : null;
