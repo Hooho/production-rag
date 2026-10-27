@@ -8754,3 +8754,14 @@ input:focus {
 
 .ag-evidence-hit-list .tag.is-hue.is-dashed,
 .ag-evidence-status .tag.is-hue.is-dashed { background: #fff; }
+
+/* 详情浮窗位于原弹窗左侧，共享屏幕宽度；连接线属于浮窗的顶层内容。 */
+.ag-delivery-dialog.ag-dialog-has-companion { width: min(600px, calc(50vw - 32px)); }
+.ag-delivery-dialog.ag-dialog-companion { left: auto; right: calc(min(600px, 50vw - 32px) + 48px); width: calc(100vw - min(600px, 50vw - 32px) - 64px); }
+.ag-dialog-companion::backdrop { background: transparent; }
+.ag-dialog-connector { position: fixed; inset: 0; width: 100vw; height: 100dvh; pointer-events: none; overflow: visible; color: #3c8655; }
+.ag-dialog-anchor { outline: 2px solid #3c8655; outline-offset: 3px; border-radius: 4px; }
+@media (max-width: 640px) {
+  .ag-delivery-dialog.ag-dialog-has-companion { width: calc(50vw - 20px); padding: 12px; right: 8px; }
+  .ag-delivery-dialog.ag-dialog-companion { left: 8px; right: auto; width: calc(50vw - 20px); padding: 12px; }
+}
