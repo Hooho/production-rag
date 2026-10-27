@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { DetailDialog, ChunkOriginalDialog, type ChunkOriginal } from "./ChunkOriginalDialog";
+import { ChunkOriginalDialog, type ChunkOriginal } from "./ChunkOriginalDialog";
+import { DetailDialog } from "./DetailDialog";
 import { type EvalAgentCall, type EvalCompareKey, type EvalConfig, type EvalMaterial, type EvalMode, type EvalRetry, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSummary } from "./api";
 import { EvidenceChunkDialog, type EvidenceChunkSelection } from "./EvidenceChunkDialog";
 import { evidenceLabel, formatDuration as formatMs } from "./format";
