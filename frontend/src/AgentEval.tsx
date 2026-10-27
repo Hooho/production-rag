@@ -670,6 +670,7 @@ function ChunkTabs({ items, empty, question }: { items: ChunkItem[]; empty: stri
 
 // 按来源编号分组，每组内合并同一分片；不同来源可能覆盖同一个分片。
 function FinalDelivery({ question, items, unavailable = false }: { question: EvalQuestion; items: ChunkItem[]; unavailable?: boolean }) {
+  const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<ChunkOriginal | null>(null);
   const lists = question.answerable ? evidenceChunkLists(question) : [];
   const evidence = question.agent?.evidence.length ? question.agent.evidence : question.evidence;
@@ -692,8 +693,10 @@ function FinalDelivery({ question, items, unavailable = false }: { question: Eva
   }
   const directChunks = new Set(items.filter((item) => !item.key.startsWith("context-")).map((item) => item.chunkId).filter(Boolean));
   const expandedChunks = new Set(items.filter((item) => !item.key.startsWith("context-")).flatMap(extendedParts).filter((id) => !directChunks.has(id)));
-  return <details className="ag-delivery">
-    <summary><span className="ag-tool">最终交付给模型的资料</span><small>{groups.size} 条来源 · {chunks.size} 个分片（含扩展 {expandedChunks.size} 片）</small></summary>
+  return <div className="ag-delivery">
+    <button type="button" className="ag-delivery-open" aria-haspopup="dialog" onClick={() => setOpen(true)}><span className="ag-tool">最终交付给模型的资料</span><small>{groups.size} 条来源 · {chunks.size} 个分片（含扩展 {expandedChunks.size} 片）</small><span aria-hidden="true">查看 →</span></button>
+    <DetailDialog open={open} title="最终交付给模型的资料" onClose={() => setOpen(false)}>
+    <p className="ag-muted">{groups.size} 条来源 · {chunks.size} 个分片（含扩展 {expandedChunks.size} 片）</p>
     {unavailable ? <p className="ag-muted">这次评测没有保存最终交付资料。</p> : groups.size === 0 ? <p className="ag-muted">{question.cleared ? "资料已清空，没有最终交付。" : "没有最终交付资料。"}</p> : <ul className="ag-delivery-groups">
       {[...groups].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([id, rows]) => <li className="ag-delivery-group" key={id}>
         <details className="ag-delivery-source" open={[...rows.values()].some((row) => row.hits.length > 0)}>
@@ -714,7 +717,8 @@ function FinalDelivery({ question, items, unavailable = false }: { question: Eva
       </li>)}
     </ul>}
     <ChunkOriginalDialog value={selected} onClose={() => setSelected(null)} />
-  </details>;
+    </DetailDialog>
+  </div>;
 }
 
 function agentDelivery(question: EvalQuestion): ChunkItem[] {

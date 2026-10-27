@@ -8749,3 +8749,9 @@ input:focus {
 
 .ag-evidence-hit-list .tag.is-hue.is-dashed,
 .ag-evidence-status .tag.is-hue.is-dashed { background: #fff; }
+
+.ag-delivery-open { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.ag-delivery-open small, .ag-delivery-open > span:last-child { color: var(--ev-muted); font-size: 12px; }
+.ag-delivery-open > span:last-child { margin-left: auto; }
+.ag-delivery-open:hover .ag-tool { text-decoration: underline; }
+.ag-delivery-open:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
