@@ -220,7 +220,7 @@ function fixedEvidenceRows(question: EvalQuestion, config: EvalRun["config"]): E
           detail: sources.map((item) => [
             `${from}来源 ${item.id}`,
             direct ? `证据在直接检索到的${chunkLabel(item.position, item.chunkId)}`
-              : `直接检索到${chunkLabel(item.position, item.chunkId)}，证据在随附的相邻扩展分片中`,
+              : `直接检索到${chunkLabel(item.position, item.chunkId)}，证据在相邻${item.parts.filter((chunkId) => chunkId !== item.chunkId && chunkIds.includes(chunkId)).map((chunkId) => chunkLabel(question.agent?.evidence[evidence]?.positions?.[chunkIds.indexOf(chunkId)], chunkId)).join("、")}中`,
             rerankText(item.relevance ?? (!usedRetry && direct ? fixed?.rerank_probability : undefined), !direct)
           ].filter(Boolean).join(" · ")).join("；") });
       }
