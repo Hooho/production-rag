@@ -20,6 +20,7 @@ function Demo() {
     <button onClick={() => setValue("分片 A")}>选择 A</button>
     <button onClick={() => setValue("分片 B")}>选择 B</button>
     <button onClick={() => setOther(true)}>另一个入口</button>
+    <p>主弹窗空白内容</p>
     <DetailDialog open={value !== null} title={value ?? "原文"} onClose={() => setValue(null)}><p>分片内容</p></DetailDialog>
     <DetailDialog open={other} title="其他预览" onClose={() => setOther(false)}><p>其他内容</p></DetailDialog>
   </DetailDialog></>;
@@ -39,6 +40,13 @@ try {
   await page.getByRole("button", { name: "选择 A" }).click();
   await page.locator('dialog[aria-label="分片 A"]:popover-open').waitFor();
   assert.equal(await page.locator("dialog:modal").count(), 1);
+  await page.getByText("分片内容", { exact: true }).click();
+  assert.equal(await page.locator(":popover-open").count(), 1);
+  await page.getByText("主弹窗空白内容", { exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector(":popover-open"));
+  assert.equal(await page.locator("dialog:modal").count(), 1);
+  await page.getByRole("button", { name: "选择 A" }).click();
+  await page.locator('dialog[aria-label="分片 A"]:popover-open').waitFor();
   await page.getByRole("button", { name: "选择 B" }).click();
   await page.locator('dialog[aria-label="分片 B"]:popover-open').waitFor();
   assert.equal(await page.locator(":popover-open").count(), 1);
@@ -53,5 +61,5 @@ try {
   await page.getByRole("dialog", { name: "主弹窗", exact: true }).getByRole("button", { name: "关闭", exact: true }).first().click();
   await page.waitForFunction(() => !document.querySelector(":popover-open") && !document.querySelector("dialog:modal"));
   assert.deepEqual(errors, []);
-  console.log("Companion switching, Escape, and parent close checks passed.");
+  console.log("Outside dismissal, inside clicks, switching, Escape, and parent close checks passed.");
 } finally { await browser.close(); }

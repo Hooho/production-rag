@@ -44,6 +44,9 @@ export function DetailDialog({ open, title, onClose, children, className = "" }:
       if ((event as CustomEvent).detail !== instance.current) closeHandler.current();
     }
     function dismiss() { closeHandler.current(); }
+    function outsidePointer(event: PointerEvent) {
+      if (!event.composedPath().includes(element!)) closeHandler.current();
+    }
     function escape(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -54,6 +57,7 @@ export function DetailDialog({ open, title, onClose, children, className = "" }:
     if (companion) {
       document.addEventListener("detail-companion-open", dismissOther);
       document.addEventListener("keydown", escape, true);
+      document.addEventListener("pointerdown", outsidePointer, true);
       companion.addEventListener("close", dismiss);
     }
     function updateConnector() {
@@ -88,6 +92,7 @@ export function DetailDialog({ open, title, onClose, children, className = "" }:
       if (companion) {
         document.removeEventListener("detail-companion-open", dismissOther);
         document.removeEventListener("keydown", escape, true);
+        document.removeEventListener("pointerdown", outsidePointer, true);
         companion.removeEventListener("close", dismiss);
         if (element.matches(":popover-open")) element.hidePopover();
       }
@@ -100,7 +105,7 @@ export function DetailDialog({ open, title, onClose, children, className = "" }:
     const target = event.target instanceof Element ? event.target.closest<HTMLElement>("button, a, summary") : null;
     if (target && target.closest("dialog") === event.currentTarget) dialogTriggers.set(event.currentTarget, target);
   }} className={`ag-delivery-dialog ${className}`} aria-label={title} onClose={(event) => { event.stopPropagation(); onClose(); }}
-    onClick={(event) => { if (event.target === event.currentTarget) close(); }}>
+    onClick={(event) => { if (!host && event.target === event.currentTarget) close(); }}>
     {connector && <svg className="ag-dialog-connector" style={{ left: connector.x, top: connector.y }} viewBox="0 0 12 20" aria-hidden="true">
       <path d="M0 0 L11 10 L0 20" fill="white" stroke="#d9e5dc" strokeWidth="1.5" />
     </svg>}
