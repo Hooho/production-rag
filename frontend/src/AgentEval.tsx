@@ -210,7 +210,7 @@ function fixedEvidenceRows(question: EvalQuestion, config: EvalRun["config"]): E
     const finalItems = usedRetry ? retryItems : items;
     const chunkIds = evidenceLists[evidence] ?? [];
     const carriers = finalItems.filter((item) => (item.parts ?? []).some((chunkId) => chunkIds.includes(chunkId)));
-    const from = usedRetry ? "补充检索的" : "";
+    const from = usedRetry ? "补充检索的" : "检索的";
     if (carriers.length) {
       const matches: EvidenceStatusEntry[] = [];
       for (const direct of [true, false]) {
@@ -218,9 +218,8 @@ function fixedEvidenceRows(question: EvalQuestion, config: EvalRun["config"]): E
         if (!sources.length) continue;
         matches.push({ label: direct ? "检索命中" : "扩展命中", tone: "success", dashed: !direct,
           detail: sources.map((item) => [
-            `${from}来源 ${item.id}`,
-            direct ? `证据在直接检索到的${chunkLabel(item.position, item.chunkId)}`
-              : `直接检索到${chunkLabel(item.position, item.chunkId)}，证据在相邻${item.parts.filter((chunkId) => chunkId !== item.chunkId && chunkIds.includes(chunkId)).map((chunkId) => chunkLabel(question.agent?.evidence[evidence]?.positions?.[chunkIds.indexOf(chunkId)], chunkId)).join("、")}中`,
+            direct ? `${from}${chunkLabel(item.position, item.chunkId)}`
+              : `${from}${chunkLabel(item.position, item.chunkId)}的扩展分片：${item.parts.filter((chunkId) => chunkId !== item.chunkId && chunkIds.includes(chunkId)).map((chunkId) => chunkLabel(question.agent?.evidence[evidence]?.positions?.[chunkIds.indexOf(chunkId)], chunkId)).join("、")}`,
             rerankText(item.relevance ?? (!usedRetry && direct ? fixed?.rerank_probability : undefined), !direct)
           ].filter(Boolean).join(" · ")).join("；") });
       }
