@@ -1029,7 +1029,7 @@ function AgentCallEvidence({ question, call, items }: { question: EvalQuestion; 
         {[...rows].map(([key, row]) => <Tag key={key} size="sm" tone={row.extended ? "accent" : "info"} outline={row.extended} className={row.extended ? "is-dashed" : undefined}
           title={[row.item.title, row.extended ? "通过相邻分片扩展拿到" : "", "点击查看原文"].filter(Boolean).join(" · ")}
           onClick={() => setSelected({ label: chunkLabel(row.position, row.chunkId), chunkId: row.chunkId, sources: [row.item], evidence: [{ number: index + 1, text: quote.text }] })}>
-          {row.extended ? "扩展分片 · " : ""}{row.chunkId || row.position != null ? chunkLabel(row.position, row.chunkId) : "查看原文"}
+          {row.extended ? "扩展命中 " : call.name === "read_context" ? "读前后文命中 " : "检索命中 "}{row.chunkId || row.position != null ? chunkLabel(row.position, row.chunkId) : "查看原文"}
         </Tag>)}
         {hit && !rows.size && <small>历史记录未保存对应分片</small>}
       </li>;
