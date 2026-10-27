@@ -6,14 +6,14 @@
 
 /* 固定宽度的详情浮窗靠近点击入口，只有高度随正文变化。 */
 .ag-delivery-dialog.ag-dialog-companion { width: 560px; max-width: calc(100vw - 32px); height: auto; max-height: var(--companion-max-height, calc(80dvh - 26px)); bottom: auto; right: auto; box-shadow: 0 24px 80px #102b2559, 0 8px 28px #102b253d; }
-.ag-dialog-companion::backdrop { background: transparent; }
+.ag-dialog-companion::backdrop { background: transparent; pointer-events: none; }
 .ag-dialog-connector { position: fixed; width: 12px; height: 20px; pointer-events: none; overflow: visible; filter: drop-shadow(3px 2px 3px #16362218); }
 .ag-dialog-anchor { outline: 2px solid #3c8655; outline-offset: 3px; border-radius: 4px; }
 
-.ag-delivery-dialog section.ag-original-chunk { border: 1px dashed var(--chunk-border, var(--border, #b2cdb7)); border-radius: 8px; padding: 14px; margin-top: 14px; scroll-margin: 16px; }
-.ag-delivery-dialog section.ag-original-chunk.is-selected { border: 2px dashed var(--chunk-border); background: var(--chunk-bg); }
+.ag-delivery-dialog section.ag-original-chunk { border: 1px dashed var(--chunk-border, var(--border, #b2cdb7)); border-radius: 8px; padding: 14px; margin-top: 14px; scroll-margin: 16px; background: color-mix(in srgb, var(--chunk-bg) 45%, white); }
+.ag-delivery-dialog section.ag-original-chunk.is-selected { border: 2px dashed var(--chunk-border); background: color-mix(in srgb, var(--chunk-bg) 70%, white); }
 .ag-original-chunk-heading { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--chunk-text); font-size: 12px; }
 .ag-original-chunk-heading > span { font-size: 11px; }
 
 .ag-original-chunk.is-retrieved { --chunk-text: var(--tone-info-text); --chunk-border: var(--tone-info-border); --chunk-bg: var(--tone-info-bg); }
-.ag-original-chunk.is-extended { --chunk-text: var(--tone-accent-text); --chunk-border: var(--tone-accent-border); --chunk-bg: #fff; }
+.ag-original-chunk.is-extended { --chunk-text: var(--tone-accent-text); --chunk-border: var(--tone-accent-border); --chunk-bg: var(--tone-accent-bg); }
