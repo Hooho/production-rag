@@ -249,10 +249,18 @@ class Inspector:
 
     # 时间窗口内的问答及其反馈。response 只用到 answer，但它和 trace 都在 JSON 列里，一并读出。
     def load_runs(self, connection):
+        # 只排序编号和时间，避免完整回答、trace JSON 占满 MySQL 排序缓冲区。
+        ordered = connection.execute(select(runs.c.id, runs.c.created).where(
+            runs.c.created >= self.since).order_by(runs.c.created, runs.c.id)).all()
+        rows = {}
         query = select(runs.c.id, runs.c.owner, runs.c.question, runs.c.response, runs.c.route, runs.c.refused,
             runs.c.trace, runs.c.created, feedback.c.rating, feedback.c.reason, feedback.c.comment).outerjoin(
-                feedback, feedback.c.run_id == runs.c.id).where(runs.c.created >= self.since).order_by(runs.c.created)
-        return connection.execute(query).mappings().all()
+                feedback, feedback.c.run_id == runs.c.id)
+        for start in range(0, len(ordered), 500):
+            ids = [row.id for row in ordered[start:start + 500]]
+            rows.update((row["id"], row) for row in connection.execute(
+                query.where(runs.c.id.in_(ids))).mappings())
+        return [rows[row.id] for row in ordered if row.id in rows]
 
     # 某类问题已经关联过的原始记录，重复巡检时跳过。
     def linked(self, connection, kind, source):
