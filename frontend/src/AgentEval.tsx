@@ -1032,7 +1032,7 @@ function AgentCallEvidence({ question, call, items }: { question: EvalQuestion; 
   const returned = new Map<string, { item: ChunkItem; chunkId: string | null; position?: number | null; extended: boolean }>();
   for (const item of items) {
     for (const chunkId of item.parts?.length ? item.parts : [item.chunkId ?? null]) {
-      const key = chunkId ?? item.key;
+      const key = `${item.key}:${chunkId ?? "unknown"}`;
       const direct = chunkId === item.chunkId;
       if (!returned.has(key) || direct) returned.set(key, {
         item, chunkId, position: direct ? item.position : call.name === "read_context" ? call.positions?.[call.chunk_ids.indexOf(chunkId ?? "")] : undefined,
@@ -1068,12 +1068,12 @@ function AgentCallEvidence({ question, call, items }: { question: EvalQuestion; 
     })}</ul>
     <div className="ag-returned-chunks">
       <strong>{call.name === "read_context" ? "本次读取到的分片" : "本次检索到的分片"}</strong>
-      <div className="ag-call-param-values">{returned.size ? [...returned].map(([key, row]) => <Tag key={key} size="sm" tone={row.extended ? "accent" : "info"} outline={row.extended} className={row.extended ? "is-dashed" : undefined}
+      <div className="ag-returned-groups">{returned.size ? items.map((item) => <div key={item.key} className="ag-call-param-values">{[...returned].filter(([, row]) => row.item.key === item.key).map(([key, row]) => <Tag key={key} size="sm" tone={row.extended ? "accent" : "info"} outline={row.extended} className={row.extended ? "is-dashed" : undefined}
         title={[row.item.title, "点击查看原文"].filter(Boolean).join(" · ")}
         onClick={() => {
           const hits = evidence.flatMap((quote, index) => row.chunkId && quote.chunk_ids?.includes(row.chunkId) ? [{ number: index + 1, text: quote.text }] : []);
           setSelected({ label: chunkLabel(row.position, row.chunkId), chunkId: row.chunkId, sources: [row.item], evidence: hits });
-        }}>{row.extended ? "扩展 " : ""}{row.chunkId || row.position != null ? chunkLabel(row.position, row.chunkId) : "查看原文"}</Tag>)
+        }}>{row.extended ? "扩展 " : ""}{row.chunkId || row.position != null ? chunkLabel(row.position, row.chunkId) : "查看原文"}</Tag>)}</div>)
         : <small className="ag-muted">没有返回分片</small>}</div>
     </div>
     <ChunkOriginalDialog value={selected} onClose={() => setSelected(null)} />
