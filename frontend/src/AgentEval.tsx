@@ -1082,7 +1082,13 @@ function AgentCallEvidence({ question, call, items }: { question: EvalQuestion; 
 
 function QueryExplanation({ call, question }: { call: EvalAgentCall; question: EvalQuestion }) {
   const explanation = call.query_explanation;
-  if (!explanation) return <p className="ag-muted">此记录未保存查询说明，新评测会要求模型提供。</p>;
+  if (!explanation) {
+    const raw = call.arguments.query_explanation;
+    if (raw && typeof raw === "object" && "purpose" in raw && typeof raw.purpose === "string") {
+      return <div className="ag-query-explanation"><strong>查询说明</strong><p>{raw.purpose}</p><p className="ag-muted">{"references" in raw && Array.isArray(raw.references) && raw.references.length > 0 ? "此历史记录未保存结构化的引用依据" : "大模型没有返回引用依据"}</p></div>;
+    }
+    return <p className="ag-muted">大模型没有返回查询说明</p>;
+  }
   const labels = { user_question: "用户问题", previous_results: "此前返回资料", hypothesis: "待验证假设" };
   return <div className="ag-query-explanation">
     <div className="ag-query-explanation-head"><strong>查询说明</strong><small>模型自述，引用与依据尚未核验</small></div>
@@ -1140,6 +1146,7 @@ function AgentCall({ call, fresh, evidenceChunks, question }: { question: EvalQu
         : <div className="ag-call-query"><code>{JSON.stringify(call.arguments)}</code></div>}
     {(call.name === "search_knowledge" || call.name === "read_context") && <QueryExplanation call={call} question={question} />}
     {status && <div className="ag-call-meta">{status}{call.error ? `：${call.error}` : ""}</div>}
+    {call.error?.includes("依据此前返回资料时") && <p className="ag-muted">这是当次运行保存的校验错误。修复不会改写历史结果，需重新运行评测确认检索结果。</p>}
     {call.note && call.status !== "ok" && <div className="ag-call-meta">{call.note}</div>}
     {(call.results || call.name === "read_context") && <AgentCallEvidence question={question} call={call} items={items} />}
   </div>;
