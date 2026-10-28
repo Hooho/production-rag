@@ -3,6 +3,7 @@ import { ChunkOriginalDialog, type ChunkOriginal } from "./ChunkOriginalDialog";
 import { DetailDialog } from "./DetailDialog";
 import { type EvalAgentCall, type EvalCompareKey, type EvalConfig, type EvalMaterial, type EvalMode, type EvalRetry, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSummary } from "./api";
 import { EvidenceChunkDialog, type EvidenceChunkSelection } from "./EvidenceChunkDialog";
+import { EvidenceTargetTags } from "./EvidenceTargetTags";
 import { evidenceLabel, formatDuration as formatMs } from "./format";
 import { SourceTag, Tag, TypeStats, TypeTag, typeHues, type TypeStat } from "./Tag";
 import type { Tone } from "./tags";
@@ -805,11 +806,7 @@ function QuestionDetail({ question, hasFixed, params, config }: { question: Eval
       return <div className="ag-evidence" key={index}>
         {evidence.label && evidence.targets ? <>
           <p><strong>计分项 {index + 1}：{evidence.label}</strong></p>
-          <small className="ag-muted">命中任一目标分片即可</small>
-          {evidence.targets.map((target) => <div className="ag-evidence-target" key={target.chunk_id}>
-            <button type="button" className="ag-evidence-chunk-button" aria-haspopup="dialog" onClick={() => setSelected({ chunkId: target.chunk_id, label: chunkLabel(target.position, target.chunk_id), evidence: { number: index + 1, text: target.quote } })}>{chunkLabel(target.position, target.chunk_id)}</button>
-            <blockquote>{target.quote}</blockquote>
-          </div>)}
+          <EvidenceTargetTags targets={evidence.targets} number={index + 1} />
         </> : <p>证据 {index + 1}：“{evidenceLabel(evidence.text)}”</p>}
         {!evidence.targets && <span className="ag-evidence-chunk">所在分块 {chunkIds.length ? chunkIds.map((chunkId, order) => <button type="button" className="ag-evidence-chunk-button" key={chunkId} title={`${chunkId} · 点击查看原文`} aria-haspopup="dialog" onClick={() => setSelected({ chunkId, label: chunkLabel(positions?.[order], chunkId), evidence: { number: index + 1, text: evidence.text } })}>{chunkLabel(positions?.[order], chunkId)}</button>) : "知识库里没找到"}</span>}
       </div>;

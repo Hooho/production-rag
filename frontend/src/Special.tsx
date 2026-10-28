@@ -3,6 +3,7 @@ import { SpecialAgentResults, rewriteLabel } from "./AgentEval";
 import { evidenceLabel } from "./format";
 import { addEvalSuiteItem, createEvalSuite, deleteEvalSuite, deleteEvalSuiteItem, getEvalRun, getEvalSuite, listEvalSuites, startSpecialRun, updateEvalSuite, updateEvalSuiteItem, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSuiteBrief, type EvalSuiteFull, type EvalSuiteItem, type EvalSuiteMethod, type EvalSuiteSearchMode, type EvalSuiteRunEntry } from "./api";
 import { EvidenceDetails } from "./EvidenceChunks";
+import { EvidenceTargetTags } from "./EvidenceTargetTags";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import { Tag, TypeStats, TypeTag, typeHues } from "./Tag";
 import { CHANGE_TONES, passTone, runStatus } from "./tags";
@@ -306,10 +307,8 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
             <details className="rg-details"><summary>查看内容</summary>
               {item.turns && item.turns.length > 0 && <div className="rg-text"><span className="rg-muted">前面的提问：</span><ol className="sp-turns">{item.turns.map((turn, index) => <li key={index}>{turn}</li>)}</ol></div>}
               {item.evidence_groups ? item.evidence_groups.map((group, index) => <div className="rg-text" key={index}>
-                <strong>计分项 {index + 1}：{group.label}</strong><p className="rg-muted">命中任一目标分片即可</p>
-                {group.targets.map((target) => <div className="ag-evidence-target" key={`${target.title}:${target.position}`}>
-                  <span>第 {target.position + 1} 片</span><blockquote>{target.quote}</blockquote>
-                </div>)}
+                <strong>计分项 {index + 1}：{group.label}</strong>
+                <EvidenceTargetTags targets={group.targets} number={index + 1} />
               </div>) : <>
                 {item.evidence?.map((text, index) => <div key={index} className="rg-text"><span className="rg-muted">证据：</span>{evidenceLabel(text)}</div>)}
                 {item.evidence && <div className="rg-text"><EvidenceDetails texts={item.evidence} /></div>}
