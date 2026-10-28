@@ -1,4 +1,5 @@
 import { EvidenceTargetTags, type EvidenceTarget } from "./EvidenceTargetTags";
+import "./ScoringItems.css";
 
 export function ScoringItems({
   items,
@@ -6,7 +7,7 @@ export function ScoringItems({
   items: { label?: string; targets?: EvidenceTarget[] }[];
 }) {
   return (
-    <div className="ag-evidence-list">
+    <div className="ag-evidence-list ag-scoring-items">
       {items.map((item, index) => (
         <div className="ag-evidence" key={index}>
           <p>

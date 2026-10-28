@@ -1,0 +1,17 @@
+.ag-evidence-list.ag-scoring-items {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.ag-evidence-list.ag-scoring-items > .ag-evidence {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid #d5e3d8;
+  border-radius: 8px;
+  background: #f8fbf9;
+}
+
+.ag-scoring-items > .ag-evidence .ag-evidence-target-tags {
+  margin-top: 0;
+}
