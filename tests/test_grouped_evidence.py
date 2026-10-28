@@ -44,7 +44,12 @@ class GroupedEvidenceTest(unittest.TestCase):
         data = json.loads((Path(__file__).parents[1] / "eval/seed/suites.json").read_text())
         suite = next(s for s in data["suites"] if s["name"] == "Agent 区分题")
         items = [item for item in suite["items"] if item.get("type") == "汇总"]
-        self.assertEqual([len(item["evidence_groups"]) for item in items], [8, 5, 3, 6])
+        self.assertEqual([len(item["evidence_groups"]) for item in items], [8, 7, 3, 6])
+        self.assertEqual(items[1]["question"], "书里提到段永平在投资判断、买卖决策和学习上，有过哪些失误或遗憾？")
+        self.assertEqual([[target["position"] + 1 for target in group["targets"]]
+            for group in items[1]["evidence_groups"]], [[11], [39], [74], [80], [3, 4], [37], [69]])
+        self.assertNotIn("supplemental_notes", items[1])
+        self.assertEqual([target["position"] + 1 for target in items[2]["evidence_groups"][1]["targets"]], [3, 4])
         cases = items[-1]
         self.assertEqual([(group["label"], [target["position"] + 1 for target in group["targets"]])
             for group in cases["evidence_groups"][3:]], [
