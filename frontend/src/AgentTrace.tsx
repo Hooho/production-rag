@@ -1964,6 +1964,7 @@ export function AgentStepView({
       <Summary result={step.result ?? {}} />
       <details
         className="agent-detail"
+        open
         onToggle={(event) => {
           if ((event.currentTarget as HTMLDetailsElement).open) load();
         }}
