@@ -1,11 +1,28 @@
+import { ScoringItems } from "./ScoringItems";
 import { useEffect, useState } from "react";
 import { SpecialAgentResults, rewriteLabel } from "./AgentEval";
-import { evidenceLabel } from "./format";
-import { addEvalSuiteItem, createEvalSuite, deleteEvalSuite, deleteEvalSuiteItem, getEvalRun, getEvalSuite, listEvalSuites, startSpecialRun, updateEvalSuite, updateEvalSuiteItem, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSuiteBrief, type EvalSuiteFull, type EvalSuiteItem, type EvalSuiteMethod, type EvalSuiteSearchMode, type EvalSuiteRunEntry } from "./api";
-import { EvidenceDetails } from "./EvidenceChunks";
+import {
+  addEvalSuiteItem,
+  createEvalSuite,
+  deleteEvalSuite,
+  deleteEvalSuiteItem,
+  getEvalRun,
+  getEvalSuite,
+  listEvalSuites,
+  startSpecialRun,
+  updateEvalSuite,
+  updateEvalSuiteItem,
+  type EvalSpecialQuestion,
+  type EvalSpecialSection,
+  type EvalSuiteBrief,
+  type EvalSuiteFull,
+  type EvalSuiteItem,
+  type EvalSuiteMethod,
+  type EvalSuiteSearchMode,
+  type EvalSuiteRunEntry,
+} from "./api";
 import { ScoringItemEditor } from "./ScoringItemEditor";
 import type { EvalScoringGroup } from "./api";
-import { EvidenceTargetTags } from "./EvidenceTargetTags";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import { Tag, TypeStats, TypeTag, typeHues } from "./Tag";
 import { CHANGE_TONES, passTone, runStatus } from "./tags";
@@ -15,15 +32,27 @@ import "./Special.css";
 // 专项评测集：每个专项针对一个方向（例如分片超长被截断、多轮对话记忆）检查有没有问题，题目只属于这个专项，
 // 不计入调参分数。页面布局和「巡检复测集」一致：列表 → 详情（运行、运行记录、题目）。
 type ShowToast = (kind: "success" | "error", message: string) => void;
-type Props = { suiteId: string | null; onNavigate: (path: string) => void; onToast: ShowToast };
+type Props = {
+  suiteId: string | null;
+  onNavigate: (path: string) => void;
+  onToast: ShowToast;
+};
 
-const METHOD_LABELS: Record<EvalSuiteMethod, string> = { retrieval: "检索", answer: "回答", dialogue: "多轮对话" };
+const METHOD_LABELS: Record<EvalSuiteMethod, string> = {
+  retrieval: "检索",
+  answer: "回答",
+  dialogue: "多轮对话",
+};
 const METHOD_HINTS: Record<EvalSuiteMethod, string> = {
-  retrieval: "和线上一样检索，证据全交给模型算通过。题目要有证据原文。",
+  retrieval: "和线上一样检索，全部计分项的目标分片交给模型算通过。",
   answer: "检索后回答，和参考答案要点一致算通过。题目要有参考答案。",
   dialogue: "按顺序问完一段对话，最后一问答对算通过。",
 };
-const SEARCH_LABELS: Record<EvalSuiteSearchMode, string> = { hybrid: "混合检索", dense: "只用向量", keyword: "只用关键词" };
+const SEARCH_LABELS: Record<EvalSuiteSearchMode, string> = {
+  hybrid: "混合检索",
+  dense: "只用向量",
+  keyword: "只用关键词",
+};
 const SEARCH_HINTS: Record<EvalSuiteSearchMode, string> = {
   hybrid: "向量 + 关键词，和线上一样。",
   dense: "只用向量，看向量本身找不找得到。",
@@ -31,8 +60,12 @@ const SEARCH_HINTS: Record<EvalSuiteSearchMode, string> = {
 };
 // 证据最后的去向（检索诊断里的状态）。
 const EVIDENCE_STATUS: Record<string, string> = {
-  returned: "交给了回答模型", beyond_limit: "重排后排名靠后，超出交给模型的段数", filtered_low_score: "重排打分低于相关度阈值，被过滤",
-  in_pool: "进了重排但没交给模型", not_in_pool: "合并后没进重排候选池", not_recalled: "检索没找到",
+  returned: "交给了回答模型",
+  beyond_limit: "重排后排名靠后，超出交给模型的段数",
+  filtered_low_score: "重排打分低于相关度阈值，被过滤",
+  in_pool: "进了重排但没交给模型",
+  not_in_pool: "合并后没进重排候选池",
+  not_recalled: "检索没找到",
 };
 
 function formatTime(value: string | null | undefined) {
@@ -41,32 +74,70 @@ function formatTime(value: string | null | undefined) {
   if (Number.isNaN(date.getTime())) return value;
   const pad = (number: number) => String(number).padStart(2, "0");
   const text = `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-  return date.getFullYear() === new Date().getFullYear() ? text : `${date.getFullYear()}-${text}`;
+  return date.getFullYear() === new Date().getFullYear()
+    ? text
+    : `${date.getFullYear()}-${text}`;
 }
 
 // 检索方式选择：多轮对话方式不用（它走完整问答流程）。随时可以改，不影响已有题目。
-function SearchModeField({ value, onChange }: { value: EvalSuiteSearchMode; onChange: (value: EvalSuiteSearchMode) => void }) {
-  return <label className="rg-field is-top"><span>检索方式</span>
-    <div className="sp-method-field">
-      <select value={value} onChange={(event) => onChange(event.target.value as EvalSuiteSearchMode)}>
-        {(Object.keys(SEARCH_LABELS) as EvalSuiteSearchMode[]).map((key) => <option key={key} value={key}>{SEARCH_LABELS[key]}</option>)}
-      </select>
-      <small>{SEARCH_HINTS[value]} 随时可以改。</small>
-    </div>
-  </label>;
+function SearchModeField({
+  value,
+  onChange,
+}: {
+  value: EvalSuiteSearchMode;
+  onChange: (value: EvalSuiteSearchMode) => void;
+}) {
+  return (
+    <label className="rg-field is-top">
+      <span>检索方式</span>
+      <div className="sp-method-field">
+        <select
+          value={value}
+          onChange={(event) =>
+            onChange(event.target.value as EvalSuiteSearchMode)
+          }
+        >
+          {(Object.keys(SEARCH_LABELS) as EvalSuiteSearchMode[]).map((key) => (
+            <option key={key} value={key}>
+              {SEARCH_LABELS[key]}
+            </option>
+          ))}
+        </select>
+        <small>{SEARCH_HINTS[value]} 随时可以改。</small>
+      </div>
+    </label>
+  );
 }
 
 function lines(text: string) {
-  return text.split("\n").map((line) => line.trim()).filter(Boolean);
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 export default function Special({ suiteId, onNavigate, onToast }: Props) {
-  return suiteId
-    ? <SuiteDetail suiteId={suiteId} onBack={() => onNavigate("/eval/special")} onToast={onToast} />
-    : <SuiteList onOpen={(id) => onNavigate(`/eval/special/${encodeURIComponent(id)}`)} onToast={onToast} />;
+  return suiteId ? (
+    <SuiteDetail
+      suiteId={suiteId}
+      onBack={() => onNavigate("/eval/special")}
+      onToast={onToast}
+    />
+  ) : (
+    <SuiteList
+      onOpen={(id) => onNavigate(`/eval/special/${encodeURIComponent(id)}`)}
+      onToast={onToast}
+    />
+  );
 }
 
-function SuiteList({ onOpen, onToast }: { onOpen: (id: string) => void; onToast: ShowToast }) {
+function SuiteList({
+  onOpen,
+  onToast,
+}: {
+  onOpen: (id: string) => void;
+  onToast: ShowToast;
+}) {
   const [suites, setSuites] = useState<EvalSuiteBrief[] | null>(null);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
@@ -76,13 +147,20 @@ function SuiteList({ onOpen, onToast }: { onOpen: (id: string) => void; onToast:
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    listEvalSuites().then((data) => setSuites(data.items)).catch((reason: Error) => onToast("error", reason.message));
+    listEvalSuites()
+      .then((data) => setSuites(data.items))
+      .catch((reason: Error) => onToast("error", reason.message));
   }, []);
 
   async function create() {
     setBusy(true);
     try {
-      const created = await createEvalSuite({ name: name.trim(), description: description.trim() || undefined, method, search_mode: searchMode });
+      const created = await createEvalSuite({
+        name: name.trim(),
+        description: description.trim() || undefined,
+        method,
+        search_mode: searchMode,
+      });
       onOpen(created.id);
     } catch (reason) {
       onToast("error", (reason as Error).message);
@@ -91,46 +169,154 @@ function SuiteList({ onOpen, onToast }: { onOpen: (id: string) => void; onToast:
     }
   }
 
-  return <div className="rg-root">
-    <div className="rg-intro">
-      <p>每个专项盯一个方向的难题，分数低正常，不计入调参分数。</p>
-      {!creating && <button type="button" className="primary-button" onClick={() => setCreating(true)}>新建专项</button>}
-    </div>
-    {creating && <div className="rg-form">
-      <label className="rg-field"><span>名称</span><input value={name} maxLength={64} onChange={(event) => setName(event.target.value)} placeholder="例如：截断、多轮对话、表格内容" autoFocus /></label>
-      <label className="rg-field"><span>说明</span><input value={description} maxLength={500} onChange={(event) => setDescription(event.target.value)} placeholder="这个专项检查什么方向（可选）" /></label>
-      <label className="rg-field is-top"><span>评测方式</span>
-        <div className="sp-method-field">
-          <select value={method} onChange={(event) => setMethod(event.target.value as EvalSuiteMethod)}>
-            {(Object.keys(METHOD_LABELS) as EvalSuiteMethod[]).map((key) => <option key={key} value={key}>{METHOD_LABELS[key]}</option>)}
-          </select>
-          <small>{METHOD_HINTS[method]} 加了题目以后不能再改。</small>
-        </div>
-      </label>
-      {method !== "dialogue" && <SearchModeField value={searchMode} onChange={setSearchMode} />}
-      <div className="rg-buttons">
-        <button type="button" className="secondary-button" onClick={() => setCreating(false)} disabled={busy}>取消</button>
-        <button type="button" className="primary-button" onClick={() => void create()} disabled={busy || !name.trim()}>创建</button>
-      </div>
-    </div>}
-    {suites === null ? <LoadingSkeleton label="正在加载专项评测集"><SkeletonBlock className="skeleton-line" /><SkeletonBlock className="skeleton-line-short" /></LoadingSkeleton>
-      : suites.length === 0 ? <div className="rg-empty">还没有专项。</div>
-      : <ul className="rg-sets">
-        {suites.map((item) => <li key={item.id}>
-          <button type="button" className="rg-set" onClick={() => onOpen(item.id)}>
-            <span className="rg-set-name">{item.name}<Tag size="sm" hue className="is-after">{item.method_label}</Tag>{item.method !== "dialogue" && <Tag size="sm" outline plain className="is-after">{item.search_mode_label}</Tag>}</span>
-            {item.description && <span className="rg-set-description">{item.description}</span>}
-            <span className="rg-set-meta">
-              <span>{item.item_count} 题</span>
-              {item.latest?.summary ? <span>最近一次：<strong className={item.latest.summary.passed === item.latest.summary.count ? "is-pass" : "is-fail"}>{item.latest.summary.passed} / {item.latest.summary.count} 通过</strong>（{formatTime(item.latest.finished)}）</span> : <span className="rg-muted">还没跑过</span>}
-            </span>
+  return (
+    <div className="rg-root">
+      <div className="rg-intro">
+        <p>每个专项盯一个方向的难题，分数低正常，不计入调参分数。</p>
+        {!creating && (
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => setCreating(true)}
+          >
+            新建专项
           </button>
-        </li>)}
-      </ul>}
-  </div>;
+        )}
+      </div>
+      {creating && (
+        <div className="rg-form">
+          <label className="rg-field">
+            <span>名称</span>
+            <input
+              value={name}
+              maxLength={64}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="例如：截断、多轮对话、表格内容"
+              autoFocus
+            />
+          </label>
+          <label className="rg-field">
+            <span>说明</span>
+            <input
+              value={description}
+              maxLength={500}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="这个专项检查什么方向（可选）"
+            />
+          </label>
+          <label className="rg-field is-top">
+            <span>评测方式</span>
+            <div className="sp-method-field">
+              <select
+                value={method}
+                onChange={(event) =>
+                  setMethod(event.target.value as EvalSuiteMethod)
+                }
+              >
+                {(Object.keys(METHOD_LABELS) as EvalSuiteMethod[]).map(
+                  (key) => (
+                    <option key={key} value={key}>
+                      {METHOD_LABELS[key]}
+                    </option>
+                  ),
+                )}
+              </select>
+              <small>{METHOD_HINTS[method]} 加了题目以后不能再改。</small>
+            </div>
+          </label>
+          {method !== "dialogue" && (
+            <SearchModeField value={searchMode} onChange={setSearchMode} />
+          )}
+          <div className="rg-buttons">
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => setCreating(false)}
+              disabled={busy}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => void create()}
+              disabled={busy || !name.trim()}
+            >
+              创建
+            </button>
+          </div>
+        </div>
+      )}
+      {suites === null ? (
+        <LoadingSkeleton label="正在加载专项评测集">
+          <SkeletonBlock className="skeleton-line" />
+          <SkeletonBlock className="skeleton-line-short" />
+        </LoadingSkeleton>
+      ) : suites.length === 0 ? (
+        <div className="rg-empty">还没有专项。</div>
+      ) : (
+        <ul className="rg-sets">
+          {suites.map((item) => (
+            <li key={item.id}>
+              <button
+                type="button"
+                className="rg-set"
+                onClick={() => onOpen(item.id)}
+              >
+                <span className="rg-set-name">
+                  {item.name}
+                  <Tag size="sm" hue className="is-after">
+                    {item.method_label}
+                  </Tag>
+                  {item.method !== "dialogue" && (
+                    <Tag size="sm" outline plain className="is-after">
+                      {item.search_mode_label}
+                    </Tag>
+                  )}
+                </span>
+                {item.description && (
+                  <span className="rg-set-description">{item.description}</span>
+                )}
+                <span className="rg-set-meta">
+                  <span>{item.item_count} 题</span>
+                  {item.latest?.summary ? (
+                    <span>
+                      最近一次：
+                      <strong
+                        className={
+                          item.latest.summary.passed ===
+                          item.latest.summary.count
+                            ? "is-pass"
+                            : "is-fail"
+                        }
+                      >
+                        {item.latest.summary.passed} /{" "}
+                        {item.latest.summary.count} 通过
+                      </strong>
+                      （{formatTime(item.latest.finished)}）
+                    </span>
+                  ) : (
+                    <span className="rg-muted">还没跑过</span>
+                  )}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
-function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: () => void; onToast: ShowToast }) {
+function SuiteDetail({
+  suiteId,
+  onBack,
+  onToast,
+}: {
+  suiteId: string;
+  onBack: () => void;
+  onToast: ShowToast;
+}) {
   const [data, setData] = useState<EvalSuiteFull | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [section, setSection] = useState<EvalSpecialSection | null>(null);
@@ -156,16 +342,23 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
 
   useEffect(() => {
     setRunId(null);
-    load().then((value) => {
-      const pick = value.runs.find((item) => item.status === "running") ?? value.runs.find((item) => item.status === "completed") ?? value.runs[0];
-      setRunId(pick?.id ?? null);
-    }).catch((reason: Error) => onToast("error", reason.message));
+    load()
+      .then((value) => {
+        const pick =
+          value.runs.find((item) => item.status === "running") ??
+          value.runs.find((item) => item.status === "completed") ??
+          value.runs[0];
+        setRunId(pick?.id ?? null);
+      })
+      .catch((reason: Error) => onToast("error", reason.message));
   }, [suiteId]);
 
   const running = data?.runs.find((item) => item.status === "running") ?? null;
   useEffect(() => {
     if (!running) return;
-    const timer = window.setInterval(() => { load().catch(() => undefined); }, 2000);
+    const timer = window.setInterval(() => {
+      load().catch(() => undefined);
+    }, 2000);
     return () => window.clearInterval(timer);
   }, [running?.id]);
 
@@ -175,13 +368,18 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
     setRunError(null);
     if (!runId || selectedStatus === "running") return;
     let cancelled = false;
-    getEvalRun(runId).then((run) => {
-      if (cancelled) return;
-      if (run.status !== "completed") setRunError(run.error ?? "这次评测没有正常结束");
-      const found = run.special?.find((item) => item.suite_id === suiteId);
-      setSection(found ? { ...found, run_config: run.config } : null);
-    }).catch((reason: Error) => onToast("error", reason.message));
-    return () => { cancelled = true; };
+    getEvalRun(runId)
+      .then((run) => {
+        if (cancelled) return;
+        if (run.status !== "completed")
+          setRunError(run.error ?? "这次评测没有正常结束");
+        const found = run.special?.find((item) => item.suite_id === suiteId);
+        setSection(found ? { ...found, run_config: run.config } : null);
+      })
+      .catch((reason: Error) => onToast("error", reason.message));
+    return () => {
+      cancelled = true;
+    };
   }, [runId, selectedStatus]);
 
   async function start() {
@@ -200,7 +398,14 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
 
   async function saveInfo() {
     try {
-      setData({ ...(await updateEvalSuite(suiteId, { name: name.trim(), description: description.trim(), method, search_mode: searchMode })) });
+      setData({
+        ...(await updateEvalSuite(suiteId, {
+          name: name.trim(),
+          description: description.trim(),
+          method,
+          search_mode: searchMode,
+        })),
+      });
       setRenaming(false);
     } catch (reason) {
       onToast("error", (reason as Error).message);
@@ -225,128 +430,414 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
     }
   }
 
-  if (!data) return <div className="rg-root"><LoadingSkeleton label="正在加载专项"><SkeletonBlock className="skeleton-line" /><SkeletonBlock className="skeleton-line-short" /></LoadingSkeleton></div>;
+  if (!data)
+    return (
+      <div className="rg-root">
+        <LoadingSkeleton label="正在加载专项">
+          <SkeletonBlock className="skeleton-line" />
+          <SkeletonBlock className="skeleton-line-short" />
+        </LoadingSkeleton>
+      </div>
+    );
   // 题目类型：颜色按第一次出现的顺序取；表单里提示已有的类型，避免同一类写成两种名字。
   const hues = typeHues(data.items.map((item) => item.type));
   const types = [...hues.keys()];
-  const typeCounts = types.map((type): [string, number] => [type, data.items.filter((item) => item.type === type).length]);
-  return <div className="rg-root">
-    <button type="button" className="rg-back" onClick={onBack}>← 全部专项</button>
-    {renaming ? <div className="rg-form">
-      <label className="rg-field"><span>名称</span><input value={name} maxLength={64} onChange={(event) => setName(event.target.value)} /></label>
-      <label className="rg-field"><span>说明</span><input value={description} maxLength={500} onChange={(event) => setDescription(event.target.value)} placeholder="可选" /></label>
-      <label className="rg-field is-top"><span>评测方式</span>
-        <div className="sp-method-field">
-          <select value={method} disabled={data.items.length > 0} onChange={(event) => setMethod(event.target.value as EvalSuiteMethod)}>
-            {(Object.keys(METHOD_LABELS) as EvalSuiteMethod[]).map((key) => <option key={key} value={key}>{METHOD_LABELS[key]}</option>)}
-          </select>
-          <small>{data.items.length > 0 ? "已经有题目，不能再改评测方式。" : METHOD_HINTS[method]}</small>
+  const typeCounts = types.map((type): [string, number] => [
+    type,
+    data.items.filter((item) => item.type === type).length,
+  ]);
+  return (
+    <div className="rg-root">
+      <button type="button" className="rg-back" onClick={onBack}>
+        ← 全部专项
+      </button>
+      {renaming ? (
+        <div className="rg-form">
+          <label className="rg-field">
+            <span>名称</span>
+            <input
+              value={name}
+              maxLength={64}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </label>
+          <label className="rg-field">
+            <span>说明</span>
+            <input
+              value={description}
+              maxLength={500}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="可选"
+            />
+          </label>
+          <label className="rg-field is-top">
+            <span>评测方式</span>
+            <div className="sp-method-field">
+              <select
+                value={method}
+                disabled={data.items.length > 0}
+                onChange={(event) =>
+                  setMethod(event.target.value as EvalSuiteMethod)
+                }
+              >
+                {(Object.keys(METHOD_LABELS) as EvalSuiteMethod[]).map(
+                  (key) => (
+                    <option key={key} value={key}>
+                      {METHOD_LABELS[key]}
+                    </option>
+                  ),
+                )}
+              </select>
+              <small>
+                {data.items.length > 0
+                  ? "已经有题目，不能再改评测方式。"
+                  : METHOD_HINTS[method]}
+              </small>
+            </div>
+          </label>
+          {method !== "dialogue" && (
+            <SearchModeField value={searchMode} onChange={setSearchMode} />
+          )}
+          <div className="rg-buttons">
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => setRenaming(false)}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => void saveInfo()}
+              disabled={!name.trim()}
+            >
+              保存
+            </button>
+          </div>
         </div>
-      </label>
-      {method !== "dialogue" && <SearchModeField value={searchMode} onChange={setSearchMode} />}
-      <div className="rg-buttons">
-        <button type="button" className="secondary-button" onClick={() => setRenaming(false)}>取消</button>
-        <button type="button" className="primary-button" onClick={() => void saveInfo()} disabled={!name.trim()}>保存</button>
-      </div>
-    </div> : <div className="rg-title">
-      <div>
-        <h3>{data.name}<Tag size="sm" hue className="is-after">{data.method_label}</Tag>{data.method !== "dialogue" && <Tag size="sm" outline plain className="is-after">{data.search_mode_label}</Tag>}</h3>
-        {data.description && <p>{data.description}</p>}
-      </div>
-      <div className="rg-buttons">
-        <button type="button" className="secondary-button" onClick={() => { setName(data.name); setDescription(data.description); setMethod(data.method); setSearchMode(data.search_mode); setRenaming(true); }}>修改</button>
-        {confirmDelete
-          ? <><button type="button" className="secondary-button" onClick={() => setConfirmDelete(false)}>取消</button><button type="button" className="rg-danger" onClick={() => void remove()}>确认删除（题目一起删除）</button></>
-          : <button type="button" className="secondary-button" onClick={() => setConfirmDelete(true)}>删除</button>}
-      </div>
-    </div>}
-
-    <div className="rg-launch">
-      <div className="rg-launch-option">
-        <button type="button" className="primary-button" disabled={starting || Boolean(running) || data.items.length === 0} onClick={() => void start()}>运行这个专项</button>
-        <span>{METHOD_HINTS[data.method]}</span>
-      </div>
-      {data.method === "dialogue" && <div className="sp-switch-line">
-        <button type="button" role="switch" aria-checked={compareMemory} className={`sp-switch ${compareMemory ? "is-on" : ""}`} onClick={() => setCompareMemory(!compareMemory)}><span /></button>
-        <span>对比记忆参数：压缩阈值、保留条数各调大调小再跑，共 5 组，大模型调用是 5 倍。</span>
-      </div>}
-      {running && <div className="rg-progress">正在运行…</div>}
-    </div>
-
-    <div className="document-detail-tabs ev-tabs rg-tabs" role="tablist">
-      <button type="button" role="tab" aria-selected={tab === "items"} className={tab === "items" ? "active" : ""} onClick={() => setTab("items")}>题目<span>{data.items.length}</span></button>
-      <button type="button" role="tab" aria-selected={tab === "runs"} className={tab === "runs" ? "active" : ""} onClick={() => setTab("runs")}>运行记录<span>{data.runs.length}</span></button>
-    </div>
-
-    {tab === "runs" && data.runs.length === 0 && <p className="rg-muted">还没有运行过，点上面的「运行」按钮。</p>}
-    {tab === "runs" && data.runs.length > 0 && <section className="rg-section">
-      <div className="rg-runs" role="tablist">
-        {data.runs.map((item) => <RunChip key={item.id} run={item} selected={item.id === runId} onClick={() => setRunId(item.id)} />)}
-      </div>
-      {runError && <p className="rg-error">{runError}</p>}
-      {section && <SpecialSection section={section} />}
-      {runId && selectedStatus === "running" && <p className="rg-muted">跑完后这里显示逐题结果。</p>}
-    </section>}
-
-    {tab === "items" && <section className="rg-section">
-      {typeCounts.length > 0 && <div className="sp-type-line">{typeCounts.map(([type, count]) => <span key={type}><TypeTag type={type} hues={hues} /> {count} 题</span>)}</div>}
-      <div className="rg-section-head">
-        <span className="rg-muted">{data.items.length} 题</span>
-        {!adding && <button type="button" className="secondary-button" onClick={() => { setEditing(null); setAdding(true); }}>添加题目</button>}
-      </div>
-      {adding && <ItemForm suiteId={suiteId} method={data.method} types={types} onToast={onToast} onDone={(value) => { setAdding(false); if (value) setData(value); }} />}
-      {data.items.length === 0 && !adding && <p className="rg-muted">还没有题目，点「添加题目」。</p>}
-      <ul className="rg-items">
-        {data.items.map((item) => editing === item.id ? <li key={item.id}><ItemForm suiteId={suiteId} method={data.method} initial={item} types={types} onToast={onToast} onDone={(value) => { setEditing(null); if (value) setData(value); }} /></li> : <li key={item.id} className="rg-item">
-          <div className="rg-item-main">
-            <details className="sp-question-details">
-            <summary className="sp-question-summary">
-            <div className="rg-item-question">{item.question}</div>
-            <div className="rg-item-meta">
-              <TypeTag type={item.type} hues={hues} />
-              {item.turns && item.turns.length > 0 && <span>前面 {item.turns.length} 轮提问</span>}
-              {item.evidence && item.evidence.length > 0 && <span>{item.evidence_groups ? `${item.evidence_groups.length} 个计分项` : `${item.evidence.length} 条证据`}</span>}
-              {item.reference_answer && <span>有参考答案</span>}
-            </div>
-            </summary>
-            <div className="sp-question-content">
-              {item.turns && item.turns.length > 0 && <div className="rg-text"><span className="rg-muted">前面的提问：</span><ol className="sp-turns">{item.turns.map((turn, index) => <li key={index}>{turn}</li>)}</ol></div>}
-              {item.evidence_groups ? <div className="sp-scoring-grid">{item.evidence_groups.map((group, index) => <div className="sp-scoring-card" key={index}>
-                <strong>计分项 {index + 1}：{group.label}</strong>
-                <EvidenceTargetTags targets={group.targets} number={index + 1} />
-              </div>)}</div> : <>
-                {item.evidence?.map((text, index) => <div key={index} className="rg-text"><span className="rg-muted">证据：</span>{evidenceLabel(text)}</div>)}
-                {item.evidence && <div className="rg-text"><EvidenceDetails texts={item.evidence} /></div>}
-              </>}
-              {item.reference_answer && <div className="rg-text"><span className="rg-muted">参考答案：</span>{item.reference_answer}</div>}
-            </div>
-            </details>
+      ) : (
+        <div className="rg-title">
+          <div>
+            <h3>
+              {data.name}
+              <Tag size="sm" hue className="is-after">
+                {data.method_label}
+              </Tag>
+              {data.method !== "dialogue" && (
+                <Tag size="sm" outline plain className="is-after">
+                  {data.search_mode_label}
+                </Tag>
+              )}
+            </h3>
+            {data.description && <p>{data.description}</p>}
           </div>
-          <div className="rg-item-actions">
-            <button type="button" className="rg-link is-edit" onClick={() => { setAdding(false); setEditing(item.id); }}>编辑</button>
-            <button type="button" className="rg-link" onClick={() => void removeItem(item.id)}>移除</button>
+          <div className="rg-buttons">
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => {
+                setName(data.name);
+                setDescription(data.description);
+                setMethod(data.method);
+                setSearchMode(data.search_mode);
+                setRenaming(true);
+              }}
+            >
+              修改
+            </button>
+            {confirmDelete ? (
+              <>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setConfirmDelete(false)}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="rg-danger"
+                  onClick={() => void remove()}
+                >
+                  确认删除（题目一起删除）
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setConfirmDelete(true)}
+              >
+                删除
+              </button>
+            )}
           </div>
-        </li>)}
-      </ul>
-    </section>}
-  </div>;
+        </div>
+      )}
+
+      <div className="rg-launch">
+        <div className="rg-launch-option">
+          <button
+            type="button"
+            className="primary-button"
+            disabled={starting || Boolean(running) || data.items.length === 0}
+            onClick={() => void start()}
+          >
+            运行这个专项
+          </button>
+          <span>{METHOD_HINTS[data.method]}</span>
+        </div>
+        {data.method === "dialogue" && (
+          <div className="sp-switch-line">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={compareMemory}
+              className={`sp-switch ${compareMemory ? "is-on" : ""}`}
+              onClick={() => setCompareMemory(!compareMemory)}
+            >
+              <span />
+            </button>
+            <span>
+              对比记忆参数：压缩阈值、保留条数各调大调小再跑，共 5
+              组，大模型调用是 5 倍。
+            </span>
+          </div>
+        )}
+        {running && <div className="rg-progress">正在运行…</div>}
+      </div>
+
+      <div className="document-detail-tabs ev-tabs rg-tabs" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "items"}
+          className={tab === "items" ? "active" : ""}
+          onClick={() => setTab("items")}
+        >
+          题目<span>{data.items.length}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "runs"}
+          className={tab === "runs" ? "active" : ""}
+          onClick={() => setTab("runs")}
+        >
+          运行记录<span>{data.runs.length}</span>
+        </button>
+      </div>
+
+      {tab === "runs" && data.runs.length === 0 && (
+        <p className="rg-muted">还没有运行过，点上面的「运行」按钮。</p>
+      )}
+      {tab === "runs" && data.runs.length > 0 && (
+        <section className="rg-section">
+          <div className="rg-runs" role="tablist">
+            {data.runs.map((item) => (
+              <RunChip
+                key={item.id}
+                run={item}
+                selected={item.id === runId}
+                onClick={() => setRunId(item.id)}
+              />
+            ))}
+          </div>
+          {runError && <p className="rg-error">{runError}</p>}
+          {section && <SpecialSection section={section} />}
+          {runId && selectedStatus === "running" && (
+            <p className="rg-muted">跑完后这里显示逐题结果。</p>
+          )}
+        </section>
+      )}
+
+      {tab === "items" && (
+        <section className="rg-section">
+          {typeCounts.length > 0 && (
+            <div className="sp-type-line">
+              {typeCounts.map(([type, count]) => (
+                <span key={type}>
+                  <TypeTag type={type} hues={hues} /> {count} 题
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="rg-section-head">
+            <span className="rg-muted">{data.items.length} 题</span>
+            {!adding && (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  setEditing(null);
+                  setAdding(true);
+                }}
+              >
+                添加题目
+              </button>
+            )}
+          </div>
+          {adding && (
+            <ItemForm
+              suiteId={suiteId}
+              method={data.method}
+              types={types}
+              onToast={onToast}
+              onDone={(value) => {
+                setAdding(false);
+                if (value) setData(value);
+              }}
+            />
+          )}
+          {data.items.length === 0 && !adding && (
+            <p className="rg-muted">还没有题目，点「添加题目」。</p>
+          )}
+          <ul className="rg-items">
+            {data.items.map((item) =>
+              editing === item.id ? (
+                <li key={item.id}>
+                  <ItemForm
+                    suiteId={suiteId}
+                    method={data.method}
+                    initial={item}
+                    types={types}
+                    onToast={onToast}
+                    onDone={(value) => {
+                      setEditing(null);
+                      if (value) setData(value);
+                    }}
+                  />
+                </li>
+              ) : (
+                <li key={item.id} className="rg-item">
+                  <div className="rg-item-main">
+                    <details className="sp-question-details">
+                      <summary className="sp-question-summary">
+                        <div className="rg-item-question">{item.question}</div>
+                        <div className="rg-item-meta">
+                          <TypeTag type={item.type} hues={hues} />
+                          {item.turns && item.turns.length > 0 && (
+                            <span>前面 {item.turns.length} 轮提问</span>
+                          )}
+                          {item.evidence && item.evidence.length > 0 && (
+                            <span>{`${(item.evidence_groups ?? []).length} 个计分项`}</span>
+                          )}
+                          {item.reference_answer && <span>有参考答案</span>}
+                        </div>
+                      </summary>
+                      <div className="sp-question-content">
+                        {item.turns && item.turns.length > 0 && (
+                          <div className="rg-text">
+                            <span className="rg-muted">前面的提问：</span>
+                            <ol className="sp-turns">
+                              {item.turns.map((turn, index) => (
+                                <li key={index}>{turn}</li>
+                              ))}
+                            </ol>
+                          </div>
+                        )}
+                        <ScoringItems items={item.evidence_groups ?? []} />
+                        {item.reference_answer && (
+                          <div className="rg-text">
+                            <span className="rg-muted">参考答案：</span>
+                            {item.reference_answer}
+                          </div>
+                        )}
+                      </div>
+                    </details>
+                  </div>
+                  <div className="rg-item-actions">
+                    <button
+                      type="button"
+                      className="rg-link is-edit"
+                      onClick={() => {
+                        setAdding(false);
+                        setEditing(item.id);
+                      }}
+                    >
+                      编辑
+                    </button>
+                    <button
+                      type="button"
+                      className="rg-link"
+                      onClick={() => void removeItem(item.id)}
+                    >
+                      移除
+                    </button>
+                  </div>
+                </li>
+              ),
+            )}
+          </ul>
+        </section>
+      )}
+    </div>
+  );
 }
 
-function RunChip({ run, selected, onClick }: { run: EvalSuiteRunEntry; selected: boolean; onClick: () => void }) {
+function RunChip({
+  run,
+  selected,
+  onClick,
+}: {
+  run: EvalSuiteRunEntry;
+  selected: boolean;
+  onClick: () => void;
+}) {
   const status = runStatus(run.status);
-  return <button type="button" role="tab" aria-selected={selected} className={`rg-run ${selected ? "is-selected" : ""}`} onClick={onClick}>
-    <span className="rg-muted">{formatTime(run.created)}</span>
-    {run.status === "completed" && run.summary ? <strong className={run.summary.passed === run.summary.count ? "is-pass" : "is-fail"}>{run.summary.passed} / {run.summary.count} 通过</strong> : <Tag dot tone={status.tone}>{status.label}</Tag>}
-  </button>;
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={selected}
+      className={`rg-run ${selected ? "is-selected" : ""}`}
+      onClick={onClick}
+    >
+      <span className="rg-muted">{formatTime(run.created)}</span>
+      {run.status === "completed" && run.summary ? (
+        <strong
+          className={
+            run.summary.passed === run.summary.count ? "is-pass" : "is-fail"
+          }
+        >
+          {run.summary.passed} / {run.summary.count} 通过
+        </strong>
+      ) : (
+        <Tag dot tone={status.tone}>
+          {status.label}
+        </Tag>
+      )}
+    </button>
+  );
 }
 
 // 计分项结构与题型无关；所有带检索资料的题统一填写名称和目标分片。
-function ItemForm({ suiteId, method, initial, types, onToast, onDone }: { suiteId: string; method: EvalSuiteMethod; initial?: EvalSuiteItem; types: string[]; onToast: ShowToast; onDone: (value: EvalSuiteFull | null) => void }) {
+function ItemForm({
+  suiteId,
+  method,
+  initial,
+  types,
+  onToast,
+  onDone,
+}: {
+  suiteId: string;
+  method: EvalSuiteMethod;
+  initial?: EvalSuiteItem;
+  types: string[];
+  onToast: ShowToast;
+  onDone: (value: EvalSuiteFull | null) => void;
+}) {
   const [type, setType] = useState(initial?.type ?? "");
   const hues = typeHues(types);
   const [question, setQuestion] = useState(initial?.question ?? "");
-  const [evidence, setEvidence] = useState((initial?.evidence ?? []).join("\n"));
-  const [groups, setGroups] = useState<EvalScoringGroup[]>(initial?.evidence_groups ?? (method === "answer" ? [] : [{ label: "", targets: [] }]));
+  const [evidence, setEvidence] = useState(
+    (initial?.evidence ?? []).join("\n"),
+  );
+  const [groups, setGroups] = useState<EvalScoringGroup[]>(
+    initial?.evidence_groups ??
+      (method === "answer" ? [] : [{ label: "", targets: [] }]),
+  );
   const grouped = method !== "dialogue";
   const [reference, setReference] = useState(initial?.reference_answer ?? "");
   const [turns, setTurns] = useState((initial?.turns ?? []).join("\n"));
@@ -354,11 +845,20 @@ function ItemForm({ suiteId, method, initial, types, onToast, onDone }: { suiteI
 
   async function submit() {
     setBusy(true);
-    const payload = { question: question.trim(), evidence: grouped ? [] : method === "dialogue" ? [] : lines(evidence),
+    const payload = {
+      question: question.trim(),
+      evidence: grouped ? [] : method === "dialogue" ? [] : lines(evidence),
       ...(grouped && groups.length > 0 ? { evidence_groups: groups } : {}),
-      reference_answer: reference.trim() || null, turns: method === "dialogue" ? lines(turns) : [], type: type.trim() || null };
+      reference_answer: reference.trim() || null,
+      turns: method === "dialogue" ? lines(turns) : [],
+      type: type.trim() || null,
+    };
     try {
-      onDone(initial ? await updateEvalSuiteItem(suiteId, initial.id, payload) : await addEvalSuiteItem(suiteId, payload));
+      onDone(
+        initial
+          ? await updateEvalSuiteItem(suiteId, initial.id, payload)
+          : await addEvalSuiteItem(suiteId, payload),
+      );
     } catch (reason) {
       onToast("error", (reason as Error).message);
     } finally {
@@ -366,108 +866,350 @@ function ItemForm({ suiteId, method, initial, types, onToast, onDone }: { suiteI
     }
   }
 
-  const ready = question.trim() && (method !== "retrieval" || (grouped ? groups.length > 0 && groups.every((group) => group.label.trim() && group.targets.length > 0) : lines(evidence).length > 0))
-    && (!grouped || groups.every((group) => group.label.trim() && group.targets.length > 0))
-    && (method === "retrieval" || reference.trim()) && (method !== "dialogue" || lines(turns).length > 0);
-  return <div className="rg-form">
-    <div className="rg-form-title">{initial ? "编辑题目" : "添加题目"}</div>
-    {method === "dialogue" && <label className="rg-field is-top"><span>前面的提问</span><textarea value={turns} rows={4} onChange={(event) => setTurns(event.target.value)} placeholder="每行一轮，按顺序问" autoFocus /></label>}
-    <label className="rg-field"><span>{method === "dialogue" ? "最后一问" : "问题"}</span><input value={question} maxLength={500} onChange={(event) => setQuestion(event.target.value)} placeholder={method === "dialogue" ? "要用到前面内容的问题，例如「回到我最开始问的那个」" : "完整的问题"} autoFocus={method !== "dialogue"} /></label>
-    {grouped && <div className="rg-field is-top"><span>计分项</span><ScoringItemEditor groups={groups} onChange={setGroups} /></div>}
+  const ready =
+    question.trim() &&
+    (method !== "retrieval" ||
+      (grouped
+        ? groups.length > 0 &&
+          groups.every(
+            (group) => group.label.trim() && group.targets.length > 0,
+          )
+        : lines(evidence).length > 0)) &&
+    (!grouped ||
+      groups.every(
+        (group) => group.label.trim() && group.targets.length > 0,
+      )) &&
+    (method === "retrieval" || reference.trim()) &&
+    (method !== "dialogue" || lines(turns).length > 0);
+  return (
+    <div className="rg-form">
+      <div className="rg-form-title">{initial ? "编辑题目" : "添加题目"}</div>
+      {method === "dialogue" && (
+        <label className="rg-field is-top">
+          <span>前面的提问</span>
+          <textarea
+            value={turns}
+            rows={4}
+            onChange={(event) => setTurns(event.target.value)}
+            placeholder="每行一轮，按顺序问"
+            autoFocus
+          />
+        </label>
+      )}
+      <label className="rg-field">
+        <span>{method === "dialogue" ? "最后一问" : "问题"}</span>
+        <input
+          value={question}
+          maxLength={500}
+          onChange={(event) => setQuestion(event.target.value)}
+          placeholder={
+            method === "dialogue"
+              ? "要用到前面内容的问题，例如「回到我最开始问的那个」"
+              : "完整的问题"
+          }
+          autoFocus={method !== "dialogue"}
+        />
+      </label>
+      {grouped && (
+        <div className="rg-field is-top">
+          <span>计分项</span>
+          <ScoringItemEditor groups={groups} onChange={setGroups} />
+        </div>
+      )}
 
-    {/* 类型：普通文本框，可以输入新类型；下面列出这个专项已经用过的类型，点一下填进去（同一类别写成同一个名字）。 */}
-    <div className="rg-field is-top"><span>类型</span><div className="sp-type-input">
-      <input value={type} maxLength={20} onChange={(event) => setType(event.target.value)} placeholder="可选，例如多跳、比较；结果会按类型统计" />
-      {types.length > 0 && <div className="tag-row"><small>已有：</small>{types.map((item) => <Tag key={item} size="sm" hue={hues.get(item)} outline={item !== type.trim()} onClick={() => setType(item)}>{item}</Tag>)}</div>}
-    </div></div>
-    <label className="rg-field is-top"><span>参考答案</span><textarea value={reference} maxLength={2000} rows={2} onChange={(event) => setReference(event.target.value)} placeholder={method === "retrieval" ? "可选" : "评审模型拿回答和它比对"} /></label>
-    <div className="rg-buttons">
-      <button type="button" className="secondary-button" onClick={() => onDone(null)} disabled={busy}>取消</button>
-      <button type="button" className="primary-button" onClick={() => void submit()} disabled={busy || !ready}>{initial ? "保存" : "添加"}</button>
+      {/* 类型：普通文本框，可以输入新类型；下面列出这个专项已经用过的类型，点一下填进去（同一类别写成同一个名字）。 */}
+      <div className="rg-field is-top">
+        <span>类型</span>
+        <div className="sp-type-input">
+          <input
+            value={type}
+            maxLength={20}
+            onChange={(event) => setType(event.target.value)}
+            placeholder="可选，例如多跳、比较；结果会按类型统计"
+          />
+          {types.length > 0 && (
+            <div className="tag-row">
+              <small>已有：</small>
+              {types.map((item) => (
+                <Tag
+                  key={item}
+                  size="sm"
+                  hue={hues.get(item)}
+                  outline={item !== type.trim()}
+                  onClick={() => setType(item)}
+                >
+                  {item}
+                </Tag>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      <label className="rg-field is-top">
+        <span>参考答案</span>
+        <textarea
+          value={reference}
+          maxLength={2000}
+          rows={2}
+          onChange={(event) => setReference(event.target.value)}
+          placeholder={
+            method === "retrieval" ? "可选" : "评审模型拿回答和它比对"
+          }
+        />
+      </label>
+      <div className="rg-buttons">
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={() => onDone(null)}
+          disabled={busy}
+        >
+          取消
+        </button>
+        <button
+          type="button"
+          className="primary-button"
+          onClick={() => void submit()}
+          disabled={busy || !ready}
+        >
+          {initial ? "保存" : "添加"}
+        </button>
+      </div>
     </div>
-  </div>;
+  );
 }
 
 // 含证据的分片在某一路检索结果里排第几：向量检索按意思相近取前 12 个分片，关键词检索（BM25）按字面取前 30 个。
 function rankText(label: string, rank: number | null, limit: number) {
-  return rank === null ? `${label}检索：前 ${limit} 名里没有` : `${label}检索：第 ${rank} 名`;
+  return rank === null
+    ? `${label}检索：前 ${limit} 名里没有`
+    : `${label}检索：第 ${rank} 名`;
 }
 
 // 一个专项在一次评测里的结果：先看通过数和与上次相比的变化，没通过的排在前面；检索方式额外统计向量和关键词各找到几条证据。
 export function SpecialSection({ section }: { section: EvalSpecialSection }) {
   // 检索方式的专项勾了 Agent：换成两种模式的逐题对比（和调参评测的「对比」页同一个列表）。
-  if (section.modes?.includes("agent") || section.questions.some((question) => question.fixed_evidence?.some((evidence) => evidence.targets?.length))) return <SpecialAgentResults section={section} />;
-  const questions = [...section.questions].sort((a, b) => Number(a.passed) - Number(b.passed));
+  if (section.modes?.includes("agent"))
+    return <SpecialAgentResults section={section} />;
+  const questions = [...section.questions].sort(
+    (a, b) => Number(a.passed) - Number(b.passed),
+  );
   // 类型颜色按题目原来的顺序取，和题目列表里一致（上面排序只是把没通过的放前面）。
   const hues = typeHues(section.questions.map((question) => question.type));
-  const fixed = section.questions.filter((item) => item.passed && item.previous_passed === false).length;
-  const regressed = section.questions.filter((item) => !item.passed && item.previous_passed === true).length;
-  return <div className="rg-results">
-    <div className="rg-summary">
-      <span><strong>{section.passed} / {section.count} 通过</strong>（{section.count ? Math.round((section.passed / section.count) * 100) : 0}%）</span>
-      {section.search_mode_label && <Tag size="sm" outline plain>{section.search_mode_label}</Tag>}
-      {section.evidence_total ? <span>{section.evidence_total} 条证据：{[section.search_mode !== "keyword" ? `向量找到 ${section.dense_found ?? 0}` : "", section.search_mode !== "dense" ? `关键词找到 ${section.keyword_found ?? 0}` : ""].filter(Boolean).join(" · ")}</span> : null}
-      {section.previous ? <span title={formatTime(section.previous.created)}>上次 {section.previous.passed} / {section.previous.count} · 新通过 {fixed} · 新失败 <strong className={regressed ? "is-fail" : ""}>{regressed}</strong></span> : <span className="rg-muted">第一次跑</span>}
+  const fixed = section.questions.filter(
+    (item) => item.passed && item.previous_passed === false,
+  ).length;
+  const regressed = section.questions.filter(
+    (item) => !item.passed && item.previous_passed === true,
+  ).length;
+  return (
+    <div className="rg-results">
+      <div className="rg-summary">
+        <span>
+          <strong>
+            {section.passed} / {section.count} 通过
+          </strong>
+          （
+          {section.count
+            ? Math.round((section.passed / section.count) * 100)
+            : 0}
+          %）
+        </span>
+        {section.search_mode_label && (
+          <Tag size="sm" outline plain>
+            {section.search_mode_label}
+          </Tag>
+        )}
+        {section.evidence_total ? (
+          <span>
+            {section.evidence_total} 个计分项：
+            {[
+              section.search_mode !== "keyword"
+                ? `向量找到 ${section.dense_found ?? 0}`
+                : "",
+              section.search_mode !== "dense"
+                ? `关键词找到 ${section.keyword_found ?? 0}`
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+        ) : null}
+        {section.previous ? (
+          <span title={formatTime(section.previous.created)}>
+            上次 {section.previous.passed} / {section.previous.count} · 新通过{" "}
+            {fixed} · 新失败{" "}
+            <strong className={regressed ? "is-fail" : ""}>{regressed}</strong>
+          </span>
+        ) : (
+          <span className="rg-muted">第一次跑</span>
+        )}
+      </div>
+      {section.variants && (
+        <ul className="sp-variants">
+          {section.variants.map((variant, index) => (
+            <li key={variant.name} className={index === 0 ? "is-current" : ""}>
+              <strong>{variant.label}</strong>
+              <span>
+                {variant.passed} / {section.count} 通过
+              </span>
+              <span>
+                触发压缩{" "}
+                {variant.summarized_rate === null
+                  ? "—"
+                  : `${Math.round(variant.summarized_rate * 100)}%`}
+              </span>
+              <span>
+                最后一问平均输入{" "}
+                {variant.input_tokens_avg === null
+                  ? "—"
+                  : `${Math.round(variant.input_tokens_avg)} Token`}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {section.by_type && (
+        <TypeStats stats={section.by_type} hues={hues} both={false} />
+      )}
+      <ul className="rg-result-list">
+        {questions.map((question) => (
+          <SpecialQuestion
+            key={question.id}
+            question={question}
+            hues={hues}
+            method={section.method}
+            searchMode={section.search_mode ?? "hybrid"}
+          />
+        ))}
+      </ul>
     </div>
-    {section.variants && <ul className="sp-variants">
-      {section.variants.map((variant, index) => <li key={variant.name} className={index === 0 ? "is-current" : ""}>
-        <strong>{variant.label}</strong>
-        <span>{variant.passed} / {section.count} 通过</span>
-        <span>触发压缩 {variant.summarized_rate === null ? "—" : `${Math.round(variant.summarized_rate * 100)}%`}</span>
-        <span>最后一问平均输入 {variant.input_tokens_avg === null ? "—" : `${Math.round(variant.input_tokens_avg)} Token`}</span>
-      </li>)}
-    </ul>}
-    {section.by_type && <TypeStats stats={section.by_type} hues={hues} both={false} />}
-    <ul className="rg-result-list">
-      {questions.map((question) => <SpecialQuestion key={question.id} question={question} hues={hues} method={section.method} searchMode={section.search_mode ?? "hybrid"} />)}
-    </ul>
-  </div>;
+  );
 }
 
 // 充分性判断结论的简称（完整检索流程，见 app/evaluation/flow.py）。
-const SUFFICIENCY_SHORT: Record<string, string> = { sufficient: "够了", partial: "只够一部分", insufficient: "不够" };
+const SUFFICIENCY_SHORT: Record<string, string> = {
+  sufficient: "够了",
+  partial: "只够一部分",
+  insufficient: "不够",
+};
 
-function SpecialQuestion({ question, hues, method, searchMode }: { question: EvalSpecialQuestion; hues: Map<string, number>; method: EvalSuiteMethod; searchMode: EvalSuiteSearchMode }) {
-  const change = question.previous_passed === undefined || question.previous_passed === null || question.previous_passed === question.passed ? null
-    : question.passed ? { label: "新通过", tone: CHANGE_TONES.fixed } : { label: "新失败", tone: CHANGE_TONES.regressed };
+function SpecialQuestion({
+  question,
+  hues,
+  method,
+  searchMode,
+}: {
+  question: EvalSpecialQuestion;
+  hues: Map<string, number>;
+  method: EvalSuiteMethod;
+  searchMode: EvalSuiteSearchMode;
+}) {
+  const change =
+    question.previous_passed === undefined ||
+    question.previous_passed === null ||
+    question.previous_passed === question.passed
+      ? null
+      : question.passed
+        ? { label: "新通过", tone: CHANGE_TONES.fixed }
+        : { label: "新失败", tone: CHANGE_TONES.regressed };
   const judgement = question.judgement;
-  return <li className={`rg-result ${question.passed ? "is-ok" : "is-bad"}`}>
-    <div className="rg-result-head">
-      <Tag dot tone={passTone(question.passed)}>{question.passed ? "通过" : "没通过"}</Tag>
-      {change && <Tag outline tone={change.tone}>{change.label}</Tag>}
-      <TypeTag type={question.type} hues={hues} />
-      <span className="rg-result-question">{question.question}</span>
-    </div>
-    {question.evidence && question.evidence.length > 0 && <ul className="sp-evidence">
-      {question.evidence.map((item, index) => <li key={index}>
-        <span className="sp-evidence-text">{evidenceLabel(item.text)}</span>
-        <span className="sp-evidence-ranks" title="向量取前 12，关键词取前 30">
-          <span className="sp-evidence-label">含证据的分片</span>
-          {searchMode === "keyword" ? <span>向量检索：这次没用</span> : <span className={item.dense_rank === null ? "is-miss" : ""}>{rankText("向量", item.dense_rank, 12)}</span>}
-          {searchMode === "dense" ? <span>关键词检索：这次没用</span> : <span className={item.keyword_rank === null ? "is-miss" : ""}>{rankText("关键词", item.keyword_rank, 30)}</span>}
-          <span className={item.status === "returned" ? "" : "is-miss"}>最后：{EVIDENCE_STATUS[item.status ?? "not_recalled"] ?? item.status}</span>
-        </span>
-      </li>)}
-    </ul>}
-    {question.evidence && question.evidence.length > 0 && <EvidenceDetails texts={question.evidence.map((item) => item.text)} />}
-    {question.sufficiency && <div className="rg-item-meta">
-      {question.queries && question.queries.length > 0 && <span>检索词：{question.queries.join(" / ")}（{rewriteLabel(question)}）</span>}
-      <span>{question.sufficiency.checked ? `充分性判断：${SUFFICIENCY_SHORT[question.sufficiency.verdict ?? ""] ?? "—"}` : "没做充分性判断"}</span>
-      {question.sufficiency.retried && <span>补充检索「{question.sufficiency.retry_query}」{question.sufficiency.retry_used ? "，采用了" : "，没变好"}</span>}
-      {question.cleared && <span className="is-miss">资料被清空，线上会直接拒答</span>}
-      {!question.cleared && question.first_given_recall !== undefined && question.first_given_recall !== null && question.given_recall !== undefined && question.given_recall !== null && question.given_recall > question.first_given_recall && <span>补充检索把证据补全了</span>}
-    </div>}
-    {method !== "retrieval" && <div className="rg-item-meta">
-      {judgement?.correctness !== undefined && judgement?.correctness !== null && <span>正确性 {judgement.correctness}</span>}
-      {method === "dialogue" && <span>{question.summarized ? "触发了压缩" : "没有压缩"}</span>}
-      {method === "answer" && question.found === false && <span>证据没全部返回</span>}
-    </div>}
-    {(question.answer || judgement?.correctness_reason || question.turns?.length || question.reference_answer) && <details className="rg-details">
-      <summary>查看详情</summary>
-      {question.turns && question.turns.length > 0 && <div className="rg-text"><span className="rg-muted">前面的提问：</span><ol className="sp-turns">{question.turns.map((turn, index) => <li key={index}>{turn}</li>)}</ol></div>}
-      {question.answer && <div className="rg-text"><span className="rg-muted">回答：</span>{question.answer}</div>}
-      {question.reference_answer && <div className="rg-text"><span className="rg-muted">参考答案：</span>{question.reference_answer}</div>}
-      {judgement?.correctness_reason && <div className="rg-text"><span className="rg-muted">评审意见：</span>{judgement.correctness_reason}</div>}
-    </details>}
-  </li>;
+  return (
+    <li className={`rg-result ${question.passed ? "is-ok" : "is-bad"}`}>
+      <div className="rg-result-head">
+        <Tag dot tone={passTone(question.passed)}>
+          {question.passed ? "通过" : "没通过"}
+        </Tag>
+        {change && (
+          <Tag outline tone={change.tone}>
+            {change.label}
+          </Tag>
+        )}
+        <TypeTag type={question.type} hues={hues} />
+        <span className="rg-result-question">{question.question}</span>
+      </div>
+      <ScoringItems items={question.evidence ?? []} />
+      {question.sufficiency && (
+        <div className="rg-item-meta">
+          {question.queries && question.queries.length > 0 && (
+            <span>
+              检索词：{question.queries.join(" / ")}（{rewriteLabel(question)}）
+            </span>
+          )}
+          <span>
+            {question.sufficiency.checked
+              ? `充分性判断：${SUFFICIENCY_SHORT[question.sufficiency.verdict ?? ""] ?? "—"}`
+              : "没做充分性判断"}
+          </span>
+          {question.sufficiency.retried && (
+            <span>
+              补充检索「{question.sufficiency.retry_query}」
+              {question.sufficiency.retry_used ? "，采用了" : "，没变好"}
+            </span>
+          )}
+          {question.cleared && (
+            <span className="is-miss">资料被清空，线上会直接拒答</span>
+          )}
+          {!question.cleared &&
+            question.first_given_recall !== undefined &&
+            question.first_given_recall !== null &&
+            question.given_recall !== undefined &&
+            question.given_recall !== null &&
+            question.given_recall > question.first_given_recall && (
+              <span>补充检索把证据补全了</span>
+            )}
+        </div>
+      )}
+      {method !== "retrieval" && (
+        <div className="rg-item-meta">
+          {judgement?.correctness !== undefined &&
+            judgement?.correctness !== null && (
+              <span>正确性 {judgement.correctness}</span>
+            )}
+          {method === "dialogue" && (
+            <span>{question.summarized ? "触发了压缩" : "没有压缩"}</span>
+          )}
+          {method === "answer" && question.found === false && (
+            <span>证据没全部返回</span>
+          )}
+        </div>
+      )}
+      {(question.answer ||
+        judgement?.correctness_reason ||
+        question.turns?.length ||
+        question.reference_answer) && (
+        <details className="rg-details">
+          <summary>查看详情</summary>
+          {question.turns && question.turns.length > 0 && (
+            <div className="rg-text">
+              <span className="rg-muted">前面的提问：</span>
+              <ol className="sp-turns">
+                {question.turns.map((turn, index) => (
+                  <li key={index}>{turn}</li>
+                ))}
+              </ol>
+            </div>
+          )}
+          {question.answer && (
+            <div className="rg-text">
+              <span className="rg-muted">回答：</span>
+              {question.answer}
+            </div>
+          )}
+          {question.reference_answer && (
+            <div className="rg-text">
+              <span className="rg-muted">参考答案：</span>
+              {question.reference_answer}
+            </div>
+          )}
+          {judgement?.correctness_reason && (
+            <div className="rg-text">
+              <span className="rg-muted">评审意见：</span>
+              {judgement.correctness_reason}
+            </div>
+          )}
+        </details>
+      )}
+    </li>
+  );
 }

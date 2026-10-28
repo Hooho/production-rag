@@ -1,5 +1,14 @@
 // 来源带上版本号、页码和标题路径，便于确认命中的是当前版本的哪个位置。
-export type Source = { relevance?: number | null; id: string; title: string; text: string; score?: number; version?: number | null; page_start?: number | null; heading?: string | null };
+export type Source = {
+  relevance?: number | null;
+  id: string;
+  title: string;
+  text: string;
+  score?: number;
+  version?: number | null;
+  page_start?: number | null;
+  heading?: string | null;
+};
 export type TraceStep = {
   id: string;
   stage: string;
@@ -14,9 +23,25 @@ export type TraceStep = {
   field_order?: string[];
 };
 // 检索诊断：后端记录的每张排名表、每个候选的 RRF 贡献、重排概率和最终去向。
-export type RetrievalContribution = { query: string; method: string; rank: number; raw_score: number; rrf: number };
-export type RetrievalListHit = { rank: number; chunk_id: string; title: string; raw_score: number; rrf: number };
-export type RetrievalList = { query: string; method: string; hits: RetrievalListHit[] };
+export type RetrievalContribution = {
+  query: string;
+  method: string;
+  rank: number;
+  raw_score: number;
+  rrf: number;
+};
+export type RetrievalListHit = {
+  rank: number;
+  chunk_id: string;
+  title: string;
+  raw_score: number;
+  rrf: number;
+};
+export type RetrievalList = {
+  query: string;
+  method: string;
+  hits: RetrievalListHit[];
+};
 export type RetrievalCandidate = {
   chunk_id: string;
   chunk_key?: string | null;
@@ -25,7 +50,12 @@ export type RetrievalCandidate = {
   page_start?: number | null;
   heading?: string | null;
   preview: string;
-  status: "returned" | "beyond_limit" | "filtered_low_score" | "in_pool" | "not_in_pool";
+  status:
+    | "returned"
+    | "beyond_limit"
+    | "filtered_low_score"
+    | "in_pool"
+    | "not_in_pool";
   source_id: string | null;
   retrieval_methods: string[];
   contributions: RetrievalContribution[];
@@ -36,15 +66,35 @@ export type RetrievalCandidate = {
   rerank_rank: number | null;
 };
 export type RetrievalDiagnosticsData = {
-  config: { rrf_k: number; rerank_candidates: number; return_limit: number; reranked: boolean; min_score: number | null; rerank_query: string; rerank_model: string; rerank_error?: string | null };
+  config: {
+    rrf_k: number;
+    rerank_candidates: number;
+    return_limit: number;
+    reranked: boolean;
+    min_score: number | null;
+    rerank_query: string;
+    rerank_model: string;
+    rerank_error?: string | null;
+  };
   lists: RetrievalList[];
   candidates: RetrievalCandidate[];
   // 这次检索的权限范围：可检索的文档（当前版本）按自己上传 / 共享给我 / 公开计数；旧记录没有。
   scope?: RetrievalScope;
 };
 export type RetrievalScope = {
-  total: number; own: number; shared: number; public: number; groups: string[];
-  documents: Array<{ document_id: string; title: string; version: number; source: "own" | "shared" | "public"; owner: string; groups: string[] }>;
+  total: number;
+  own: number;
+  shared: number;
+  public: number;
+  groups: string[];
+  documents: Array<{
+    document_id: string;
+    title: string;
+    version: number;
+    source: "own" | "shared" | "public";
+    owner: string;
+    groups: string[];
+  }>;
 };
 export type ChatResult = {
   answer: string;
@@ -61,11 +111,29 @@ export type ChatResult = {
   feedback?: FeedbackRecord | null;
 };
 // Agent 模式（后端 app/agentic）：一次问答的统计摘要，存在 runs.response.agent 里。
-export type AgentCitation = { passed: boolean; reason: string | null; allowed: string[]; cited: string[]; unknown: string[]; markers?: string[]; raw_answer?: string };
-export type AgentUsage = { prompt_tokens: number; completion_tokens: number; cached_tokens: number };
+export type AgentCitation = {
+  passed: boolean;
+  reason: string | null;
+  allowed: string[];
+  cited: string[];
+  unknown: string[];
+  markers?: string[];
+  raw_answer?: string;
+};
+export type AgentUsage = {
+  prompt_tokens: number;
+  completion_tokens: number;
+  cached_tokens: number;
+};
 export type AgentSummary = {
   status: "completed" | "failed" | "blocked";
-  stop_reason: "answered" | "budget" | "timeout" | "model_error" | "demo" | null;
+  stop_reason:
+    | "answered"
+    | "budget"
+    | "timeout"
+    | "model_error"
+    | "demo"
+    | null;
   tool_calls_used: number;
   tool_budget: number;
   citation: AgentCitation | null;
@@ -76,12 +144,30 @@ export type AgentSummary = {
   prompt_version?: string;
 };
 // 模型请求里的一条消息：原样记录，assistant 可能带 reasoning_content 和 tool_calls，tool 带 tool_call_id。
-export type AgentMessage = { role: "system" | "user" | "assistant" | "tool"; content?: string | null; reasoning_content?: string;
-  tool_calls?: AgentToolCall[]; tool_call_id?: string };
-export type AgentToolCall = { id: string; type?: string; function: { name: string; arguments: string } };
+export type AgentMessage = {
+  role: "system" | "user" | "assistant" | "tool";
+  content?: string | null;
+  reasoning_content?: string;
+  tool_calls?: AgentToolCall[];
+  tool_call_id?: string;
+};
+export type AgentToolCall = {
+  id: string;
+  type?: string;
+  function: { name: string; arguments: string };
+};
 // 程序执行一次工具调用的记录：content 是放回消息给模型看的文字，trace 是完整结果（检索诊断、查询计划等）。
-export type AgentToolResult = { id: string; name: string; arguments: string; status: "ok" | "error" | "duplicate" | "skipped";
-  ok: boolean; content: string; trace?: Record<string, unknown>; budget_left?: number; duration_ms?: number };
+export type AgentToolResult = {
+  id: string;
+  name: string;
+  arguments: string;
+  status: "ok" | "error" | "duplicate" | "skipped";
+  ok: boolean;
+  content: string;
+  trace?: Record<string, unknown>;
+  budget_left?: number;
+  duration_ms?: number;
+};
 // 一轮的完整记录（后端 app/agentic/loop.py）：本轮新增的消息、原始响应、推理过程、工具调用和返回、引用检查。
 export type AgentRound = {
   round: number;
@@ -104,9 +190,23 @@ export type AgentRound = {
   error?: string;
   duration_ms?: number;
 };
-export type AgentRun = { id: string; status: string; stop_reason: string | null; round_count: number; tool_calls: number;
-  tool_budget: number; prompt_tokens: number; completion_tokens: number; cached_tokens: number; duration_ms: number | null;
-  model: string | null; prompt_version: string | null; error: string | null; created: string; rounds: AgentRound[] };
+export type AgentRun = {
+  id: string;
+  status: string;
+  stop_reason: string | null;
+  round_count: number;
+  tool_calls: number;
+  tool_budget: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cached_tokens: number;
+  duration_ms: number | null;
+  model: string | null;
+  prompt_version: string | null;
+  error: string | null;
+  created: string;
+  rounds: AgentRound[];
+};
 export type ChatMode = "fixed" | "agent";
 
 export type HistoryRun = {
@@ -118,7 +218,12 @@ export type HistoryRun = {
   feedback?: FeedbackRecord | null;
 };
 // 点踩原因，与后端 FEEDBACK_REASONS 保持一致。
-export type FeedbackReason = "wrong" | "incomplete" | "missed" | "citation" | "other";
+export type FeedbackReason =
+  | "wrong"
+  | "incomplete"
+  | "missed"
+  | "citation"
+  | "other";
 export type FeedbackRecord = {
   request_id: string;
   rating: 1 | -1;
@@ -175,7 +280,23 @@ export type DocumentStatus = {
 export type DocumentListing = "listed" | "unlisted" | "never";
 // Excel、CSV 的表格识别结果：每个工作表识别到几张表、表头在哪几行、是否认出了表头。
 export type TableReport = {
-  sheets: { sheet: string | null; tables: { title: string | null; first_row: number; last_row: number; columns: number; rows: number; header_rows: number[]; header_depth: number; confidence: "high" | "low" | null; single_column: boolean; column_names: string[] }[]; text_only: boolean; empty: boolean }[];
+  sheets: {
+    sheet: string | null;
+    tables: {
+      title: string | null;
+      first_row: number;
+      last_row: number;
+      columns: number;
+      rows: number;
+      header_rows: number[];
+      header_depth: number;
+      confidence: "high" | "low" | null;
+      single_column: boolean;
+      column_names: string[];
+    }[];
+    text_only: boolean;
+    empty: boolean;
+  }[];
   hidden_sheets: string[];
 };
 export type DocumentMetadata = {
@@ -276,8 +397,18 @@ const API_BASE = "/api";
 
 // 登录状态。原来浏览器里只保存一个永不过期的 API Key；现在保存访问令牌（30 分钟）和刷新令牌（7 天），
 // 访问令牌过期后用刷新令牌自动换新，用户感觉不到；刷新令牌也失效时才回到登录页。
-export type AuthUser = { username: string; is_admin: boolean; disabled: boolean; groups: string[]; created: string };
-type AuthTokens = { access_token: string; refresh_token: string; user: AuthUser };
+export type AuthUser = {
+  username: string;
+  is_admin: boolean;
+  disabled: boolean;
+  groups: string[];
+  created: string;
+};
+type AuthTokens = {
+  access_token: string;
+  refresh_token: string;
+  user: AuthUser;
+};
 const accessStorage = "atlas-rag-access-token";
 const refreshStorage = "atlas-rag-refresh-token";
 const userStorage = "atlas-rag-user";
@@ -327,12 +458,15 @@ async function refreshTokens(): Promise<boolean> {
     body: JSON.stringify({ refresh_token: refreshToken }),
   });
   if (!response.ok) return false;
-  saveTokens(await response.json() as AuthTokens);
+  saveTokens((await response.json()) as AuthTokens);
   return true;
 }
 
 // 带上访问令牌发请求；返回 401 时刷新令牌后重试一次，仍失败则清除登录状态并通知 App。
-async function authorizedFetch(path: string, options: RequestInit = {}): Promise<Response> {
+async function authorizedFetch(
+  path: string,
+  options: RequestInit = {},
+): Promise<Response> {
   function send() {
     const headers = new Headers(options.headers);
     const token = readStorage(accessStorage);
@@ -341,7 +475,10 @@ async function authorizedFetch(path: string, options: RequestInit = {}): Promise
   }
   let response = await send();
   if (response.status !== 401) return response;
-  if (!refreshing) refreshing = refreshTokens().finally(() => { refreshing = null; });
+  if (!refreshing)
+    refreshing = refreshTokens().finally(() => {
+      refreshing = null;
+    });
   if (await refreshing) {
     response = await send();
     if (response.status !== 401) return response;
@@ -354,21 +491,29 @@ async function authorizedFetch(path: string, options: RequestInit = {}): Promise
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await authorizedFetch(path, options);
   if (!response.ok) {
-    const body = await response.json().catch(() => ({ detail: response.statusText }));
+    const body = await response
+      .json()
+      .catch(() => ({ detail: response.statusText }));
     throw new Error(body.detail || `请求失败：${response.status}`);
   }
   return response.json() as Promise<T>;
 }
 
 // 登录接口不带令牌，也不走自动刷新：密码错误的 401 不能被当成"令牌过期"。
-export async function login(username: string, password: string): Promise<AuthUser> {
+export async function login(
+  username: string,
+  password: string,
+): Promise<AuthUser> {
   const response = await fetch(`${API_BASE}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
   });
-  const body = await response.json().catch(() => ({ detail: response.statusText }));
-  if (!response.ok) throw new Error(body.detail || `登录失败：${response.status}`);
+  const body = await response
+    .json()
+    .catch(() => ({ detail: response.statusText }));
+  if (!response.ok)
+    throw new Error(body.detail || `登录失败：${response.status}`);
   saveTokens(body as AuthTokens);
   return (body as AuthTokens).user;
 }
@@ -396,7 +541,12 @@ export function listUsers() {
   return request<{ users: AuthUser[] }>("/admin/users");
 }
 
-export function createUser(payload: { username: string; password: string; is_admin: boolean; groups: string[] }) {
+export function createUser(payload: {
+  username: string;
+  password: string;
+  is_admin: boolean;
+  groups: string[];
+}) {
   return request<AuthUser>("/admin/users", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -404,7 +554,15 @@ export function createUser(payload: { username: string; password: string; is_adm
   });
 }
 
-export function updateUser(username: string, payload: { password?: string; is_admin?: boolean; disabled?: boolean; groups?: string[] }) {
+export function updateUser(
+  username: string,
+  payload: {
+    password?: string;
+    is_admin?: boolean;
+    disabled?: boolean;
+    groups?: string[];
+  },
+) {
   return request<AuthUser>(`/admin/users/${encodeURIComponent(username)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -429,13 +587,24 @@ export function updateGroup(id: string, payload: Pick<Group, "name">) {
 }
 
 export function deleteGroup(id: string) {
-  return request<{ id: string }>(`/admin/groups/${encodeURIComponent(id)}`, { method: "DELETE" });
+  return request<{ id: string }>(`/admin/groups/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }
 
 // 修改文档可见范围，只有上传者可以调用。
-export function updateDocumentPermission(documentId: string, visibility: DocumentVisibility, groups: string[]) {
+export function updateDocumentPermission(
+  documentId: string,
+  visibility: DocumentVisibility,
+  groups: string[],
+) {
   // 普通用户改成「所有人」时可见范围不变，publish_review 是提交的公开申请（status=pending）。
-  return request<{ document_id: string; visibility: DocumentVisibility; groups: string[]; publish_review: DocumentReview | null }>(`/documents/${documentId}/permission`, {
+  return request<{
+    document_id: string;
+    visibility: DocumentVisibility;
+    groups: string[];
+    publish_review: DocumentReview | null;
+  }>(`/documents/${documentId}/permission`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ visibility, groups }),
@@ -448,8 +617,7 @@ export function createSession(): Promise<{ session_id: string }> {
 
 // 读取指定会话，确认浏览器保存的会话仍属于当前用户。
 export function getSessionHistory(sessionId: string) {
-  return request<{ messages: HistoryRun[] }>(`/sessions/${sessionId}`, {
-  });
+  return request<{ messages: HistoryRun[] }>(`/sessions/${sessionId}`, {});
 }
 
 // 读取当前用户最近保存的问答记录，刷新页面后恢复对话列表。
@@ -457,7 +625,11 @@ export function listHistory() {
   return request<{ messages: HistoryRun[] }>("/history");
 }
 
-export function sendChat(payload: { session_id: string; request_id: string; question: string }) {
+export function sendChat(payload: {
+  session_id: string;
+  request_id: string;
+  question: string;
+}) {
   return request<ChatResult>("/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -474,18 +646,29 @@ export async function sendChatStream(
   mode: ChatMode = "fixed",
   onRound?: (round: AgentRound) => void,
 ): Promise<ChatResult> {
-  const response = await authorizedFetch(mode === "agent" ? "/agent/chat/stream" : "/chat/stream", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  const response = await authorizedFetch(
+    mode === "agent" ? "/agent/chat/stream" : "/chat/stream",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
   return readChatEvents(response, onStep, onToken, onRound);
 }
 
 // 这个会话正在回答（或刚回答完）的问题。切页面、刷新之后用它接着看进度；没有就是 null。
-export type LiveChatState = { request_id: string; question: string; mode: ChatMode; status: "running" | "done"; started: string };
+export type LiveChatState = {
+  request_id: string;
+  question: string;
+  mode: ChatMode;
+  status: "running" | "done";
+  started: string;
+};
 export function getChatLive(sessionId: string) {
-  return request<{ live: LiveChatState | null }>(`/chat/live?session_id=${encodeURIComponent(sessionId)}`);
+  return request<{ live: LiveChatState | null }>(
+    `/chat/live?session_id=${encodeURIComponent(sessionId)}`,
+  );
 }
 
 // 重放一次回答的全部进度事件，再接着收新的，直到完成。和 sendChatStream 收到的事件一样，返回最终结果。
@@ -495,7 +678,9 @@ export async function resumeChatStream(
   onToken: (text: string) => void,
   onRound?: (round: AgentRound) => void,
 ): Promise<ChatResult> {
-  const response = await authorizedFetch(`/chat/live/${encodeURIComponent(requestId)}/events`);
+  const response = await authorizedFetch(
+    `/chat/live/${encodeURIComponent(requestId)}/events`,
+  );
   return readChatEvents(response, onStep, onToken, onRound);
 }
 
@@ -506,7 +691,9 @@ async function readChatEvents(
   onRound?: (round: AgentRound) => void,
 ): Promise<ChatResult> {
   if (!response.ok || !response.body) {
-    const body = await response.json().catch(() => ({ detail: response.statusText }));
+    const body = await response
+      .json()
+      .catch(() => ({ detail: response.statusText }));
     throw new Error(body.detail || `请求失败：${response.status}`);
   }
   const reader = response.body.getReader();
@@ -518,12 +705,17 @@ async function readChatEvents(
     const event = block.match(/^event: (.+)$/m)?.[1];
     const data = block.match(/^data: (.+)$/m)?.[1];
     if (!event || !data) return;
-    const value = JSON.parse(data) as TraceStep | ChatResult | { detail?: string } | { text: string };
+    const value = JSON.parse(data) as
+      | TraceStep
+      | ChatResult
+      | { detail?: string }
+      | { text: string };
     if (event === "step") onStep(value as TraceStep);
     // 后端逐段推送回答文字，原来要等 complete 才能看到整段回答。
     if (event === "token") onToken((value as { text: string }).text);
     if (event === "round" && onRound) onRound(value as unknown as AgentRound);
-    if (event === "error") throw new Error((value as { detail?: string }).detail || "请求失败");
+    if (event === "error")
+      throw new Error((value as { detail?: string }).detail || "请求失败");
     if (event === "complete") complete = value as ChatResult;
   }
 
@@ -535,7 +727,9 @@ async function readChatEvents(
     } catch {
       throw new ConnectionLost();
     }
-    buffer += decoder.decode(result.value ?? new Uint8Array(), { stream: !result.done });
+    buffer += decoder.decode(result.value ?? new Uint8Array(), {
+      stream: !result.done,
+    });
     const blocks = buffer.split("\n\n");
     buffer = blocks.pop() ?? "";
     for (const block of blocks) handle(block);
@@ -547,7 +741,9 @@ async function readChatEvents(
 
 // 连接中途断开（网络波动、切到后台被浏览器掐断）。后端可能还在回答，调用方可以改用 resumeChatStream 接着看。
 export class ConnectionLost extends Error {
-  constructor(message = "与服务器的连接中断（服务重启或网络波动），请稍后重试") {
+  constructor(
+    message = "与服务器的连接中断（服务重启或网络波动），请稍后重试",
+  ) {
     super(message);
   }
 }
@@ -558,7 +754,12 @@ export function getAgentRun(requestId: string) {
 }
 
 // 提交或修改对一次回答的反馈，重复提交覆盖上一次。
-export function submitFeedback(payload: { request_id: string; rating: 1 | -1; reason?: FeedbackReason | null; comment?: string | null }) {
+export function submitFeedback(payload: {
+  request_id: string;
+  rating: 1 | -1;
+  reason?: FeedbackReason | null;
+  comment?: string | null;
+}) {
   return request<FeedbackRecord>("/feedback", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -568,7 +769,14 @@ export function submitFeedback(payload: { request_id: string; rating: 1 | -1; re
 
 // replaceDocumentId 指定后作为该文档的新版本上传；内容与已有版本相同时返回 status=duplicate。
 // visibility 和 groups 只对新文档生效；替换为新版本时沿用原来的可见范围。
-export function uploadDocument(file: File, title: string, replaceDocumentId?: string | null, versionNote?: string, visibility: DocumentVisibility = "private", groups: string[] = []) {
+export function uploadDocument(
+  file: File,
+  title: string,
+  replaceDocumentId?: string | null,
+  versionNote?: string,
+  visibility: DocumentVisibility = "private",
+  groups: string[] = [],
+) {
   const form = new FormData();
   form.append("file", file);
   form.append("visibility", visibility);
@@ -577,7 +785,13 @@ export function uploadDocument(file: File, title: string, replaceDocumentId?: st
   if (replaceDocumentId) form.append("replace_document_id", replaceDocumentId);
   if (versionNote?.trim()) form.append("version_note", versionNote.trim());
   // review_pending：publish 表示提交了公开申请（普通用户选了所有人），version 表示这是公开文档的新版本，处理完要等审核。
-  return request<{ document_id: string; status: string; filename: string; version?: number; review_pending?: "publish" | "version" | null }>("/documents/upload", {
+  return request<{
+    document_id: string;
+    status: string;
+    filename: string;
+    version?: number;
+    review_pending?: "publish" | "version" | null;
+  }>("/documents/upload", {
     method: "POST",
     body: form,
   });
@@ -589,32 +803,49 @@ export function getDocument(documentId: string) {
 
 // 删除一个已完成或失败的文档及其检索索引。
 export function deleteDocument(documentId: string) {
-  return request<{ document_id: string; deleted: boolean; chunk_count: number }>(`/documents/${documentId}`, {
+  return request<{
+    document_id: string;
+    deleted: boolean;
+    chunk_count: number;
+  }>(`/documents/${documentId}`, {
     method: "DELETE",
   });
 }
 
 // 让处理失败的文档版本重新进入解析队列。
 export function retryDocument(documentId: string) {
-  return request<{ document_id: string; status: string }>(`/documents/${documentId}/retry`, {
-    method: "POST",
-  });
+  return request<{ document_id: string; status: string }>(
+    `/documents/${documentId}/retry`,
+    {
+      method: "POST",
+    },
+  );
 }
 
 // 为已完成版本里上下文说明生成失败的分片补生成说明，由 worker 在后台执行。
 export function retryDocumentContexts(documentId: string) {
-  return request<{ document_id: string; status: string }>(`/documents/${documentId}/contexts/retry`, {
-    method: "POST",
-  });
+  return request<{ document_id: string; status: string }>(
+    `/documents/${documentId}/contexts/retry`,
+    {
+      method: "POST",
+    },
+  );
 }
 
 export function listDocuments() {
   return request<{ documents: DocumentStatus[] }>("/documents");
 }
 
-export function listDocumentChunks(documentId: string, page: number, pageSize = 10, source?: ChunkSource | null) {
-  return request<DocumentChunkPage>(`/documents/${documentId}/chunks?page=${page}&page_size=${pageSize}${source ? `&source=${source}` : ""}`, {
-  });
+export function listDocumentChunks(
+  documentId: string,
+  page: number,
+  pageSize = 10,
+  source?: ChunkSource | null,
+) {
+  return request<DocumentChunkPage>(
+    `/documents/${documentId}/chunks?page=${page}&page_size=${pageSize}${source ? `&source=${source}` : ""}`,
+    {},
+  );
 }
 
 // 评测：题目、单次评测结果、历次评测列表与两次对比，字段与后端 app/evaluation 保持一致。
@@ -634,29 +865,121 @@ export type EvalItem = {
   pair_role?: "original" | "paraphrase";
 };
 export type EvalSummary = Record<string, number | null>;
-export type EvalStage = { recall: number | null; rr: number; rank: number | null };
+export type EvalStage = {
+  recall: number | null;
+  rr: number;
+  rank: number | null;
+};
 // given：证据在不在交给回答模型的资料里（含父块扩展拼进来的相邻分片，旧记录没有）。
-export type EvalEvidenceTarget = { chunk_id: string; position: number; title: string; quote: string };
-export type EvalEvidenceGroup = { label?: string; targets?: EvalEvidenceTarget[] };
-export type EvalEvidence = EvalEvidenceGroup & { text: string; chunk_id: string | null; rrf_rank: number | null; rerank_rank: number | null; rerank_probability: number | null; source_id: string | null; status: string; given?: boolean; first_given?: boolean;
+export type EvalEvidenceTarget = {
+  chunk_id: string;
+  position: number | null;
+  title: string;
+  quote: string;
+};
+export type EvalEvidenceGroup = {
+  label?: string;
+  targets?: EvalEvidenceTarget[];
+};
+export type EvalEvidence = EvalEvidenceGroup & {
+  text: string;
+  chunk_id: string | null;
+  rrf_rank: number | null;
+  rerank_rank: number | null;
+  rerank_probability: number | null;
+  source_id: string | null;
+  status: string;
+  given?: boolean;
+  first_given?: boolean;
   // 怎么拿到的：direct 检索命中的那一片就含证据，extension 只在父块扩展拼进来的分片里（旧记录没有）。
-  via?: "direct" | "extension" | null };
-export type EvalJudgement = { refused: boolean; faithfulness: number; correctness: number; citation: number; faithfulness_reason: string; correctness_reason: string; citation_reason: string; judge: string };
-export type EvalSufficiency = { checked: boolean; verdict: "sufficient" | "partial" | "insufficient" | null; missing?: string | string[] | null; retried?: boolean; retry_query?: string | null; refused?: boolean; source_count?: number | null;
+  via?: "direct" | "extension" | null;
+};
+export type EvalJudgement = {
+  refused: boolean;
+  faithfulness: number;
+  correctness: number;
+  citation: number;
+  faithfulness_reason: string;
+  correctness_reason: string;
+  citation_reason: string;
+  judge: string;
+};
+export type EvalSufficiency = {
+  checked: boolean;
+  verdict: "sufficient" | "partial" | "insufficient" | null;
+  missing?: string | string[] | null;
+  retried?: boolean;
+  retry_query?: string | null;
+  refused?: boolean;
+  source_count?: number | null;
   // 完整检索流程（检索评测也做判断后才有）：每次判断的结论、判断次数、是否用了补充检索的结果。
-  judgements?: { verdict: string; missing: string; rewrite_query: string; error?: string }[]; calls?: number; errors?: number; retry_used?: boolean };
+  judgements?: {
+    verdict: string;
+    missing: string;
+    rewrite_query: string;
+    error?: string;
+  }[];
+  calls?: number;
+  errors?: number;
+  retry_used?: boolean;
+};
 // 固定流程的改写（app/evaluation/flow.py）：classifier 是谁改写的（llm 大模型 / small_model 小模型只分类 / rule、fallback 规则），
 // cached 表示用了改写缓存，duration_ms 是改写耗时（用缓存时是当时实际花的时间）。
 // fallback_reason：没用上大模型改写的原因（调用失败、格式不对、命中规则等），旧记录没有。
-export type EvalRewrite = { classifier: string; route?: string | null; intent?: string | null; cached?: boolean; duration_ms?: number; fallback_reason?: string | null };
+export type EvalRewrite = {
+  classifier: string;
+  route?: string | null;
+  intent?: string | null;
+  cached?: boolean;
+  duration_ms?: number;
+  fallback_reason?: string | null;
+};
 // 补充检索：返回几段、是否被采用、补充检索的资料命中率和来源。
-export type EvalRetry = { queries?: string[]; query_routes?: EvalQueryRoute[]; evidence?: EvalEvidence[]; latency_ms?: number | null; recall_ms?: number | null; rerank_ms?: number | null; returned: number; used: boolean; given_recall: number | null; found?: number[]; sources?: (Source & { chunk_id?: string | null; position?: number | null; parent_chunk_ids?: string[] })[] };
+export type EvalRetry = {
+  queries?: string[];
+  query_routes?: EvalQueryRoute[];
+  evidence?: EvalEvidence[];
+  latency_ms?: number | null;
+  recall_ms?: number | null;
+  rerank_ms?: number | null;
+  returned: number;
+  used: boolean;
+  given_recall: number | null;
+  found?: number[];
+  sources?: (Source & {
+    chunk_id?: string | null;
+    position?: number | null;
+    parent_chunk_ids?: string[];
+  })[];
+};
 // 和完整检索流程有关的逐题字段，调参评测和专项评测共用。
 // 固定流程每一路检索词各自召回的情况：召回几段、留到最后几段、含哪几条证据（从 0 开始）、证据在向量 / 关键词排名表里最好排第几。
-export type EvalQueryRoute = { query: string; recalled: number; kept: number; kept_ids?: string[]; evidence: number[]; best: { evidence: number; dense?: number; keyword?: number }[] };
+export type EvalQueryRoute = {
+  query: string;
+  recalled: number;
+  kept: number;
+  kept_ids?: string[];
+  evidence: number[];
+  best: { evidence: number; dense?: number; keyword?: number }[];
+};
 // 交给模型的资料：几段、多少字、约多少 token（只算资料正文，旧记录没有）。
-export type EvalMaterial = { count: number; chars: number; tokens: number; items?: { chunk_id: string | null; chars: number; tokens: number }[] };
-export type EvalFlowFields = { material?: EvalMaterial | null; query_routes?: EvalQueryRoute[] | null; given_hits?: number | null; ext_hits?: number | null; first_given_recall?: number | null; rewrite?: EvalRewrite | null; retry?: EvalRetry | null; cleared?: boolean | null; flow_latency_ms?: number | null };
+export type EvalMaterial = {
+  count: number;
+  chars: number;
+  tokens: number;
+  items?: { chunk_id: string | null; chars: number; tokens: number }[];
+};
+export type EvalFlowFields = {
+  material?: EvalMaterial | null;
+  query_routes?: EvalQueryRoute[] | null;
+  given_hits?: number | null;
+  ext_hits?: number | null;
+  first_given_recall?: number | null;
+  rewrite?: EvalRewrite | null;
+  retry?: EvalRetry | null;
+  cleared?: boolean | null;
+  flow_latency_ms?: number | null;
+};
 export type EvalQuestion = {
   id: string;
   question: string;
@@ -695,7 +1018,23 @@ export type EvalQuestion = {
 // Agent 检索评测（app/evaluation/agent_retrieval.py）：只看最后命中，口径和固定流程的过滤后 Recall 一致。
 export type EvalMode = "fixed" | "agent";
 export type EvalCompareKey = "both" | "fixed_only" | "agent_only" | "neither";
-export type EvalAgentResult = { vector_rank?: number | null; keyword_rank?: number | null; rerank_score?: number | null; retrieval_recorded?: boolean; evidence_id: string; title: string | null; heading?: string | null; chunk_id: string | null; position?: number | null; parent_chunk_ids?: string[]; relevance: number | null; low_relevance: boolean; text: string; hits: number[]; main_hits?: number[] };
+export type EvalAgentResult = {
+  vector_rank?: number | null;
+  keyword_rank?: number | null;
+  rerank_score?: number | null;
+  retrieval_recorded?: boolean;
+  evidence_id: string;
+  title: string | null;
+  heading?: string | null;
+  chunk_id: string | null;
+  position?: number | null;
+  parent_chunk_ids?: string[];
+  relevance: number | null;
+  low_relevance: boolean;
+  text: string;
+  hits: number[];
+  main_hits?: number[];
+};
 export type AgentQueryExplanation = {
   purpose: string;
   basis: ("user_question" | "previous_results" | "hypothesis")[];
@@ -729,7 +1068,14 @@ export type EvalAgentCall = {
   note?: string;
   error?: string;
 };
-export type EvalAgentRound = { round: number | null; kind: string; reasoning: string; content: string; error?: string | null; duration_ms?: number | null };
+export type EvalAgentRound = {
+  round: number | null;
+  kind: string;
+  reasoning: string;
+  content: string;
+  error?: string | null;
+  duration_ms?: number | null;
+};
 export type EvalAgentQuestion = {
   round_logs?: EvalAgentRound[];
   // 交给模型的资料：资料池里全部资料（旧记录没有）。
@@ -744,7 +1090,14 @@ export type EvalAgentQuestion = {
   recall: number | null;
   // chunk_ids：证据在知识库里所属的分块（旧记录没有）。
   // positions：同一顺序的分块序号（从 0 开始，页面显示「第 N 片」）。
-  evidence: (EvalEvidenceGroup & { text: string; chunk_ids?: string[]; positions?: (number | null)[]; found: boolean; where: { call: number; evidence_id: string | null }[]; via?: "direct" | "extension" | "context" | null })[];
+  evidence: (EvalEvidenceGroup & {
+    text: string;
+    chunk_ids?: string[];
+    positions?: (number | null)[];
+    found: boolean;
+    where: { call: number; evidence_id: string | null }[];
+    via?: "direct" | "extension" | "context" | null;
+  })[];
   calls: EvalAgentCall[];
   returned: number;
   searches: number;
@@ -764,12 +1117,19 @@ export type EvalAgentQuestion = {
   cached_tokens: number;
   answer: string;
 };
-export type EvalParaphraseMetric = { original: number | null; paraphrase: number | null; delta: number | null };
+export type EvalParaphraseMetric = {
+  original: number | null;
+  paraphrase: number | null;
+  delta: number | null;
+};
 export type EvalParaphrasePair = {
   pair_id: string;
   original: { id: string; question: string };
   paraphrase: { id: string; question: string };
-  statuses: Record<"pool" | "top" | "final", "stable" | "lost" | "gained" | "both_missed">;
+  statuses: Record<
+    "pool" | "top" | "final",
+    "stable" | "lost" | "gained" | "both_missed"
+  >;
 };
 export type EvalParaphraseAnalysis = {
   pair_count: number;
@@ -780,14 +1140,60 @@ export type EvalParaphraseAnalysis = {
   retention: Record<"pool" | "top" | "final", number | null>;
   pairs: EvalParaphrasePair[];
 };
-export type EvalSweepPoint = { threshold: number; false_reject_rate: number | null; false_accept_rate: number | null; recall_final: number | null };
+export type EvalSweepPoint = {
+  threshold: number;
+  false_reject_rate: number | null;
+  false_accept_rate: number | null;
+  recall_final: number | null;
+};
 // 「交给模型的段数」扫描：段数取 1 到候选池大小时的证据召回、全部证据都命中的题数、平均实际交给模型几段、被段数截断的题数。
-export type EvalMemoryVariant = { name: string; label: string; trigger: number; keep: number;
-  summary: { correctness: number | null; faithfulness: number | null; summarized_rate: number | null; input_tokens_avg: number | null };
-  dialogues: { id: string; question: string; turns: number; answer: string; route: string; summarized: boolean; input_tokens: number | null; judgement: { correctness?: number; correctness_reason?: string } }[] };
-export type EvalLimitPoint = { return_limit: number; recall_final: number | null; complete: number; answerable: number; multi_evidence_recall: number | null; multi_evidence: number; avg_returned: number | null; capped: number; total: number };
-export type EvalVariant = { name: string; label: string; suite: string; options: Record<string, unknown>; summary: EvalSummary; funnel: EvalFunnel };
-export type EvalFunnel = { total: number; pool: number; top: number; final: number };
+export type EvalMemoryVariant = {
+  name: string;
+  label: string;
+  trigger: number;
+  keep: number;
+  summary: {
+    correctness: number | null;
+    faithfulness: number | null;
+    summarized_rate: number | null;
+    input_tokens_avg: number | null;
+  };
+  dialogues: {
+    id: string;
+    question: string;
+    turns: number;
+    answer: string;
+    route: string;
+    summarized: boolean;
+    input_tokens: number | null;
+    judgement: { correctness?: number; correctness_reason?: string };
+  }[];
+};
+export type EvalLimitPoint = {
+  return_limit: number;
+  recall_final: number | null;
+  complete: number;
+  answerable: number;
+  multi_evidence_recall: number | null;
+  multi_evidence: number;
+  avg_returned: number | null;
+  capped: number;
+  total: number;
+};
+export type EvalVariant = {
+  name: string;
+  label: string;
+  suite: string;
+  options: Record<string, unknown>;
+  summary: EvalSummary;
+  funnel: EvalFunnel;
+};
+export type EvalFunnel = {
+  total: number;
+  pool: number;
+  top: number;
+  final: number;
+};
 export type EvalHistoryMetrics = {
   answerable_questions: number;
   unanswerable_questions: number;
@@ -809,15 +1215,55 @@ export type EvalHistoryMetrics = {
   // 拿到的证据里，靠父块扩展拿到的条数（旧记录没有）。
   ext_hits?: number | null;
 };
-export type EvalConfig = { split: string | null; suites: string[]; special?: { suites: { id: string; name: string }[]; compare_memory?: boolean }; dataset_size?: number; rrf_k?: number; pool_size?: number; return_limit?: number; min_score?: number | null; reranked?: boolean; fusion?: string; methods?: string[]; model_mode?: string; embedding_mode?: string; embedding_model?: string; rerank_model?: string; rerank_mode?: string; query_source?: string[];
+export type EvalConfig = {
+  split: string | null;
+  suites: string[];
+  special?: {
+    suites: { id: string; name: string }[];
+    compare_memory?: boolean;
+  };
+  dataset_size?: number;
+  rrf_k?: number;
+  pool_size?: number;
+  return_limit?: number;
+  min_score?: number | null;
+  reranked?: boolean;
+  fusion?: string;
+  methods?: string[];
+  model_mode?: string;
+  embedding_mode?: string;
+  embedding_model?: string;
+  rerank_model?: string;
+  rerank_mode?: string;
+  query_source?: string[];
   // 检索评测跑了哪些模式（旧记录没有，都是只跑固定流程）；agent 是 Agent 的运行配置。
-  modes?: EvalMode[]; agent?: { tool_budget: number; timeout: number; prompt_version: string; prompt_identity?: string; model: string | null };
+  modes?: EvalMode[];
+  agent?: {
+    tool_budget: number;
+    timeout: number;
+    prompt_version: string;
+    prompt_identity?: string;
+    model: string | null;
+  };
   // 固定流程怎么跑的：name=full 是完整检索（改写 + 判断，旧记录没有，是规则检索词、只检索）。
-  flow?: { name: string; intent_prompt: string; model: string; rewrite_cached: number; rewrite_fresh: number; sufficiency: boolean };
+  flow?: {
+    name: string;
+    intent_prompt: string;
+    model: string;
+    rewrite_cached: number;
+    rewrite_fresh: number;
+    sufficiency: boolean;
+  };
   // 这次评测用的全部设置页参数（评测记录里比较「参数改过」用）。
   settings?: Record<string, unknown>;
   // 这次用的评测语料（标题、内容指纹；跑完后是导入情况）。旧记录也有（当时目录里的全部语料）。
-  corpus?: { title: string; sha256?: string; status?: string; chunks?: number }[] };
+  corpus?: {
+    title: string;
+    sha256?: string;
+    status?: string;
+    chunks?: number;
+  }[];
+};
 export type EvalRunBrief = {
   id: string;
   // memory 是以前单独的多轮对话评测（现在并入专项评测集），旧记录仍然能打开。
@@ -849,18 +1295,39 @@ export type EvalRun = EvalRunBrief & {
   comparison?: Record<EvalCompareKey, number>;
   previous_id: string | null;
 };
-export type EvalComparisonRow = { key: string; label: string; direction: "higher" | "lower"; base: number | null; target: number | null; delta: number | null; change: "better" | "worse" | "same" | "unknown" };
+export type EvalComparisonRow = {
+  key: string;
+  label: string;
+  direction: "higher" | "lower";
+  base: number | null;
+  target: number | null;
+  delta: number | null;
+  change: "better" | "worse" | "same" | "unknown";
+};
 // settings_diff：两次评测用的系统参数不同的项（设置页改过），分数变化可能来自参数而不是代码。
-export type EvalComparison = { base: EvalRunBrief; target: EvalRunBrief; metrics: EvalComparisonRow[]; settings_diff?: { key: string; base: unknown; target: unknown }[] };
+export type EvalComparison = {
+  base: EvalRunBrief;
+  target: EvalRunBrief;
+  metrics: EvalComparisonRow[];
+  settings_diff?: { key: string; base: unknown; target: unknown }[];
+};
 export type EvalSuite = { key: string; label: string; variants: string[] };
-export type EvalDataset = { items: EvalItem[]; types: string[]; corpus: string[]; reviewed_count?: number; pending_count?: number };
+export type EvalDataset = {
+  items: EvalItem[];
+  types: string[];
+  corpus: string[];
+  reviewed_count?: number;
+  pending_count?: number;
+};
 
 export function getEvalDataset() {
   return request<EvalDataset>("/eval/dataset");
 }
 
 // 手动写入一道题；服务端负责生成编号、校验证据并标记为已人工录入。
-export function addEvalDatasetItem(payload: Omit<EvalItem, "id" | "origin" | "reviewed">) {
+export function addEvalDatasetItem(
+  payload: Omit<EvalItem, "id" | "origin" | "reviewed">,
+) {
   return request<EvalItem>("/eval/dataset/items", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -878,22 +1345,32 @@ export function addEvalDatasetPair(payload: {
   reference_answer: string;
   split: string;
 }) {
-  return request<{ pair_id: string; items: EvalItem[] }>("/eval/dataset/pairs", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  return request<{ pair_id: string; items: EvalItem[] }>(
+    "/eval/dataset/pairs",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 // 审核通过一道题；服务端持久化状态，之后它才会进入实际评测范围。
 export function reviewEvalDatasetItem(itemId: string) {
-  return request<EvalItem>(`/eval/dataset/items/${encodeURIComponent(itemId)}/review`, {
-    method: "POST",
-  });
+  return request<EvalItem>(
+    `/eval/dataset/items/${encodeURIComponent(itemId)}/review`,
+    {
+      method: "POST",
+    },
+  );
 }
 
 // 请求大模型起草评测题；返回的题目会被服务端标记为待人工审核。
-export function generateEvalDatasetItems(payload: { count: number; split: string; type?: string | null }) {
+export function generateEvalDatasetItems(payload: {
+  count: number;
+  split: string;
+  type?: string | null;
+}) {
   return request<{ items: EvalItem[] }>("/eval/dataset/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -902,7 +1379,11 @@ export function generateEvalDatasetItems(payload: { count: number; split: string
 }
 
 export function listEvalRuns() {
-  return request<{ runs: EvalRunBrief[]; running: string | null; suites: EvalSuite[] }>("/eval/runs");
+  return request<{
+    runs: EvalRunBrief[];
+    running: string | null;
+    suites: EvalSuite[];
+  }>("/eval/runs");
 }
 
 export function getEvalRun(runId: string) {
@@ -911,18 +1392,29 @@ export function getEvalRun(runId: string) {
 
 // 删除单条已经完成或失败的评测记录，服务端会拒绝删除正在运行的记录。
 export function deleteEvalRun(runId: string) {
-  return request<{ id: string; deleted: boolean }>(`/eval/runs/${encodeURIComponent(runId)}`, {
-    method: "DELETE",
-  });
+  return request<{ id: string; deleted: boolean }>(
+    `/eval/runs/${encodeURIComponent(runId)}`,
+    {
+      method: "DELETE",
+    },
+  );
 }
 
 export function compareEvalRuns(base: string, target: string) {
-  return request<EvalComparison>(`/eval/compare?base=${encodeURIComponent(base)}&target=${encodeURIComponent(target)}`);
+  return request<EvalComparison>(
+    `/eval/compare?base=${encodeURIComponent(base)}&target=${encodeURIComponent(target)}`,
+  );
 }
 
 // 在界面上发起一次评测：调参评测按 split 选开发集或留出集；专项评测按 suite_ids 选专项。
 // corpusIds：用评测语料库里的哪几份语料；不传（或空）就是全部。
-export function startEvalRun(kind: "retrieval" | "generation", split: string, suites: string[], modes: EvalMode[] = ["fixed"], corpusIds: string[] = []) {
+export function startEvalRun(
+  kind: "retrieval" | "generation",
+  split: string,
+  suites: string[],
+  modes: EvalMode[] = ["fixed"],
+  corpusIds: string[] = [],
+) {
   return request<{ id: string; status: string }>("/eval/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -930,46 +1422,95 @@ export function startEvalRun(kind: "retrieval" | "generation", split: string, su
   });
 }
 
-export function startSpecialRun(suiteIds: string[], compareMemory = false, modes: EvalMode[] = ["fixed"], corpusIds: string[] = []) {
+export function startSpecialRun(
+  suiteIds: string[],
+  compareMemory = false,
+  modes: EvalMode[] = ["fixed"],
+  corpusIds: string[] = [],
+) {
   return request<{ id: string; status: string }>("/eval/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind: "special", suite_ids: suiteIds, compare_memory: compareMemory, modes, corpus_ids: corpusIds }),
+    body: JSON.stringify({
+      kind: "special",
+      suite_ids: suiteIds,
+      compare_memory: compareMemory,
+      modes,
+      corpus_ids: corpusIds,
+    }),
   });
 }
 
 // ---- 评测语料库 ----
 // status：imported 已导入评测账号（chunks 个分片）；stale 内容改过、下次评测重新导入；not_imported 还没导入（下次评测开跑时导入）；
 // importing 正在导入。import_error 是上次点「导入」失败的原因。
-export type EvalCorpusStatus = "imported" | "stale" | "not_imported" | "importing";
-export type EvalCorpusEntry = { id: string; title: string; filename: string; sha256: string; char_count: number; created_by: string; created: string; missing: boolean; status: EvalCorpusStatus; chunks: number | null; import_error?: string | null };
-export type EvalCorpusUpload = { added: { id: string; title: string; filename: string; char_count: number }[]; rejected: { filename: string; reason: string }[] };
+export type EvalCorpusStatus =
+  | "imported"
+  | "stale"
+  | "not_imported"
+  | "importing";
+export type EvalCorpusEntry = {
+  id: string;
+  title: string;
+  filename: string;
+  sha256: string;
+  char_count: number;
+  created_by: string;
+  created: string;
+  missing: boolean;
+  status: EvalCorpusStatus;
+  chunks: number | null;
+  import_error?: string | null;
+};
+export type EvalCorpusUpload = {
+  added: { id: string; title: string; filename: string; char_count: number }[];
+  rejected: { filename: string; reason: string }[];
+};
 
 export function listEvalCorpus() {
-  return request<{ items: EvalCorpusEntry[]; suffixes: string[]; max_bytes: number }>("/eval/corpus");
+  return request<{
+    items: EvalCorpusEntry[];
+    suffixes: string[];
+    max_bytes: number;
+  }>("/eval/corpus");
 }
 
 export function getEvalCorpus(entryId: string) {
-  return request<{ id: string; title: string; filename: string; content: string }>(`/eval/corpus/${encodeURIComponent(entryId)}`);
+  return request<{
+    id: string;
+    title: string;
+    filename: string;
+    content: string;
+  }>(`/eval/corpus/${encodeURIComponent(entryId)}`);
 }
 
 export function uploadEvalCorpus(files: File[]) {
   const form = new FormData();
   for (const file of files) form.append("files", file);
-  return request<EvalCorpusUpload>("/eval/corpus", { method: "POST", body: form });
+  return request<EvalCorpusUpload>("/eval/corpus", {
+    method: "POST",
+    body: form,
+  });
 }
 
 // 语料在评测账号里的分片，格式和知识库文档的分块一样；stale 表示语料内容改过，这些是旧内容的分片。
 export function getEvalCorpusChunks(entryId: string, page: number) {
-  return request<DocumentChunkPage & { stale: boolean }>(`/eval/corpus/${encodeURIComponent(entryId)}/chunks?page=${page}&page_size=10`);
+  return request<DocumentChunkPage & { stale: boolean }>(
+    `/eval/corpus/${encodeURIComponent(entryId)}/chunks?page=${page}&page_size=10`,
+  );
 }
 
 export function importEvalCorpus(entryId: string) {
-  return request<{ id: string; status: string }>(`/eval/corpus/${encodeURIComponent(entryId)}/import`, { method: "POST" });
+  return request<{ id: string; status: string }>(
+    `/eval/corpus/${encodeURIComponent(entryId)}/import`,
+    { method: "POST" },
+  );
 }
 
 export function deleteEvalCorpus(entryId: string) {
-  return requestEmpty(`/eval/corpus/${encodeURIComponent(entryId)}`, { method: "DELETE" });
+  return requestEmpty(`/eval/corpus/${encodeURIComponent(entryId)}`, {
+    method: "DELETE",
+  });
 }
 
 // ---- 专项评测集 ----
@@ -977,16 +1518,66 @@ export function deleteEvalCorpus(entryId: string) {
 export type EvalSuiteMethod = "retrieval" | "answer" | "dialogue";
 // 检索、回答方式用哪几路检索：混合（默认）、只用向量、只用关键词。
 export type EvalSuiteSearchMode = "hybrid" | "dense" | "keyword";
-export type EvalSuiteRunEntry = { id: string; status: "running" | "completed" | "failed" | "interrupted"; created: string; finished: string | null; summary: { name: string; method: EvalSuiteMethod; count: number; passed: number } | null };
-export type EvalSuiteBrief = { id: string; name: string; description: string; method: EvalSuiteMethod; method_label: string; search_mode: EvalSuiteSearchMode; search_mode_label: string; created_by: string; created: string; updated: string; item_count: number; latest: EvalSuiteRunEntry | null };
-export type EvalScoringTarget = { title: string; position: number; fingerprint: string; quote: string };
+export type EvalSuiteRunEntry = {
+  id: string;
+  status: "running" | "completed" | "failed" | "interrupted";
+  created: string;
+  finished: string | null;
+  summary: {
+    name: string;
+    method: EvalSuiteMethod;
+    count: number;
+    passed: number;
+  } | null;
+};
+export type EvalSuiteBrief = {
+  id: string;
+  name: string;
+  description: string;
+  method: EvalSuiteMethod;
+  method_label: string;
+  search_mode: EvalSuiteSearchMode;
+  search_mode_label: string;
+  created_by: string;
+  created: string;
+  updated: string;
+  item_count: number;
+  latest: EvalSuiteRunEntry | null;
+};
+export type EvalScoringTarget = {
+  title: string;
+  position: number;
+  fingerprint: string;
+  quote: string;
+};
 export type EvalScoringGroup = { label: string; targets: EvalScoringTarget[] };
 export function listEvalTargetChunks() {
   return request<{ items: EvalScoringTarget[] }>("/eval/target-chunks");
 }
-export type EvalSuiteItem = { evidence_groups?: EvalScoringGroup[]; id: string; question: string; evidence?: string[]; reference_answer?: string; turns?: string[]; type?: string; created_by: string; created: string; updated: string };
-export type EvalSuiteFull = EvalSuiteBrief & { items: EvalSuiteItem[]; runs: EvalSuiteRunEntry[] };
-export type EvalSuiteItemInput = { evidence_groups?: EvalScoringGroup[]; question: string; evidence?: string[]; reference_answer?: string | null; turns?: string[]; type?: string | null };
+export type EvalSuiteItem = {
+  evidence_groups?: EvalScoringGroup[];
+  id: string;
+  question: string;
+  evidence?: string[];
+  reference_answer?: string;
+  turns?: string[];
+  type?: string;
+  created_by: string;
+  created: string;
+  updated: string;
+};
+export type EvalSuiteFull = EvalSuiteBrief & {
+  items: EvalSuiteItem[];
+  runs: EvalSuiteRunEntry[];
+};
+export type EvalSuiteItemInput = {
+  evidence_groups?: EvalScoringGroup[];
+  question: string;
+  evidence?: string[];
+  reference_answer?: string | null;
+  turns?: string[];
+  type?: string | null;
+};
 // 一道专项题的结果。检索 / 回答：每条证据在向量、关键词检索里排第几、最后有没有返回；多轮对话：最后一问的回答和评审。
 export type EvalSpecialQuestion = {
   id: string;
@@ -996,7 +1587,13 @@ export type EvalSpecialQuestion = {
   passed: boolean;
   previous_passed?: boolean | null;
   reference_answer?: string | null;
-  evidence?: { text: string; dense_rank: number | null; keyword_rank: number | null; rerank_rank: number | null; status: string | null }[];
+  evidence?: (EvalEvidenceGroup & {
+    text: string;
+    dense_rank: number | null;
+    keyword_rank: number | null;
+    rerank_rank: number | null;
+    status: string | null;
+  })[];
   found?: boolean;
   lost_stage?: "recall" | "rerank" | "threshold" | null;
   returned?: number;
@@ -1015,9 +1612,23 @@ export type EvalSpecialQuestion = {
   agent?: EvalAgentQuestion;
   recall_final?: number;
   given_recall?: number | null;
-  fixed_evidence?: (EvalEvidenceGroup & { text: string; chunk_id: string | null; source_id: string | null; status: string | null; given?: boolean; first_given?: boolean;
-    via?: "direct" | "extension" | null; rrf_rank?: number | null; rerank_rank?: number | null; rerank_probability?: number | null })[];
-  sources?: (Source & { chunk_id?: string | null; position?: number | null; parent_chunk_ids?: string[] })[];
+  fixed_evidence?: (EvalEvidenceGroup & {
+    text: string;
+    chunk_id: string | null;
+    source_id: string | null;
+    status: string | null;
+    given?: boolean;
+    first_given?: boolean;
+    via?: "direct" | "extension" | null;
+    rrf_rank?: number | null;
+    rerank_rank?: number | null;
+    rerank_probability?: number | null;
+  })[];
+  sources?: (Source & {
+    chunk_id?: string | null;
+    position?: number | null;
+    parent_chunk_ids?: string[];
+  })[];
   queries?: string[];
   rerank_query?: string;
   latency_ms?: number;
@@ -1037,55 +1648,138 @@ export type EvalSpecialSection = {
   dense_found?: number;
   keyword_found?: number;
   questions: EvalSpecialQuestion[];
-  variants?: { name: string; label: string; passed: number; correctness: number | null; summarized_rate: number | null; input_tokens_avg: number | null }[];
+  variants?: {
+    name: string;
+    label: string;
+    passed: number;
+    correctness: number | null;
+    summarized_rate: number | null;
+    input_tokens_avg: number | null;
+  }[];
   previous?: { id: string; created: string; passed: number; count: number };
   // 勾了 Agent 时：跑了哪些模式、Agent 通过数、Agent 的上一次、Agent 运行配置。
   modes?: EvalMode[];
   agent_passed?: number;
-  previous_agent?: { id: string; created: string; passed: number | null; count: number };
-  agent?: { tool_budget: number; timeout: number; prompt_version: string; model: string | null };
+  previous_agent?: {
+    id: string;
+    created: string;
+    passed: number | null;
+    count: number;
+  };
+  agent?: {
+    tool_budget: number;
+    timeout: number;
+    prompt_version: string;
+    model: string | null;
+  };
   // 按题目类型的通过数（没有题标类型时没有）。
-  by_type?: { type: string; count: number; passed: number; fixed_passed?: number; agent_passed?: number; evidence_total?: number; fixed_hits?: number; agent_hits?: number; fixed_score?: number; agent_score?: number }[] | null;
+  by_type?:
+    | {
+        type: string;
+        count: number;
+        passed: number;
+        fixed_passed?: number;
+        agent_passed?: number;
+        evidence_total?: number;
+        fixed_hits?: number;
+        agent_hits?: number;
+        fixed_score?: number;
+        agent_score?: number;
+      }[]
+    | null;
   // 两边的平均得分和分档计数（规则见 app/evaluation/score.py，旧记录没有）。
-  fixed_score?: number | null; agent_score?: number | null;
+  fixed_score?: number | null;
+  agent_score?: number | null;
   // 前端补上的：这次评测的配置（检索参数、改写缓存），给模式卡片显示。
   run_config?: EvalConfig;
 };
 
 export function listEvalSuites() {
-  return request<{ items: EvalSuiteBrief[]; methods: Record<EvalSuiteMethod, string> }>("/eval/suites");
+  return request<{
+    items: EvalSuiteBrief[];
+    methods: Record<EvalSuiteMethod, string>;
+  }>("/eval/suites");
 }
 
 export function getEvalSuite(suiteId: string) {
   return request<EvalSuiteFull>(`/eval/suites/${encodeURIComponent(suiteId)}`);
 }
 
-export function createEvalSuite(payload: { name: string; description?: string; method: EvalSuiteMethod; search_mode?: EvalSuiteSearchMode }) {
-  return request<EvalSuiteFull>("/eval/suites", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+export function createEvalSuite(payload: {
+  name: string;
+  description?: string;
+  method: EvalSuiteMethod;
+  search_mode?: EvalSuiteSearchMode;
+}) {
+  return request<EvalSuiteFull>("/eval/suites", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }
 
-export function updateEvalSuite(suiteId: string, payload: { name: string; description?: string; method: EvalSuiteMethod; search_mode?: EvalSuiteSearchMode }) {
-  return request<EvalSuiteFull>(`/eval/suites/${encodeURIComponent(suiteId)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+export function updateEvalSuite(
+  suiteId: string,
+  payload: {
+    name: string;
+    description?: string;
+    method: EvalSuiteMethod;
+    search_mode?: EvalSuiteSearchMode;
+  },
+) {
+  return request<EvalSuiteFull>(`/eval/suites/${encodeURIComponent(suiteId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }
 
 export function deleteEvalSuite(suiteId: string) {
-  return request<{ id: string; deleted: boolean }>(`/eval/suites/${encodeURIComponent(suiteId)}`, { method: "DELETE" });
+  return request<{ id: string; deleted: boolean }>(
+    `/eval/suites/${encodeURIComponent(suiteId)}`,
+    { method: "DELETE" },
+  );
 }
 
 export function addEvalSuiteItem(suiteId: string, payload: EvalSuiteItemInput) {
-  return request<EvalSuiteFull>(`/eval/suites/${encodeURIComponent(suiteId)}/items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  return request<EvalSuiteFull>(
+    `/eval/suites/${encodeURIComponent(suiteId)}/items`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
-export function updateEvalSuiteItem(suiteId: string, itemId: string, payload: EvalSuiteItemInput) {
-  return request<EvalSuiteFull>(`/eval/suites/${encodeURIComponent(suiteId)}/items/${encodeURIComponent(itemId)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+export function updateEvalSuiteItem(
+  suiteId: string,
+  itemId: string,
+  payload: EvalSuiteItemInput,
+) {
+  return request<EvalSuiteFull>(
+    `/eval/suites/${encodeURIComponent(suiteId)}/items/${encodeURIComponent(itemId)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 export function deleteEvalSuiteItem(suiteId: string, itemId: string) {
-  return request<EvalSuiteFull>(`/eval/suites/${encodeURIComponent(suiteId)}/items/${encodeURIComponent(itemId)}`, { method: "DELETE" });
+  return request<EvalSuiteFull>(
+    `/eval/suites/${encodeURIComponent(suiteId)}/items/${encodeURIComponent(itemId)}`,
+    { method: "DELETE" },
+  );
 }
 
 // 知识巡检（只有管理员可见）：从问答日志合并出来的问题。
-export type InspectionKind = "knowledge_gap" | "suspect_content" | "system_error" | "parse_quality";
+export type InspectionKind =
+  | "knowledge_gap"
+  | "suspect_content"
+  | "system_error"
+  | "parse_quality";
 export type InspectionStatus = "open" | "handled" | "resolved" | "ignored";
 export type InspectionIssueDetail = {
   signals?: Record<string, number>;
@@ -1107,7 +1801,11 @@ export type InspectionIssueDetail = {
   diagnosis?: InspectionDiagnosis;
   // 标记已处理后验证没通过时的说明。
   verification?: { passed: boolean; at: string; message: string };
-  reopened?: { at: string; previous_status: InspectionStatus; new_occurrences: number };
+  reopened?: {
+    at: string;
+    previous_status: InspectionStatus;
+    new_occurrences: number;
+  };
   // 系统问题最近一次重新提问验证的结果。
   recheck?: InspectionRecheck;
   // 关联记录上"重新提问"的最近一次结果，键是 "run:编号" 或 "error:编号"。
@@ -1121,8 +1819,25 @@ export type InspectionIssueDetail = {
   checked_by?: string;
   problems?: InspectionParseProblem[];
 };
-export type InspectionParseProblem = { code: "empty" | "garbled" | "spaced" | "repeated" | "fragments"; label: string; value: number; message: string; examples: string[] };
-export type InspectionRecheck = { at: string; trigger: "inspection" | "manual"; by: string | null; question: string; owner: string; passed: boolean; message: string; answer?: string; route?: string; error?: string };
+export type InspectionParseProblem = {
+  code: "empty" | "garbled" | "spaced" | "repeated" | "fragments";
+  label: string;
+  value: number;
+  message: string;
+  examples: string[];
+};
+export type InspectionRecheck = {
+  at: string;
+  trigger: "inspection" | "manual";
+  by: string | null;
+  question: string;
+  owner: string;
+  passed: boolean;
+  message: string;
+  answer?: string;
+  route?: string;
+  error?: string;
+};
 // 以提问人的身份把问题完整再问一遍的结果；出错时只有 error。
 export type InspectionReplay = {
   at: string;
@@ -1138,10 +1853,37 @@ export type InspectionReplay = {
   sources?: { id: string; title: string; score?: number | null }[];
   error?: string;
 };
-export type InspectionDiagnosisCategory = "answerable" | "permission" | "routing" | "retrieval" | "content" | "out_of_scope" | "unknown";
-export type InspectionDiagnosisDocument = { title: string; doc_key: string; owner: string; visibility: string; visibility_label?: string | null; groups: string[]; score?: number | null };
+export type InspectionDiagnosisCategory =
+  | "answerable"
+  | "permission"
+  | "routing"
+  | "retrieval"
+  | "content"
+  | "out_of_scope"
+  | "unknown";
+export type InspectionDiagnosisDocument = {
+  title: string;
+  doc_key: string;
+  owner: string;
+  visibility: string;
+  visibility_label?: string | null;
+  groups: string[];
+  score?: number | null;
+};
 // 重新检索时得分最高的几段资料：scope=mine 是按提问人权限检索到的，all 是全库检索到、提问人看不到的。
-export type InspectionDiagnosisChunk = { chunk_id: string; scope: "mine" | "all"; title: string; version?: number | null; page_start?: number | null; heading?: string | null; score: number; passed: boolean; visible: boolean; text: string; truncated: boolean };
+export type InspectionDiagnosisChunk = {
+  chunk_id: string;
+  scope: "mine" | "all";
+  title: string;
+  version?: number | null;
+  page_start?: number | null;
+  heading?: string | null;
+  score: number;
+  passed: boolean;
+  visible: boolean;
+  text: string;
+  truncated: boolean;
+};
 export type InspectionDiagnosis = {
   category: InspectionDiagnosisCategory;
   label: string;
@@ -1151,14 +1893,54 @@ export type InspectionDiagnosis = {
   // inspection：巡检时自动验证；manual：管理员点了"重新检索"。
   trigger?: "inspection" | "manual";
   checked_by?: string | null;
-  questions: { question: string; owner: string; category: InspectionDiagnosisCategory; label: string; reason?: string; user_top: number | null; full_top: number | null; documents: InspectionDiagnosisDocument[]; chunks?: InspectionDiagnosisChunk[];
+  questions: {
+    question: string;
+    owner: string;
+    category: InspectionDiagnosisCategory;
+    label: string;
+    reason?: string;
+    user_top: number | null;
+    full_top: number | null;
+    documents: InspectionDiagnosisDocument[];
+    chunks?: InspectionDiagnosisChunk[];
     // 问题提到了业务数据时，用当前的意图识别和分流规则判断会分到哪里；rerouted 表示现在会分到数据查询。
-    routing?: { route: string; route_label: string; classifier?: string | null; reason?: string | null; data_types: string[] }; rerouted?: boolean }[];
+    routing?: {
+      route: string;
+      route_label: string;
+      classifier?: string | null;
+      reason?: string | null;
+      data_types: string[];
+    };
+    rerouted?: boolean;
+  }[];
 };
-export type InspectionFixType = "add_content" | "update_content" | "fix_parsing" | "grant_permission" | "tune_retrieval" | "tune_routing" | "update_prompt" | "fix_system" | "other";
-export type InspectionCloseReason = "out_of_scope" | "by_design_permission" | "not_covered" | "invalid_feedback" | "transient" | "other";
+export type InspectionFixType =
+  | "add_content"
+  | "update_content"
+  | "fix_parsing"
+  | "grant_permission"
+  | "tune_retrieval"
+  | "tune_routing"
+  | "update_prompt"
+  | "fix_system"
+  | "other";
+export type InspectionCloseReason =
+  | "out_of_scope"
+  | "by_design_permission"
+  | "not_covered"
+  | "invalid_feedback"
+  | "transient"
+  | "other";
 // 页面顶部统计：最近 N 天没答上来的问答，按所属问题的处理结果分组。
-export type InspectionGapSummary = { days: number; total: number; reasonable: number; reasonable_by_reason: Partial<Record<InspectionCloseReason, number>>; other_ignored: number; resolved: number; pending: number };
+export type InspectionGapSummary = {
+  days: number;
+  total: number;
+  reasonable: number;
+  reasonable_by_reason: Partial<Record<InspectionCloseReason, number>>;
+  other_ignored: number;
+  resolved: number;
+  pending: number;
+};
 export type InspectionIssue = {
   id: string;
   kind: InspectionKind;
@@ -1197,20 +1979,63 @@ export type InspectionEvent = {
   // 最终交给模型的资料段数。
   returned?: number | null;
   // 被相关度阈值挡掉、没交给模型的资料里得分最高的一段。
-  filtered?: { chunk_id: string; title: string | null; heading?: string | null; version?: number | null; page_start?: number | null; score: number; min_score?: number | null; text: string; truncated: boolean }[];
+  filtered?: {
+    chunk_id: string;
+    title: string | null;
+    heading?: string | null;
+    version?: number | null;
+    page_start?: number | null;
+    score: number;
+    min_score?: number | null;
+    text: string;
+    truncated: boolean;
+  }[];
   // 引用检查明细；回答被拦截时带模型原话。记录这项信息之前的问答为空。
-  citation?: { passed: boolean; reason: "no_citation" | "unknown_source" | null; source_ids: string[]; cited: string[]; unknown: string[]; raw_answer?: string } | null;
+  citation?: {
+    passed: boolean;
+    reason: "no_citation" | "unknown_source" | null;
+    source_ids: string[];
+    cited: string[];
+    unknown: string[];
+    raw_answer?: string;
+  } | null;
   // 调用摘要：调用的模型及用途、重排模型、提示词版本、Token 用量、总耗时。
-  call?: { models: { name: string; steps: string[] }[]; rerank_model?: string | null; prompt_version?: string | null; token_usage?: { input?: number | null; output?: number | null; total?: number | null } | null; duration_ms?: number | null };
+  call?: {
+    models: { name: string; steps: string[] }[];
+    rerank_model?: string | null;
+    prompt_version?: string | null;
+    token_usage?: {
+      input?: number | null;
+      output?: number | null;
+      total?: number | null;
+    } | null;
+    duration_ms?: number | null;
+  };
   // 交给模型的资料原文，按 S1、S2… 排列。
-  sources?: { id: string; title: string; heading?: string | null; page_start?: number | null; version?: number | null; score?: number | null; text: string; truncated: boolean }[];
+  sources?: {
+    id: string;
+    title: string;
+    heading?: string | null;
+    page_start?: number | null;
+    version?: number | null;
+    score?: number | null;
+    text: string;
+    truncated: boolean;
+  }[];
   missing?: string[];
-  feedback?: { rating: number; reason: FeedbackReason | null; comment: string | null } | null;
+  feedback?: {
+    rating: number;
+    reason: FeedbackReason | null;
+    comment: string | null;
+  } | null;
   error?: string;
   last_step?: string | null;
   status_code?: number;
 };
-export type InspectionIssueFull = InspectionIssue & { events: InspectionEvent[]; verify_result?: Record<string, number> };
+export type InspectionIssueFull = InspectionIssue & {
+  events: InspectionEvent[];
+  verify_result?: Record<string, number>;
+};
 export type InspectionRun = {
   id: string;
   status: "running" | "completed" | "failed";
@@ -1231,7 +2056,9 @@ export type InspectionIssuePage = {
   kind_counts: Partial<Record<InspectionKind, number>>;
   reason_counts: Partial<Record<InspectionCloseReason | "none", number>>;
   // 知识缺口按拒答分类结论计数（none 是还没诊断过的），diagnoses 是结论的中文名。
-  diagnosis_counts: Partial<Record<InspectionDiagnosisCategory | "none", number>>;
+  diagnosis_counts: Partial<
+    Record<InspectionDiagnosisCategory | "none", number>
+  >;
   diagnoses: Record<InspectionDiagnosisCategory, string>;
   gap_summary: InspectionGapSummary;
   close_reasons: Record<InspectionCloseReason, string>;
@@ -1243,7 +2070,13 @@ export type InspectionIssuePage = {
   signals: Record<string, string>;
 };
 
-export function listInspectionIssues(params: { status?: InspectionStatus | null; kind?: InspectionKind | null; reason?: InspectionCloseReason | "none" | null; diagnosis?: InspectionDiagnosisCategory | "none" | null; page?: number }) {
+export function listInspectionIssues(params: {
+  status?: InspectionStatus | null;
+  kind?: InspectionKind | null;
+  reason?: InspectionCloseReason | "none" | null;
+  diagnosis?: InspectionDiagnosisCategory | "none" | null;
+  page?: number;
+}) {
   const query = new URLSearchParams();
   if (params.status) query.set("status", params.status);
   if (params.kind) query.set("kind", params.kind);
@@ -1254,27 +2087,58 @@ export function listInspectionIssues(params: { status?: InspectionStatus | null;
 }
 
 export function getInspectionIssue(issueId: string) {
-  return request<InspectionIssueFull>(`/inspection/issues/${encodeURIComponent(issueId)}`);
+  return request<InspectionIssueFull>(
+    `/inspection/issues/${encodeURIComponent(issueId)}`,
+  );
 }
 
 // 手动标记状态（待处理 / 已处理 / 已忽略）或修改备注；已解决只由巡检自动设置。
-export function updateInspectionIssue(issueId: string, payload: { status?: "open" | "handled" | "ignored"; note?: string; close_reason?: InspectionCloseReason; fix_type?: InspectionFixType }) {
-  return request<InspectionIssueFull>(`/inspection/issues/${encodeURIComponent(issueId)}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+export function updateInspectionIssue(
+  issueId: string,
+  payload: {
+    status?: "open" | "handled" | "ignored";
+    note?: string;
+    close_reason?: InspectionCloseReason;
+    fix_type?: InspectionFixType;
+  },
+) {
+  return request<InspectionIssueFull>(
+    `/inspection/issues/${encodeURIComponent(issueId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 // 定时巡检设置：daily 每天 time 执行，interval 每隔 interval_hours 小时；days 是扫描最近多少天的问答。
-export type InspectionSchedule = { enabled: boolean; mode: "daily" | "interval"; time: string; interval_hours: number; days: number; updated?: string | null; updated_by?: string | null };
-export type InspectionScheduleView = { schedule: InspectionSchedule; next_run: string | null; last_scheduled_run: string | null; timezone: string };
+export type InspectionSchedule = {
+  enabled: boolean;
+  mode: "daily" | "interval";
+  time: string;
+  interval_hours: number;
+  days: number;
+  updated?: string | null;
+  updated_by?: string | null;
+};
+export type InspectionScheduleView = {
+  schedule: InspectionSchedule;
+  next_run: string | null;
+  last_scheduled_run: string | null;
+  timezone: string;
+};
 
 export function getInspectionSchedule() {
   return request<InspectionScheduleView>("/inspection/schedule");
 }
 
-export function saveInspectionSchedule(payload: Pick<InspectionSchedule, "enabled" | "mode" | "time" | "interval_hours" | "days">) {
+export function saveInspectionSchedule(
+  payload: Pick<
+    InspectionSchedule,
+    "enabled" | "mode" | "time" | "interval_hours" | "days"
+  >,
+) {
   return request<InspectionScheduleView>("/inspection/schedule", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -1284,35 +2148,137 @@ export function saveInspectionSchedule(payload: Pick<InspectionSchedule, "enable
 
 // 立即重新检索一个知识缺口，同步返回更新后的问题。
 export function verifyInspectionIssue(issueId: string) {
-  return request<InspectionIssueFull>(`/inspection/issues/${encodeURIComponent(issueId)}/verify`, { method: "POST" });
+  return request<InspectionIssueFull>(
+    `/inspection/issues/${encodeURIComponent(issueId)}/verify`,
+    { method: "POST" },
+  );
 }
 
 // 关联记录上的"重新提问"：以提问人的身份完整再问一遍，要调用大模型，可能需要十几秒。
-export function replayInspectionEvent(issueId: string, source: "run" | "error", sourceId: string) {
-  return request<InspectionReplay>(`/inspection/issues/${encodeURIComponent(issueId)}/events/${source}/${encodeURIComponent(sourceId)}/replay`, { method: "POST" });
+export function replayInspectionEvent(
+  issueId: string,
+  source: "run" | "error",
+  sourceId: string,
+) {
+  return request<InspectionReplay>(
+    `/inspection/issues/${encodeURIComponent(issueId)}/events/${source}/${encodeURIComponent(sourceId)}/replay`,
+    { method: "POST" },
+  );
 }
 
 // ---- 线上回归集 ----
 // 管理员自建的评测集，题目多数从知识巡检加入，按提问人的权限在线上知识库里跑。
 export type EvalSetExpect = "answer" | "refuse";
 export type EvalSetKind = "retrieval" | "generation";
-export type EvalSetRunSummary = { total?: number; done?: number; passed?: number; failed?: number; pass_rate?: number | null; by_expect?: Partial<Record<EvalSetExpect, { total: number; passed: number }>>; previous?: { id: string; started: string } | null; changes?: Partial<Record<"fixed" | "regressed" | "new", number>> };
-export type EvalSetLatest = { id: string; status: string; summary: EvalSetRunSummary; started: string; finished: string | null };
-export type EvalSetBrief = { id: string; name: string; description: string | null; created_by: string; created: string; updated: string; item_count: number; latest: Partial<Record<EvalSetKind, EvalSetLatest>> };
-export type EvalSetDocument = { doc_key: string; title: string; score?: number | null };
-export type EvalSetItem = { id: string; set_id: string; question: string; asker: string; expect: EvalSetExpect; expect_label: string; documents: EvalSetDocument[]; reference_answer: string | null; note: string | null; issue_id: string | null; created_by: string; created: string };
-export type EvalSetRun = { id: string; set_id: string; kind: EvalSetKind; kind_label: string; status: "running" | "completed" | "failed" | "interrupted"; triggered_by: string | null; summary: EvalSetRunSummary; error: string | null; started: string; finished: string | null };
-export type EvalSetResult = { item_id: string; question: string; asker: string; expect: EvalSetExpect; passed: boolean; reason: string; top_score?: number | null; documents?: EvalSetDocument[]; route?: string; refused?: boolean; answer?: string; judge?: { correctness?: number; correctness_reason?: string } | null; change?: "fixed" | "regressed" | "new"; error?: boolean };
+export type EvalSetRunSummary = {
+  total?: number;
+  done?: number;
+  passed?: number;
+  failed?: number;
+  pass_rate?: number | null;
+  by_expect?: Partial<Record<EvalSetExpect, { total: number; passed: number }>>;
+  previous?: { id: string; started: string } | null;
+  changes?: Partial<Record<"fixed" | "regressed" | "new", number>>;
+};
+export type EvalSetLatest = {
+  id: string;
+  status: string;
+  summary: EvalSetRunSummary;
+  started: string;
+  finished: string | null;
+};
+export type EvalSetBrief = {
+  id: string;
+  name: string;
+  description: string | null;
+  created_by: string;
+  created: string;
+  updated: string;
+  item_count: number;
+  latest: Partial<Record<EvalSetKind, EvalSetLatest>>;
+};
+export type EvalSetDocument = {
+  doc_key: string;
+  title: string;
+  score?: number | null;
+};
+export type EvalSetItem = {
+  id: string;
+  set_id: string;
+  question: string;
+  asker: string;
+  expect: EvalSetExpect;
+  expect_label: string;
+  documents: EvalSetDocument[];
+  reference_answer: string | null;
+  note: string | null;
+  issue_id: string | null;
+  created_by: string;
+  created: string;
+};
+export type EvalSetRun = {
+  id: string;
+  set_id: string;
+  kind: EvalSetKind;
+  kind_label: string;
+  status: "running" | "completed" | "failed" | "interrupted";
+  triggered_by: string | null;
+  summary: EvalSetRunSummary;
+  error: string | null;
+  started: string;
+  finished: string | null;
+};
+export type EvalSetResult = {
+  item_id: string;
+  question: string;
+  asker: string;
+  expect: EvalSetExpect;
+  passed: boolean;
+  reason: string;
+  top_score?: number | null;
+  documents?: EvalSetDocument[];
+  route?: string;
+  refused?: boolean;
+  answer?: string;
+  judge?: { correctness?: number; correctness_reason?: string } | null;
+  change?: "fixed" | "regressed" | "new";
+  error?: boolean;
+};
 export type EvalSetRunFull = EvalSetRun & { results: EvalSetResult[] };
-export type EvalSetFull = EvalSetBrief & { items: EvalSetItem[]; runs: EvalSetRun[] };
-export type EvalSetItemInput = { question: string; asker: string; expect: EvalSetExpect; documents?: string[]; reference_answer?: string | null; note?: string | null; issue_id?: string | null };
-export type EvalCandidates = { issue_id: string; kind: InspectionKind; candidates: { question: string; original: string; asker: string; in_sets: string[] }[]; expect: EvalSetExpect; documents: EvalSetDocument[]; hint: string };
+export type EvalSetFull = EvalSetBrief & {
+  items: EvalSetItem[];
+  runs: EvalSetRun[];
+};
+export type EvalSetItemInput = {
+  question: string;
+  asker: string;
+  expect: EvalSetExpect;
+  documents?: string[];
+  reference_answer?: string | null;
+  note?: string | null;
+  issue_id?: string | null;
+};
+export type EvalCandidates = {
+  issue_id: string;
+  kind: InspectionKind;
+  candidates: {
+    question: string;
+    original: string;
+    asker: string;
+    in_sets: string[];
+  }[];
+  expect: EvalSetExpect;
+  documents: EvalSetDocument[];
+  hint: string;
+};
 
 // 删除接口返回 204 没有内容，不能按 JSON 解析。
 async function requestEmpty(path: string, options: RequestInit = {}) {
   const response = await authorizedFetch(path, options);
   if (!response.ok) {
-    const body = await response.json().catch(() => ({ detail: response.statusText }));
+    const body = await response
+      .json()
+      .catch(() => ({ detail: response.statusText }));
     throw new Error(body.detail || `请求失败：${response.status}`);
   }
 }
@@ -1322,49 +2288,96 @@ export function listEvalSets() {
 }
 
 export function createEvalSet(name: string, description?: string) {
-  return request<EvalSetFull>("/eval/sets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, description }) });
+  return request<EvalSetFull>("/eval/sets", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, description }),
+  });
 }
 
 export function getEvalSet(setId: string) {
   return request<EvalSetFull>(`/eval/sets/${encodeURIComponent(setId)}`);
 }
 
-export function updateEvalSet(setId: string, payload: { name?: string; description?: string }) {
-  return request<EvalSetFull>(`/eval/sets/${encodeURIComponent(setId)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+export function updateEvalSet(
+  setId: string,
+  payload: { name?: string; description?: string },
+) {
+  return request<EvalSetFull>(`/eval/sets/${encodeURIComponent(setId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }
 
 export function deleteEvalSet(setId: string) {
-  return requestEmpty(`/eval/sets/${encodeURIComponent(setId)}`, { method: "DELETE" });
+  return requestEmpty(`/eval/sets/${encodeURIComponent(setId)}`, {
+    method: "DELETE",
+  });
 }
 
 export function addEvalSetItems(setId: string, items: EvalSetItemInput[]) {
-  return request<{ items: EvalSetItem[] }>(`/eval/sets/${encodeURIComponent(setId)}/items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items }) });
+  return request<{ items: EvalSetItem[] }>(
+    `/eval/sets/${encodeURIComponent(setId)}/items`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items }),
+    },
+  );
 }
 
-export function updateEvalSetItem(setId: string, itemId: string, item: EvalSetItemInput) {
-  return request<EvalSetItem>(`/eval/sets/${encodeURIComponent(setId)}/items/${encodeURIComponent(itemId)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(item) });
+export function updateEvalSetItem(
+  setId: string,
+  itemId: string,
+  item: EvalSetItemInput,
+) {
+  return request<EvalSetItem>(
+    `/eval/sets/${encodeURIComponent(setId)}/items/${encodeURIComponent(itemId)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(item),
+    },
+  );
 }
 
 // 编辑题目时可选的期望文档（所有文档的当前版本）。
 export function listEvalDocuments() {
-  return request<{ documents: { doc_key: string; title: string; owner: string }[] }>("/eval/documents");
+  return request<{
+    documents: { doc_key: string; title: string; owner: string }[];
+  }>("/eval/documents");
 }
 
 export function deleteEvalSetItem(setId: string, itemId: string) {
-  return requestEmpty(`/eval/sets/${encodeURIComponent(setId)}/items/${encodeURIComponent(itemId)}`, { method: "DELETE" });
+  return requestEmpty(
+    `/eval/sets/${encodeURIComponent(setId)}/items/${encodeURIComponent(itemId)}`,
+    { method: "DELETE" },
+  );
 }
 
 export function startEvalSetRun(setId: string, kind: EvalSetKind) {
-  return request<{ id: string; status: string }>(`/eval/sets/${encodeURIComponent(setId)}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind }) });
+  return request<{ id: string; status: string }>(
+    `/eval/sets/${encodeURIComponent(setId)}/runs`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind }),
+    },
+  );
 }
 
 export function getEvalSetRun(setId: string, runId: string) {
-  return request<EvalSetRunFull>(`/eval/sets/${encodeURIComponent(setId)}/runs/${encodeURIComponent(runId)}`);
+  return request<EvalSetRunFull>(
+    `/eval/sets/${encodeURIComponent(setId)}/runs/${encodeURIComponent(runId)}`,
+  );
 }
 
 // 把巡检问题加入回归集前的预填内容。
 export function getInspectionEvalCandidates(issueId: string) {
-  return request<EvalCandidates>(`/inspection/issues/${encodeURIComponent(issueId)}/eval-candidates`);
+  return request<EvalCandidates>(
+    `/inspection/issues/${encodeURIComponent(issueId)}/eval-candidates`,
+  );
 }
 
 // 立即巡检，在服务端后台执行；完成后问题列表的 running 变为 false。
@@ -1387,7 +2400,12 @@ export type LLMSettings = {
   source: "env" | "settings";
   updated: string | null;
 };
-export type LLMSettingsInput = { provider: string; base_url: string; model: string; api_key?: string | null };
+export type LLMSettingsInput = {
+  provider: string;
+  base_url: string;
+  model: string;
+  api_key?: string | null;
+};
 
 export function getLLMSettings() {
   return request<LLMSettings>("/settings/llm");
@@ -1404,26 +2422,53 @@ export function saveLLMSettings(payload: LLMSettingsInput) {
 
 // 只发一次很短的请求检查配置是否可用，不保存。
 export function testLLMSettings(payload: LLMSettingsInput) {
-  return request<{ ok: boolean; latency_ms: number; reply: string }>("/settings/llm/test", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  return request<{ ok: boolean; latency_ms: number; reply: string }>(
+    "/settings/llm/test",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 // ---- 系统参数 ----
 // 设置页「系统参数」：每一项的当前值、来源（settings 设置页 / env .env / default 代码默认值）、默认值和允许范围。
 export type RuntimeSettingValue = boolean | number | string;
-export type RuntimeSettingItem = { key: string; group: string; type: "float" | "int" | "bool" | "choice"; default: RuntimeSettingValue; value: RuntimeSettingValue; source: "settings" | "default"; advanced: boolean; min?: number; max?: number; choices?: string[] };
-export type RuntimeSettingChange = { key: string; before: RuntimeSettingValue; after: RuntimeSettingValue };
-export type RuntimeSettingsView = { items: RuntimeSettingItem[]; groups: Record<string, string>; pages?: Record<string, "rag" | "system">; history: { at: string; by: string; changes: RuntimeSettingChange[] }[]; cache_seconds: number; changed?: RuntimeSettingChange[] };
+export type RuntimeSettingItem = {
+  key: string;
+  group: string;
+  type: "float" | "int" | "bool" | "choice";
+  default: RuntimeSettingValue;
+  value: RuntimeSettingValue;
+  source: "settings" | "default";
+  advanced: boolean;
+  min?: number;
+  max?: number;
+  choices?: string[];
+};
+export type RuntimeSettingChange = {
+  key: string;
+  before: RuntimeSettingValue;
+  after: RuntimeSettingValue;
+};
+export type RuntimeSettingsView = {
+  items: RuntimeSettingItem[];
+  groups: Record<string, string>;
+  pages?: Record<string, "rag" | "system">;
+  history: { at: string; by: string; changes: RuntimeSettingChange[] }[];
+  cache_seconds: number;
+  changed?: RuntimeSettingChange[];
+};
 
 export function getRuntimeSettings() {
   return request<RuntimeSettingsView>("/settings/runtime");
 }
 
 // changes 里值为 null 表示恢复默认（回到 .env 或代码默认值）。
-export function saveRuntimeSettings(changes: Record<string, RuntimeSettingValue | null>) {
+export function saveRuntimeSettings(
+  changes: Record<string, RuntimeSettingValue | null>,
+) {
   return request<RuntimeSettingsView>("/settings/runtime", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -1449,13 +2494,49 @@ export type DataField = {
   max?: number;
   max_length?: number;
 };
-export type DataType = { key: string; label: string; description: string; id_prefix: string; display: string; examples: string[]; fields: DataField[]; permissions: DataAction[] };
+export type DataType = {
+  key: string;
+  label: string;
+  description: string;
+  id_prefix: string;
+  display: string;
+  examples: string[];
+  fields: DataField[];
+  permissions: DataAction[];
+};
 export type DataValue = string | number | null;
-export type DataRow = Record<string, DataValue> & { id: string; source: "manual" | "ai"; batch_id: string | null; created_by: string; created: string };
-export type DataPage = { items: DataRow[]; total: number; page: number; page_size: number };
-export type DataPreviewRow = { values: Record<string, DataValue>; labels: Record<string, string>; errors: Record<string, string> };
-export type DataPreview = { rows: DataPreviewRow[]; generator: "llm" | "template"; note: string; label: string };
-export type DataPermissionRow = { group_id: string; data_type: string; can_read: boolean; can_create: boolean; can_update: boolean; can_delete: boolean };
+export type DataRow = Record<string, DataValue> & {
+  id: string;
+  source: "manual" | "ai";
+  batch_id: string | null;
+  created_by: string;
+  created: string;
+};
+export type DataPage = {
+  items: DataRow[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+export type DataPreviewRow = {
+  values: Record<string, DataValue>;
+  labels: Record<string, string>;
+  errors: Record<string, string>;
+};
+export type DataPreview = {
+  rows: DataPreviewRow[];
+  generator: "llm" | "template";
+  note: string;
+  label: string;
+};
+export type DataPermissionRow = {
+  group_id: string;
+  data_type: string;
+  can_read: boolean;
+  can_create: boolean;
+  can_update: boolean;
+  can_delete: boolean;
+};
 
 // 业务数据接口校验失败时除了总的原因，还按字段返回原因（errors），表单要把它们标在对应输入框上；
 // 通用的 request 只保留 detail，所以这里单独处理。
@@ -1467,7 +2548,11 @@ export class DataRequestError extends Error {
   }
 }
 
-async function dataRequest<T>(path: string, method = "GET", payload?: unknown): Promise<T> {
+async function dataRequest<T>(
+  path: string,
+  method = "GET",
+  payload?: unknown,
+): Promise<T> {
   const options: RequestInit = { method };
   if (payload !== undefined) {
     options.headers = { "Content-Type": "application/json" };
@@ -1475,8 +2560,13 @@ async function dataRequest<T>(path: string, method = "GET", payload?: unknown): 
   }
   const response = await authorizedFetch(path, options);
   if (!response.ok) {
-    const body = await response.json().catch(() => ({ detail: response.statusText }));
-    const detail = typeof body.detail === "string" ? body.detail : `请求失败：${response.status}`;
+    const body = await response
+      .json()
+      .catch(() => ({ detail: response.statusText }));
+    const detail =
+      typeof body.detail === "string"
+        ? body.detail
+        : `请求失败：${response.status}`;
     throw new DataRequestError(detail, body.errors ?? {});
   }
   return response.json() as Promise<T>;
@@ -1486,7 +2576,17 @@ export function listDataTypes() {
   return dataRequest<{ types: DataType[] }>("/data/types");
 }
 
-export function listDataRecords(dataType: string, params: { q?: string; source?: string; sort?: string; direction?: "asc" | "desc"; page?: number; pageSize?: number }) {
+export function listDataRecords(
+  dataType: string,
+  params: {
+    q?: string;
+    source?: string;
+    sort?: string;
+    direction?: "asc" | "desc";
+    page?: number;
+    pageSize?: number;
+  },
+) {
   const query = new URLSearchParams();
   if (params.q) query.set("q", params.q);
   if (params.source) query.set("source", params.source);
@@ -1498,72 +2598,248 @@ export function listDataRecords(dataType: string, params: { q?: string; source?:
 }
 
 export function listDataOptions(dataType: string, q = "") {
-  return dataRequest<{ options: { id: string; label: string }[] }>(`/data/${dataType}/options?q=${encodeURIComponent(q)}`);
+  return dataRequest<{ options: { id: string; label: string }[] }>(
+    `/data/${dataType}/options?q=${encodeURIComponent(q)}`,
+  );
 }
 
-export function createDataRecord(dataType: string, values: Record<string, DataValue>) {
-  return dataRequest<{ id: string }>(`/data/${dataType}/records`, "POST", { values });
+export function createDataRecord(
+  dataType: string,
+  values: Record<string, DataValue>,
+) {
+  return dataRequest<{ id: string }>(`/data/${dataType}/records`, "POST", {
+    values,
+  });
 }
 
-export function updateDataRecord(dataType: string, id: string, values: Record<string, DataValue>) {
-  return dataRequest<{ id: string }>(`/data/${dataType}/records/${encodeURIComponent(id)}`, "PATCH", { values });
+export function updateDataRecord(
+  dataType: string,
+  id: string,
+  values: Record<string, DataValue>,
+) {
+  return dataRequest<{ id: string }>(
+    `/data/${dataType}/records/${encodeURIComponent(id)}`,
+    "PATCH",
+    { values },
+  );
 }
 
 export function deleteDataRecord(dataType: string, id: string) {
-  return dataRequest<{ id: string }>(`/data/${dataType}/records/${encodeURIComponent(id)}`, "DELETE");
+  return dataRequest<{ id: string }>(
+    `/data/${dataType}/records/${encodeURIComponent(id)}`,
+    "DELETE",
+  );
 }
 
 // AI 生成只返回预览，不写库；确认后调用 commitDataBatch 写入。
-export function generateDataPreview(dataType: string, count: number, prompt: string) {
-  return dataRequest<DataPreview>(`/data/${dataType}/generate`, "POST", { count, prompt });
+export function generateDataPreview(
+  dataType: string,
+  count: number,
+  prompt: string,
+) {
+  return dataRequest<DataPreview>(`/data/${dataType}/generate`, "POST", {
+    count,
+    prompt,
+  });
 }
 
-export function commitDataBatch(dataType: string, rows: Record<string, DataValue>[]) {
-  return dataRequest<{ batch_id: string; created: string[]; failed: { index: number; message: string; errors: Record<string, string> }[] }>(`/data/${dataType}/batches`, "POST", { rows });
+export function commitDataBatch(
+  dataType: string,
+  rows: Record<string, DataValue>[],
+) {
+  return dataRequest<{
+    batch_id: string;
+    created: string[];
+    failed: {
+      index: number;
+      message: string;
+      errors: Record<string, string>;
+    }[];
+  }>(`/data/${dataType}/batches`, "POST", { rows });
 }
 
 export function deleteDataBatch(dataType: string, batchId: string) {
-  return dataRequest<{ deleted: number }>(`/data/${dataType}/batches/${encodeURIComponent(batchId)}`, "DELETE");
+  return dataRequest<{ deleted: number }>(
+    `/data/${dataType}/batches/${encodeURIComponent(batchId)}`,
+    "DELETE",
+  );
 }
 
 export function getDataPermissions() {
-  return dataRequest<{ types: { key: string; label: string }[]; permissions: DataPermissionRow[] }>("/admin/data-permissions");
+  return dataRequest<{
+    types: { key: string; label: string }[];
+    permissions: DataPermissionRow[];
+  }>("/admin/data-permissions");
 }
 
-export function saveDataPermission(payload: { group_id: string; data_type: string; read: boolean; create: boolean; update: boolean; delete: boolean }) {
-  return dataRequest<DataPermissionRow>("/admin/data-permissions", "PUT", payload);
+export function saveDataPermission(payload: {
+  group_id: string;
+  data_type: string;
+  read: boolean;
+  create: boolean;
+  update: boolean;
+  delete: boolean;
+}) {
+  return dataRequest<DataPermissionRow>(
+    "/admin/data-permissions",
+    "PUT",
+    payload,
+  );
 }
 
 // 证据原文所在的分片（评测语料当前的分片里现查）。match 是证据在正文里的起止位置；
 // cut 是正文里开始没参与向量计算的位置（本地向量模型才有），null 表示没被截断或拿不到。
-export type EvalEvidenceChunk = { chunk_id: string | null; title: string; position: number; heading: string | null; content: string; prefix: string | null; match: [number, number]; chars: number; token_count: number | null; max_tokens?: number; truncated: boolean | null; cut: number | null };
-export type EvalEvidenceLookup = { imported: boolean; cuts_available: boolean; items: { text: string; chunks: EvalEvidenceChunk[] }[] };
+export type EvalEvidenceChunk = {
+  chunk_id: string | null;
+  title: string;
+  position: number;
+  heading: string | null;
+  content: string;
+  prefix: string | null;
+  match: [number, number];
+  chars: number;
+  token_count: number | null;
+  max_tokens?: number;
+  truncated: boolean | null;
+  cut: number | null;
+};
+export type EvalEvidenceLookup = {
+  imported: boolean;
+  cuts_available: boolean;
+  items: { text: string; chunks: EvalEvidenceChunk[] }[];
+};
 
 export function locateEvalEvidence(texts: string[]) {
-  return request<EvalEvidenceLookup>("/eval/evidence", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ texts }) });
+  return request<EvalEvidenceLookup>("/eval/evidence", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ texts }),
+  });
 }
 
 // 运行概览：近 N 天按天汇总的问答量、失败、拒答、耗时、Token 和反馈（GET /overview）。
-export type OverviewDay = { date: string; requests: number; errors: number; error_rate: number | null; knowledge: number; refused: number; refusal_rate: number | null; p50_ms: number | null; p95_ms: number | null; tokens: number; up: number; down: number };
+export type OverviewDay = {
+  date: string;
+  requests: number;
+  errors: number;
+  error_rate: number | null;
+  knowledge: number;
+  refused: number;
+  refusal_rate: number | null;
+  p50_ms: number | null;
+  p95_ms: number | null;
+  tokens: number;
+  up: number;
+  down: number;
+};
 export type Overview = {
-  days: number; timezone: string; from: string; to: string;
-  totals: { requests: number; runs: number; errors: number; error_rate: number | null; knowledge: number; refused: number; refusal_rate: number | null; p50_ms: number | null; p95_ms: number | null; tokens: { input: number; output: number; total: number; runs_with_usage: number }; avg_tokens: number | null; feedback: number; up: number; down: number; down_rate: number | null };
+  days: number;
+  timezone: string;
+  from: string;
+  to: string;
+  totals: {
+    requests: number;
+    runs: number;
+    errors: number;
+    error_rate: number | null;
+    knowledge: number;
+    refused: number;
+    refusal_rate: number | null;
+    p50_ms: number | null;
+    p95_ms: number | null;
+    tokens: {
+      input: number;
+      output: number;
+      total: number;
+      runs_with_usage: number;
+    };
+    avg_tokens: number | null;
+    feedback: number;
+    up: number;
+    down: number;
+    down_rate: number | null;
+  };
   daily: OverviewDay[];
-  stages: { stage: string; label: string; count: number; p50_ms: number | null; p95_ms: number | null }[];
+  stages: {
+    stage: string;
+    label: string;
+    count: number;
+    p50_ms: number | null;
+    p95_ms: number | null;
+  }[];
   routes: { route: string; label: string; count: number }[];
-  retrieval: { runs: number; returned_zero: number; returned_zero_rate: number | null; top_score_p50: number | null; below_threshold: number; min_score: number };
-  intent: { runs: number; stages: { stage: string; label: string; reached: number; accepted: number; hit_rate: number | null; share: number | null }[]; fallback_causes: { cause: string; label: string; count: number }[] };
-  refusals: { total: number; partial: number; reasons: { reason: string; label: string; count: number }[] };
-  security: { runs: number; blocked: number; blocked_rate: number | null; rules: { key: string; label: string; count: number }[]; redacted_runs: number; redacted: number; output_runs: number; issues: { key: string; label: string; count: number }[]; vector: { checked: number; blocked: number; logged: number }; model: { checked: number; blocked: number; logged: number } };
-  errors: { stages: { stage: string; label: string; count: number }[]; codes: { code: string; count: number }[] };
+  retrieval: {
+    runs: number;
+    returned_zero: number;
+    returned_zero_rate: number | null;
+    top_score_p50: number | null;
+    below_threshold: number;
+    min_score: number;
+  };
+  intent: {
+    runs: number;
+    stages: {
+      stage: string;
+      label: string;
+      reached: number;
+      accepted: number;
+      hit_rate: number | null;
+      share: number | null;
+    }[];
+    fallback_causes: { cause: string; label: string; count: number }[];
+  };
+  refusals: {
+    total: number;
+    partial: number;
+    reasons: { reason: string; label: string; count: number }[];
+  };
+  security: {
+    runs: number;
+    blocked: number;
+    blocked_rate: number | null;
+    rules: { key: string; label: string; count: number }[];
+    redacted_runs: number;
+    redacted: number;
+    output_runs: number;
+    issues: { key: string; label: string; count: number }[];
+    vector: { checked: number; blocked: number; logged: number };
+    model: { checked: number; blocked: number; logged: number };
+  };
+  errors: {
+    stages: { stage: string; label: string; count: number }[];
+    codes: { code: string; count: number }[];
+  };
   feedback_reasons: { reason: string; label: string; count: number }[];
   // 文档导入：这段时间上传的版本（不含评测账号）。
   imports: {
-    versions: number; retried: number;
+    versions: number;
+    retried: number;
     results: { key: string; label: string; count: number }[];
-    steps: { step: string; label: string; count: number; avg_ms: number; p50_ms: number | null; p95_ms: number | null; share: number | null }[];
-    slowest: { document_id: string; title: string | null; total_ms: number; slowest_step: string; slowest_ms: number }[];
-    savings: { reused_vectors: number; embedded_vectors: number; context_generated: number; context_cached: number; copied: number; vector_reuse_rate: number | null; context_cache_rate: number | null };
+    steps: {
+      step: string;
+      label: string;
+      count: number;
+      avg_ms: number;
+      p50_ms: number | null;
+      p95_ms: number | null;
+      share: number | null;
+    }[];
+    slowest: {
+      document_id: string;
+      title: string | null;
+      total_ms: number;
+      slowest_step: string;
+      slowest_ms: number;
+    }[];
+    savings: {
+      reused_vectors: number;
+      embedded_vectors: number;
+      context_generated: number;
+      context_cached: number;
+      copied: number;
+      vector_reuse_rate: number | null;
+      context_cache_rate: number | null;
+    };
   };
 };
 
@@ -1573,14 +2849,60 @@ export function getOverview(days: number) {
 
 // 会话记忆（GET /memory/sessions、/memory/sessions/{id}）：只能看自己的会话。
 export type MemoryTurnText = { question: string; answer: string };
-export type MemorySessionBrief = { session_id: string; title: string; turns: number; compressions: number; memory_tokens: number; message_count: number; snapshots: number | null; bytes: number | null; last_active: string | null };
-export type MemorySessionList = { items: MemorySessionBrief[]; trigger_tokens: number; keep_tokens: number; backend?: string };
-export type MemoryTimelineTurn = { index: number; run_id: string; created: string; question: string; rewritten: string | null; route: string | null; entered: boolean | null; skip_reason?: string | null; memory_tokens: number | null; messages_before: number | null; compressed: boolean; summary: string | null; kept_turns: MemoryTurnText[] | null; compressed_turns?: (MemoryTurnText & { round?: number })[] | null; kept_rounds?: number[]; previous_summary?: string | null };
+export type MemorySessionBrief = {
+  session_id: string;
+  title: string;
+  turns: number;
+  compressions: number;
+  memory_tokens: number;
+  message_count: number;
+  snapshots: number | null;
+  bytes: number | null;
+  last_active: string | null;
+};
+export type MemorySessionList = {
+  items: MemorySessionBrief[];
+  trigger_tokens: number;
+  keep_tokens: number;
+  backend?: string;
+};
+export type MemoryTimelineTurn = {
+  index: number;
+  run_id: string;
+  created: string;
+  question: string;
+  rewritten: string | null;
+  route: string | null;
+  entered: boolean | null;
+  skip_reason?: string | null;
+  memory_tokens: number | null;
+  messages_before: number | null;
+  compressed: boolean;
+  summary: string | null;
+  kept_turns: MemoryTurnText[] | null;
+  compressed_turns?: (MemoryTurnText & { round?: number })[] | null;
+  kept_rounds?: number[];
+  previous_summary?: string | null;
+};
 export type MemorySessionDetail = {
-  session_id: string; title: string; last_order: string | null; trigger_tokens: number; keep_tokens: number;
-  current: { summary: string; summary_tokens: number | null; turns: MemoryTurnText[]; message_count: number; estimated_tokens: number };
+  session_id: string;
+  title: string;
+  last_order: string | null;
+  trigger_tokens: number;
+  keep_tokens: number;
+  current: {
+    summary: string;
+    summary_tokens: number | null;
+    turns: MemoryTurnText[];
+    message_count: number;
+    estimated_tokens: number;
+  };
   timeline: MemoryTimelineTurn[];
-  storage: { snapshots?: number | null; bytes?: number | null; backend: string };
+  storage: {
+    snapshots?: number | null;
+    bytes?: number | null;
+    backend: string;
+  };
 };
 
 export function listMemorySessions() {
@@ -1588,19 +2910,53 @@ export function listMemorySessions() {
 }
 
 export function getMemorySession(sessionId: string) {
-  return request<MemorySessionDetail>(`/memory/sessions/${encodeURIComponent(sessionId)}`);
+  return request<MemorySessionDetail>(
+    `/memory/sessions/${encodeURIComponent(sessionId)}`,
+  );
 }
 
 // 提示词管理（GET /prompts、/prompts/{id}，POST 保存新版本、改用某个版本）：只有管理员。
 export type PromptGroup = { key: string; label: string; description: string };
-export type PromptBrief = { id: string; group: string; label: string; where: string; active_version: number; active_label: string; versions: number; updated: string | null };
-export type PromptVersion = { version: number; label: string; text: string; note: string; created_by: string | null; created: string | null };
-export type PromptPart = "instructions" | "locked" | { input: string; template: string };
+export type PromptBrief = {
+  id: string;
+  group: string;
+  label: string;
+  where: string;
+  active_version: number;
+  active_label: string;
+  versions: number;
+  updated: string | null;
+};
+export type PromptVersion = {
+  version: number;
+  label: string;
+  text: string;
+  note: string;
+  created_by: string | null;
+  created: string | null;
+};
+export type PromptPart =
+  | "instructions"
+  | "locked"
+  | { input: string; template: string };
 export type PromptBox = { title: string; parts: PromptPart[] };
 export type PromptDetail = {
-  id: string; group: string; label: string; where: string; input: string; locked: string; locked_reason: string; note: string;
-  locked_label: string; locked_display: string; boxes: PromptBox[];
-  active_version: number; active_label: string; activated_by: string | null; activated_at: string | null; versions: PromptVersion[];
+  id: string;
+  group: string;
+  label: string;
+  where: string;
+  input: string;
+  locked: string;
+  locked_reason: string;
+  note: string;
+  locked_label: string;
+  locked_display: string;
+  boxes: PromptBox[];
+  active_version: number;
+  active_label: string;
+  activated_by: string | null;
+  activated_at: string | null;
+  versions: PromptVersion[];
 };
 
 export function listPrompts() {
@@ -1613,21 +2969,58 @@ export function getPrompt(id: string) {
 
 export function savePromptVersion(id: string, text: string, note: string) {
   return request<PromptDetail>(`/prompts/${encodeURIComponent(id)}/versions`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, note }),
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, note }),
   });
 }
 
 export function activatePromptVersion(id: string, version: number) {
   return request<PromptDetail>(`/prompts/${encodeURIComponent(id)}/activate`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version }),
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ version }),
   });
 }
 
 // 长期记忆（GET /memory/long 等）：跨会话记住的用户偏好、身份和长期关注的主题，只能看、改自己的。
-export type LongMemoryItem = { id: string; content: string; category: string; created?: string; updated?: string; source_session?: string; source_run?: string };
-export type LongMemoryChanges = { added: string[]; updated: ({ before: string; after: string } | string)[]; deleted: string[]; ignored?: { content: string; reason: string }[] };
-export type LongMemoryLog = { run_id: string | null; session_id?: string; question?: string; status: "pending" | "changed" | "none" | "skipped" | "failed"; reason?: string; model?: string | null; changes?: LongMemoryChanges; total?: number; duration_ms?: number; created: string; updated?: string };
-export type LongMemoryView = { enabled: boolean; global_enabled: boolean; max_items: number; categories: Record<string, string>; items: LongMemoryItem[]; logs: LongMemoryLog[]; log_limit: number };
+export type LongMemoryItem = {
+  id: string;
+  content: string;
+  category: string;
+  created?: string;
+  updated?: string;
+  source_session?: string;
+  source_run?: string;
+};
+export type LongMemoryChanges = {
+  added: string[];
+  updated: ({ before: string; after: string } | string)[];
+  deleted: string[];
+  ignored?: { content: string; reason: string }[];
+};
+export type LongMemoryLog = {
+  run_id: string | null;
+  session_id?: string;
+  question?: string;
+  status: "pending" | "changed" | "none" | "skipped" | "failed";
+  reason?: string;
+  model?: string | null;
+  changes?: LongMemoryChanges;
+  total?: number;
+  duration_ms?: number;
+  created: string;
+  updated?: string;
+};
+export type LongMemoryView = {
+  enabled: boolean;
+  global_enabled: boolean;
+  max_items: number;
+  categories: Record<string, string>;
+  items: LongMemoryItem[];
+  logs: LongMemoryLog[];
+  log_limit: number;
+};
 
 export function getLongMemory() {
   return request<LongMemoryView>("/memory/long");
@@ -1635,12 +3028,17 @@ export function getLongMemory() {
 
 export function setLongMemoryEnabled(enabled: boolean) {
   return request<LongMemoryView>("/memory/long/settings", {
-    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }),
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
   });
 }
 
 export function deleteLongMemory(id: string) {
-  return request<LongMemoryView>(`/memory/long/items/${encodeURIComponent(id)}`, { method: "DELETE" });
+  return request<LongMemoryView>(
+    `/memory/long/items/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+  );
 }
 
 export function clearLongMemory() {
@@ -1648,40 +3046,117 @@ export function clearLongMemory() {
 }
 
 // 安全样本（只有管理员）：输入安全检查第二层的向量样本库。
-export type InjectionSample = { id: string; text: string; category: string; source: string; status: "active" | "candidate"; created: string; created_by?: string | null; rules?: string[] };
-export type GuardHealth = { status: "ready" | "loading" | "failed" | "unreachable" | "missing"; error?: string | null; model?: string };
-export type InjectionView = { categories: Record<string, string>; sources: Record<string, string>; rules_enabled: boolean; settings: { enabled: boolean; threshold: number; action: "log" | "block" }; model: { enabled: boolean; threshold: number; action: "log" | "block"; health: GuardHealth }; items: InjectionSample[]; candidates: InjectionSample[] };
-export type InjectionMatch = { id: string; text: string; category: string; score: number };
-export type InjectionCheck = { rules: { rule: string; text: string }[]; matches: InjectionMatch[]; threshold: number; action: "log" | "block"; model: { score?: number; model?: string; error?: string } | null; model_threshold: number; model_action: "log" | "block" };
-export type InjectionFalsePositives = { threshold: number; checked: number; builtin: number; recent: number; over: number; items: { question: string; source: "builtin" | "recent"; score: number; sample: string; category: string; rules: string[] }[] };
+export type InjectionSample = {
+  id: string;
+  text: string;
+  category: string;
+  source: string;
+  status: "active" | "candidate";
+  created: string;
+  created_by?: string | null;
+  rules?: string[];
+};
+export type GuardHealth = {
+  status: "ready" | "loading" | "failed" | "unreachable" | "missing";
+  error?: string | null;
+  model?: string;
+};
+export type InjectionView = {
+  categories: Record<string, string>;
+  sources: Record<string, string>;
+  rules_enabled: boolean;
+  settings: { enabled: boolean; threshold: number; action: "log" | "block" };
+  model: {
+    enabled: boolean;
+    threshold: number;
+    action: "log" | "block";
+    health: GuardHealth;
+  };
+  items: InjectionSample[];
+  candidates: InjectionSample[];
+};
+export type InjectionMatch = {
+  id: string;
+  text: string;
+  category: string;
+  score: number;
+};
+export type InjectionCheck = {
+  rules: { rule: string; text: string }[];
+  matches: InjectionMatch[];
+  threshold: number;
+  action: "log" | "block";
+  model: { score?: number; model?: string; error?: string } | null;
+  model_threshold: number;
+  model_action: "log" | "block";
+};
+export type InjectionFalsePositives = {
+  threshold: number;
+  checked: number;
+  builtin: number;
+  recent: number;
+  over: number;
+  items: {
+    question: string;
+    source: "builtin" | "recent";
+    score: number;
+    sample: string;
+    category: string;
+    rules: string[];
+  }[];
+};
 
 export function getInjectionSamples() {
   return request<InjectionView>("/security/samples");
 }
 
 export function addInjectionSample(text: string, category: string) {
-  return request<InjectionView>("/security/samples", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, category }) });
+  return request<InjectionView>("/security/samples", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, category }),
+  });
 }
 
 export function deleteInjectionSample(id: string) {
-  return request<InjectionView>(`/security/samples/${encodeURIComponent(id)}`, { method: "DELETE" });
+  return request<InjectionView>(`/security/samples/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }
 
 export function confirmInjectionSample(id: string, category: string) {
-  return request<InjectionView>(`/security/samples/${encodeURIComponent(id)}/confirm`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ category }) });
+  return request<InjectionView>(
+    `/security/samples/${encodeURIComponent(id)}/confirm`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ category }),
+    },
+  );
 }
 
 export function checkInjection(text: string) {
-  return request<InjectionCheck>("/security/check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+  return request<InjectionCheck>("/security/check", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
 }
 
 export function checkFalsePositives() {
-  return request<InjectionFalsePositives>("/security/false-positives", { method: "POST" });
+  return request<InjectionFalsePositives>("/security/false-positives", {
+    method: "POST",
+  });
 }
 
 // 公开审核（只有管理员）：普通用户申请公开、公开文档的新版本，通过后才对所有人生效。
 export type DocumentReviewKind = "publish" | "version" | "flagged" | "share";
-export type DocumentReviewStatus = "pending" | "approved" | "rejected" | "cancelled" | "superseded";
+export type DocumentReviewStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "cancelled"
+  | "superseded";
 export type DocumentReview = {
   id: string;
   doc_key: string;
@@ -1700,11 +3175,31 @@ export type DocumentReview = {
   // 上传者提交时写的说明（扫描有问题的版本说明为什么没问题）。
   request_note?: string | null;
 };
-export type DocumentReviewItem = DocumentReview & { title: string; owner: string; filename: string; visibility: DocumentVisibility };
-export type DocumentReviewList = { items: DocumentReviewItem[]; pending: number; kinds: Record<string, string>; statuses: Record<string, string> };
+export type DocumentReviewItem = DocumentReview & {
+  title: string;
+  owner: string;
+  filename: string;
+  visibility: DocumentVisibility;
+};
+export type DocumentReviewList = {
+  items: DocumentReviewItem[];
+  pending: number;
+  kinds: Record<string, string>;
+  statuses: Record<string, string>;
+};
 export type DocumentReviewDetail = {
   review: DocumentReview;
-  document: { document_id: string; title: string; owner: string; filename: string; version: number; status: string; created: string; version_note: string | null; metadata: DocumentMetadata } | null;
+  document: {
+    document_id: string;
+    title: string;
+    owner: string;
+    filename: string;
+    version: number;
+    status: string;
+    created: string;
+    version_note: string | null;
+    metadata: DocumentMetadata;
+  } | null;
   visibility: DocumentVisibility;
   current_version: number | null;
   chunks: DocumentChunkPage | null;
@@ -1715,43 +3210,105 @@ export type DocumentReviewDetail = {
 };
 
 export function getDocumentReviews(status: "pending" | "done") {
-  return request<DocumentReviewList>(`/admin/document-reviews?status=${status}`);
+  return request<DocumentReviewList>(
+    `/admin/document-reviews?status=${status}`,
+  );
 }
 
 export function getDocumentReview(id: string, page = 1) {
-  return request<DocumentReviewDetail>(`/admin/document-reviews/${encodeURIComponent(id)}?page=${page}`);
+  return request<DocumentReviewDetail>(
+    `/admin/document-reviews/${encodeURIComponent(id)}?page=${page}`,
+  );
 }
 
 // documentId 是审核时看到的版本：上传者在这期间更新了文档，接口会拒绝，要重新看过再通过。
 export function approveDocumentReview(id: string, documentId?: string) {
-  return request<DocumentReviewDetail>(`/admin/document-reviews/${encodeURIComponent(id)}/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(documentId ? { document_id: documentId } : {}) });
+  return request<DocumentReviewDetail>(
+    `/admin/document-reviews/${encodeURIComponent(id)}/approve`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(documentId ? { document_id: documentId } : {}),
+    },
+  );
 }
 
 export function rejectDocumentReview(id: string, note: string) {
-  return request<DocumentReviewDetail>(`/admin/document-reviews/${encodeURIComponent(id)}/reject`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note }) });
+  return request<DocumentReviewDetail>(
+    `/admin/document-reviews/${encodeURIComponent(id)}/reject`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ note }),
+    },
+  );
 }
 
 // 导入时的注入扫描结果。
-export type InjectionScanHit = { position: number; source: "rule" | "model"; rule: string; text: string; score?: number };
-export type InjectionScan = { checked: number; rule_hits: number; model_hits: number; model: string | null; model_error: string | null; threshold: number | null; scanned: string; hits: InjectionScanHit[] };
+export type InjectionScanHit = {
+  position: number;
+  source: "rule" | "model";
+  rule: string;
+  text: string;
+  score?: number;
+};
+export type InjectionScan = {
+  checked: number;
+  rule_hits: number;
+  model_hits: number;
+  model: string | null;
+  model_error: string | null;
+  threshold: number | null;
+  scanned: string;
+  hits: InjectionScanHit[];
+};
 
 // 安全扫描有问题的分片：spans 是规则命中的位置（分片正文里的字符下标），model_score 是注入检测模型判断的攻击概率。
-export type ProblemChunk = { position: number; chunk_id: string; content: string; spans: { start: number; end: number; rule: string; label: string }[]; model_score: number | null; heading_path: string[]; page_start: number | null; page_end: number | null };
-export type DocumentProblems = { document_id: string; status: string; scan: InjectionScan | null; chunks: ProblemChunk[] };
+export type ProblemChunk = {
+  position: number;
+  chunk_id: string;
+  content: string;
+  spans: { start: number; end: number; rule: string; label: string }[];
+  model_score: number | null;
+  heading_path: string[];
+  page_start: number | null;
+  page_end: number | null;
+};
+export type DocumentProblems = {
+  document_id: string;
+  status: string;
+  scan: InjectionScan | null;
+  chunks: ProblemChunk[];
+};
 
 // 上架：documentId 是要上架的版本。返回 state=review 表示公开文档的新版本交给了管理员审核。
 // note：管理员直接上架扫描有问题的版本时必填，说明为什么没问题。
 export function listDocument(documentId: string, note?: string) {
-  return request<{ document_id: string; state: "listed" | "review"; review: DocumentReview | null }>(`/documents/${documentId}/list`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(note ? { note } : {}) });
+  return request<{
+    document_id: string;
+    state: "listed" | "review";
+    review: DocumentReview | null;
+  }>(`/documents/${documentId}/list`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(note ? { note } : {}),
+  });
 }
 
 export function unlistDocument(documentId: string) {
-  return request<{ document_id: string; listing: DocumentListing }>(`/documents/${documentId}/unlist`, { method: "POST" });
+  return request<{ document_id: string; listing: DocumentListing }>(
+    `/documents/${documentId}/unlist`,
+    { method: "POST" },
+  );
 }
 
 // 扫描有问题的版本：写明情况后提交管理员审核。
 export function submitDocumentReview(documentId: string, note: string) {
-  return request<DocumentReview>(`/documents/${documentId}/submit-review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note }) });
+  return request<DocumentReview>(`/documents/${documentId}/submit-review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ note }),
+  });
 }
 
 export function getDocumentProblems(documentId: string) {
@@ -1759,7 +3316,16 @@ export function getDocumentProblems(documentId: string) {
 }
 
 // 上传前查内容是否已经存在：own 是自己文档里内容完全相同的当前版本，readable 是别人上传、自己本来就能看到的。
-export type ContentMatch = { document_id: string; doc_key: string; title: string; version: number; owner: string; listing?: DocumentListing; visibility?: DocumentVisibility; groups?: string[] };
+export type ContentMatch = {
+  document_id: string;
+  doc_key: string;
+  title: string;
+  version: number;
+  owner: string;
+  listing?: DocumentListing;
+  visibility?: DocumentVisibility;
+  groups?: string[];
+};
 export type ContentMatches = { own: ContentMatch[]; readable: ContentMatch[] };
 
 export function getContentMatches(sha256: string) {
@@ -1770,11 +3336,24 @@ export function getContentMatches(sha256: string) {
 // 只有 https 或 localhost 才有 crypto.subtle；拿不到时返回 null，上传后服务端照样会判断重复。
 export async function fileSha256(file: File) {
   if (!globalThis.crypto?.subtle) return null;
-  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-  return Array.from(new Uint8Array(digest)).map((value) => value.toString(16).padStart(2, "0")).join("");
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    await file.arrayBuffer(),
+  );
+  return Array.from(new Uint8Array(digest))
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
 }
 
-export type EvalChunkOriginal = { chunk_id: string; position: number; title: string | null; heading: string | null; content: string };
+export type EvalChunkOriginal = {
+  chunk_id: string;
+  position: number;
+  title: string | null;
+  heading: string | null;
+  content: string;
+};
 export function getEvalChunkOriginal(chunkId: string) {
-  return request<EvalChunkOriginal>(`/eval/chunks/${encodeURIComponent(chunkId)}`);
+  return request<EvalChunkOriginal>(
+    `/eval/chunks/${encodeURIComponent(chunkId)}`,
+  );
 }
