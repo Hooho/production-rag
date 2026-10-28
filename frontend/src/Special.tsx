@@ -315,7 +315,6 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
                 {item.evidence?.map((text, index) => <div key={index} className="rg-text"><span className="rg-muted">证据：</span>{evidenceLabel(text)}</div>)}
                 {item.evidence && <div className="rg-text"><EvidenceDetails texts={item.evidence} /></div>}
               </>}
-              {item.supplemental_notes && <p className="rg-muted">{item.supplemental_notes}</p>}
               {item.reference_answer && <div className="rg-text"><span className="rg-muted">参考答案：</span>{item.reference_answer}</div>}
             </details>
           </div>
@@ -337,14 +336,14 @@ function RunChip({ run, selected, onClick }: { run: EvalSuiteRunEntry; selected:
   </button>;
 }
 
-// 汇总题填写命名计分项并选择目标分片；其他题保留原文证据编辑。
+// 汇总、比较、多跳题填写命名计分项并选择目标分片；其他题保留原文证据编辑。
 function ItemForm({ suiteId, method, initial, types, onToast, onDone }: { suiteId: string; method: EvalSuiteMethod; initial?: EvalSuiteItem; types: string[]; onToast: ShowToast; onDone: (value: EvalSuiteFull | null) => void }) {
   const [type, setType] = useState(initial?.type ?? "");
   const hues = typeHues(types);
   const [question, setQuestion] = useState(initial?.question ?? "");
   const [evidence, setEvidence] = useState((initial?.evidence ?? []).join("\n"));
   const [groups, setGroups] = useState<EvalScoringGroup[]>(initial?.evidence_groups ?? [{ label: "", targets: [] }]);
-  const grouped = method === "retrieval" && (Boolean(initial?.evidence_groups) || type.trim() === "汇总");
+  const grouped = method === "retrieval" && (Boolean(initial?.evidence_groups) || ["汇总", "比较", "多跳"].includes(type.trim()));
   const [reference, setReference] = useState(initial?.reference_answer ?? "");
   const [turns, setTurns] = useState((initial?.turns ?? []).join("\n"));
   const [busy, setBusy] = useState(false);

@@ -43,6 +43,13 @@ class GroupedEvidenceTest(unittest.TestCase):
     def test_seed_question_names_and_item_counts(self):
         data = json.loads((Path(__file__).parents[1] / "eval/seed/suites.json").read_text())
         suite = next(s for s in data["suites"] if s["name"] == "Agent 区分题")
+        structured = [item for item in suite["items"] if item.get("type") in ("多跳", "比较")]
+        self.assertEqual(len(structured), 8)
+        self.assertEqual([len(item["evidence_groups"]) for item in structured], [2] * 8)
+        self.assertEqual([[[target["position"] + 1 for target in group["targets"]]
+            for group in item["evidence_groups"]] for item in structured], [
+                [[3], [11]], [[73], [57]], [[73, 74], [105]], [[39], [107]],
+                [[19], [85]], [[28], [21]], [[57], [73, 74]], [[45], [67]]])
         items = [item for item in suite["items"] if item.get("type") == "汇总"]
         self.assertEqual([len(item["evidence_groups"]) for item in items], [8, 7, 3, 6])
         self.assertEqual(items[1]["question"], "书里提到段永平在投资判断、买卖决策和学习上，有过哪些失误或遗憾？")
