@@ -1,0 +1,18 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: Ruff format
+        entry: ruff format
+        language: python
+        additional_dependencies: [ruff==0.14.3]
+        types_or: [python, pyi]
+      - id: prettier
+        name: Prettier
+        entry: prettier --write
+        language: node
+        language_version: system
+        additional_dependencies: [prettier@3.6.2]
+        types_or:
+          [javascript, jsx, ts, tsx, css, scss, json, yaml, markdown, html]
+        exclude: (^|/)(package-lock\.json)$
