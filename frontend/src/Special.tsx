@@ -299,6 +299,8 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
       <ul className="rg-items">
         {data.items.map((item) => editing === item.id ? <li key={item.id}><ItemForm suiteId={suiteId} method={data.method} initial={item} types={types} onToast={onToast} onDone={(value) => { setEditing(null); if (value) setData(value); }} /></li> : <li key={item.id} className="rg-item">
           <div className="rg-item-main">
+            <details className="sp-question-details">
+            <summary className="sp-question-summary">
             <div className="rg-item-question">{item.question}</div>
             <div className="rg-item-meta">
               <TypeTag type={item.type} hues={hues} />
@@ -306,7 +308,8 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
               {item.evidence && item.evidence.length > 0 && <span>{item.evidence.length} 条证据</span>}
               {item.reference_answer && <span>有参考答案</span>}
             </div>
-            <details className="rg-details"><summary>查看内容</summary>
+            </summary>
+            <div className="sp-question-content">
               {item.turns && item.turns.length > 0 && <div className="rg-text"><span className="rg-muted">前面的提问：</span><ol className="sp-turns">{item.turns.map((turn, index) => <li key={index}>{turn}</li>)}</ol></div>}
               {item.evidence_groups ? item.evidence_groups.map((group, index) => <div className="rg-text" key={index}>
                 <strong>计分项 {index + 1}：{group.label}</strong>
@@ -316,6 +319,7 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
                 {item.evidence && <div className="rg-text"><EvidenceDetails texts={item.evidence} /></div>}
               </>}
               {item.reference_answer && <div className="rg-text"><span className="rg-muted">参考答案：</span>{item.reference_answer}</div>}
+            </div>
             </details>
           </div>
           <div className="rg-item-actions">
