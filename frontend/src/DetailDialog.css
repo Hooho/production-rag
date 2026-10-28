@@ -7,6 +7,7 @@
 /* 固定宽度的详情浮窗靠近点击入口，只有高度随正文变化。 */
 .ag-delivery-dialog.ag-dialog-companion { width: 560px; max-width: calc(100vw - 32px); height: auto; max-height: var(--companion-max-height, calc(80dvh - 26px)); bottom: auto; right: auto; box-shadow: 0 24px 80px #102b2559, 0 8px 28px #102b253d; }
 .ag-dialog-companion::backdrop { background: transparent; pointer-events: none; }
+.ag-dialog-companion > .ag-delivery-dialog-head { cursor: move; touch-action: none; user-select: none; }
 .ag-dialog-connector { position: fixed; width: 12px; height: 20px; pointer-events: none; overflow: visible; filter: drop-shadow(3px 2px 3px #16362218); }
 .ag-dialog-anchor { outline: 2px solid #3c8655; outline-offset: 3px; border-radius: 4px; }
 

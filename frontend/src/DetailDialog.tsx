@@ -60,20 +60,46 @@ export function DetailDialog({ open, title, onClose, children, className = "" }:
       document.addEventListener("pointerdown", outsidePointer, true);
       companion.addEventListener("close", dismiss);
     }
+    let position: { left: number; top: number } | null = null;
+    let drag: { pointerId: number; x: number; y: number; left: number; top: number } | null = null;
+    const header = element.querySelector<HTMLElement>(".ag-delivery-dialog-head");
+    function startDrag(event: PointerEvent) {
+      if (!companion || !header || !element || event.button !== 0 || (event.target instanceof Element && event.target.closest("button"))) return;
+      const panel = element.getBoundingClientRect();
+      drag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, left: panel.left, top: panel.top };
+      header.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    }
+    function moveDrag(event: PointerEvent) {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      position = { left: drag.left + event.clientX - drag.x, top: drag.top + event.clientY - drag.y };
+      updateConnector();
+    }
+    function stopDrag(event: PointerEvent) {
+      if (drag?.pointerId !== event.pointerId) return;
+      drag = null;
+      if (header?.hasPointerCapture(event.pointerId)) header.releasePointerCapture(event.pointerId);
+    }
+    header?.addEventListener("pointerdown", startDrag);
+    header?.addEventListener("pointermove", moveDrag);
+    header?.addEventListener("pointerup", stopDrag);
+    header?.addEventListener("pointercancel", stopDrag);
+    header?.addEventListener("lostpointercapture", stopDrag);
     function updateConnector() {
       if (!companion || !trigger || !element) return;
       const anchor = trigger.getBoundingClientRect();
       const container = companion.getBoundingClientRect();
       element.style.setProperty("--companion-max-height", `${Math.min(container.height * 0.8, window.innerHeight - 32)}px`);
       const { width, height } = element.getBoundingClientRect();
-      const left = Math.max(16, Math.min(anchor.left - width - 16, window.innerWidth - width - 16));
+      const left = Math.max(16, Math.min(position?.left ?? anchor.left - width - 16, window.innerWidth - width - 16));
       element.style.left = `${left}px`;
       const center = anchor.top + anchor.height / 2;
-      const top = Math.max(16, Math.min(center - height / 2, window.innerHeight - height - 16));
+      const top = Math.max(16, Math.min(position?.top ?? center - height / 2, window.innerHeight - height - 16));
       element.style.top = `${top}px`;
+      if (position) position = { left, top };
       const panel = element.getBoundingClientRect();
       const y = Math.max(panel.top + 20, Math.min(center, panel.bottom - 20));
-      setConnector(anchor.bottom > container.top && anchor.top < container.bottom && panel.right < anchor.left
+      setConnector(!position && anchor.bottom > container.top && anchor.top < container.bottom && panel.right < anchor.left
         ? { x: panel.right - 1, y: y - 10 } : null);
     }
     updateConnector();
@@ -83,6 +109,11 @@ export function DetailDialog({ open, title, onClose, children, className = "" }:
     window.addEventListener("resize", updateConnector);
     companion?.addEventListener("scroll", updateConnector, true);
     return () => {
+      header?.removeEventListener("pointerdown", startDrag);
+      header?.removeEventListener("pointermove", moveDrag);
+      header?.removeEventListener("pointerup", stopDrag);
+      header?.removeEventListener("pointercancel", stopDrag);
+      header?.removeEventListener("lostpointercapture", stopDrag);
       observer.disconnect();
       element.style.removeProperty("top");
       element.style.removeProperty("left");
