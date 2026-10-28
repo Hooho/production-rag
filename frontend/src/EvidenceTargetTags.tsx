@@ -5,12 +5,12 @@ import { Tag } from "./Tag";
 
 type Target = { chunk_id?: string; title: string; position: number; quote: string };
 
-export function EvidenceTargetTags({ targets, number }: { targets: Target[]; number: number }) {
+export function EvidenceTargetTags({ targets, number, buttonLabel }: { targets: Target[]; number: number; buttonLabel?: string }) {
   const [selected, setSelected] = useState<Target | null>(null);
   const [original, setOriginal] = useState<ChunkOriginal | null>(null);
   useEffect(() => {
     if (!selected) return;
-    const base: ChunkOriginal = { label: `第 ${selected.position + 1} 片`, sources: [],
+    const base: ChunkOriginal = { context: "target", label: `第 ${selected.position + 1} 片`, sources: [],
       evidence: [{ number, text: selected.quote }] };
     if (selected.chunk_id) {
       setOriginal({ ...base, chunkId: selected.chunk_id });
@@ -31,7 +31,7 @@ export function EvidenceTargetTags({ targets, number }: { targets: Target[]; num
   }, [selected, number]);
   return <>
     <div className="ag-call-param-values ag-evidence-target-tags">{targets.map((target) => <Tag key={`${target.title}:${target.position}`} size="sm" tone="info"
-      title="点击查看原文" onClick={() => setSelected(target)}>第 {target.position + 1} 片</Tag>)}</div>
+      title="点击查看原文" onClick={() => setSelected(target)}>{buttonLabel ?? `第 ${target.position + 1} 片`}</Tag>)}</div>
     <ChunkOriginalDialog value={original} onClose={() => { setSelected(null); setOriginal(null); }} />
   </>;
 }
