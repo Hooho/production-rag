@@ -1,6 +1,11 @@
 /* 专项评测集：布局沿用巡检复测集（Regression.css），这里只补专项特有的部分。 */
-.sp-scoring-editor { display: grid; gap: 12px; min-width: 0; }
-.sp-scoring-item { display: grid; gap: 10px; padding: 14px; border: 1px solid #d5e3d8; border-radius: 8px; }
+.sp-scoring-editor { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; min-width: 0; }
+.sp-scoring-editor > .secondary-button,
+.sp-scoring-editor > small { grid-column: 1 / -1; }
+.sp-scoring-item { display: grid; align-content: start; min-width: 0; gap: 10px; padding: 14px; border: 1px solid #d5e3d8; border-radius: 8px; }
+@media (max-width: 760px) {
+  .sp-scoring-editor { grid-template-columns: minmax(0, 1fr); }
+}
 .sp-scoring-heading { display: flex; align-items: center; gap: 12px; }
 .sp-scoring-heading label { display: grid; flex: 1; gap: 6px; min-width: 0; }
 .sp-scoring-heading input { width: 100%; box-sizing: border-box; }
