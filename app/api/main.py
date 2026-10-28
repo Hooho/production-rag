@@ -176,11 +176,26 @@ class EvalSuiteInput(BaseModel):
     search_mode: str = Field("hybrid", pattern="^(hybrid|dense|keyword)$")
 
 
+class EvalTargetInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(..., min_length=1)
+    position: int = Field(..., ge=0)
+    fingerprint: str = Field(..., pattern="^[0-9a-f]{64}$")
+    quote: str = ""
+
+
+class EvalScoringGroupInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    label: str = Field(..., min_length=1, max_length=100)
+    targets: list[EvalTargetInput] = Field(..., min_length=1, max_length=100)
+
+
 # 专项的一道题，字段随评测方式不同：检索要问题和证据，回答再加参考答案，多轮对话是前面几轮提问 + 最后一问 + 参考答案。
 class EvalSuiteItemInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     question: str = Field(..., max_length=500)
     evidence: list[str] = Field(default_factory=list, max_length=10)
+    evidence_groups: list[EvalScoringGroupInput] | None = Field(None, min_length=1, max_length=10)
     reference_answer: str | None = Field(None, max_length=2000)
     turns: list[str] = Field(default_factory=list, max_length=20)
     # 题目类型（可选，自己起名，例如多跳、比较）：结果按类型统计通过数。
@@ -1647,6 +1662,11 @@ def create_app(store=None, models=None, jwt_secret=None):
     def eval_evidence(body: EvalEvidenceInput):
         texts = [text.strip()[:1000] for text in body.texts if text.strip()]
         return locate_evidence(app.state.store, app.state.models, texts)
+
+    @app.get("/eval/target-chunks", dependencies=[Depends(require_admin)])
+    def eval_target_chunks():
+        from ..evaluation.evidence import target_catalog
+        return {"items": target_catalog(app.state.store.engine)}
 
     @app.get("/eval/chunks/{chunk_id}", dependencies=[Depends(require_admin)])
     def eval_chunk(chunk_id: str):

@@ -40,16 +40,27 @@ def find_in(indexed, evidence):
 
 
 # 评测语料当前的全部分片：(分片 id, 标题, 送去算向量的文字, 正文, 元数据)。
-def stored_chunks(store):
+def stored_chunk_rows(engine):
     joined = document_heads.join(document_chunks,
         document_chunks.c.document_id == document_heads.c.current_document_id).join(
         chunks, chunks.c.id == document_chunks.c.chunk_id)
-    with store.engine.connect() as connection:
+    with engine.connect() as connection:
         rows = connection.execute(select(chunks.c.id, chunks.c.title, chunks.c.text, chunks.c.content,
             document_chunks.c.position, document_chunks.c.chunk_metadata).select_from(joined).where(
                 document_heads.c.owner == EVAL_OWNER).order_by(chunks.c.title, document_chunks.c.position)).all()
     return [{"chunk_id": row[0], "title": row[1], "text": row[2], "content": row[3] or row[2],
         "position": row[4], "metadata": row[5] or {}} for row in rows]
+
+
+def stored_chunks(store):
+    return stored_chunk_rows(store.engine)
+
+
+def target_catalog(engine):
+    from .grouped_evidence import fingerprint
+    rows = stored_chunk_rows(engine) or file_chunks(engine)
+    return [{"title": row["title"], "position": row["position"],
+        "fingerprint": fingerprint(row["content"]), "quote": row["content"]} for row in rows]
 
 
 def file_chunks(engine):

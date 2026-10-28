@@ -3,7 +3,7 @@ import json
 import unittest
 from pathlib import Path
 
-from app.evaluation.grouped_evidence import bind_groups, fingerprint, match_evidence
+from app.evaluation.grouped_evidence import bind_groups, fingerprint, match_evidence, validate_groups
 
 
 class GroupedEvidenceTest(unittest.TestCase):
@@ -50,6 +50,29 @@ class GroupedEvidenceTest(unittest.TestCase):
             for group in item["evidence_groups"]:
                 self.assertTrue(group["label"])
                 self.assertTrue(group["targets"])
+
+    def test_edit_groups_validates_selection_and_uses_server_excerpt(self):
+        catalog = [{"title": row["title"], "position": row["position"],
+            "fingerprint": fingerprint(row["content"]), "quote": row["content"]} for row in self.catalog]
+        groups = copy.deepcopy(self.groups)
+        groups[0]["label"] = " 公司乙 "
+        groups[0]["targets"][0]["quote"] = "客户端提供的任意文字"
+        groups[0]["targets"].append(groups[0]["targets"][0])
+        saved = validate_groups(groups, catalog)
+        self.assertEqual(saved[0]["label"], "公司乙")
+        self.assertEqual(len(saved[0]["targets"]), 2)
+        self.assertEqual(saved[0]["targets"][0]["quote"], "公司甲经营失败")
+        self.assertEqual(len(validate_groups([groups[0], groups[0]], catalog)), 2)
+
+    def test_edit_groups_rejects_empty_and_stale_selection(self):
+        catalog = [{"title": row["title"], "position": row["position"],
+            "fingerprint": fingerprint(row["content"]), "quote": row["content"]} for row in self.catalog]
+        stale = copy.deepcopy(self.groups)
+        stale[0]["targets"][0]["fingerprint"] = "0" * 64
+        for groups in ([], [{"label": "", "targets": self.groups[0]["targets"]}],
+                [{"label": "公司甲", "targets": []}], stale):
+            with self.subTest(groups=groups), self.assertRaises(ValueError):
+                validate_groups(groups, catalog)
 
 
 if __name__ == "__main__":

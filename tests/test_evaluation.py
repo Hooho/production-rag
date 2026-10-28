@@ -539,3 +539,18 @@ def test_summary_target_scoring_includes_expansion_without_excerpt_matching():
     assert row["given_recall"] == 1
     assert row["evidence"][0]["targets"] == [target]
     assert row["evidence"][0]["label"] == "公司甲"
+
+
+def test_summary_item_editor_saves_names_and_selected_chunks():
+    from app.evaluation.suites import check_item
+    from app.evaluation.grouped_evidence import fingerprint
+    target = {"title": "书", "position": 3, "quote": "公司甲的原文", "fingerprint": fingerprint("公司甲的原文")}
+    data = {"question": "列出公司", "type": "汇总", "evidence": [],
+        "evidence_groups": [{"label": "公司甲", "targets": [target]}]}
+    saved = check_item("retrieval", data, catalog=[target])
+    assert saved["evidence"] == ["公司甲"]
+    assert saved["evidence_groups"] == data["evidence_groups"]
+    data["evidence_groups"] = [{"label": "改名后的计分项", "targets": [target]},
+        {"label": "新增计分项", "targets": [target]}]
+    saved = check_item("retrieval", data, catalog=[target])
+    assert saved["evidence"] == ["改名后的计分项", "新增计分项"]

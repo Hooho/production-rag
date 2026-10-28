@@ -155,10 +155,15 @@ def text_value(value, label, limit, required=True):
 
 
 # 按评测方式校验一道题，返回要保存的字段。证据必须能在评测语料里逐字找到，否则这道题永远判为没找到。
-def check_item(method, data, corpus=None):
+def check_item(method, data, corpus=None, catalog=None):
     question = text_value(data.get("question"), "问题", QUESTION_LIMIT)
     cleaned = {"question": question}
-    if method in ("retrieval", "answer"):
+    if method in ("retrieval", "answer") and data.get("evidence_groups") is not None:
+        from .grouped_evidence import validate_groups
+        groups = validate_groups(data["evidence_groups"], catalog or [])
+        cleaned["evidence_groups"] = groups
+        cleaned["evidence"] = [group["label"] for group in groups]
+    elif method in ("retrieval", "answer"):
         evidence = [text.strip() for text in data.get("evidence") or [] if isinstance(text, str) and text.strip()]
         if method == "retrieval" and not evidence:
             raise ValueError("检索方式的题目至少要有一条证据原文")
@@ -190,12 +195,14 @@ def suite_method(connection, suite_id):
 
 
 def add_item(engine, suite_id, data, username):
+    from .evidence import target_catalog
+    catalog = target_catalog(engine) if data.get("evidence_groups") is not None else None
     now = now_text()
     with engine.begin() as connection:
         method = suite_method(connection, suite_id)
         if method is None:
             return None
-        cleaned = check_item(method, data)
+        cleaned = check_item(method, data, catalog=catalog)
         position = connection.execute(select(func.max(eval_suite_items.c.position)).where(
             eval_suite_items.c.suite_id == suite_id)).scalar()
         item_id = str(uuid4())
@@ -207,20 +214,22 @@ def add_item(engine, suite_id, data, username):
 
 
 def update_item(engine, suite_id, item_id, data):
+    from .evidence import target_catalog
+    catalog = target_catalog(engine) if data.get("evidence_groups") is not None else None
     now = now_text()
     with engine.begin() as connection:
         method = suite_method(connection, suite_id)
         if method is None:
             return None
-        cleaned = check_item(method, data)
+        cleaned = check_item(method, data, catalog=catalog)
         previous = connection.execute(select(eval_suite_items.c.data).where(eval_suite_items.c.id == item_id,
             eval_suite_items.c.suite_id == suite_id)).scalar()
-        if previous and previous.get("evidence_groups"):
+        if previous and previous.get("evidence_groups") and data.get("evidence_groups") is None:
             if len(cleaned.get("evidence", [])) != len(previous["evidence_groups"]):
                 raise ValueError("汇总题计分项数量变化，需要重新标注目标分片")
             cleaned["evidence_groups"] = previous["evidence_groups"]
-            if previous.get("supplemental_notes"):
-                cleaned["supplemental_notes"] = previous["supplemental_notes"]
+        if previous and previous.get("supplemental_notes"):
+            cleaned["supplemental_notes"] = previous["supplemental_notes"]
         updated = connection.execute(eval_suite_items.update().where(eval_suite_items.c.id == item_id,
             eval_suite_items.c.suite_id == suite_id).values(data=cleaned, updated=now)).rowcount
         if not updated:

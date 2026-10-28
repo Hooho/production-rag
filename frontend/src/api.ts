@@ -978,9 +978,14 @@ export type EvalSuiteMethod = "retrieval" | "answer" | "dialogue";
 export type EvalSuiteSearchMode = "hybrid" | "dense" | "keyword";
 export type EvalSuiteRunEntry = { id: string; status: "running" | "completed" | "failed" | "interrupted"; created: string; finished: string | null; summary: { name: string; method: EvalSuiteMethod; count: number; passed: number } | null };
 export type EvalSuiteBrief = { id: string; name: string; description: string; method: EvalSuiteMethod; method_label: string; search_mode: EvalSuiteSearchMode; search_mode_label: string; created_by: string; created: string; updated: string; item_count: number; latest: EvalSuiteRunEntry | null };
-export type EvalSuiteItem = { evidence_groups?: { label: string; targets: { title: string; position: number; quote: string; fingerprint: string }[] }[]; supplemental_notes?: string; id: string; question: string; evidence?: string[]; reference_answer?: string; turns?: string[]; type?: string; created_by: string; created: string; updated: string };
+export type EvalScoringTarget = { title: string; position: number; fingerprint: string; quote: string };
+export type EvalScoringGroup = { label: string; targets: EvalScoringTarget[] };
+export function listEvalTargetChunks() {
+  return request<{ items: EvalScoringTarget[] }>("/eval/target-chunks");
+}
+export type EvalSuiteItem = { evidence_groups?: EvalScoringGroup[]; supplemental_notes?: string; id: string; question: string; evidence?: string[]; reference_answer?: string; turns?: string[]; type?: string; created_by: string; created: string; updated: string };
 export type EvalSuiteFull = EvalSuiteBrief & { items: EvalSuiteItem[]; runs: EvalSuiteRunEntry[] };
-export type EvalSuiteItemInput = { question: string; evidence?: string[]; reference_answer?: string | null; turns?: string[]; type?: string | null };
+export type EvalSuiteItemInput = { evidence_groups?: EvalScoringGroup[]; question: string; evidence?: string[]; reference_answer?: string | null; turns?: string[]; type?: string | null };
 // 一道专项题的结果。检索 / 回答：每条证据在向量、关键词检索里排第几、最后有没有返回；多轮对话：最后一问的回答和评审。
 export type EvalSpecialQuestion = {
   supplemental_notes?: string;

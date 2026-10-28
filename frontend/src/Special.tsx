@@ -3,6 +3,8 @@ import { SpecialAgentResults, rewriteLabel } from "./AgentEval";
 import { evidenceLabel } from "./format";
 import { addEvalSuiteItem, createEvalSuite, deleteEvalSuite, deleteEvalSuiteItem, getEvalRun, getEvalSuite, listEvalSuites, startSpecialRun, updateEvalSuite, updateEvalSuiteItem, type EvalSpecialQuestion, type EvalSpecialSection, type EvalSuiteBrief, type EvalSuiteFull, type EvalSuiteItem, type EvalSuiteMethod, type EvalSuiteSearchMode, type EvalSuiteRunEntry } from "./api";
 import { EvidenceDetails } from "./EvidenceChunks";
+import { ScoringItemEditor } from "./ScoringItemEditor";
+import type { EvalScoringGroup } from "./api";
 import { EvidenceTargetTags } from "./EvidenceTargetTags";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import { Tag, TypeStats, TypeTag, typeHues } from "./Tag";
@@ -335,19 +337,22 @@ function RunChip({ run, selected, onClick }: { run: EvalSuiteRunEntry; selected:
   </button>;
 }
 
-// 添加或编辑一道题，字段随评测方式不同；证据每行一条，必须是评测语料里的原文。
+// 汇总题填写命名计分项并选择目标分片；其他题保留原文证据编辑。
 function ItemForm({ suiteId, method, initial, types, onToast, onDone }: { suiteId: string; method: EvalSuiteMethod; initial?: EvalSuiteItem; types: string[]; onToast: ShowToast; onDone: (value: EvalSuiteFull | null) => void }) {
   const [type, setType] = useState(initial?.type ?? "");
   const hues = typeHues(types);
   const [question, setQuestion] = useState(initial?.question ?? "");
   const [evidence, setEvidence] = useState((initial?.evidence ?? []).join("\n"));
+  const [groups, setGroups] = useState<EvalScoringGroup[]>(initial?.evidence_groups ?? [{ label: "", targets: [] }]);
+  const grouped = method === "retrieval" && (Boolean(initial?.evidence_groups) || type.trim() === "汇总");
   const [reference, setReference] = useState(initial?.reference_answer ?? "");
   const [turns, setTurns] = useState((initial?.turns ?? []).join("\n"));
   const [busy, setBusy] = useState(false);
 
   async function submit() {
     setBusy(true);
-    const payload = { question: question.trim(), evidence: method === "dialogue" ? [] : lines(evidence),
+    const payload = { question: question.trim(), evidence: grouped ? [] : method === "dialogue" ? [] : lines(evidence),
+      ...(grouped ? { evidence_groups: groups } : {}),
       reference_answer: reference.trim() || null, turns: method === "dialogue" ? lines(turns) : [], type: type.trim() || null };
     try {
       onDone(initial ? await updateEvalSuiteItem(suiteId, initial.id, payload) : await addEvalSuiteItem(suiteId, payload));
@@ -358,13 +363,14 @@ function ItemForm({ suiteId, method, initial, types, onToast, onDone }: { suiteI
     }
   }
 
-  const ready = question.trim() && (method !== "retrieval" || lines(evidence).length > 0)
+  const ready = question.trim() && (method !== "retrieval" || (grouped ? groups.length > 0 && groups.every((group) => group.label.trim() && group.targets.length > 0) : lines(evidence).length > 0))
     && (method === "retrieval" || reference.trim()) && (method !== "dialogue" || lines(turns).length > 0);
   return <div className="rg-form">
     <div className="rg-form-title">{initial ? "编辑题目" : "添加题目"}</div>
     {method === "dialogue" && <label className="rg-field is-top"><span>前面的提问</span><textarea value={turns} rows={4} onChange={(event) => setTurns(event.target.value)} placeholder="每行一轮，按顺序问" autoFocus /></label>}
     <label className="rg-field"><span>{method === "dialogue" ? "最后一问" : "问题"}</span><input value={question} maxLength={500} onChange={(event) => setQuestion(event.target.value)} placeholder={method === "dialogue" ? "要用到前面内容的问题，例如「回到我最开始问的那个」" : "完整的问题"} autoFocus={method !== "dialogue"} /></label>
-    {method !== "dialogue" && <label className="rg-field is-top"><span>证据原文</span><textarea value={evidence} rows={3} onChange={(event) => setEvidence(event.target.value)} placeholder={`${method === "retrieval" ? "" : "可选："}每行一条，必须是评测语料里的原文；同一件事书里写了几处，用 || 隔开，拿到任意一处就算`} /></label>}
+    {grouped && <div className="rg-field is-top"><span>计分项</span><ScoringItemEditor groups={groups} onChange={setGroups} /></div>}
+    {!grouped && method !== "dialogue" && <label className="rg-field is-top"><span>证据原文</span><textarea value={evidence} rows={3} onChange={(event) => setEvidence(event.target.value)} placeholder={`${method === "retrieval" ? "" : "可选："}每行一条，必须是评测语料里的原文；同一件事书里写了几处，用 || 隔开，拿到任意一处就算`} /></label>}
     {/* 类型：普通文本框，可以输入新类型；下面列出这个专项已经用过的类型，点一下填进去（同一类别写成同一个名字）。 */}
     <div className="rg-field is-top"><span>类型</span><div className="sp-type-input">
       <input value={type} maxLength={20} onChange={(event) => setType(event.target.value)} placeholder="可选，例如多跳、比较；结果会按类型统计" />

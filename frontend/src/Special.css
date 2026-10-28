@@ -1,4 +1,21 @@
 /* 专项评测集：布局沿用巡检复测集（Regression.css），这里只补专项特有的部分。 */
+.sp-scoring-editor { display: grid; gap: 12px; min-width: 0; }
+.sp-scoring-item { display: grid; gap: 10px; padding: 14px; border: 1px solid #d5e3d8; border-radius: 8px; }
+.sp-scoring-heading { display: flex; align-items: center; gap: 12px; }
+.sp-scoring-heading label { display: grid; flex: 1; gap: 6px; min-width: 0; }
+.sp-scoring-heading input { width: 100%; box-sizing: border-box; }
+.sp-scoring-targets { display: flex; flex-wrap: wrap; gap: 8px; }
+.sp-scoring-target { display: flex; align-items: center; gap: 4px; }
+.sp-scoring-target .ag-evidence-target-tags { margin-top: 0; }
+.sp-chunk-filters { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+.sp-chunk-filters input { flex: 1; min-width: 180px; }
+.sp-chunk-filters select { max-width: 100%; }
+.sp-chunk-options { display: grid; gap: 8px; max-height: 55vh; overflow-y: auto; }
+.sp-chunk-option { padding: 12px; border: 1px solid #d5e3d8; border-radius: 8px; }
+.sp-chunk-option label { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+.sp-chunk-option input[type="checkbox"] { width: 16px; height: 16px; flex: 0 0 16px; padding: 0; margin: 4px 0 0; }
+.sp-chunk-option label > span { display: grid; gap: 6px; }
+.sp-chunk-option small { color: #718675; line-height: 1.6; }
 
 .sp-method-field {
    display: flex;
