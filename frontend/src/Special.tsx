@@ -311,10 +311,10 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
             </summary>
             <div className="sp-question-content">
               {item.turns && item.turns.length > 0 && <div className="rg-text"><span className="rg-muted">前面的提问：</span><ol className="sp-turns">{item.turns.map((turn, index) => <li key={index}>{turn}</li>)}</ol></div>}
-              {item.evidence_groups ? item.evidence_groups.map((group, index) => <div className="rg-text" key={index}>
+              {item.evidence_groups ? <div className="sp-scoring-grid">{item.evidence_groups.map((group, index) => <div className="sp-scoring-card" key={index}>
                 <strong>计分项 {index + 1}：{group.label}</strong>
                 <EvidenceTargetTags targets={group.targets} number={index + 1} />
-              </div>) : <>
+              </div>)}</div> : <>
                 {item.evidence?.map((text, index) => <div key={index} className="rg-text"><span className="rg-muted">证据：</span>{evidenceLabel(text)}</div>)}
                 {item.evidence && <div className="rg-text"><EvidenceDetails texts={item.evidence} /></div>}
               </>}

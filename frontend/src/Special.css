@@ -6,6 +6,11 @@
 .sp-question-details[open] > .sp-question-summary .rg-item-question::after { content: "−"; }
 .sp-question-summary:focus-visible { outline: 2px solid #3c8655; outline-offset: 4px; border-radius: 4px; }
 .sp-question-content { margin-top: 14px; }
+.sp-scoring-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.sp-scoring-card { min-width: 0; padding: 14px; border: 1px solid #d5e3d8; border-radius: 8px; background: #f8fbf9; }
+.sp-scoring-card > strong { display: block; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+@media (max-width: 900px) { .sp-scoring-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .sp-scoring-grid { grid-template-columns: minmax(0, 1fr); } }
 .sp-scoring-editor { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; min-width: 0; }
 .sp-scoring-editor > .secondary-button,
 .sp-scoring-editor > small { grid-column: 1 / -1; }
