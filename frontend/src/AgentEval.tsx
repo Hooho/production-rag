@@ -811,7 +811,6 @@ function QuestionDetail({ question, hasFixed, params, config }: { question: Eval
         {!evidence.targets && <span className="ag-evidence-chunk">所在分块 {chunkIds.length ? chunkIds.map((chunkId, order) => <button type="button" className="ag-evidence-chunk-button" key={chunkId} title={`${chunkId} · 点击查看原文`} aria-haspopup="dialog" onClick={() => setSelected({ chunkId, label: chunkLabel(positions?.[order], chunkId), evidence: { number: index + 1, text: evidence.text } })}>{chunkLabel(positions?.[order], chunkId)}</button>) : "知识库里没找到"}</span>}
       </div>;
     })}</div> : <p className="ev-muted-note">没有答案的题，拿到的资料越少越好。</p>}
-    {question.supplemental_notes && <p className="ag-muted">{question.supplemental_notes}</p>}
     {selected && <EvidenceChunkDialog key={`${selected.chunkId}:${selected.evidence.number}`} selection={selected} onClose={() => setSelected(null)} />}
     <div className={`ag-columns ${hasFixed ? "" : "is-single"}`}>
       {hasFixed && <FixedLog question={question} params={params} config={config} />}
@@ -1176,7 +1175,7 @@ function fromSpecial(question: EvalSpecialQuestion, hasFixed: boolean, seq: numb
   change(question.agent_passed, question.previous_agent_passed) && `Agent ${change(question.agent_passed, question.previous_agent_passed)}`].filter(Boolean);
   const recall = question.recall_final ?? (question.fixed_passed ? 1 : 0);
   return {
-    id: question.id, seq, question: question.question, supplemental_notes: question.supplemental_notes, type: question.type ?? "未分类", answerable: true,
+    id: question.id, seq, question: question.question, type: question.type ?? "未分类", answerable: true,
     evidence_count: question.evidence_count ?? question.agent?.evidence.length ?? 0,
     stages: (hasFixed ? { pool: { recall, rr: 0, rank: null }, top: { recall, rr: 0, rank: null }, final: { recall, rr: 0, rank: null } } : undefined) as EvalQuestion["stages"],
     lost_stage: question.lost_stage ?? null,

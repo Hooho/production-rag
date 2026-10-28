@@ -228,8 +228,6 @@ def update_item(engine, suite_id, item_id, data):
             if len(cleaned.get("evidence", [])) != len(previous["evidence_groups"]):
                 raise ValueError("汇总题计分项数量变化，需要重新标注目标分片")
             cleaned["evidence_groups"] = previous["evidence_groups"]
-        if previous and previous.get("supplemental_notes"):
-            cleaned["supplemental_notes"] = previous["supplemental_notes"]
         updated = connection.execute(eval_suite_items.update().where(eval_suite_items.c.id == item_id,
             eval_suite_items.c.suite_id == suite_id).values(data=cleaned, updated=now)).rowcount
         if not updated:
@@ -311,7 +309,7 @@ def run_search_suite(store, models, suite, responder, run_id, progress, modes=("
     for item in suite["items"]:
         items.append({"id": item["id"], "question": item["question"], "type": item.get("type") or "", "answerable": True,
             "evidence": item.get("evidence") or [], "evidence_groups": item.get("evidence_groups"), "reference_answer": item.get("reference_answer") or "",
-            "supplemental_notes": item.get("supplemental_notes"), "split": "dev", "reviewed": True})
+            "split": "dev", "reviewed": True})
     on_item = answer_hook(store, models, responder, run_id) if suite["method"] == "answer" else None
     rows, config = search_items(store, models, items, SEARCH_METHODS[suite["search_mode"]], progress, on_item)
     questions = []
@@ -329,7 +327,7 @@ def run_search_suite(store, models, suite, responder, run_id, progress, modes=("
         found = ((row.get("stages") or {}).get("final") or {}).get("recall") or 0
         entry = {"id": item["id"], "question": item["question"], "type": item["type"] or None, "evidence": evidence, "found": found >= 1,
             "lost_stage": row.get("lost_stage"), "returned": row.get("returned"),
-            "reference_answer": item["reference_answer"] or None, "supplemental_notes": item.get("supplemental_notes"),
+            "reference_answer": item["reference_answer"] or None,
             # 和 Agent 逐题对比时要用：过滤后的召回、证据去向、交给回答模型的来源、检索词和耗时。
             "recall_final": found, "given_recall": row.get("given_recall"),
             # 证据去向：status（没召回 / 没进候选池 / 低于阈值被过滤 / 超出返回段数 / 交给模型）和合并名次、重排名次、重排分，
@@ -390,7 +388,7 @@ def run_agent_search_suite(store, models, suite, progress, modes, agent_mode):
         agent_passed += passed_agent
         entry = dict(fixed_by_id.get(item["id"]) or {"id": item["id"], "question": item["question"],
             "type": item.get("type") or None, "reference_answer": item.get("reference_answer") or None})
-        entry.update({"supplemental_notes": item.get("supplemental_notes"), "evidence_count": len(evidence), "agent": agent, "agent_passed": passed_agent})
+        entry.update({"evidence_count": len(evidence), "agent": agent, "agent_passed": passed_agent})
         if with_fixed:
             # 和 Agent 对比时，固定流程按“交给模型的资料”（含父块扩展）判断是否通过，两边口径一致。
             given = entry.get("given_recall")

@@ -657,7 +657,6 @@ export type EvalQueryRoute = { query: string; recalled: number; kept: number; ke
 export type EvalMaterial = { count: number; chars: number; tokens: number; items?: { chunk_id: string | null; chars: number; tokens: number }[] };
 export type EvalFlowFields = { material?: EvalMaterial | null; query_routes?: EvalQueryRoute[] | null; given_hits?: number | null; ext_hits?: number | null; first_given_recall?: number | null; rewrite?: EvalRewrite | null; retry?: EvalRetry | null; cleared?: boolean | null; flow_latency_ms?: number | null };
 export type EvalQuestion = {
-  supplemental_notes?: string;
   id: string;
   question: string;
   type: string;
@@ -983,12 +982,11 @@ export type EvalScoringGroup = { label: string; targets: EvalScoringTarget[] };
 export function listEvalTargetChunks() {
   return request<{ items: EvalScoringTarget[] }>("/eval/target-chunks");
 }
-export type EvalSuiteItem = { evidence_groups?: EvalScoringGroup[]; supplemental_notes?: string; id: string; question: string; evidence?: string[]; reference_answer?: string; turns?: string[]; type?: string; created_by: string; created: string; updated: string };
+export type EvalSuiteItem = { evidence_groups?: EvalScoringGroup[]; id: string; question: string; evidence?: string[]; reference_answer?: string; turns?: string[]; type?: string; created_by: string; created: string; updated: string };
 export type EvalSuiteFull = EvalSuiteBrief & { items: EvalSuiteItem[]; runs: EvalSuiteRunEntry[] };
 export type EvalSuiteItemInput = { evidence_groups?: EvalScoringGroup[]; question: string; evidence?: string[]; reference_answer?: string | null; turns?: string[]; type?: string | null };
 // 一道专项题的结果。检索 / 回答：每条证据在向量、关键词检索里排第几、最后有没有返回；多轮对话：最后一问的回答和评审。
 export type EvalSpecialQuestion = {
-  supplemental_notes?: string;
   id: string;
   question: string;
   // 题目类型（可选，专项里自己起的名字）。
