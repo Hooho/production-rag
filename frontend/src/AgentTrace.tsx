@@ -980,7 +980,7 @@ function messageNames(messages: AgentMessage[], roundNo: number) {
 
 // 「① 收到」里的输入清单：按接口请求的真实结构排，一个框装下 tools 和 messages。
 // messages 是一张连续的表，每行同一种样式：序号（消息在请求里的位置）、类型、名称、大小。
-// 和之前轮次完全一样的消息排在上面，浅色、按组合并，点击跳到第一次出现的地方；分隔线下面是本轮新增的，可以直接展开。
+// 之前轮次已有的消息排在上面，按组合并；所有消息均点击打开内容弹窗。
 function range(first: number, last: number) {
   return first === last ? `#${first}` : `#${first}–${last}`;
 }
@@ -992,7 +992,6 @@ function InputRow({
   note,
   size,
   id,
-  link,
   children,
   hue,
 }: {
@@ -1002,8 +1001,7 @@ function InputRow({
   note?: ReactNode;
   size: string;
   id?: string;
-  link?: ReactNode;
-  children?: ReactNode;
+  children: ReactNode;
   hue?: number;
 }) {
   const head = (
@@ -1015,10 +1013,8 @@ function InputRow({
       <strong>{label}</strong>
       {note && <span className="agent-input-note">{note}</span>}
       <small>{size}</small>
-      {link}
     </>
   );
-  if (!children) return <div className="agent-input-row reused">{head}</div>;
   // hue：工具返回的消息按工具颜色着色（和 ③④ 里同一个工具的卡片一致）。
   return (
     <TraceContent
@@ -1233,7 +1229,6 @@ function RequestInput({
       }
     }
   }
-  const target = (item: Placed) => `${anchor}-m${item.index}`;
   return (
     <div className="agent-input">
       <div className="agent-input-title">本次请求的输入</div>
@@ -1258,11 +1253,7 @@ function RequestInput({
         <div className="agent-input-head">
           <code>messages</code>
           <span>{round.message_count} 条</span>
-          {before.length > 0 && (
-            <small>
-              沿用 {before.length} · 新增 {messages.length}
-            </small>
-          )}
+          {before.length > 0 && <small>新增 {messages.length}</small>}
         </div>
         <div className="agent-input-rows">
           {reused.map(({ first, items }) => (
@@ -1270,21 +1261,18 @@ function RequestInput({
               key={`reused-${first.index}`}
               no={range(first.index + 1, items[items.length - 1].index + 1)}
               kind={first.kind}
-              label={
-                <span title={items.map((item) => item.name).join("\n")}>
-                  {first.group}
-                </span>
-              }
+              label={first.group}
               size={`${items.length} 条`}
-              link={
-                <a
-                  href={`#${target(first)}`}
-                  onClick={(event) => jumpTo(event, target(first))}
-                >
-                  沿用 → 第 {first.round} 轮
-                </a>
-              }
-            />
+            >
+              {items.map((item) => (
+                <div key={item.index}>
+                  <strong>
+                    #{item.index + 1} · {item.name}
+                  </strong>
+                  <MessageBody message={item.message} />
+                </div>
+              ))}
+            </InputRow>
           ))}
           {before.length > 0 && messages.length > 0 && (
             <div className="agent-input-divider">以下为本轮新增</div>
@@ -1294,21 +1282,6 @@ function RequestInput({
       </div>
     </div>
   );
-}
-
-// 跳转链接指向的消息可能在折叠起来的轮次里：先把它和外层的折叠全部展开，再滚动过去。
-function jumpTo(event: { preventDefault: () => void }, id: string) {
-  const target = document.getElementById(id);
-  if (!target) return;
-  event.preventDefault();
-  let node: HTMLElement | null = target;
-  while (node) {
-    if (node instanceof HTMLDetailsElement) node.open = true;
-    node = node.parentElement;
-  }
-  target.scrollIntoView({ behavior: "smooth", block: "center" });
-  target.classList.add("agent-jumped");
-  window.setTimeout(() => target.classList.remove("agent-jumped"), 1600);
 }
 
 // 程序对一次工具调用做了什么：参数、执行状态、关键结果（检索漏斗、查询计划、读到的位置）。
