@@ -90,6 +90,20 @@ class EvalRunInput(BaseModel):
     corpus_ids: list[str] = Field(default_factory=list, max_length=200)
 
 
+class EvalTargetInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(..., min_length=1)
+    position: int = Field(..., ge=0)
+    fingerprint: str = Field(..., pattern="^[0-9a-f]{64}$")
+    quote: str = ""
+
+
+class EvalScoringGroupInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    label: str = Field(..., min_length=1, max_length=100)
+    targets: list[EvalTargetInput] = Field(..., min_length=1, max_length=100)
+
+
 # 手动录入一道评测题；编号、来源和审核状态由服务端统一生成，避免客户端伪造元数据。
 class EvalDatasetItemInput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -97,6 +111,7 @@ class EvalDatasetItemInput(BaseModel):
     type: str = Field(min_length=1, max_length=20)
     answerable: bool
     evidence: list[str] = Field(default_factory=list, max_length=10)
+    evidence_groups: list[EvalScoringGroupInput] | None = Field(None, min_length=1, max_length=10)
     reference_answer: str = Field(min_length=1, max_length=2000)
     split: str = Field("dev", pattern="^(dev|holdout)$")
     history: list[str] = Field(default_factory=list, max_length=5)
@@ -109,6 +124,7 @@ class EvalDatasetPairInput(BaseModel):
     paraphrase_question: str = Field(min_length=1, max_length=1000)
     answerable: bool
     evidence: list[str] = Field(default_factory=list, max_length=10)
+    evidence_groups: list[EvalScoringGroupInput] | None = Field(None, min_length=1, max_length=10)
     reference_answer: str = Field(min_length=1, max_length=2000)
     split: str = Field("dev", pattern="^(dev|holdout)$")
 
@@ -174,20 +190,6 @@ class EvalSuiteInput(BaseModel):
     description: str | None = Field(None, max_length=500)
     method: str = Field(..., pattern="^(retrieval|answer|dialogue)$")
     search_mode: str = Field("hybrid", pattern="^(hybrid|dense|keyword)$")
-
-
-class EvalTargetInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    title: str = Field(..., min_length=1)
-    position: int = Field(..., ge=0)
-    fingerprint: str = Field(..., pattern="^[0-9a-f]{64}$")
-    quote: str = ""
-
-
-class EvalScoringGroupInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    label: str = Field(..., min_length=1, max_length=100)
-    targets: list[EvalTargetInput] = Field(..., min_length=1, max_length=100)
 
 
 # 专项的一道题，字段随评测方式不同：检索要问题和证据，回答再加参考答案，多轮对话是前面几轮提问 + 最后一问 + 参考答案。
@@ -1653,6 +1655,12 @@ def create_app(store=None, models=None, jwt_secret=None):
     def eval_dataset(owner=Depends(identity)):
         corpus = [entry["title"] for entry in eval_corpus.list_entries(app.state.store.engine)]
         items = load_dataset()
+        from ..evaluation.evidence import target_catalog
+        from ..evaluation.grouped_evidence import legacy_groups
+        if any(item.get("answerable") and item.get("evidence") and not item.get("evidence_groups") for item in items):
+            catalog = target_catalog(app.state.store.engine)
+            items = [{**item, "evidence_groups": legacy_groups(item["evidence"], catalog)}
+                if item.get("answerable") and item.get("evidence") and not item.get("evidence_groups") else item for item in items]
         reviewed_count = len(select_split(items, "all"))
         return {"items": items, "types": QUESTION_TYPES, "corpus": corpus,
             "reviewed_count": reviewed_count, "pending_count": len(items) - reviewed_count}
@@ -1675,6 +1683,19 @@ def create_app(store=None, models=None, jwt_secret=None):
             raise HTTPException(404, "该分片已不存在，无法读取原文")
         return result
 
+    def dataset_scoring_fields(data):
+        if data.get("evidence_groups") is None:
+            return data
+        if not data.get("answerable"):
+            raise HTTPException(422, "无法回答题不应选择目标分片")
+        from ..evaluation.evidence import target_catalog
+        from ..evaluation.grouped_evidence import validate_groups
+        try:
+            groups = validate_groups(data["evidence_groups"], target_catalog(app.state.store.engine))
+        except ValueError as error:
+            raise HTTPException(422, str(error))
+        return {**data, "evidence_groups": groups, "evidence": [group["label"] for group in groups]}
+
     # 手动新增评测题：先验证题型、证据和语料一致性，再追加到项目评测集。
     @app.post("/eval/dataset/items", status_code=201, dependencies=[Depends(require_admin)])
     def add_eval_dataset_item(body: EvalDatasetItemInput, owner=Depends(identity)):
@@ -1685,9 +1706,10 @@ def create_app(store=None, models=None, jwt_secret=None):
         with app.state.eval_dataset_lock:
             existing = load_dataset()
             evidence = [text.strip() for text in body.evidence if text.strip()]
-            item = body.model_dump()
+            item = dataset_scoring_fields(body.model_dump())
             item["id"] = next_item_id(existing, body.answerable)
-            item["evidence"] = evidence
+            if not item.get("evidence_groups"):
+                item["evidence"] = evidence
             item["origin"] = "manual"
             item["reviewed"] = True
             problems = validate_dataset(existing + [item], corpus_text(app.state.store.engine))
@@ -1703,7 +1725,8 @@ def create_app(store=None, models=None, jwt_secret=None):
             existing = load_dataset()
             evidence = [text.strip() for text in body.evidence if text.strip()]
             pair_id = next_pair_id(existing)
-            base = body.model_dump()
+            base = dataset_scoring_fields(body.model_dump())
+            evidence = base["evidence"]
             base.pop("original_question")
             base.pop("paraphrase_question")
             items = []
@@ -1746,6 +1769,11 @@ def create_app(store=None, models=None, jwt_secret=None):
             existing = load_dataset()
             try:
                 items = generate_items(app.state.models, existing, body.count, body.split, body.type)
+                from ..evaluation.evidence import target_catalog
+                from ..evaluation.grouped_evidence import legacy_groups, validate_groups
+                catalog = target_catalog(app.state.store.engine)
+                items = [{**item, "evidence_groups": validate_groups(legacy_groups(item["evidence"], catalog), catalog)}
+                    if item.get("answerable") else item for item in items]
             except ValueError as error:
                 raise HTTPException(422, str(error))
             except Exception:

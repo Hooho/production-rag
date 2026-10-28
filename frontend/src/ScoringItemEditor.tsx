@@ -3,6 +3,8 @@ import { listEvalTargetChunks, type EvalScoringGroup, type EvalScoringTarget } f
 import { DetailDialog } from "./DetailDialog";
 import { EvidenceTargetTags } from "./EvidenceTargetTags";
 
+import "./Special.css";
+
 const PAGE_SIZE = 10;
 const targetKey = (target: EvalScoringTarget) => `${target.title}:${target.position}:${target.fingerprint}`;
 

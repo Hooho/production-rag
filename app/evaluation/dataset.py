@@ -381,6 +381,13 @@ def validate_dataset(items, corpus_text):
             problems.append(f"{item_id}：可回答的题必须至少有一条证据原文")
         if not item.get("answerable") and evidence:
             problems.append(f"{item_id}：无法回答的题不应该有证据")
+        groups = item.get("evidence_groups")
+        if groups:
+            if not item.get("answerable"):
+                problems.append(f"{item_id}：无法回答的题不应该有计分项")
+            if len(groups) != len(evidence) or any(not group.get("label", "").strip() or not group.get("targets") for group in groups):
+                problems.append(f"{item_id}：计分项需要名称和目标分片，且数量应与计分依据一致")
+            continue
         for text in evidence:
             for piece in missing_variants(text, corpus):
                 problems.append(f"{item_id}：证据不在语料中：{piece}")
@@ -404,6 +411,8 @@ def validate_dataset(items, corpus_text):
             problems.append(f"{pair_id}：题对中的可回答标记必须一致")
         if any(member.get("evidence", []) != members[0].get("evidence", []) for member in members):
             problems.append(f"{pair_id}：题对中的标准证据必须一致")
+        if any(member.get("evidence_groups") != members[0].get("evidence_groups") for member in members):
+            problems.append(f"{pair_id}：题对的计分项和目标分片必须一致")
         if any(member.get("split") != members[0].get("split") for member in members):
             problems.append(f"{pair_id}：题对中的题目范围必须一致")
     return problems

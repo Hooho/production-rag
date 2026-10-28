@@ -9,6 +9,20 @@ def fingerprint(content):
     return hashlib.sha256(text.encode()).hexdigest()
 
 
+def legacy_groups(texts, catalog):
+    """旧题只按原有证据定位分片，不推测或新增答案要点。"""
+    def normalized(text):
+        return re.sub(r"\s+", "", unicodedata.normalize("NFKC", text or ""))
+    rows = [(row, normalized(row["quote"])) for row in catalog]
+    result = []
+    for index, text in enumerate(texts):
+        pieces = [piece.strip() for piece in text.split("||") if piece.strip()]
+        variants = [normalized(piece) for piece in pieces]
+        result.append({"label": pieces[0][:100] if pieces else f"要点 {index + 1}",
+            "targets": [row for row, content in rows if any(variant in content for variant in variants)]})
+    return result
+
+
 def bind_groups(texts, groups, catalog):
     if not groups:
         return texts

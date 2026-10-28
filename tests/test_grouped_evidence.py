@@ -3,7 +3,7 @@ import json
 import unittest
 from pathlib import Path
 
-from app.evaluation.grouped_evidence import bind_groups, fingerprint, match_evidence, validate_groups
+from app.evaluation.grouped_evidence import bind_groups, fingerprint, legacy_groups, match_evidence, validate_groups
 
 
 class GroupedEvidenceTest(unittest.TestCase):
@@ -90,6 +90,16 @@ class GroupedEvidenceTest(unittest.TestCase):
                 [{"label": "公司甲", "targets": []}], stale):
             with self.subTest(groups=groups), self.assertRaises(ValueError):
                 validate_groups(groups, catalog)
+
+    def test_legacy_conversion_preserves_alternative_targets_without_type_rules(self):
+        catalog = [{"title": row["title"], "position": row["position"],
+            "fingerprint": fingerprint(row["content"]), "quote": row["content"]} for row in self.catalog]
+        catalog.append({"title": "另一本书", "position": 0, "fingerprint": fingerprint("无关内容"), "quote": "无关内容"})
+        groups = legacy_groups(["公司甲经营失败 || 公司甲的另一处案例"], catalog)
+        self.assertEqual(groups[0]["label"], "公司甲经营失败")
+        self.assertEqual([target["position"] for target in groups[0]["targets"]], [0, 1])
+        self.assertEqual(validate_groups(groups, catalog), groups)
+        self.assertEqual(legacy_groups([], catalog), [])
 
 
 if __name__ == "__main__":

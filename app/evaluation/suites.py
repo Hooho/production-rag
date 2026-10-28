@@ -139,6 +139,12 @@ def get_suite(engine, suite_id):
             eval_suite_items.c.position)).mappings().all()
     view = suite_view(row, len(items))
     view["items"] = [item_view(item) for item in items]
+    if row["method"] in ("retrieval", "answer") and any(item.get("evidence") and not item.get("evidence_groups") for item in view["items"]):
+        from .evidence import target_catalog
+        from .grouped_evidence import legacy_groups
+        catalog = target_catalog(engine)
+        view["items"] = [{**item, "evidence_groups": legacy_groups(item["evidence"], catalog)}
+            if item.get("evidence") and not item.get("evidence_groups") else item for item in view["items"]]
     view["runs"] = suite_runs(suite_id)
     return view
 

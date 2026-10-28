@@ -1,3 +1,6 @@
+import { ScoringItemEditor } from "./ScoringItemEditor";
+import { EvidenceTargetTags } from "./EvidenceTargetTags";
+import type { EvalScoringGroup } from "./api";
 import { Fragment, useEffect, useMemo, useRef, useState, type ComponentType, type FormEvent, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { addEvalDatasetItem, addEvalDatasetPair, compareEvalRuns, listEvalCorpus, listEvalSuites, startSpecialRun, type EvalCorpusEntry, type EvalSuiteBrief, deleteEvalRun, generateEvalDatasetItems, getEvalDataset, getEvalRun, listEvalRuns, reviewEvalDatasetItem, startEvalRun, type EvalComparison, type EvalComparisonRow, type EvalDataset, type EvalHistoryMetrics, type EvalItem, type EvalParaphraseAnalysis, type EvalQuestion, type EvalRun, type EvalRunBrief, type EvalMode, type EvalSufficiency, type EvalSuite, type EvalSummary, type EvalLimitPoint, type EvalSweepPoint, type RetrievalDiagnosticsData } from "./api";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
@@ -965,7 +968,7 @@ function summarizeChunkStages(run: EvalRun) {
   for (const question of answerable) {
     const diagnostics = question.diagnostics;
     if (!diagnostics) continue;
-    const expectedIds = new Set(question.evidence.map((evidence) => evidence.chunk_id).filter((chunkId): chunkId is string => Boolean(chunkId)));
+    const expectedIds = new Set(question.evidence.flatMap((evidence) => evidence.targets?.map((target) => target.chunk_id) ?? (evidence.chunk_id ? [evidence.chunk_id] : [])));
     expectedChunks += expectedIds.size;
     evidenceTotal += question.evidence.length;
     const denseIds = new Set(diagnostics.lists.filter((list) => list.method === "dense").flatMap((list) => list.hits.map((hit) => hit.chunk_id)));
@@ -1015,7 +1018,8 @@ function QuestionChunkComparison({ question, run }: { question: EvalQuestion; ru
       <div className="ev-chunk-detail-column is-reference">
         <div className="ev-chunk-detail-heading"><strong>预设正确证据</strong><span>{question.evidence.length}</span></div>
         <div className="ev-chunk-detail-list">{question.evidence.map((evidence, index) => <div className="ev-chunk-detail-item is-reference" key={`${evidence.chunk_id ?? "evidence"}-${index}`}>
-          <span>正确证据 {index + 1}</span><p>{evidenceLabel(evidence.text)}</p><small>{evidence.chunk_id ?? "没有找到对应 chunk"}</small>
+          {evidence.targets ? <><span>计分项 {index + 1}：{evidence.label}</span><EvidenceTargetTags targets={evidence.targets} number={index + 1} /></>
+            : <><span>正确证据 {index + 1}</span><p>{evidenceLabel(evidence.text)}</p><small>{evidence.chunk_id ?? "没有找到对应 chunk"}</small></>}
         </div>)}</div>
       </div>
       {stages.map((stage) => {
@@ -1199,7 +1203,8 @@ function QuestionList({ run, Diagnostics }: { run: EvalRun; Diagnostics: Props["
           </div>}
           {question.answerable && <QuestionChunkComparison question={question} run={run} />}
           {question.evidence.length > 0 && <div className="ev-evidence-list">{question.evidence.map((evidence, index) => <div className="ev-evidence" key={index}>
-            <p>“{evidenceLabel(evidence.text)}”</p>
+            {evidence.targets ? <><strong>计分项 {index + 1}：{evidence.label}</strong><EvidenceTargetTags targets={evidence.targets} number={index + 1} /></>
+              : <p>“{evidenceLabel(evidence.text)}”</p>}
             <span>{EVIDENCE_STATUS[evidence.status] ?? evidence.status}</span><span>RRF 第 {evidence.rrf_rank ?? "—"} 名</span><span>重排第 {evidence.rerank_rank ?? "—"} 名</span><span>概率 {formatScore(evidence.rerank_probability, 3)}</span><span>来源 {evidence.source_id ?? "—"}</span>
           </div>)}</div>}
           <div className="ev-queries"><span>检索词</span>{question.queries.map((query) => <code key={query}>{query}</code>)}<span>重排问题</span><code>{question.rerank_query}</code><small>{rewriteLabel(question)}</small></div>
@@ -1612,7 +1617,7 @@ function DatasetBrowser({ dataset, onToast, onSaved }: { dataset: EvalDataset | 
   const [paraphraseQuestion, setParaphraseQuestion] = useState("");
   const [questionType, setQuestionType] = useState("事实");
   const [answerable, setAnswerable] = useState(true);
-  const [evidence, setEvidence] = useState("");
+  const [groups, setGroups] = useState<EvalScoringGroup[]>([{ label: "", targets: [] }]);
   const [referenceAnswer, setReferenceAnswer] = useState("");
   const [questionSplit, setQuestionSplit] = useState("dev");
   const [history, setHistory] = useState("");
@@ -1685,18 +1690,18 @@ function DatasetBrowser({ dataset, onToast, onSaved }: { dataset: EvalDataset | 
       if (questionType === "同义改写") {
         await addEvalDatasetPair({
           original_question: question, paraphrase_question: paraphraseQuestion, answerable,
-          evidence: answerable ? readLines(evidence) : [], reference_answer: referenceAnswer, split: questionSplit,
+          evidence: [], ...(answerable ? { evidence_groups: groups } : {}), reference_answer: referenceAnswer, split: questionSplit,
         });
       } else {
         await addEvalDatasetItem({
-          question, type: questionType, answerable, evidence: answerable ? readLines(evidence) : [],
+          question, type: questionType, answerable, evidence: [], ...(answerable ? { evidence_groups: groups } : {}),
           reference_answer: referenceAnswer, split: questionSplit, history: readLines(history),
         });
       }
       await onSaved();
       setQuestion("");
       setParaphraseQuestion("");
-      setEvidence("");
+      setGroups([{ label: "", targets: [] }]);
       setReferenceAnswer("");
       setHistory("");
       closeAddDialog();
@@ -1763,10 +1768,11 @@ function DatasetBrowser({ dataset, onToast, onSaved }: { dataset: EvalDataset | 
               <label className="ev-form-field ev-form-wide">问题 2（同义改写）<input value={paraphraseQuestion} onChange={(event) => setParaphraseQuestion(event.target.value)} placeholder="换一种说法询问同一事实" required /></label>
             </> : <label className="ev-form-field ev-form-wide">问题<input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="例如：耳机保修多久？" required /></label>}
             <label className="ev-form-check"><input type="checkbox" checked={answerable} onChange={(event) => setAnswerable(event.target.checked)} />可回答题</label>
-            <label className="ev-form-field ev-form-wide">证据原文 <small>每行一条；一条有几处原文用 || 隔开；无法回答题留空</small><textarea value={evidence} onChange={(event) => setEvidence(event.target.value)} disabled={!answerable} placeholder="从语料中逐字粘贴证据原文" rows={3} /></label>
+            {answerable ? <div className="ev-form-field ev-form-wide"><span>计分项</span><ScoringItemEditor groups={groups} onChange={setGroups} /></div>
+              : <p className="ev-form-note">无法回答题不设置目标分片，评估系统能否正确拒答。</p>}
             <label className="ev-form-field ev-form-wide">标准答案<textarea value={referenceAnswer} onChange={(event) => setReferenceAnswer(event.target.value)} placeholder="回答应包含的事实或拒答说明" rows={3} required /></label>
             <label className="ev-form-field ev-form-wide">多轮追问历史 <small>可选，每行一条</small><textarea value={history} onChange={(event) => setHistory(event.target.value)} disabled={questionType !== "多轮追问"} rows={2} /></label>
-            <button className="primary-button ev-form-submit" type="submit" disabled={saving}>{saving ? "保存中…" : "加入评测集"}</button>
+            <button className="primary-button ev-form-submit" type="submit" disabled={saving || (answerable && (!groups.length || groups.some((group) => !group.label.trim() || !group.targets.length)))}>{saving ? "保存中…" : "加入评测集"}</button>
           </form> : <form className="ev-dataset-form ev-modal-form" onSubmit={(event) => void submitAi(event)}>
             <p className="ev-form-note">按语料起草题目、证据和答案，生成后要人工审核。</p>
             <div className="ev-form-grid">
@@ -1801,7 +1807,9 @@ function DatasetBrowser({ dataset, onToast, onSaved }: { dataset: EvalDataset | 
       <div className="ev-item-purpose"><span>评测目标</span><p>{DATASET_TYPE_CARD_DETAILS[item.type] ?? "检验系统能否从语料中找回与问题相关的证据。"}</p></div>
       {item.history && item.history.length > 0 && <div className="ev-item-context"><span>对话上下文 · 第 {item.history.length + 1} 轮</span><p>{item.history.join(" → ")}</p></div>}
       <h4>问题：{item.question}</h4>
-      {item.evidence.length > 0 ? <div className="ev-item-evidence"><span>证据原文</span>{item.evidence.map((text, index) => <blockquote key={index}>{evidenceLabel(text)}</blockquote>)}<EvidenceDetails texts={item.evidence} /></div> : <div className="ev-item-evidence"><span>证据原文</span><p className="ev-muted">无（只看系统是否正确拒答）</p></div>}
+      {item.evidence_groups ? <div className="ev-item-evidence">{item.evidence_groups.map((group, index) => <div key={index}>
+        <strong>计分项 {index + 1}：{group.label}</strong><EvidenceTargetTags targets={group.targets} number={index + 1} />
+      </div>)}</div> : item.evidence.length > 0 ? <div className="ev-item-evidence"><span>证据原文</span>{item.evidence.map((text, index) => <blockquote key={index}>{evidenceLabel(text)}</blockquote>)}<EvidenceDetails texts={item.evidence} /></div> : <div className="ev-item-evidence"><span>证据原文</span><p className="ev-muted">无（只看系统是否正确拒答）</p></div>}
       <div className="ev-item-answer"><span>标准答案（给AI参考判断）</span><p>{item.reference_answer}</p></div>
       {/* 审核按钮放在题目底部的独立操作栏，和状态标签分离，避免用户误以为标签可以点击。 */}
       {item.reviewed !== true && <div className="ev-item-actions" aria-label="题目操作"><span className="ev-item-actions-label">操作</span><button className="ev-review-button" type="button" disabled={reviewingId === item.id} onClick={() => void reviewItem(item.id)}>{reviewingId === item.id ? "审核中…" : "审核通过"}</button></div>}

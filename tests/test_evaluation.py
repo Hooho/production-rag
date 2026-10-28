@@ -554,3 +554,25 @@ def test_summary_item_editor_saves_names_and_selected_chunks():
         {"label": "新增计分项", "targets": [target]}]
     saved = check_item("retrieval", data, catalog=[target])
     assert saved["evidence"] == ["改名后的计分项", "新增计分项"]
+
+
+def test_all_question_types_share_scoring_item_api(setup, eval_dir):
+    client, _ = setup
+    catalog = client.get("/eval/target-chunks", headers=headers())
+    assert catalog.status_code == 200
+    target = catalog.json()["items"][0]
+    group = {"label": "自定义计分项名称", "targets": [target]}
+    added = client.post("/eval/dataset/items", headers=headers(), json={
+        "question": "测试事实题", "type": "事实", "answerable": True, "evidence_groups": [group],
+        "reference_answer": "参考答案", "split": "dev"})
+    assert added.status_code == 201
+    assert added.json()["evidence_groups"] == [group]
+    assert added.json()["evidence"] == [group["label"]]
+    suite = client.post("/eval/suites", headers=headers(), json={"name": "统一结构测试", "method": "retrieval"})
+    assert suite.status_code == 201
+    saved = client.post(f"/eval/suites/{suite.json()['id']}/items", headers=headers(), json={
+        "question": "不填写类型的专项题", "evidence_groups": [group]})
+    assert saved.status_code == 201
+    assert saved.json()["items"][0]["evidence_groups"] == [group]
+    legacy = client.get("/eval/dataset", headers=headers()).json()["items"]
+    assert next(item for item in legacy if item["id"] == "a1")["evidence_groups"]

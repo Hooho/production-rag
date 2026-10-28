@@ -619,6 +619,7 @@ export function listDocumentChunks(documentId: string, page: number, pageSize = 
 
 // 评测：题目、单次评测结果、历次评测列表与两次对比，字段与后端 app/evaluation 保持一致。
 export type EvalItem = {
+  evidence_groups?: EvalScoringGroup[];
   id: string;
   question: string;
   type: string;
@@ -873,6 +874,7 @@ export function addEvalDatasetPair(payload: {
   paraphrase_question: string;
   answerable: boolean;
   evidence: string[];
+  evidence_groups?: EvalScoringGroup[];
   reference_answer: string;
   split: string;
 }) {
