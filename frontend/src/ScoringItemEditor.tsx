@@ -68,13 +68,15 @@ export function ScoringItemEditor({ groups, onChange }: { groups: EvalScoringGro
       </div>}
       {catalog && !error && <nav className="sp-chunk-pagination" aria-label="分片分页">
         <span className="rg-muted">共 {filtered.length} 片 · 每页 {PAGE_SIZE} 片</span>
+        <div className="sp-chunk-page-controls">
         <button type="button" className="secondary-button" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>上一页</button>
-        <select aria-label="跳转页码" value={currentPage} onChange={(event) => setPage(Number(event.target.value))}>
+        <select className="sp-chunk-page-select" aria-label="跳转页码" value={currentPage} onChange={(event) => setPage(Number(event.target.value))}>
           {Array.from({ length: pageCount }, (_, i) => <option key={i + 1} value={i + 1}>第 {i + 1} / {pageCount} 页</option>)}
         </select>
         <button type="button" className="secondary-button" disabled={currentPage === pageCount} onClick={() => setPage(currentPage + 1)}>下一页</button>
+        </div>
       </nav>}
-      <div className="rg-buttons"><span className="rg-muted">已选 {group?.targets.length ?? 0} 片</span><button type="button" className="primary-button" onClick={() => setActive(null)}>完成选择</button></div>
+      <div className="rg-buttons sp-chunk-footer"><span className="rg-muted">已选 {group?.targets.length ?? 0} 片</span><button type="button" className="primary-button" onClick={() => setActive(null)}>完成选择</button></div>
     </DetailDialog>
   </div>;
 }

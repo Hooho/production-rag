@@ -13,6 +13,10 @@
 .sp-chunk-options { display: grid; gap: 8px; max-height: 55vh; overflow-y: auto; }
 .sp-chunk-pagination { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .sp-chunk-pagination > span { margin-right: auto; }
+.sp-chunk-page-controls { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.sp-chunk-pagination .sp-chunk-page-select { width: 128px; max-width: 128px; flex: 0 0 128px; }
+.sp-chunk-page-controls > button { flex: 0 0 auto; }
+.sp-chunk-footer { margin-top: 18px; padding-top: 14px; border-top: 1px solid #d5e3d8; }
 .sp-chunk-option { padding: 12px; border: 1px solid #d5e3d8; border-radius: 8px; }
 .sp-chunk-option label { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
 .sp-chunk-option input[type="checkbox"] { width: 16px; height: 16px; flex: 0 0 16px; padding: 0; margin: 4px 0 0; }
