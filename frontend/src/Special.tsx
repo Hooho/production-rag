@@ -58,7 +58,7 @@ const SEARCH_HINTS: Record<EvalSuiteSearchMode, string> = {
   dense: "只用向量，看向量本身找不找得到。",
   keyword: "只用关键词（BM25），看字面匹配找不找得到。",
 };
-// 证据最后的去向（检索诊断里的状态）。
+// 计分项最后的去向（检索诊断里的状态）。
 const EVIDENCE_STATUS: Record<string, string> = {
   returned: "交给了回答模型",
   beyond_limit: "重排后排名靠后，超出交给模型的段数",
@@ -979,14 +979,14 @@ function ItemForm({
   );
 }
 
-// 含证据的分片在某一路检索结果里排第几：向量检索按意思相近取前 12 个分片，关键词检索（BM25）按字面取前 30 个。
+// 含计分项的分片在某一路检索结果里排第几：向量检索按意思相近取前 12 个分片，关键词检索（BM25）按字面取前 30 个。
 function rankText(label: string, rank: number | null, limit: number) {
   return rank === null
     ? `${label}检索：前 ${limit} 名里没有`
     : `${label}检索：第 ${rank} 名`;
 }
 
-// 一个专项在一次评测里的结果：先看通过数和与上次相比的变化，没通过的排在前面；检索方式额外统计向量和关键词各找到几条证据。
+// 一个专项在一次评测里的结果：先看通过数和与上次相比的变化，没通过的排在前面；检索方式额外统计向量和关键词各找到几个计分项。
 export function SpecialSection({ section }: { section: EvalSpecialSection }) {
   // 检索方式的专项勾了 Agent：换成两种模式的逐题对比（和调参评测的「对比」页同一个列表）。
   if (section.modes?.includes("agent"))
@@ -1156,7 +1156,7 @@ function SpecialQuestion({
             question.given_recall !== undefined &&
             question.given_recall !== null &&
             question.given_recall > question.first_given_recall && (
-              <span>补充检索把证据补全了</span>
+              <span>补充检索把计分项补全了</span>
             )}
         </div>
       )}
@@ -1170,7 +1170,7 @@ function SpecialQuestion({
             <span>{question.summarized ? "触发了压缩" : "没有压缩"}</span>
           )}
           {method === "answer" && question.found === false && (
-            <span>证据没全部返回</span>
+            <span>计分项没全部返回</span>
           )}
         </div>
       )}

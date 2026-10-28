@@ -129,8 +129,11 @@ const SPLIT_LABELS: Record<string, string> = {
 };
 // 丢失阶段的说明：告诉读者该去优化哪一环。
 const LOST_LABELS: Record<string, { label: string; hint: string }> = {
-  recall: { label: "未进候选池", hint: "证据没进候选池：查检索词、分块或召回" },
-  rerank: { label: "重排后掉出前列", hint: "重排把证据排到了返回数量之外" },
+  recall: {
+    label: "未进候选池",
+    hint: "计分项没进候选池：查检索词、分块或召回",
+  },
+  rerank: { label: "重排后掉出前列", hint: "重排把计分项排到了返回数量之外" },
   threshold: {
     label: "被阈值误杀",
     hint: "重排分数低于阈值被丢弃，阈值可能偏高",
@@ -161,7 +164,7 @@ const DATASET_TYPE_DESCRIPTIONS: Record<string, string> = {
 };
 // 题目卡片补充每道题的评测目标，避免用户只能看到类型名称却不知道这道题具体在测什么。
 const DATASET_TYPE_CARD_DETAILS: Record<string, string> = {
-  事实: "能不能找回原文证据。",
+  事实: "能不能找回原文计分项。",
   同义改写: "换了说法还能不能找到。",
   关键词: "靠专有名词能不能找到。",
   多轮追问: "能不能接上上一轮补全问题。",
@@ -294,7 +297,7 @@ type HistoryEvidenceStats = {
   extHits?: number | null;
 };
 
-// 从完整评测逐题结果统计真实证据数量，说明文字与页面上的汇总百分比使用同一批数据。
+// 从完整评测逐题结果统计真实计分项数量，说明文字与页面上的汇总百分比使用同一批数据。
 function historyStageHits(
   question: EvalQuestion,
   stage: "pool" | "top" | "final",
@@ -305,7 +308,7 @@ function historyStageHits(
   );
 }
 
-// 汇总历史记录中实际命中的证据和剩余 chunk，避免用固定示例解释不同评测。
+// 汇总历史记录中实际命中的计分项和剩余 chunk，避免用固定示例解释不同评测。
 function summarizeHistoryEvidence(run: EvalRun): HistoryEvidenceStats | null {
   if (!run.questions) return null;
   const answerable = run.questions.filter((question) => question.answerable);
@@ -389,16 +392,17 @@ function summarizeHistoryEvidence(run: EvalRun): HistoryEvidenceStats | null {
   };
 }
 
-// 指标卡片下面的一句说明：统一写成「共 N 条证据，有 X 条……」「N 道……题，有 X 道……」，分母、分子、条件都写清楚。
+// 指标卡片下面的一句说明：统一写成「共 N 个计分项，有 X 条……」「N 道……题，有 X 道……」，分母、分子、条件都写清楚。
 // 评测记录展开的卡片和详情页总览的卡片共用。没有逐题统计（旧记录）时返回 null，调用方退回通用说明。
 function metricSentence(
   key: string,
   stats: HistoryEvidenceStats | null,
   config: EvalRunBrief["config"],
 ) {
-  if (key.startsWith("mrr")) return "1 = 每题第 1 段就是证据，0.5 ≈ 平均排第 2";
+  if (key.startsWith("mrr"))
+    return "1 = 每题第 1 段就是计分项，0.5 ≈ 平均排第 2";
   if (!stats) return null;
-  const evidence = `共 ${stats.evidenceTotal} 条证据`;
+  const evidence = `共 ${stats.evidenceTotal} 个计分项`;
   switch (key) {
     case "recall_given":
       return stats.givenHits === null || stats.givenHits === undefined
@@ -419,7 +423,7 @@ function metricSentence(
       const without = stats.evidenceTotal
         ? formatPercent((stats.givenHits - stats.extHits) / stats.evidenceTotal)
         : "—";
-      return `拿到的 ${stats.givenHits} 条证据里，有 ${stats.extHits} 条在扩展的分片里；不扩展的话命中率 ${without}`;
+      return `拿到的 ${stats.givenHits} 个计分项里，有 ${stats.extHits} 条在扩展的分片里；不扩展的话命中率 ${without}`;
     }
     case "recall_direct": {
       if (
@@ -535,25 +539,25 @@ const GENERATION_METRIC_EXPLANATIONS: Record<string, string> = {
 
 // 完整检索流程（改写 → 检索 → 充分性判断 → 补充检索）的指标说明，和线上用户实际拿到的资料一致。
 const FLOW_METRIC_EXPLANATIONS: Record<string, string> = {
-  recall_given_first: "判断之前，第一次检索的资料里有证据的比例。",
-  recall_given: "最后交给大模型写答案的资料里，包含题目的证据的比例",
-  rescued_count: "补充检索后拿到更多证据的题。",
+  recall_given_first: "判断之前，第一次检索的资料里有计分项的比例。",
+  recall_given: "最后交给大模型写答案的资料里，包含题目的计分项的比例",
+  rescued_count: "补充检索后拿到更多计分项的题。",
   wrong_clear_rate: "有答案却被判资料不足、清空的比例，越低越好。",
   right_clear_rate: "没答案、被清空的比例，越高越好。",
   retry_rate: "触发补充检索的比例。",
   avg_judge_calls: "每题平均判断几次。",
   flow_latency_avg_ms: "改写 + 检索 + 判断 + 补充检索。",
-  ext_hit_rate: "拿到的证据里，只在父块扩展拼进来的分片里的比例",
-  recall_direct: "不算父块扩展，检索本身命中的证据占全部证据的比例",
+  ext_hit_rate: "拿到的计分项里，只在父块扩展拼进来的分片里的比例",
+  recall_direct: "不算父块扩展，检索本身命中的计分项占全部计分项的比例",
 };
 
 const METRIC_HINTS: Record<string, string> = {
-  recall_pool: "证据进了候选池的比例",
-  recall_top: "重排后前几名里证据的比例",
-  recall_final: "阈值过滤后证据的比例",
-  mrr_pool: "越接近 1，证据排得越靠前",
-  mrr_top: "越接近 1，证据排得越靠前",
-  mrr_final: "越接近 1，证据排得越靠前",
+  recall_pool: "计分项进了候选池的比例",
+  recall_top: "重排后前几名里计分项的比例",
+  recall_final: "阈值过滤后计分项的比例",
+  mrr_pool: "越接近 1，计分项排得越靠前",
+  mrr_top: "越接近 1，计分项排得越靠前",
+  mrr_final: "越接近 1，计分项排得越靠前",
   false_reject_rate: "有答案的题一段资料都没拿到，越低越好",
   false_accept_rate: "没答案的题仍拿到资料，越低越好",
   latency_avg_ms: "召回 + 重排",
@@ -1314,7 +1318,7 @@ function Evaluation({
                   text={
                     pickedCorpus.length === 0
                       ? "至少勾一份。"
-                      : "只导入、只检索勾选的；证据不在勾选语料里的题会找不到。"
+                      : "只导入、只检索勾选的；计分项不在勾选语料里的题会找不到。"
                   }
                 />
               </div>
@@ -2003,7 +2007,7 @@ function Overview({
       <div className="ev-overview-grid">
         <div className="ev-panel">
           <div className="ev-section-title">
-            chunk 命中对比<small>预设证据与各阶段实际返回 chunk</small>
+            chunk 命中对比<small>预设计分项与各阶段实际返回 chunk</small>
           </div>
           <ChunkStageComparison run={run} />
         </div>
@@ -2142,7 +2146,7 @@ function SufficiencySummary({ run }: { run: EvalRun }) {
   );
 }
 
-// 总览直接对照预设证据和返回 chunk，避免用题目数的漏斗掩盖“返回了什么、命中了多少”这个核心问题。
+// 总览直接对照预设计分项和返回 chunk，避免用题目数的漏斗掩盖“返回了什么、命中了多少”这个核心问题。
 function ChunkStageComparison({ run }: { run: EvalRun }) {
   const stats = summarizeChunkStages(run);
   if (!stats)
@@ -2151,17 +2155,17 @@ function ChunkStageComparison({ run }: { run: EvalRun }) {
   return (
     <div className="ev-chunk-comparison">
       <div className="ev-chunk-reference">
-        <span>预设证据对应 chunk</span>
+        <span>预设计分项对应 chunk</span>
         <strong>{stats.expectedChunks}</strong>
         <small>
-          {stats.evidenceTotal} 条证据按 chunk 去重 ·{" "}
+          {stats.evidenceTotal} 个计分项按 chunk 去重 ·{" "}
           {stats.answerableQuestions} 道可回答题
         </small>
       </div>
       <div
         className="ev-chunk-table"
         role="table"
-        aria-label="预设证据与实际返回 chunk 对比"
+        aria-label="预设计分项与实际返回 chunk 对比"
       >
         <div className="ev-chunk-table-row is-header" role="row">
           <span>阶段</span>
@@ -2316,7 +2320,7 @@ function stageCandidates(
     );
 }
 
-// 逐题展示预设证据、各阶段返回的 chunk 以及命中/其他状态，帮助用户直接判断丢失发生在哪一环。
+// 逐题展示预设计分项、各阶段返回的 chunk 以及命中/其他状态，帮助用户直接判断丢失发生在哪一环。
 function QuestionChunkComparison({
   question,
   run,
@@ -2344,12 +2348,12 @@ function QuestionChunkComparison({
     <div className="ev-question-chunk-comparison">
       <div className="ev-section-title">
         chunk 命中对比
-        <small>绿色为包含预设证据的 chunk，灰色为其他返回 chunk</small>
+        <small>绿色为包含预设计分项的 chunk，灰色为其他返回 chunk</small>
       </div>
       <div className="ev-chunk-detail-grid">
         <div className="ev-chunk-detail-column is-reference">
           <div className="ev-chunk-detail-heading">
-            <strong>预设正确证据</strong>
+            <strong>预设正确计分项</strong>
             <span>{question.evidence.length}</span>
           </div>
           <div className="ev-chunk-detail-list">
@@ -2394,7 +2398,7 @@ function QuestionChunkComparison({
                         key={`${stage.key}-${candidate.chunk_id}`}
                       >
                         <div>
-                          <span>{isCorrect ? "✓ 包含证据" : "其他"}</span>
+                          <span>{isCorrect ? "✓ 包含计分项" : "其他"}</span>
                           <code title={candidate.chunk_id}>
                             {candidate.chunk_id}
                           </code>
@@ -2630,7 +2634,7 @@ function ParaphraseAnalysis({
   );
 }
 
-// 一道题的检索结论：能回答的题看证据是否全部出现在最终来源里；无法回答的题看是否正确地没有返回来源。
+// 一道题的检索结论：能回答的题看计分项是否全部出现在最终来源里；无法回答的题看是否正确地没有返回来源。
 function questionVerdict(question: EvalQuestion) {
   if (!question.answerable)
     return question.returned === 0
@@ -2649,7 +2653,7 @@ function questionVerdict(question: EvalQuestion) {
   return { key: "bad", label: "未命中" };
 }
 
-// 逐题明细：命中情况、证据名次、丢失阶段；无法回答题展开后直接查看被漏放的 chunk。
+// 逐题明细：命中情况、计分项名次、丢失阶段；无法回答题展开后直接查看被漏放的 chunk。
 function QuestionList({
   run,
   Diagnostics,
@@ -2704,7 +2708,7 @@ function QuestionList({
         <span>编号</span>
         <span>问题</span>
         <span>检索结果</span>
-        <span>证据位置（RRF / 重排 / 来源）</span>
+        <span>计分项位置（RRF / 重排 / 来源）</span>
         <span>丢失阶段</span>
         <span />
       </div>
@@ -2742,7 +2746,7 @@ function QuestionList({
                   <small>
                     {question.type}
                     {question.evidence_count > 1
-                      ? ` · ${question.evidence_count} 条证据`
+                      ? ` · ${question.evidence_count} 个计分项`
                       : ""}
                   </small>
                 </span>
@@ -2758,7 +2762,7 @@ function QuestionList({
                 </span>
                 <span
                   className="ev-rank"
-                  title="证据所在分片：RRF 名次 / 重排名次 / 最终来源编号"
+                  title="计分项所在分片：RRF 名次 / 重排名次 / 最终来源编号"
                 >
                   {question.answerable
                     ? first
@@ -2814,7 +2818,7 @@ function QuestionList({
                               ? question.stages[stage].rank
                                 ? `第 ${question.stages[stage].rank} 名`
                                 : "未找到"
-                              : "无标准证据，无法计算 Recall"}
+                              : "无标准计分项，无法计算 Recall"}
                           </small>
                         </div>
                       );
@@ -3213,8 +3217,8 @@ function SweepPanel({ run }: { run: EvalRun }) {
   );
 }
 
-// 「交给模型的段数」扫描：在当前阈值下，段数取不同值时证据召回和平均实际交给模型几段。
-// 召回在某个段数之后不再上升，说明再多给也找不到更多证据，只会让输入更长。
+// 「交给模型的段数」扫描：在当前阈值下，段数取不同值时计分项召回和平均实际交给模型几段。
+// 召回在某个段数之后不再上升，说明再多给也找不到更多计分项，只会让输入更长。
 function LimitSweep({
   points,
   current,
@@ -3244,9 +3248,9 @@ function LimitSweep({
           <thead>
             <tr>
               <th className="num">段数</th>
-              <th className="num">证据召回</th>
-              <th className="num">证据全部命中</th>
-              <th className="num">多证据题召回</th>
+              <th className="num">计分项召回</th>
+              <th className="num">计分项全部命中</th>
+              <th className="num">多计分项题召回</th>
               <th className="num">平均实际交给模型</th>
               <th className="num">被段数截断的题</th>
             </tr>
@@ -4109,7 +4113,7 @@ function RunHistory({
                                       `${entry.passed} / ${entry.count}${(agentOnly ? entry.agent_score : entry.fixed_score) !== undefined && (agentOnly ? entry.agent_score : entry.fixed_score) !== null ? ` · ${formatPoints(agentOnly ? entry.agent_score : entry.fixed_score)}` : ""}`
                                     )
                                   }
-                                  hint={`${entry.count} 道题里，通过的题数（证据全拿到算通过）和得分${agentOnly ? "，只跑了 Agent" : ""}`}
+                                  hint={`${entry.count} 道题里，通过的题数（计分项全拿到算通过）和得分${agentOnly ? "，只跑了 Agent" : ""}`}
                                 />
                               );
                             })}
@@ -4160,7 +4164,7 @@ function RunHistory({
                                     "agent_recall",
                                     stats,
                                     item.config,
-                                  ) ?? "Agent 找到资料，包含题目的证据的比例"
+                                  ) ?? "Agent 找到资料，包含题目的计分项的比例"
                                 }
                               />
                             )}
@@ -4467,7 +4471,7 @@ function DatasetBrowser({
   const scopedTotal = scopedReviewedCount + scopedPendingCount;
   const visible = items.filter((item) => matchesFilterScope(item, "none"));
 
-  // 把多行文本转换为非空数组，证据和追问历史都采用“一行一条”的编辑方式。
+  // 把多行文本转换为非空数组，计分项和追问历史都采用“一行一条”的编辑方式。
   function readLines(value: string) {
     const lines = [];
     for (const line of value.split("\n")) {
@@ -4681,7 +4685,7 @@ function DatasetBrowser({
                     {questionType === "同义改写" ? (
                       <>
                         <p className="ev-form-note ev-paraphrase-form-note">
-                          保存为两道题，共用答案和证据。
+                          保存为两道题，共用答案和计分项。
                         </p>
                         <label className="ev-form-field ev-form-wide">
                           问题 1（原问题）
@@ -4783,7 +4787,7 @@ function DatasetBrowser({
                     onSubmit={(event) => void submitAi(event)}
                   >
                     <p className="ev-form-note">
-                      按语料起草题目、证据和答案，生成后要人工审核。
+                      按语料起草题目、计分项和答案，生成后要人工审核。
                     </p>
                     <div className="ev-form-grid">
                       <label className="ev-form-field">
@@ -4912,7 +4916,7 @@ function DatasetBrowser({
               <span>评测目标</span>
               <p>
                 {DATASET_TYPE_CARD_DETAILS[item.type] ??
-                  "检验系统能否从语料中找回与问题相关的证据。"}
+                  "检验系统能否从语料中找回与问题相关的计分项。"}
               </p>
             </div>
             {item.history && item.history.length > 0 && (

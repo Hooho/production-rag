@@ -36,7 +36,7 @@ import {
 } from "./score";
 
 // Agent 检索评测的结果页（后端 app/evaluation/agent_retrieval.py）。
-// Agent 每道题用新会话跑一遍，只看它最后拿到的资料里有没有证据（最后命中），口径和固定流程的「交给模型的资料命中率」一致
+// Agent 每道题用新会话跑一遍，只看它最后拿到的资料里有没有计分项（最后命中），口径和固定流程的「交给模型的资料命中率」一致
 // （两边都算父块扩展拼进来的相邻分片，Agent 另外加上读前后文读到的）；
 // 答案照样生成，但这一步不评分。和固定流程一起跑时，逐题对比两边是否命中，点开看两边的检索日志。
 
@@ -100,7 +100,7 @@ function number(value: number | null | undefined, digits = 1) {
     : String(Math.round(value * 10 ** digits) / 10 ** digits);
 }
 
-// 一道题 Agent 的结果：能回答的题看证据拿到多少；无法回答的题看有没有拿到资料（拿到了就可能硬凑答案）。
+// 一道题 Agent 的结果：能回答的题看计分项拿到多少；无法回答的题看有没有拿到资料（拿到了就可能硬凑答案）。
 function agentVerdict(question: EvalQuestion) {
   const agent = question.agent;
   if (!agent) return { key: "none", label: "—" };
@@ -109,7 +109,7 @@ function agentVerdict(question: EvalQuestion) {
     return agent.returned === 0
       ? { key: "good", label: "没拿到资料 · 100 分" }
       : { key: "warn", label: `拿到 ${agent.returned} 段 · -20 分` };
-  // 写出拿到几条证据：「命中 3 / 3」「部分 1 / 3」「未命中 0 / 3」。
+  // 写出拿到几个计分项：「命中 3 / 3」「部分 1 / 3」「未命中 0 / 3」。
   const total = agent.evidence.length || question.evidence_count;
   const found = agent.evidence.length
     ? agent.evidence.filter((item) => item.found).length
@@ -204,7 +204,7 @@ function Card({
 }
 
 // 两种模式的大卡片：左边固定流程、右边 Agent，每张卡片放这个模式的全部指标，同一行左右对齐好比较。
-// 分三块：结果（通过、证据命中、扩展命中）、过程（检索次数、耗时……）、配置。数字都从逐题结果现算，调参评测和专项共用。
+// 分三块：结果（通过、计分项命中、扩展命中）、过程（检索次数、耗时……）、配置。数字都从逐题结果现算，调参评测和专项共用。
 type ModeCell = { value: string; note?: string; best?: boolean };
 type ModeRow = {
   group: "result" | "process" | "config";
@@ -269,7 +269,7 @@ function MaterialLine({ material }: { material: EvalMaterial | null }) {
   );
 }
 
-// 证据命中情况：每条证据一个结果标签（检索命中 / 父块扩展命中 / 读前后文拿到 / 被过滤 / 没召回 / 没拿到），后面写细节。
+// 计分项命中情况：每个计分项一个结果标签（检索命中 / 父块扩展命中 / 读前后文拿到 / 被过滤 / 没召回 / 没拿到），后面写细节。
 type EvidenceStatusEntry = {
   label: string;
   tone: "success" | "danger" | "neutral" | "info";
@@ -283,7 +283,7 @@ type EvidenceStatusRow = EvidenceStatusEntry & {
   hitCount?: number;
 };
 
-// 卡片显示简洁摘要，完整证据命中记录通过标题旁的详情按钮查看。
+// 卡片显示简洁摘要，完整计分项命中记录通过标题旁的详情按钮查看。
 function EvidenceStatus({
   rows,
   expanded,
@@ -336,7 +336,7 @@ function EvidenceStatus({
           ))}
         </ul>
       ) : (
-        <p className="ag-muted">没有答案的题，不看证据。</p>
+        <p className="ag-muted">没有答案的题，不看计分项。</p>
       )}
       {children}
       <button
@@ -349,12 +349,12 @@ function EvidenceStatus({
       </button>
       <DetailDialog
         open={detailOpen}
-        title={`${agent ? "Agent" : "固定流程"} · 证据命中详情`}
+        title={`${agent ? "Agent" : "固定流程"} · 计分项命中详情`}
         onClose={() => setDetailOpen(false)}
         className="ag-evidence-hit-dialog"
       >
         {rows.length === 0 && (
-          <p className="ag-muted">没有答案的题，不看证据。</p>
+          <p className="ag-muted">没有答案的题，不看计分项。</p>
         )}
         {rows.map((row, index) => (
           <section key={index}>
@@ -396,7 +396,7 @@ function EvidenceStatus({
   );
 }
 
-// 证据命中情况（两边各一列）：从逐题结果算出每条证据的结果标签和细节。
+// 计分项命中情况（两边各一列）：从逐题结果算出每个计分项的结果标签和细节。
 // 固定流程按最后交给模型的资料算（补充检索、被清空都考虑），没拿到的写丢在哪一步；Agent 重点写第几轮拿到的。
 function rerankText(value: number | null | undefined, extended = false) {
   return !extended && typeof value === "number" && Number.isFinite(value)
@@ -582,7 +582,7 @@ function agentEvidenceRows(question: EvalQuestion): EvidenceStatusRow[] {
   });
 }
 
-// 固定流程没交给模型的证据：丢在哪一步（第一次检索的记录）。没召回单独一类，其余都算被过滤，括号里写原因。
+// 固定流程没交给模型的计分项：丢在哪一步（第一次检索的记录）。没召回单独一类，其余都算被过滤，括号里写原因。
 function lostRow(
   fixed: EvalQuestion["evidence"][number] | undefined,
   config: EvalRun["config"],
@@ -597,7 +597,7 @@ function lostRow(
   };
 }
 
-// 固定流程一道题命中几条证据：按最后交给模型的资料算，被清空算 0。
+// 固定流程一道题命中几个计分项：按最后交给模型的资料算，被清空算 0。
 function fixedHits(question: EvalQuestion) {
   if (question.cleared) return 0;
   if (question.given_hits !== undefined && question.given_hits !== null)
@@ -714,7 +714,7 @@ function modeRows(
     };
   }
   const both = hasFixed && hasAgent;
-  // 两边都跑时，通过数、证据命中多的一边打 ✓。
+  // 两边都跑时，通过数、计分项命中多的一边打 ✓。
   const best = (key: string, side: "fixed" | "agent") =>
     both &&
     (side === "fixed" ? fixed[key] > agent[key] : agent[key] > fixed[key]);
@@ -725,7 +725,7 @@ function modeRows(
     fixed: hasFixed ? fixedCell : undefined,
     agent: hasAgent ? agentCell : undefined,
   });
-  // 得分：每题满分 100，没拿全最高 90，一条没找到按证据条数扣分；下面一行是分档计数。
+  // 得分：每题满分 100，没拿全最高 90，一条没找到按计分项条数扣分；下面一行是分档计数。
   const fixedScore = summarizeScores(
     questions
       .filter((question) => question.stages)
@@ -777,35 +777,35 @@ function modeRows(
     ...pick(
       {
         value: `${fixed.passed} / ${fixed.count}`,
-        note: "证据全拿到的题",
+        note: "计分项全拿到的题",
         best: best("passed", "fixed"),
       },
       {
         value: `${agent.passed} / ${agent.count}`,
         note: agent.failed
-          ? `证据全拿到的题 · 运行失败 ${agent.failed} 题`
-          : "证据全拿到的题",
+          ? `计分项全拿到的题 · 运行失败 ${agent.failed} 题`
+          : "计分项全拿到的题",
         best: best("passed", "agent"),
       },
     ),
   });
   rows.push({
     group: "result",
-    label: "证据命中",
+    label: "计分项命中",
     ...pick(
       {
         value: ratio(fixed.hits, evidenceTotal),
-        note: "最后交给模型的资料里有的证据",
+        note: "最后交给模型的资料里有的计分项",
         best: best("hits", "fixed"),
       },
       {
         value: ratio(agent.hits, evidenceTotal),
-        note: "Agent 拿到的资料里有的证据",
+        note: "Agent 拿到的资料里有的计分项",
         best: best("hits", "agent"),
       },
     ),
   });
-  // 每条证据是检索命中那一片里拿到的，还是父块扩展拼进来的（via）：加扩展命中统计之前跑的评测没有记，显示「—」而不是 0。
+  // 每个计分项是检索命中那一片里拿到的，还是父块扩展拼进来的（via）：加扩展命中统计之前跑的评测没有记，显示「—」而不是 0。
   const fixedVia = answerable.some(
     (question) =>
       (question.ext_hits !== undefined && question.ext_hits !== null) ||
@@ -822,7 +822,7 @@ function modeRows(
     value: "—",
     note: "这次评测没记录（加扩展命中统计之前跑的），重跑后才有",
   };
-  // 检索命中：证据命中里去掉靠扩展（和读前后文）拿到的，只算检索本身命中的；没有 via 记录的旧评测显示「—」。
+  // 检索命中：计分项命中里去掉靠扩展（和读前后文）拿到的，只算检索本身命中的；没有 via 记录的旧评测显示「—」。
   rows.push({
     group: "result",
     label: "检索命中",
@@ -830,14 +830,14 @@ function modeRows(
       fixedVia
         ? {
             value: ratio(fixed.direct, evidenceTotal),
-            note: "不算父块扩展，检索本身命中的证据",
+            note: "不算父块扩展，检索本身命中的计分项",
             best: best("direct", "fixed"),
           }
         : noVia,
       agentVia
         ? {
             value: ratio(agent.direct, evidenceTotal),
-            note: "不算父块扩展和读前后文，检索本身命中的证据",
+            note: "不算父块扩展和读前后文，检索本身命中的计分项",
             best: best("direct", "agent"),
           }
         : noVia,
@@ -1109,7 +1109,7 @@ export function ComparePanel({ run }: { run: EvalRun }) {
       <p className="ev-muted-note">
         {summary.answerable_count ?? 0} 道能回答 ·{" "}
         {summary.unanswerable_count ?? 0}{" "}
-        道无法回答，比的是最后交给模型的资料里有没有证据。
+        道无法回答，比的是最后交给模型的资料里有没有计分项。
       </p>
       <ModeCards
         questions={run.questions ?? []}
@@ -1177,7 +1177,7 @@ export function ComparePanel({ run }: { run: EvalRun }) {
 export function AgentPanel({ run }: { run: EvalRun }) {
   const summary: EvalSummary = run.summary ?? {};
   const config = run.config.agent;
-  // 卡片说明写成「共 N 条证据，有 X 条……」「N 道……题，有 X 道……」，和固定流程的卡片同一种写法。
+  // 卡片说明写成「共 N 个计分项，有 X 条……」「N 道……题，有 X 道……」，和固定流程的卡片同一种写法。
   const agentQuestions = (run.questions ?? []).filter(
     (question) => question.agent,
   );
@@ -1198,7 +1198,7 @@ export function AgentPanel({ run }: { run: EvalRun }) {
   const rejected = answerable.filter(
     (question) => (question.agent?.returned ?? 0) === 0,
   ).length;
-  // 扩展命中：Agent 拿到的证据里，只在父块扩展拼进来的分片里的（读前后文拿到的单独算）。
+  // 扩展命中：Agent 拿到的计分项里，只在父块扩展拼进来的分片里的（读前后文拿到的单独算）。
   const viaCount = (kind: string) =>
     answerable.reduce(
       (sum, question) =>
@@ -1217,7 +1217,7 @@ export function AgentPanel({ run }: { run: EvalRun }) {
   return (
     <div className="ev-overview ag-eval">
       <p className="ev-muted-note">
-        只看 Agent 最后拿到的资料里有没有证据。
+        只看 Agent 最后拿到的资料里有没有计分项。
         {config && (
           <>
             {" "}
@@ -1254,8 +1254,8 @@ export function AgentPanel({ run }: { run: EvalRun }) {
           value={percent(summary.agent_recall)}
           note={
             agentQuestions.length
-              ? `共 ${evidenceTotal} 条证据，Agent 找到的资料里有 ${evidenceFound} 条`
-              : "Agent 找到资料，包含题目的证据的比例"
+              ? `共 ${evidenceTotal} 个计分项，Agent 找到的资料里有 ${evidenceFound} 条`
+              : "Agent 找到资料，包含题目的计分项的比例"
           }
         />
         <Card
@@ -1263,7 +1263,7 @@ export function AgentPanel({ run }: { run: EvalRun }) {
           value={hasVia ? percent(summary.agent_direct_recall) : "—"}
           note={
             hasVia
-              ? `共 ${evidenceTotal} 条证据，有 ${viaCount("direct")} 条是检索本身命中的（不算扩展和读前后文）`
+              ? `共 ${evidenceTotal} 个计分项，有 ${viaCount("direct")} 条是检索本身命中的（不算扩展和读前后文）`
               : "这次评测没记录（加扩展命中统计之前跑的），重跑后才有"
           }
         />
@@ -1272,8 +1272,8 @@ export function AgentPanel({ run }: { run: EvalRun }) {
           value={percent(summary.agent_ext_hit_rate)}
           note={
             hasVia
-              ? `拿到的 ${evidenceFound} 条证据里，有 ${viaCount("extension")} 条在扩展的分片里${viaCount("context") ? `，${viaCount("context")} 条靠读前后文` : ""}`
-              : "拿到的证据里，只在父块扩展拼进来的分片里的比例"
+              ? `拿到的 ${evidenceFound} 个计分项里，有 ${viaCount("extension")} 条在扩展的分片里${viaCount("context") ? `，${viaCount("context")} 条靠读前后文` : ""}`
+              : "拿到的计分项里，只在父块扩展拼进来的分片里的比例"
           }
         />
         <Card
@@ -1623,7 +1623,7 @@ function chunkLabel(
   return chunkId ?? "—";
 }
 
-// 一个分块：命中证据的标签有背景色；点标签打开共用的原文浮窗。
+// 一个分块：命中计分项的标签有背景色；点标签打开共用的原文浮窗。
 type ChunkItem = {
   key: string;
   id: string;
@@ -1642,12 +1642,12 @@ type ChunkItem = {
 };
 
 // 父块扩展：检索命中的是一片，父块扩展会把同一父块里相邻的几片一起拼进来交给模型。
-// 拼进来的那几片标成「扩展」（虚线框），方便看出证据是检索直接命中的，还是靠扩展带进来的。
+// 拼进来的那几片标成「扩展」（虚线框），方便看出计分项是检索直接命中的，还是靠扩展带进来的。
 function extendedParts(item: ChunkItem) {
   return (item.parts ?? []).filter((chunkId) => chunkId !== item.chunkId);
 }
 
-// 证据是不是只在父块扩展拼进来的分片里（检索命中的那一片本身不含证据）。
+// 计分项是不是只在父块扩展拼进来的分片里（检索命中的那一片本身不含计分项）。
 function hitByExtension(item: ChunkItem) {
   return (
     item.hit &&
@@ -1694,7 +1694,7 @@ function ChunkTabs({
                     title={[
                       chunkLabel(item.position, item.chunkId),
                       item.title,
-                      hitByExtension(item) ? "证据在扩展分片中" : "",
+                      hitByExtension(item) ? "计分项在扩展分片中" : "",
                       "点击查看原文",
                     ]
                       .filter(Boolean)
@@ -1852,7 +1852,7 @@ function FinalDelivery({
                         {rows.size} 个分片
                         {![...rows.values()].some(
                           (row) => row.hits.length > 0,
-                        ) && "（未命中证据）"}
+                        ) && "（未命中计分项）"}
                       </small>
                       <span
                         className="ag-delivery-source-toggle"
@@ -1944,8 +1944,8 @@ function FinalDelivery({
                                     }
                                   >
                                     {row.hits.length
-                                      ? `证据 ${row.hits.map((index) => index + 1).join("、")}`
-                                      : "非证据"}
+                                      ? `计分项 ${row.hits.map((index) => index + 1).join("、")}`
+                                      : "未关联计分项"}
                                   </Tag>
                                   {score && (
                                     <span className="ag-delivery-score">
@@ -2013,7 +2013,7 @@ function agentDelivery(question: EvalQuestion): ChunkItem[] {
   return [...items.values()];
 }
 
-// Agent 某次调用的某个结果是不是靠父块扩展才含这条证据：结果检索命中的分片不在证据所在分片里。
+// Agent 某次调用的某个结果是不是靠父块扩展才含这个计分项：结果检索命中的分片不在计分项所在分片里。
 function viaExtension(
   agent: EvalQuestion["agent"],
   where: { call: number; evidence_id: string | null },
@@ -2028,7 +2028,7 @@ function viaExtension(
   );
 }
 
-// 展开后：先说每条证据在哪个分块（两边各自的编号，Agent 还标第几次调用），下面左右两栏只列分块编号。
+// 展开后：先说每个计分项在哪个分块（两边各自的编号，Agent 还标第几次调用），下面左右两栏只列分块编号。
 // 固定流程的检索参数（一行显示）：检索方式、候选池、返回段数、相关度阈值；专项只知道检索方式。
 function SearchParams({ values }: { values: string[] }) {
   return (
@@ -2055,7 +2055,7 @@ function fixedParams(config: EvalRun["config"] & { search_label?: string }) {
   return parts;
 }
 
-// 这批分块命中了第几条证据（从 0 开始）：证据所在的分片出现在某个分块（含父块扩展拼进来的分片）里就算。
+// 这批分块命中了第几个计分项（从 0 开始）：计分项所在的分片出现在某个分块（含父块扩展拼进来的分片）里就算。
 function hitEvidence(items: ChunkItem[], evidenceLists: string[][]) {
   const given = new Set(
     items.flatMap((item) =>
@@ -2067,21 +2067,21 @@ function hitEvidence(items: ChunkItem[], evidenceLists: string[][]) {
   );
 }
 
-// 标题行上的结果：命中了哪几条证据，或者没命中。
+// 标题行上的结果：命中了哪几个计分项，或者没命中。
 function HitTag({ hits, total }: { hits: number[]; total: number }) {
   if (total === 0) return null;
   return hits.length ? (
     <Tag tone="success" dot>
-      命中证据 {hits.map((index) => index + 1).join("、")}
+      命中计分项 {hits.map((index) => index + 1).join("、")}
     </Tag>
   ) : (
     <Tag tone="danger" plain>
-      没命中证据
+      没命中计分项
     </Tag>
   );
 }
 
-// 第一次检索里，一条证据合并之后的去向：交给模型了，或者丢在哪一步（没召回 / 没进候选池 / 重排分低于阈值 / 超出返回段数）。
+// 第一次检索里，一个计分项合并之后的去向：交给模型了，或者丢在哪一步（没召回 / 没进候选池 / 重排分低于阈值 / 超出返回段数）。
 function mergeOutcome(
   fixed: EvalQuestion["evidence"][number] | undefined,
   given: boolean,
@@ -2246,7 +2246,7 @@ function FixedSearchResults({
                 </strong>
                 <span>{route.query}</span>
               </div>
-              {/* 这一路召回到了哪几条证据、各排第几（向量、关键词两张排名表）。 */}
+              {/* 这一路召回到了哪几个计分项、各排第几（向量、关键词两张排名表）。 */}
               {total > 0 && (
                 <ul className="ag-evidence-trace">
                   {Array.from({ length: total }, (_, evidence) => {
@@ -2291,7 +2291,7 @@ function FixedSearchResults({
       {mergedEvidence && mergedEvidence.length > 0 && (
         <ul
           className="ag-evidence-trace ag-merge-evidence"
-          aria-label="合并过滤后的证据命中情况"
+          aria-label="合并过滤后的计分项命中情况"
         >
           {mergedEvidence.map((row, index) => (
             <li key={index}>
@@ -2335,7 +2335,7 @@ function FixedLog({
   config: EvalRun["config"];
 }) {
   const [expanded, setExpanded] = useState(false);
-  // 证据所在的分片（Agent 记的所在分块，或固定流程命中的分片）；来源是父块，父块里任何一片含证据都算命中。
+  // 计分项所在的分片（Agent 记的所在分块，或固定流程命中的分片）；来源是父块，父块里任何一片含计分项都算命中。
   const evidenceChunks = new Set<string>();
   for (const item of question.agent?.evidence ?? [])
     for (const chunkId of item.chunk_ids ?? []) evidenceChunks.add(chunkId);
@@ -2375,7 +2375,7 @@ function FixedLog({
         parts.some((chunkId) => evidenceChunks.has(chunkId)),
     };
   });
-  // 补充检索的来源：父块里任何一片含证据都算命中。
+  // 补充检索的来源：父块里任何一片含计分项都算命中。
   const retry = question.retry;
   const retryItems: ChunkItem[] = (retry?.sources ?? []).map((source) => {
     const parts =
@@ -2399,7 +2399,7 @@ function FixedLog({
   const sufficiency = question.sufficiency;
   const searches = 1 + (sufficiency?.retried ? 1 : 0);
   const usedRetry = Boolean(sufficiency?.retry_used);
-  // 每条证据所在的分片（Agent 记的所在分块，旧记录用固定流程命中的分片），用来算每次检索命中了第几条证据。
+  // 每个计分项所在的分片（Agent 记的所在分块，旧记录用固定流程命中的分片），用来算每次检索命中了第几个计分项。
   const evidenceLists = evidenceChunkLists(question);
   const total = question.answerable ? evidenceLists.length : 0;
   const queries = question.queries ?? [];
@@ -2463,7 +2463,7 @@ function FixedLog({
         <div className="ag-retrieval-content">
           {expanded && (
             <p className="ag-muted ag-numbering-note">
-              标签显示分片在文档中的位置；命中表示包含证据，点击分片查看原文。
+              标签显示分片在文档中的位置；命中表示包含计分项，点击分片查看原文。
             </p>
           )}
           {expanded && (
@@ -2672,7 +2672,7 @@ function SufficiencySteps({
   );
 }
 
-// （资料池逐段列表已去掉，只显示段数；证据怎么拿到的看「证据命中情况」。）
+// （资料池逐段列表已去掉，只显示段数；计分项怎么拿到的看「计分项命中情况」。）
 function AgentLog({ question }: { question: EvalQuestion }) {
   const [expanded, setExpanded] = useState(false);
   const [selectedStep, setSelectedStep] = useState(0);
@@ -2742,7 +2742,7 @@ function AgentLog({ question }: { question: EvalQuestion }) {
         <div className="ag-retrieval-content">
           {expanded && (
             <p className="ag-muted ag-numbering-note">
-              每次调用按证据列出命中情况和实际所在分片；“扩展分片”表示通过相邻分片扩展拿到。点击分片查看原文。
+              每次调用按计分项列出命中情况和实际所在分片；“扩展分片”表示通过相邻分片扩展拿到。点击分片查看原文。
             </p>
           )}
           {expanded && (
@@ -2876,7 +2876,7 @@ function groupByRound(calls: EvalAgentCall[]) {
   return groups;
 }
 
-// 每次工具调用按证据展示，标签指向实际含有该证据的分片。
+// 每次工具调用按计分项展示，标签指向实际含有该计分项的分片。
 function AgentCallEvidence({
   question,
   call,
@@ -2947,7 +2947,7 @@ function AgentCallEvidence({
                   extended:
                     call.name !== "read_context" && chunkId !== item.chunkId,
                 });
-            // 旧记录未保存证据分片 ID 时，使用这次调用保存的逐证据命中记录。
+            // 旧记录未保存计分项分片 ID 时，使用这次调用保存的逐计分项命中记录。
             if (
               !matched.length &&
               !quote.chunk_ids?.length &&
@@ -2974,7 +2974,7 @@ function AgentCallEvidence({
               <span>
                 {quote.label
                   ? `计分项 ${index + 1}：${quote.label}`
-                  : `证据 ${index + 1}`}
+                  : `计分项 ${index + 1}`}
               </span>
               <small>{hit ? "命中了" : "本次没命中"}</small>
               {[...rows].map(([key, row]) => (
@@ -3275,12 +3275,12 @@ function AgentCall({
         )}
         {hit ? (
           <Tag tone="success" dot>
-            命中证据 {call.hits.map((index) => index + 1).join("、")}
+            命中计分项 {call.hits.map((index) => index + 1).join("、")}
           </Tag>
         ) : executed &&
           (call.name === "search_knowledge" || call.name === "read_context") ? (
           <Tag tone="danger" plain>
-            没命中证据
+            没命中计分项
           </Tag>
         ) : null}
         {executed &&
@@ -3415,7 +3415,7 @@ function fromSpecial(
   };
 }
 
-// 按类型统计：从逐题结果现算（通过数、证据命中条数、得分），旧记录后端没存证据命中和得分也能显示。
+// 按类型统计：从逐题结果现算（通过数、计分项命中条数、得分），旧记录后端没存计分项命中和得分也能显示。
 function specialTypeStats(
   questions: EvalSpecialQuestion[],
   hasFixed: boolean,
