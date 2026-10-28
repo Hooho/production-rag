@@ -635,7 +635,9 @@ export type EvalItem = {
 export type EvalSummary = Record<string, number | null>;
 export type EvalStage = { recall: number | null; rr: number; rank: number | null };
 // given：证据在不在交给回答模型的资料里（含父块扩展拼进来的相邻分片，旧记录没有）。
-export type EvalEvidence = { text: string; chunk_id: string | null; rrf_rank: number | null; rerank_rank: number | null; rerank_probability: number | null; source_id: string | null; status: string; given?: boolean; first_given?: boolean;
+export type EvalEvidenceTarget = { chunk_id: string; position: number; title: string; quote: string };
+export type EvalEvidenceGroup = { label?: string; targets?: EvalEvidenceTarget[] };
+export type EvalEvidence = EvalEvidenceGroup & { text: string; chunk_id: string | null; rrf_rank: number | null; rerank_rank: number | null; rerank_probability: number | null; source_id: string | null; status: string; given?: boolean; first_given?: boolean;
   // 怎么拿到的：direct 检索命中的那一片就含证据，extension 只在父块扩展拼进来的分片里（旧记录没有）。
   via?: "direct" | "extension" | null };
 export type EvalJudgement = { refused: boolean; faithfulness: number; correctness: number; citation: number; faithfulness_reason: string; correctness_reason: string; citation_reason: string; judge: string };
@@ -655,6 +657,7 @@ export type EvalQueryRoute = { query: string; recalled: number; kept: number; ke
 export type EvalMaterial = { count: number; chars: number; tokens: number; items?: { chunk_id: string | null; chars: number; tokens: number }[] };
 export type EvalFlowFields = { material?: EvalMaterial | null; query_routes?: EvalQueryRoute[] | null; given_hits?: number | null; ext_hits?: number | null; first_given_recall?: number | null; rewrite?: EvalRewrite | null; retry?: EvalRetry | null; cleared?: boolean | null; flow_latency_ms?: number | null };
 export type EvalQuestion = {
+  supplemental_notes?: string;
   id: string;
   question: string;
   type: string;
@@ -741,7 +744,7 @@ export type EvalAgentQuestion = {
   recall: number | null;
   // chunk_ids：证据在知识库里所属的分块（旧记录没有）。
   // positions：同一顺序的分块序号（从 0 开始，页面显示「第 N 片」）。
-  evidence: { text: string; chunk_ids?: string[]; positions?: (number | null)[]; found: boolean; where: { call: number; evidence_id: string | null }[]; via?: "direct" | "extension" | "context" | null }[];
+  evidence: (EvalEvidenceGroup & { text: string; chunk_ids?: string[]; positions?: (number | null)[]; found: boolean; where: { call: number; evidence_id: string | null }[]; via?: "direct" | "extension" | "context" | null })[];
   calls: EvalAgentCall[];
   returned: number;
   searches: number;
@@ -975,11 +978,12 @@ export type EvalSuiteMethod = "retrieval" | "answer" | "dialogue";
 export type EvalSuiteSearchMode = "hybrid" | "dense" | "keyword";
 export type EvalSuiteRunEntry = { id: string; status: "running" | "completed" | "failed" | "interrupted"; created: string; finished: string | null; summary: { name: string; method: EvalSuiteMethod; count: number; passed: number } | null };
 export type EvalSuiteBrief = { id: string; name: string; description: string; method: EvalSuiteMethod; method_label: string; search_mode: EvalSuiteSearchMode; search_mode_label: string; created_by: string; created: string; updated: string; item_count: number; latest: EvalSuiteRunEntry | null };
-export type EvalSuiteItem = { id: string; question: string; evidence?: string[]; reference_answer?: string; turns?: string[]; type?: string; created_by: string; created: string; updated: string };
+export type EvalSuiteItem = { evidence_groups?: { label: string; targets: { title: string; position: number; quote: string; fingerprint: string }[] }[]; supplemental_notes?: string; id: string; question: string; evidence?: string[]; reference_answer?: string; turns?: string[]; type?: string; created_by: string; created: string; updated: string };
 export type EvalSuiteFull = EvalSuiteBrief & { items: EvalSuiteItem[]; runs: EvalSuiteRunEntry[] };
 export type EvalSuiteItemInput = { question: string; evidence?: string[]; reference_answer?: string | null; turns?: string[]; type?: string | null };
 // 一道专项题的结果。检索 / 回答：每条证据在向量、关键词检索里排第几、最后有没有返回；多轮对话：最后一问的回答和评审。
 export type EvalSpecialQuestion = {
+  supplemental_notes?: string;
   id: string;
   question: string;
   // 题目类型（可选，专项里自己起的名字）。
@@ -1006,8 +1010,8 @@ export type EvalSpecialQuestion = {
   agent?: EvalAgentQuestion;
   recall_final?: number;
   given_recall?: number | null;
-  fixed_evidence?: { text: string; chunk_id: string | null; source_id: string | null; status: string | null; given?: boolean; first_given?: boolean;
-    via?: "direct" | "extension" | null; rrf_rank?: number | null; rerank_rank?: number | null; rerank_probability?: number | null }[];
+  fixed_evidence?: (EvalEvidenceGroup & { text: string; chunk_id: string | null; source_id: string | null; status: string | null; given?: boolean; first_given?: boolean;
+    via?: "direct" | "extension" | null; rrf_rank?: number | null; rerank_rank?: number | null; rerank_probability?: number | null })[];
   sources?: (Source & { chunk_id?: string | null; position?: number | null; parent_chunk_ids?: string[] })[];
   queries?: string[];
   rerank_query?: string;

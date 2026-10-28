@@ -803,10 +803,18 @@ function QuestionDetail({ question, hasFixed, params, config }: { question: Eval
       const chunkIds = "chunk_ids" in evidence && evidence.chunk_ids?.length ? evidence.chunk_ids : fixedChunk ? [fixedChunk] : [];
       const positions = "positions" in evidence ? evidence.positions : undefined;
       return <div className="ag-evidence" key={index}>
-        <p>证据 {index + 1}：“{evidenceLabel(evidence.text)}”</p>
-        <span className="ag-evidence-chunk">所在分块 {chunkIds.length ? chunkIds.map((chunkId, order) => <button type="button" className="ag-evidence-chunk-button" key={chunkId} title={`${chunkId} · 点击查看原文`} aria-haspopup="dialog" onClick={() => setSelected({ chunkId, label: chunkLabel(positions?.[order], chunkId), evidence: { number: index + 1, text: evidence.text } })}>{chunkLabel(positions?.[order], chunkId)}</button>) : "知识库里没找到"}</span>
+        {evidence.label && evidence.targets ? <>
+          <p><strong>计分项 {index + 1}：{evidence.label}</strong></p>
+          <small className="ag-muted">命中任一目标分片即可</small>
+          {evidence.targets.map((target) => <div className="ag-evidence-target" key={target.chunk_id}>
+            <button type="button" className="ag-evidence-chunk-button" aria-haspopup="dialog" onClick={() => setSelected({ chunkId: target.chunk_id, label: chunkLabel(target.position, target.chunk_id), evidence: { number: index + 1, text: target.quote } })}>{chunkLabel(target.position, target.chunk_id)}</button>
+            <blockquote>{target.quote}</blockquote>
+          </div>)}
+        </> : <p>证据 {index + 1}：“{evidenceLabel(evidence.text)}”</p>}
+        {!evidence.targets && <span className="ag-evidence-chunk">所在分块 {chunkIds.length ? chunkIds.map((chunkId, order) => <button type="button" className="ag-evidence-chunk-button" key={chunkId} title={`${chunkId} · 点击查看原文`} aria-haspopup="dialog" onClick={() => setSelected({ chunkId, label: chunkLabel(positions?.[order], chunkId), evidence: { number: index + 1, text: evidence.text } })}>{chunkLabel(positions?.[order], chunkId)}</button>) : "知识库里没找到"}</span>}
       </div>;
     })}</div> : <p className="ev-muted-note">没有答案的题，拿到的资料越少越好。</p>}
+    {question.supplemental_notes && <p className="ag-muted">{question.supplemental_notes}</p>}
     {selected && <EvidenceChunkDialog key={`${selected.chunkId}:${selected.evidence.number}`} selection={selected} onClose={() => setSelected(null)} />}
     <div className={`ag-columns ${hasFixed ? "" : "is-single"}`}>
       {hasFixed && <FixedLog question={question} params={params} config={config} />}
@@ -1057,7 +1065,7 @@ function AgentCallEvidence({ question, call, items }: { question: EvalQuestion; 
       }
       const hit = rows.size > 0 || call.hits.includes(index) || Boolean(call.read_hits?.includes(index));
       return <li key={index} className={hit ? "is-hit" : "is-miss"}>
-        <b>{hit ? "✓" : "—"}</b><span>证据 {index + 1}</span><small>{hit ? "命中了" : "本次没命中"}</small>
+        <b>{hit ? "✓" : "—"}</b><span>{quote.label ? `计分项 ${index + 1}：${quote.label}` : `证据 ${index + 1}`}</span><small>{hit ? "命中了" : "本次没命中"}</small>
         {[...rows].map(([key, row]) => <Tag key={key} size="sm" tone={row.extended ? "accent" : "info"} outline={row.extended} className={row.extended ? "is-dashed" : undefined}
           title={[row.item.title, row.extended ? "通过相邻分片扩展拿到" : "", "点击查看原文"].filter(Boolean).join(" · ")}
           onClick={() => setSelected({ label: chunkLabel(row.position, row.chunkId), chunkId: row.chunkId, sources: [row.item], evidence: [{ number: index + 1, text: quote.text }] })}>
@@ -1171,7 +1179,7 @@ function fromSpecial(question: EvalSpecialQuestion, hasFixed: boolean, seq: numb
   change(question.agent_passed, question.previous_agent_passed) && `Agent ${change(question.agent_passed, question.previous_agent_passed)}`].filter(Boolean);
   const recall = question.recall_final ?? (question.fixed_passed ? 1 : 0);
   return {
-    id: question.id, seq, question: question.question, type: question.type ?? "未分类", answerable: true,
+    id: question.id, seq, question: question.question, supplemental_notes: question.supplemental_notes, type: question.type ?? "未分类", answerable: true,
     evidence_count: question.evidence_count ?? question.agent?.evidence.length ?? 0,
     stages: (hasFixed ? { pool: { recall, rr: 0, rank: null }, top: { recall, rr: 0, rank: null }, final: { recall, rr: 0, rank: null } } : undefined) as EvalQuestion["stages"],
     lost_stage: question.lost_stage ?? null,

@@ -305,8 +305,16 @@ function SuiteDetail({ suiteId, onBack, onToast }: { suiteId: string; onBack: ()
             </div>
             <details className="rg-details"><summary>查看内容</summary>
               {item.turns && item.turns.length > 0 && <div className="rg-text"><span className="rg-muted">前面的提问：</span><ol className="sp-turns">{item.turns.map((turn, index) => <li key={index}>{turn}</li>)}</ol></div>}
-              {item.evidence && item.evidence.map((text, index) => <div key={index} className="rg-text"><span className="rg-muted">证据：</span>{evidenceLabel(text)}</div>)}
-              {item.evidence && <div className="rg-text"><EvidenceDetails texts={item.evidence} /></div>}
+              {item.evidence_groups ? item.evidence_groups.map((group, index) => <div className="rg-text" key={index}>
+                <strong>计分项 {index + 1}：{group.label}</strong><p className="rg-muted">命中任一目标分片即可</p>
+                {group.targets.map((target) => <div className="ag-evidence-target" key={`${target.title}:${target.position}`}>
+                  <span>第 {target.position + 1} 片</span><blockquote>{target.quote}</blockquote>
+                </div>)}
+              </div>) : <>
+                {item.evidence?.map((text, index) => <div key={index} className="rg-text"><span className="rg-muted">证据：</span>{evidenceLabel(text)}</div>)}
+                {item.evidence && <div className="rg-text"><EvidenceDetails texts={item.evidence} /></div>}
+              </>}
+              {item.supplemental_notes && <p className="rg-muted">{item.supplemental_notes}</p>}
               {item.reference_answer && <div className="rg-text"><span className="rg-muted">参考答案：</span>{item.reference_answer}</div>}
             </details>
           </div>
@@ -379,7 +387,7 @@ function rankText(label: string, rank: number | null, limit: number) {
 // 一个专项在一次评测里的结果：先看通过数和与上次相比的变化，没通过的排在前面；检索方式额外统计向量和关键词各找到几条证据。
 export function SpecialSection({ section }: { section: EvalSpecialSection }) {
   // 检索方式的专项勾了 Agent：换成两种模式的逐题对比（和调参评测的「对比」页同一个列表）。
-  if (section.modes?.includes("agent")) return <SpecialAgentResults section={section} />;
+  if (section.modes?.includes("agent") || section.questions.some((question) => question.fixed_evidence?.some((evidence) => evidence.targets?.length))) return <SpecialAgentResults section={section} />;
   const questions = [...section.questions].sort((a, b) => Number(a.passed) - Number(b.passed));
   // 类型颜色按题目原来的顺序取，和题目列表里一致（上面排序只是把没通过的放前面）。
   const hues = typeHues(section.questions.map((question) => question.type));

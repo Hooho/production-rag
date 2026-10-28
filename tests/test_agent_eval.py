@@ -197,3 +197,24 @@ def test_call_log_preserves_retrieval_ranks():
     assert result["keyword_rank"] == 1
     assert result["rerank_score"] == 0.876543
     assert result["retrieval_recorded"] is True
+
+
+def test_agent_summary_scores_target_ids_and_preserves_named_excerpts():
+    from app.evaluation.agent_retrieval import evaluate_agent
+    target = {"chunk_id": "target", "position": 1, "title": "书", "quote": "展示摘录"}
+    item = {"question": "哪些公司？", "evidence": [{"text": "旧摘录", "label": "公司甲", "targets": [target]}]}
+
+    class Mode:
+        def run(self, *args):
+            source = {"chunk_id": "main", "parent_chunk_ids": ["main", "target"], "text": "父块正文"}
+            return {"agent": {"sources": [source], "rounds": [{"round": 1, "tool_results": [
+                {"name": "search_knowledge", "status": "ok", "trace": {
+                    "evidence_ids": ["S1"], "retrieval": {"sources": [source]}}}]}]}}
+
+    row = evaluate_agent(Mode(), None, None, item, {"main": "展示摘录", "target": "无需摘录匹配"}, {"target": 1})
+    assert row["recall"] == 1
+    assert row["found_count"] == 1
+    assert row["evidence"][0]["via"] == "extension"
+    assert row["evidence"][0]["label"] == "公司甲"
+    assert row["evidence"][0]["targets"] == [target]
+    assert row["calls"][0]["results"][0]["main_hits"] == []

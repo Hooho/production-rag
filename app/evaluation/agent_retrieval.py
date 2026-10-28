@@ -3,8 +3,8 @@
 固定流程的检索评测分三个阶段算命中（候选池 / 重排 / 过滤后），用来调检索参数；
 Agent 每道题可能检索好几次、每次的查询词和参数都由它自己定，没有统一的排名，所以只算一个“最后命中”：
 把它所有 search_knowledge 返回的分片和 read_context 读到的分片合在一起，用和固定流程同样的方法
-（evidence_hits：分片原文标准化后包含证据原文）判断证据有没有拿到。
-口径和固定流程的“交给模型的资料命中率”（recall_given）一致：都按分片原文判断，都算父块扩展拼进来的相邻分片
+（evidence_hits：汇总题匹配目标分片 ID，旧题匹配证据原文）判断证据有没有拿到。
+口径和固定流程的“交给模型的资料命中率”（recall_given）一致，都算父块扩展拼进来的相邻分片
 （检索返回的每条资料是一个父块，正文里拼进了前后几片，模型看得到）；Agent 另外加上 read_context 读到的分片。
 （2026-10-24 前只算命中的那一个分片，前后文类的题对固定流程不公平：答案在相邻分片、已经拼进父块交给了模型，却算没拿到。）
 
@@ -21,6 +21,7 @@ import json
 import time
 from uuid import uuid4
 
+from .grouped_evidence import evidence_fields
 from ..agentic.query_explanation import query_explanation
 from .. import prompts
 from ..runtime_config import snapshot as runtime_snapshot
@@ -29,7 +30,7 @@ from sqlalchemy import select
 
 from ..mysql.store import document_chunks, document_heads
 from .retrieval import (EVAL_OWNER, current_chunk_texts, evidence_hits, import_corpus, material, material_summary, mean, percentile, plan_queries,
-    run_retrieval)
+    run_retrieval, scoring_item)
 
 FORCED = {"budget", "timeout"}
 ANSWER_LIMIT = 1000
@@ -124,6 +125,7 @@ def call_log(number, round_no, call, evidence, chunk_texts):
 
 # Agent 跑一道题，返回这道题的 agent 部分。
 def evaluate_agent(agent_mode, store, models, item, chunk_texts, positions=None):
+    item = scoring_item(store, item)
     evidence = item.get("evidence") or []
     # 多轮追问题和固定流程一样，用规则补全后的完整问题（评测没有真实的上一轮对话）。
     _, question, _ = plan_queries(item)
@@ -190,7 +192,7 @@ def evaluate_agent(agent_mode, store, models, item, chunk_texts, positions=None)
     row.update({
         "recall": len(found) / len(evidence) if evidence else None,
         # chunk_ids：这条证据在知识库里属于哪个（哪些）分块，和检索结果无关，用来对照两边拿到的分块。
-        "evidence": [{"text": text, "chunk_ids": evidence_chunks.get(index, []),
+        "evidence": [{**evidence_fields(text), "chunk_ids": evidence_chunks.get(index, []),
             "positions": [(positions or {}).get(str(chunk_id)) for chunk_id in evidence_chunks.get(index, [])],
             "found": index in found, "where": where[index], "via": via.get(index) if index in found else None}
             for index, text in enumerate(evidence)],

@@ -12,6 +12,7 @@ from ..runtime_config import snapshot as runtime_snapshot
 from ..tools.search import DocumentSearchTool, title_limit
 from .corpus import documents_for as corpus_documents
 from .dataset import QUESTION_TYPES, evidence_variants, normalize, select_split
+from .grouped_evidence import bind_groups, evidence_fields, match_evidence
 from .flow import apply_sufficiency, given_chunk_ids, rewrite_item
 
 
@@ -84,6 +85,19 @@ def current_chunk_texts(store):
     return texts
 
 
+def scoring_item(store, item):
+    if not item.get("evidence_groups") or any(isinstance(value, dict) for value in item.get("evidence", [])):
+        return item
+    joined = document_heads.join(document_chunks,
+        document_chunks.c.document_id == document_heads.c.current_document_id).join(
+        chunks, chunks.c.id == document_chunks.c.chunk_id)
+    with store.engine.connect() as connection:
+        catalog = connection.execute(select(document_heads.c.title, document_chunks.c.position,
+            document_chunks.c.chunk_id, chunks.c.content).select_from(joined).where(
+            document_heads.c.owner == EVAL_OWNER)).mappings().all()
+    return {**item, "evidence": bind_groups(item["evidence"], item["evidence_groups"], catalog)}
+
+
 # 按规则补全指代、用原问题检索（不调用模型）。固定流程现在和线上一样用大模型改写（见 app/evaluation/flow.py），
 # 这里只剩 Agent 评测用它算"实际提问"：Agent 收到的是按规则补全的问题。
 def plan_queries(item):
@@ -95,21 +109,9 @@ def plan_queries(item):
 
 
 # 找出每条证据落在哪些候选分片里，返回 {候选 chunk_id: [证据序号]}。
-# 一条证据写了几处原文（用 || 隔开）时，分片含其中任意一处就算。
+# 汇总题按显式目标分片计分；旧题仍按 || 分隔的可替代原文匹配。
 def evidence_hits(candidates, evidence, chunk_texts):
-    targets = []
-    for text in evidence:
-        targets.append(evidence_variants(text))
-    hits = {}
-    for candidate in candidates:
-        text = chunk_texts.get(candidate["chunk_id"], "")
-        found = []
-        for index, variants in enumerate(targets):
-            if any(variant in text for variant in variants):
-                found.append(index)
-        if found:
-            hits[candidate["chunk_id"]] = found
-    return hits
+    return match_evidence(candidates, evidence, chunk_texts, evidence_variants)
 
 
 # 一个阶段的证据覆盖率和倒数排名：ordered 是该阶段按名次排好的分片列表。
@@ -196,7 +198,7 @@ def score_question(item, retrieval, chunk_texts, pool_size):
             if index in hits.get(row["chunk_id"], []):
                 if best is None or row["rrf_rank"] < best["rrf_rank"]:
                     best = row
-        evidence_rows.append({"text": text, "chunk_id": best["chunk_id"] if best else None,
+        evidence_rows.append({**evidence_fields(text), "chunk_id": best["chunk_id"] if best else None,
             "rrf_rank": best["rrf_rank"] if best else None,
             "rerank_rank": best.get("rerank_rank") if best else None,
             "rerank_probability": best.get("rerank_probability") if best else None,
@@ -577,6 +579,7 @@ def evaluate_items(store, models, items, chunk_texts, options, keep_diagnostics,
     pool_size = options.get("pool_size") or runtime_snapshot()["rerank_candidates"]
     rows = []
     for item in items:
+        item = scoring_item(store, item)
         rewrite = (rewrites or {}).get(item["id"])
         if rewrite is None:
             rewrite = rewrite_item(store, models, item)

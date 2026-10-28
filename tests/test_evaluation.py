@@ -523,3 +523,19 @@ def test_retrieval_full_flow_rewrite_cache_and_sufficiency(setup, eval_dir, monk
     old = {**again, "config": {k: v for k, v in again["config"].items() if k != "flow"}}
     diff = {item["key"] for item in compare_runs(old, again)["settings_diff"]}
     assert "检索口径" in diff
+
+
+def test_summary_target_scoring_includes_expansion_without_excerpt_matching():
+    target = {"chunk_id": "c2", "position": 1, "title": "书", "quote": "仅供展示的摘录"}
+    item = {"id": "summary", "question": "q", "type": "汇总", "answerable": True,
+        "evidence": [{"text": "旧摘录", "label": "公司甲", "targets": [target]}]}
+    retrieval = diagnostics_with([("c1", 1, 1, 0.9, "returned", "S1")])
+    texts = {"c1": "仅供展示的摘录", "c2": "不依赖摘录内容"}
+    retrieval["sources"] = [{"chunk_id": "c1"}]
+    assert score_question(item, retrieval, texts, 2)["given_recall"] == 0
+    retrieval["sources"] = [{"chunk_id": "c1", "parent_chunk_ids": ["c1", "c2"]}]
+    row = score_question(item, retrieval, texts, 2)
+    assert row["stages"]["final"]["recall"] == 0
+    assert row["given_recall"] == 1
+    assert row["evidence"][0]["targets"] == [target]
+    assert row["evidence"][0]["label"] == "公司甲"
