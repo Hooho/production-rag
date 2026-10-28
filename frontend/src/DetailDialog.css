@@ -17,4 +17,4 @@
 
 .ag-original-chunk.is-retrieved { --chunk-text: var(--tone-info-text); --chunk-border: var(--tone-info-border); --chunk-bg: var(--tone-info-bg); }
 .ag-original-chunk.is-extended { --chunk-text: var(--tone-accent-text); --chunk-border: var(--tone-accent-border); --chunk-bg: var(--tone-accent-bg); }
-.ag-original-chunk.is-target { --chunk-text: #345d40; --chunk-border: #b2cdb7; --chunk-bg: #f3f8f4; }
+.ag-target-original-content { margin-top: 20px; }

@@ -30,26 +30,34 @@ export function ChunkOriginalDialog({ value, onClose }: { value: ChunkOriginal |
     return () => { cancelled = true; };
   }, [requestKey]);
   useEffect(() => {
-    if (loaded?.id === requestKey) selected.current?.scrollIntoView({ block: "start" });
-  }, [loaded, requestKey, chunkId]);
+    if (value?.context !== "target" && loaded?.id === requestKey) selected.current?.scrollIntoView({ block: "start" });
+  }, [loaded, requestKey, chunkId, value?.context]);
   if (!value) return null;
   const current = loaded?.id === requestKey ? loaded : null;
   const target = value.context === "target";
-  return <DetailDialog open title={`${value.label} · 原文`} onClose={onClose}>
-      <p className="ag-muted">{value.evidence.length ? `对应${target ? "计分项" : "证据"} ${value.evidence.map((item) => item.number).join("、")}` : "非证据"}</p>
+  if (target) return <DetailDialog open title={`${value.label} · 原文`} onClose={onClose}>
+    <div className="ag-target-original-content">
       {chunkId && !current?.data && <p role="status" className="ag-muted">{current?.error ?? "正在读取原文分片…"}</p>}
       {value.note && <p role="status" className="ag-muted">{value.note}</p>}
-      {!target && value.evidence.map((item) => <blockquote key={item.number}>证据 {item.number}：{item.text}</blockquote>)}
+      {current?.data?.map((chunk) => <OriginalText key={chunk.chunk_id} text={chunk.content} evidence={[]} />)}
+      {!chunkId && value.sources.map((source) => <OriginalText key={source.key} text={source.text} evidence={[]} />)}
+    </div>
+  </DetailDialog>;
+  return <DetailDialog open title={`${value.label} · 原文`} onClose={onClose}>
+      <p className="ag-muted">{value.evidence.length ? `对应证据 ${value.evidence.map((item) => item.number).join("、")}` : "非证据"}</p>
+      {chunkId && !current?.data && <p role="status" className="ag-muted">{current?.error ?? "正在读取原文分片…"}</p>}
+      {value.note && <p role="status" className="ag-muted">{value.note}</p>}
+      {value.evidence.map((item) => <blockquote key={item.number}>证据 {item.number}：{item.text}</blockquote>)}
       {current?.data && <p className="ag-muted">虚线框标出各分片边界，已定位到{value.label}。</p>}
       {current?.data?.map((chunk) => {
         const direct = value.sources.some((source) => source.chunkId === chunk.chunk_id);
         const hit = evidenceRanges(chunk.content, value.evidence.map((quote) => quote.text)).length > 0;
         return <section key={chunk.chunk_id} ref={chunk.chunk_id === chunkId ? selected : undefined}
-        className={`ag-original-chunk ${target ? "is-target" : direct ? "is-retrieved" : "is-extended"} ${chunk.chunk_id === chunkId ? "is-selected" : ""}`} aria-label={`第 ${chunk.position + 1} 片`}>
-        <div className="ag-original-chunk-heading"><strong>第 {chunk.position + 1} 片</strong>{!target && <Tag size="sm" tone={direct ? "info" : "accent"} outline={!direct} className={direct ? undefined : "is-dashed"}>{direct ? (hit ? "检索命中" : "检索返回") : (hit ? "扩展命中" : "扩展返回")}</Tag>}{chunk.chunk_id === chunkId && <span>当前查看</span>}</div>
+        className={`ag-original-chunk ${direct ? "is-retrieved" : "is-extended"} ${chunk.chunk_id === chunkId ? "is-selected" : ""}`} aria-label={`第 ${chunk.position + 1} 片`}>
+        <div className="ag-original-chunk-heading"><strong>第 {chunk.position + 1} 片</strong><Tag size="sm" tone={direct ? "info" : "accent"} outline={!direct} className={direct ? undefined : "is-dashed"}>{direct ? (hit ? "检索命中" : "检索返回") : (hit ? "扩展命中" : "扩展返回")}</Tag>{chunk.chunk_id === chunkId && <span>当前查看</span>}</div>
         <h4>{chunk.title ?? "来源资料"}</h4>{chunk.heading && <p className="ag-muted">{chunk.heading}</p>}
         {value.sources.find((source) => source.chunkId === chunk.chunk_id)?.relevance != null && <p className="ag-muted">重排分 {value.sources.find((source) => source.chunkId === chunk.chunk_id)?.relevance?.toFixed(2)}</p>}
-        <OriginalText text={chunk.content} evidence={target ? [] : value.evidence.map((quote) => quote.text)} />
+        <OriginalText text={chunk.content} evidence={value.evidence.map((quote) => quote.text)} />
       </section>;
       })}
       {!chunkId && value.sources.map((item) => <section key={item.key}>
