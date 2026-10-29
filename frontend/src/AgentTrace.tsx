@@ -209,9 +209,15 @@ function Clamp({
   );
 }
 
-function JsonView({ value }: { value: unknown }) {
+export function JsonView({
+  value,
+  wrap = false,
+}: {
+  value: unknown;
+  wrap?: boolean;
+}) {
   return (
-    <Clamp className="agent-pre agent-json">
+    <Clamp className={`agent-pre agent-json${wrap ? " is-wrapped" : ""}`}>
       {highlightJson(JSON.stringify(value, null, 2))}
     </Clamp>
   );

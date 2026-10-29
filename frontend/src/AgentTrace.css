@@ -437,6 +437,12 @@
   white-space: pre;
   overflow-x: auto;
 }
+.agent-json.is-wrapped {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  max-width: 100%;
+}
 .agent-json .jk {
   color: var(--t-0451a5);
 }

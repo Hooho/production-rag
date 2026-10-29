@@ -16,6 +16,7 @@ import {
   type EvalSummary,
 } from "./api";
 import { ScoringItems } from "./ScoringItems";
+import { JsonView } from "./AgentTrace";
 import { formatDuration as formatMs } from "./format";
 import {
   SourceTag,
@@ -3285,6 +3286,31 @@ function QueryExplanation({
   );
 }
 
+function RawArguments({ value }: { value: Record<string, unknown> }) {
+  let formatted = value;
+  let parsed = false;
+  if (typeof value.query_explanation === "string") {
+    try {
+      const explanation: unknown = JSON.parse(value.query_explanation);
+      if (explanation && typeof explanation === "object") {
+        formatted = { ...value, query_explanation: explanation };
+        parsed = true;
+      }
+    } catch {
+      // 非法 JSON 保留原始字符串，不能为了展示修改模型返回的内容。
+    }
+  }
+  return (
+    <details className="ag-call-query">
+      <summary>查看模型返回的原始参数</summary>
+      {parsed && (
+        <small>query_explanation 为字符串，以下为字符串解析视图</small>
+      )}
+      <JsonView value={formatted} wrap />
+    </details>
+  );
+}
+
 function AgentCall({
   call,
   fresh,
@@ -3412,12 +3438,7 @@ function AgentCall({
       {(call.name === "search_knowledge" || call.name === "read_context") && (
         <QueryExplanation call={call} question={question} />
       )}
-      {call.error && (
-        <details className="ag-call-query">
-          <summary>查看模型返回的原始参数</summary>
-          <pre>{JSON.stringify(call.arguments, null, 2)}</pre>
-        </details>
-      )}
+      {call.error && <RawArguments value={call.arguments} />}
       {status && (
         <div className="ag-call-meta">
           {status}
