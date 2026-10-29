@@ -31,8 +31,8 @@ SEARCH_MODES = {
     "keyword": ("keyword",),
     "vector": ("dense",),
 }
+# 每次要几条由模型自己定（top_k），不写默认 5 条；上限是设置页的 agent_return_limit，和固定流程的 return_limit 分开。
 TOP_K_DEFAULT = 5
-TOP_K_MAX = 10
 CONTEXT_COUNT_MAX = 3
 
 
@@ -94,10 +94,13 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
         return invalid(f"mode 只能是 {'、'.join(SEARCH_MODES)}")
     if isinstance(top_k, bool) or not isinstance(top_k, int):
         return invalid("top_k 应为整数")
-    top_k = max(1, min(top_k, TOP_K_MAX))
+    settings = runtime_snapshot()
+    cap = settings["agent_return_limit"]
+    requested = top_k
+    top_k = max(1, min(top_k, cap))
     query = query.strip()
     # Agent 的检索词按提示词要求写成完整问句，所以重排也直接用它，不再另外补全问题。
-    # 相关度阈值用 Agent 自己的 agent_rerank_min_score，和固定流程的 rerank_min_score 分开设。
+    # 相关度阈值、返回上限、要不要父块扩展都用 Agent 自己的设置（agent_ 开头），和固定流程分开设。
     retrieval = ctx.search_tool.execute(
         ctx.store,
         ctx.models,
@@ -105,10 +108,18 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
         [query],
         query,
         methods=SEARCH_MODES[mode],
-        min_score=runtime_snapshot()["agent_rerank_min_score"],
+        min_score=settings["agent_rerank_min_score"],
+        parent=settings["agent_parent_context"],
+        return_limit=cap,
     )
-    # 返回几条由重排阈值和设置页的 return_limit 决定，top_k 只能在这之内再少取，不能绕过阈值。
+    # 过了相关度阈值的资料，最多给 agent_return_limit 条；模型要得更少（top_k）就再少取，不能绕过阈值。
     sources = retrieval["sources"][:top_k]
+    # 过了阈值却没给模型的条数：超出上限被截掉的，加上模型自己要得少没取的。以前不说，模型以为拿到的就是全部。
+    hidden = (
+        len(retrieval["sources"])
+        - len(sources)
+        + (retrieval.get("stats") or {}).get("beyond_limit", 0)
+    )
     if not sources:
         return result(
             "没有找到相关资料。可以换一种问法，或者用 keyword 模式搜索名称、编号等原话。",
@@ -144,15 +155,37 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
             "换说法再查大多还是拿回同一批资料；已有资料能回答用户的问题就直接回答，"
             "还缺某一部分时，只针对缺的那部分换一个角度查，或者用 keyword 模式查名称、编号、原话。",
         )
+    truncated = truncation_note(requested, top_k, cap, hidden)
+    if truncated:
+        blocks.insert(0, truncated)
     return result(
         "\n\n".join(blocks),
         query=query,
         mode=mode,
         top_k=top_k,
+        requested_top_k=requested,
+        hidden=hidden,
         evidence_ids=evidence_ids,
         retrieval=retrieval,
         no_new=len(repeated) == len(evidence_ids),
     )
+
+
+# 还有过了相关度阈值、没给模型的资料时，告诉它没给全、为什么没给全，下一步怎么做由它自己决定。
+def truncation_note(requested, top_k, cap, hidden):
+    if hidden <= 0:
+        return ""
+    if requested > cap:
+        return (
+            f"没有给全：你要了 {requested} 条，按设置每次最多返回 {cap} 条，另有 {hidden} 条过了相关度线没有返回。"
+            "需要时换一个更具体的说法再查。"
+        )
+    if top_k < cap:
+        return (
+            f"没有给全：按你要的 {top_k} 条返回，另有 {hidden} 条过了相关度线没有返回；"
+            f"需要时可以调大 top_k（最多 {cap}）再查。"
+        )
+    return f"没有给全：每次最多返回 {cap} 条，另有 {hidden} 条过了相关度线没有返回。需要时换一个更具体的说法再查。"
 
 
 # 一条资料：编号、标题和小节，然后是正文（父块已带"标题路径"时正文里有完整路径）。
@@ -301,6 +334,7 @@ def tool_definitions(ctx):
     同一次问答里每轮的 tools 完全相同，可以命中模型服务的前缀缓存。
     """
     readable, _ = ctx.data_tool.load_access(ctx.store, ctx.owner)
+    cap = runtime_snapshot()["agent_return_limit"]
     definitions = [
         function(
             "search_knowledge",
@@ -320,8 +354,8 @@ def tool_definitions(ctx):
                 "top_k": {
                     "type": "integer",
                     "minimum": 1,
-                    "maximum": TOP_K_MAX,
-                    "description": f"最多返回几条，默认 {TOP_K_DEFAULT}。",
+                    "maximum": cap,
+                    "description": f"最多返回几条，默认 {min(TOP_K_DEFAULT, cap)}，最多 {cap}。",
                 },
                 "query_explanation": QUERY_EXPLANATION_SCHEMA,
             },

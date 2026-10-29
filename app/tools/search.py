@@ -59,8 +59,22 @@ class DocumentSearchTool:
     # fusion 决定多个检索词的 RRF 贡献是全部累加（sum）还是每路只取最好名次（best），
     # rerank=False 跳过重排，min_score 覆盖环境变量里的阈值。
     # 以前这些都是写死的常量，想比较"候选池 12 还是 20 更好"只能改代码重启，无法在同一份评测集上并排对比。
-    def execute(self, store, models, owner, queries, rerank_query, methods=("dense", "keyword"),
-                pool_size=None, fusion="sum", rerank=True, min_score=None, parent=True, scope=None):
+    def execute(
+        self,
+        store,
+        models,
+        owner,
+        queries,
+        rerank_query,
+        methods=("dense", "keyword"),
+        pool_size=None,
+        fusion="sum",
+        rerank=True,
+        min_score=None,
+        parent=True,
+        scope=None,
+        return_limit=None,
+    ):
         # 一次检索只读一次参数，整条检索用同一份；实际用到的值写进诊断配置，事后能查到这次用的是哪组参数。
         config = runtime_snapshot()
         if pool_size is None:
@@ -75,26 +89,43 @@ class DocumentSearchTool:
         # 测试和评测里的替身存储没有权限范围，这时退回各自查询、诊断里不记范围。
         # scope 只给知识巡检用：传入全库范围，判断"提问人看不到、但知识库里其实有"的权限缺口。线上问答不传。
         if scope is None:
-            scope = store.readable_scope(owner) if hasattr(store, "readable_scope") else None
+            scope = (
+                store.readable_scope(owner)
+                if hasattr(store, "readable_scope")
+                else None
+            )
         limit = title_limit(owner)
         if limit is not None and scope is not None:
             kept = [item for item in scope["documents"] if item["title"] in limit]
-            scope = {"versions": {item["document_id"]: item["version"] for item in kept}, "documents": kept}
+            scope = {
+                "versions": {item["document_id"]: item["version"] for item in kept},
+                "documents": kept,
+            }
         scoped = {"versions": scope["versions"]} if scope else {}
         for query in queries:
             if "dense" in methods:
                 dense = store.search(owner, query, models, limit=12, **scoped)
                 dense_hits += len(dense)
-                lists.append(self.add_candidates(candidates, dense, "dense", query, config["rrf_k"]))
+                lists.append(
+                    self.add_candidates(
+                        candidates, dense, "dense", query, config["rrf_k"]
+                    )
+                )
             if "keyword" in methods:
                 keyword = store.search_keyword(owner, query, limit=30, **scoped)
                 keyword_hits += len(keyword)
-                lists.append(self.add_candidates(candidates, keyword, "keyword", query, config["rrf_k"]))
+                lists.append(
+                    self.add_candidates(
+                        candidates, keyword, "keyword", query, config["rrf_k"]
+                    )
+                )
         recall_ms = round((time.monotonic() - recall_started) * 1000)
         ranked = []
         for candidate in candidates.values():
             if fusion == "best":
-                candidate["rrf_score"] = self.best_rank_score(candidate["contributions"])
+                candidate["rrf_score"] = self.best_rank_score(
+                    candidate["contributions"]
+                )
             candidate["final_score"] = candidate["rrf_score"]
             ranked.append(candidate)
         ranked.sort(key=lambda item: item["final_score"], reverse=True)
@@ -112,7 +143,11 @@ class DocumentSearchTool:
         rerank_started = time.monotonic()
         rerank_error = None
         try:
-            rerank_scores = models.rerank(rerank_query, rerank_documents) if rerank and rerank_documents else None
+            rerank_scores = (
+                models.rerank(rerank_query, rerank_documents)
+                if rerank and rerank_documents
+                else None
+            )
         except RerankError as error:
             # 重排失败时仍按 RRF 顺序返回，不让问答整体失败；把原因记进统计和诊断，面板上显示"重排失败"而不是"未启用"。
             logger.warning("rerank_failed error=%s", error)
@@ -164,11 +199,15 @@ class DocumentSearchTool:
         # 后一个直接归入前一个父块，不再重复给模型同一段文字；诊断里它的来源编号指向那个父块。
         covered = {}
         use_parent = parent and config["parent_context"]
+        # 最多返回几条：不传就用设置页的 return_limit（固定流程）；Agent 传自己的 agent_return_limit。
+        limit = config["return_limit"] if return_limit is None else return_limit
+        beyond_limit = 0
         parent_characters = 0
         injection_redacted = 0
         for index, item in enumerate(ranked, start=1):
-            if index > config["return_limit"]:
+            if index > limit:
                 item["status"] = "beyond_limit"
+                beyond_limit += 1
                 continue
             item["status"] = "returned"
             if item["id"] in covered:
@@ -178,10 +217,22 @@ class DocumentSearchTool:
             text = item["text"]
             chunk_ids = [item["id"]]
             # 父块由哪几片组成、每片多长：回答步骤据此显示"命中第几片、拼接了哪几片"，并在全文里高亮命中的那片。
-            parts = [{"chunk_id": item["id"], "position": item.get("position"), "chars": len(text),
-                "context": item.get("context")}]
+            parts = [
+                {
+                    "chunk_id": item["id"],
+                    "position": item.get("position"),
+                    "chars": len(text),
+                    "context": item.get("context"),
+                }
+            ]
             if use_parent:
-                expanded = self.parent_context(store, item, covered, config["parent_radius"], config["parent_max_chars"])
+                expanded = self.parent_context(
+                    store,
+                    item,
+                    covered,
+                    config["parent_radius"],
+                    config["parent_max_chars"],
+                )
                 if expanded:
                     text, chunk_ids, parts = expanded
             for chunk_id in chunk_ids:
@@ -194,28 +245,70 @@ class DocumentSearchTool:
             parent_characters += len(text)
             # 带上版本号、页码和标题路径，回答来源和诊断面板可以确认命中的是当前版本的哪个位置。
             # text 是交给回答模型的父块；chunk_id 是实际命中的子块，parent_chunk_ids 是父块由哪些分片拼成。
-            sources.append({"id": item["source_id"], "title": item["title"], "text": text,
-                "score": round(item["final_score"], 6),
-                "retrieval_methods": item["retrieval_methods"], "version": item.get("version"),
-                "page_start": item.get("page_start"), "heading": item.get("heading"),
-                "chunk_id": item["id"], "position": item.get("position"), "document_id": item.get("document_id"),
-                "parent_chunk_ids": chunk_ids,
-                "parent_parts": parts, "injection": injection_hits,
-                # relevance：重排模型给出的相关性（0～1），交给模型时一起写上；没有重排时 score 只是名次分，不写。
-                "relevance": round(item["final_score"], 2) if rerank_count else None,
-                "low_relevance": bool(item.get("low_relevance"))})
-        stats = {"queries": len(queries), "dense_hits": dense_hits,
-            "keyword_hits": keyword_hits, "fused_candidates": len(candidates),
-            "rerank_query": rerank_query, "reranked": rerank_count,
-            "rerank_model": getattr(models, "rerank_model", os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-base")),
+            sources.append(
+                {
+                    "id": item["source_id"],
+                    "title": item["title"],
+                    "text": text,
+                    "score": round(item["final_score"], 6),
+                    "retrieval_methods": item["retrieval_methods"],
+                    "version": item.get("version"),
+                    "page_start": item.get("page_start"),
+                    "heading": item.get("heading"),
+                    "chunk_id": item["id"],
+                    "position": item.get("position"),
+                    "document_id": item.get("document_id"),
+                    "parent_chunk_ids": chunk_ids,
+                    "parent_parts": parts,
+                    "injection": injection_hits,
+                    # relevance：重排模型给出的相关性（0～1），交给模型时一起写上；没有重排时 score 只是名次分，不写。
+                    "relevance": round(item["final_score"], 2)
+                    if rerank_count
+                    else None,
+                    "low_relevance": bool(item.get("low_relevance")),
+                }
+            )
+        stats = {
+            "queries": len(queries),
+            "dense_hits": dense_hits,
+            "keyword_hits": keyword_hits,
+            "fused_candidates": len(candidates),
+            "rerank_query": rerank_query,
+            "reranked": rerank_count,
+            "rerank_model": getattr(
+                models,
+                "rerank_model",
+                os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-base"),
+            ),
             "relevance_filter": "on" if min_score is not None else "off",
-            "min_score": min_score, "filtered": filtered, "returned": len(sources),
-            "parent_context": "on" if use_parent else "off", "source_characters": parent_characters,
-            "recall_ms": recall_ms, "rerank_ms": rerank_ms, "injection_redacted": injection_redacted,
-            "rerank_error": rerank_error, "fallback_used": fallback_used,
-            "fallback_min_score": config["rerank_fallback_min_score"] if rerank_count else None}
+            "min_score": min_score,
+            "filtered": filtered,
+            "returned": len(sources),
+            "parent_context": "on" if use_parent else "off",
+            "source_characters": parent_characters,
+            "recall_ms": recall_ms,
+            "rerank_ms": rerank_ms,
+            "injection_redacted": injection_redacted,
+            "rerank_error": rerank_error,
+            "fallback_used": fallback_used,
+            "fallback_min_score": config["rerank_fallback_min_score"]
+            if rerank_count
+            else None,
+            "return_limit": limit,
+            "beyond_limit": beyond_limit,
+        }
         reranked = rerank_count > 0
-        diagnostics = self.build_diagnostics(candidates, lists, stats, reranked, pool_size, fusion, methods, config)
+        # 诊断里记实际生效的返回上限和是否做了父块扩展（调用方可能传了和设置页不同的值）。
+        diagnostics = self.build_diagnostics(
+            candidates,
+            lists,
+            stats,
+            reranked,
+            pool_size,
+            fusion,
+            methods,
+            {**config, "return_limit": limit, "parent_context": use_parent},
+        )
         if scope:
             diagnostics["scope"] = self.scope_summary(scope["documents"])
         return {"sources": sources, "stats": stats, "diagnostics": diagnostics}
@@ -230,8 +323,12 @@ class DocumentSearchTool:
             for name in item["groups"]:
                 if name not in groups:
                     groups.append(name)
-        return {"total": len(documents_in_scope), **counts, "groups": groups,
-            "documents": documents_in_scope[:SCOPE_DOCUMENT_LIMIT]}
+        return {
+            "total": len(documents_in_scope),
+            **counts,
+            "groups": groups,
+            "documents": documents_in_scope[:SCOPE_DOCUMENT_LIMIT],
+        }
 
     # 余弦分数和 BM25 分数量纲不同，不直接相加；每张排名表只贡献 1 / (rrf_k + 名次)。
     # 同时返回这张排名表本身，诊断信息据此展示每一路召回的原始名次和分数。
@@ -240,19 +337,45 @@ class DocumentSearchTool:
         hits = []
         for rank, row in enumerate(rows, start=1):
             key = row.get("id") or f"{row['title']}:{row['text']}"
-            item = candidates.setdefault(key, {"id": key, "title": row["title"], "text": row["text"],
-                "rrf_score": 0.0, "retrieval_methods": [], "contributions": [],
-                "version": row.get("version"), "page_start": row.get("page_start"),
-                "heading": row.get("heading"), "chunk_key": row.get("chunk_key"),
-                "document_id": row.get("document_id"), "position": row.get("position")})
+            item = candidates.setdefault(
+                key,
+                {
+                    "id": key,
+                    "title": row["title"],
+                    "text": row["text"],
+                    "rrf_score": 0.0,
+                    "retrieval_methods": [],
+                    "contributions": [],
+                    "version": row.get("version"),
+                    "page_start": row.get("page_start"),
+                    "heading": row.get("heading"),
+                    "chunk_key": row.get("chunk_key"),
+                    "document_id": row.get("document_id"),
+                    "position": row.get("position"),
+                },
+            )
             contribution = 1 / (rrf_k + rank)
             item["rrf_score"] += contribution
             if method not in item["retrieval_methods"]:
                 item["retrieval_methods"].append(method)
-            item["contributions"].append({"query": query, "method": method, "rank": rank,
-                "raw_score": round(float(row.get("score", 0)), 6), "rrf": round(contribution, 6)})
-            hits.append({"rank": rank, "chunk_id": str(key), "title": row["title"],
-                "raw_score": round(float(row.get("score", 0)), 6), "rrf": round(contribution, 6)})
+            item["contributions"].append(
+                {
+                    "query": query,
+                    "method": method,
+                    "rank": rank,
+                    "raw_score": round(float(row.get("score", 0)), 6),
+                    "rrf": round(contribution, 6),
+                }
+            )
+            hits.append(
+                {
+                    "rank": rank,
+                    "chunk_id": str(key),
+                    "title": row["title"],
+                    "raw_score": round(float(row.get("score", 0)), 6),
+                    "rrf": round(contribution, 6),
+                }
+            )
         return {"query": query, "method": method, "hits": hits}
 
     # 检索充分性判断与补充检索。第一次判断为 insufficient 或 partial 且模型给出了补充检索词时，
@@ -266,26 +389,52 @@ class DocumentSearchTool:
     VERDICT_RANK = {"insufficient": 0, "partial": 1, "sufficient": 2}
 
     # options 原样传给补充检索（评测的专项可以只用一路检索，补充检索也要用同样的方式）。
-    def check_sufficiency(self, store, models, owner, queries, rerank_query, retrieval, **options):
-        result = {"checked": False, "verdict": None, "missing": "", "judgements": [], "retried": False,
-            "retry_query": None, "retrieval": retrieval, "sources": retrieval["sources"], "refused": False}
-        if models.mode != "openai" or not runtime_snapshot()["sufficiency_check"] or not retrieval["sources"]:
+    def check_sufficiency(
+        self, store, models, owner, queries, rerank_query, retrieval, **options
+    ):
+        result = {
+            "checked": False,
+            "verdict": None,
+            "missing": "",
+            "judgements": [],
+            "retried": False,
+            "retry_query": None,
+            "retrieval": retrieval,
+            "sources": retrieval["sources"],
+            "refused": False,
+        }
+        if (
+            models.mode != "openai"
+            or not runtime_snapshot()["sufficiency_check"]
+            or not retrieval["sources"]
+        ):
             return result
         result["checked"] = True
         judgement = models.judge_sufficiency(rerank_query, retrieval["sources"])
         result["judgements"].append(judgement)
         rewrite = judgement["rewrite_query"]
-        if judgement["verdict"] in {"insufficient", "partial"} and rewrite and rewrite not in queries:
+        if (
+            judgement["verdict"] in {"insufficient", "partial"}
+            and rewrite
+            and rewrite not in queries
+        ):
             retry_queries = list(queries)
             retry_queries.append(rewrite)
             retry_started = time.monotonic()
-            retry = self.execute(store, models, owner, retry_queries, rerank_query, **options)
+            retry = self.execute(
+                store, models, owner, retry_queries, rerank_query, **options
+            )
             result["retry_ms"] = round((time.monotonic() - retry_started) * 1000)
-            result.update({"retried": True, "retry_query": rewrite, "retry_retrieval": retry})
+            result.update(
+                {"retried": True, "retry_query": rewrite, "retry_retrieval": retry}
+            )
             if retry["sources"]:
                 second = models.judge_sufficiency(rerank_query, retry["sources"])
                 result["judgements"].append(second)
-                if self.VERDICT_RANK[second["verdict"]] >= self.VERDICT_RANK[judgement["verdict"]]:
+                if (
+                    self.VERDICT_RANK[second["verdict"]]
+                    >= self.VERDICT_RANK[judgement["verdict"]]
+                ):
                     judgement = second
                     result["retrieval"] = retry
             result["retry_used"] = result["retrieval"] is retry
@@ -315,7 +464,9 @@ class DocumentSearchTool:
         def joinable(index):
             if index < 0 or index >= len(rows) or rows[index]["id"] in covered:
                 return False
-            return ((rows[index]["chunk_metadata"] or {}).get("heading_path") or []) == path
+            return (
+                (rows[index]["chunk_metadata"] or {}).get("heading_path") or []
+            ) == path
 
         start = hit
         end = hit
@@ -346,8 +497,14 @@ class DocumentSearchTool:
             parts.append(content)
             chunk_ids.append(row["id"])
             # 上下文说明（Contextual Retrieval 导入时为分片写的一两句话）：回答步骤里用它说明每一片讲的是什么，不用存全文。
-            layout.append({"chunk_id": row["id"], "position": row.get("position"), "chars": len(content),
-                "context": (row["chunk_metadata"] or {}).get("context")})
+            layout.append(
+                {
+                    "chunk_id": row["id"],
+                    "position": row.get("position"),
+                    "chars": len(content),
+                    "context": (row["chunk_metadata"] or {}).get("context"),
+                }
+            )
         body = "\n".join(parts)
         heading = " / ".join(path)
         text = f"标题路径：{heading}\n{body}" if heading else body
@@ -378,36 +535,73 @@ class DocumentSearchTool:
 
     # 汇总每个候选从召回到最终去向的完整计算过程，排序与最终处理顺序一致。
     @staticmethod
-    def build_diagnostics(candidates, lists, stats, reranked, pool_size, fusion="sum",
-                          methods=("dense", "keyword"), settings=None):
+    def build_diagnostics(
+        candidates,
+        lists,
+        stats,
+        reranked,
+        pool_size,
+        fusion="sum",
+        methods=("dense", "keyword"),
+        settings=None,
+    ):
         settings = settings or runtime_snapshot()
-        status_order = {"returned": 0, "beyond_limit": 1, "filtered_low_score": 2,
-            "in_pool": 3, "not_in_pool": 4}
+        status_order = {
+            "returned": 0,
+            "beyond_limit": 1,
+            "filtered_low_score": 2,
+            "in_pool": 3,
+            "not_in_pool": 4,
+        }
         items = []
         for item in candidates.values():
             items.append(item)
-        items.sort(key=lambda item: (status_order[item["status"]],
-            item.get("rerank_rank", 0) if reranked else item["rrf_rank"], item["rrf_rank"]))
+        items.sort(
+            key=lambda item: (
+                status_order[item["status"]],
+                item.get("rerank_rank", 0) if reranked else item["rrf_rank"],
+                item["rrf_rank"],
+            )
+        )
         rows = []
         for item in items:
             # 主键是"版本 id:序号"，不能再截断前几位，否则同一版本的分片会显示成同一个 ID。
-            rows.append({"chunk_id": str(item["id"]), "chunk_key": item.get("chunk_key"), "title": item["title"],
-                "version": item.get("version"), "page_start": item.get("page_start"),
-                "heading": item.get("heading"),
-                "preview": item["text"][:PREVIEW_CHARACTERS],
-                "status": item["status"], "source_id": item.get("source_id"),
-                "retrieval_methods": item["retrieval_methods"],
-                "contributions": item["contributions"],
-                "rrf_score": round(item["rrf_score"], 6), "rrf_rank": item["rrf_rank"],
-                "rerank_logit": item.get("rerank_logit"),
-                "rerank_probability": round(item["rerank_probability"], 6)
-                    if "rerank_probability" in item else None,
-                "rerank_rank": item.get("rerank_rank")})
+            rows.append(
+                {
+                    "chunk_id": str(item["id"]),
+                    "chunk_key": item.get("chunk_key"),
+                    "title": item["title"],
+                    "version": item.get("version"),
+                    "page_start": item.get("page_start"),
+                    "heading": item.get("heading"),
+                    "preview": item["text"][:PREVIEW_CHARACTERS],
+                    "status": item["status"],
+                    "source_id": item.get("source_id"),
+                    "retrieval_methods": item["retrieval_methods"],
+                    "contributions": item["contributions"],
+                    "rrf_score": round(item["rrf_score"], 6),
+                    "rrf_rank": item["rrf_rank"],
+                    "rerank_logit": item.get("rerank_logit"),
+                    "rerank_probability": round(item["rerank_probability"], 6)
+                    if "rerank_probability" in item
+                    else None,
+                    "rerank_rank": item.get("rerank_rank"),
+                }
+            )
         # 候选池、融合方式和召回方式写进诊断配置，评测对比不同参数时能看出每次实际用的是哪一组。
-        config = {"rrf_k": settings["rrf_k"], "rerank_candidates": pool_size, "fusion": fusion, "methods": list(methods),
-            "return_limit": settings["return_limit"], "reranked": reranked,
-            "parent_context": settings["parent_context"], "parent_max_chars": settings["parent_max_chars"],
+        config = {
+            "rrf_k": settings["rrf_k"],
+            "rerank_candidates": pool_size,
+            "fusion": fusion,
+            "methods": list(methods),
+            "return_limit": settings["return_limit"],
+            "reranked": reranked,
+            "parent_context": settings["parent_context"],
+            "parent_max_chars": settings["parent_max_chars"],
             "parent_radius": settings["parent_radius"],
-            "min_score": stats["min_score"], "rerank_query": stats["rerank_query"],
-            "rerank_model": stats["rerank_model"], "rerank_error": stats.get("rerank_error")}
+            "min_score": stats["min_score"],
+            "rerank_query": stats["rerank_query"],
+            "rerank_model": stats["rerank_model"],
+            "rerank_error": stats.get("rerank_error"),
+        }
         return {"config": config, "lists": lists, "candidates": rows}

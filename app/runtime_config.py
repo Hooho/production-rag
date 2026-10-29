@@ -111,14 +111,14 @@ SPECS = [
         "default": 6,
         "min": 1,
         "max": 50,
-        "eval": "common",
+        "eval": "fixed",
     },
     {
         "key": "parent_context",
         "group": "retrieval",
         "type": "bool",
         "default": True,
-        "eval": "common",
+        "eval": "fixed",
     },
     {
         "key": "parent_max_chars",
@@ -214,6 +214,25 @@ SPECS = [
         "default": 0.85,
         "min": 0.0,
         "max": 1.0,
+        "eval": "agent",
+    },
+    # Agent 每次检索最多返回几条、要不要做父块扩展，和固定流程的 return_limit、parent_context 分开。
+    # 每次要几条由 Agent 自己定（search_knowledge 的 top_k），这里只是上限；超过上限时工具会告诉它没给全。
+    # 默认和固定流程一样（6 条、做父块扩展），行为不变；要不要放宽先在评测里单独指定对比。
+    {
+        "key": "agent_return_limit",
+        "group": "answer",
+        "type": "int",
+        "default": 6,
+        "min": 1,
+        "max": 50,
+        "eval": "agent",
+    },
+    {
+        "key": "agent_parent_context",
+        "group": "answer",
+        "type": "bool",
+        "default": True,
         "eval": "agent",
     },
     {
@@ -535,6 +554,8 @@ def check_relations(values):
         raise ValueError("兜底分数线不能高于相关度阈值")
     if values["return_limit"] > values["rerank_candidates"]:
         raise ValueError("交给模型的段数不能超过候选池大小")
+    if values["agent_return_limit"] > values["rerank_candidates"]:
+        raise ValueError("Agent 每次返回的条数不能超过候选池大小")
     if values["memory_keep_tokens"] * 2 > values["memory_trigger_tokens"]:
         raise ValueError("压缩后保留的原文最多是压缩阈值的一半")
 

@@ -3848,6 +3848,8 @@ const RESULT_SETTINGS = new Set([
   "agent_tool_budget",
   "agent_timeout",
   "agent_rerank_min_score",
+  "agent_return_limit",
+  "agent_parent_context",
 ]);
 
 // 上一次「同一种」评测：调参评测要类型和题目范围都相同；专项要跑的是同一组专项（截断专项和 Agent 区分题不互相比）。
