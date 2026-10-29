@@ -1,0 +1,164 @@
+/* 发起评测页的「参数配置」（EvalParamsPanel.tsx）：三组参数默认收起，标题行显示改了哪几项。 */
+.evp-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.evp-group {
+  border: 1px solid var(--ev-line);
+  background: var(--t-f7fbff);
+}
+
+.evp-group.is-changed {
+  border-color: rgb(var(--t-2563eb-rgb) / 0.45);
+}
+
+.evp-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 8px 10px;
+  color: var(--ev-ink);
+  font-size: 12px;
+  text-align: left;
+}
+
+.evp-caret {
+  width: 10px;
+  color: var(--ev-muted);
+}
+
+.evp-title {
+  flex: none;
+  font-weight: 600;
+}
+
+.evp-summary {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ev-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evp-group.is-changed .evp-summary {
+  color: var(--t-2563eb);
+}
+
+.evp-rows {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--ev-line);
+  padding: 4px 10px 8px 28px;
+}
+
+.evp-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 220px) minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  padding: 6px 0;
+  border-top: 1px dashed var(--ev-line);
+  font-size: 12px;
+}
+
+.evp-row:first-child {
+  border-top: 0;
+}
+
+.evp-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 4px;
+  color: var(--ev-ink);
+}
+
+.evp-label small {
+  color: var(--ev-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.evp-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.evp-switch {
+  display: inline-flex;
+  border: 1px solid var(--ev-line);
+}
+
+.evp-switch button {
+  border: 0;
+  background: transparent;
+  padding: 4px 10px;
+  color: var(--t-536d86);
+  font-size: 12px;
+}
+
+.evp-switch button + button {
+  border-left: 1px solid var(--ev-line);
+}
+
+.evp-switch button.is-selected {
+  background: var(--t-2563eb);
+  color: #fff;
+}
+
+.evp-switch em {
+  margin-left: 6px;
+  font-style: normal;
+  opacity: 0.75;
+}
+
+.evp-input {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 全局 input 是 width: 100%、padding 12px，这里改成紧凑的行内输入框。 */
+.evp-input input,
+.evp-input select {
+  width: auto;
+  min-width: 96px;
+  max-width: 220px;
+  border: 1px solid var(--t-abc4dc);
+  background: var(--t-eef5fb);
+  padding: 4px 8px;
+  color: var(--ev-ink);
+  font-size: 12px;
+}
+
+.evp-input small {
+  color: var(--ev-muted);
+  font-size: 11px;
+}
+
+@media (max-width: 640px) {
+  .evp-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .evp-rows {
+    padding-left: 10px;
+  }
+}
+
+/* 专项评测里放在专项列表下面，标题和参数组上下排。 */
+.sp-mode-line.evp-line {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}

@@ -1295,6 +1295,10 @@ export type EvalRunBrief = {
   history_metrics?: EvalHistoryMetrics | null;
   progress: { done: number; total: number } | null;
   error: string | null;
+  // 发起时单独指定、只对这次评测生效的参数（只记改了的项）；空对象或没有表示全部跟随系统设置。
+  params?: EvalParams;
+  // 这次评测实际生效的模型、运行参数和提示词版本（开跑时记下，不含密钥）。
+  effective?: EvalEffective;
 };
 export type EvalRun = EvalRunBrief & {
   by_type?: Record<string, EvalSummary>;
@@ -1444,12 +1448,63 @@ export function startEvalRun(
   suites: string[],
   modes: EvalMode[] = ["fixed"],
   corpusIds: string[] = [],
+  params: EvalParams = {},
 ) {
   return request<{ id: string; status: string }>("/eval/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind, split, suites, modes, corpus_ids: corpusIds }),
+    body: JSON.stringify({
+      kind,
+      split,
+      suites,
+      modes,
+      corpus_ids: corpusIds,
+      params,
+    }),
   });
+}
+
+// 评测运行参数：发起评测时可以单独指定的模型、运行参数和提示词版本，只对那一次评测生效（app/evaluation/params.py）。
+// 分三组：common 两种模式都用，fixed 只有固定流程用，agent 只有 Agent 用。
+export type EvalParamGroup = "common" | "fixed" | "agent";
+export type EvalModelChoice = { provider: string; model?: string };
+export type EvalParams = {
+  llm?: EvalModelChoice;
+  judge?: EvalModelChoice;
+  settings?: Record<string, RuntimeSettingValue>;
+  prompts?: Record<string, number>;
+};
+export type EvalEffective = {
+  llm?: { provider: string; model: string; base_url?: string };
+  judge?: { provider: string; model: string };
+  settings?: Record<string, RuntimeSettingValue>;
+  prompts?: Record<string, string>;
+};
+export type EvalParamOptions = {
+  groups: { key: EvalParamGroup; label: string }[];
+  settings: (RuntimeSettingItem & { eval: EvalParamGroup })[];
+  llm: {
+    enabled: boolean;
+    current: { provider: string; model: string };
+    profiles: {
+      provider: string;
+      model: string;
+      base_url: string;
+      is_active: boolean;
+    }[];
+  };
+  prompts: {
+    id: string;
+    label: string;
+    eval: EvalParamGroup;
+    active_version: number;
+    active_label: string;
+    versions: { version: number; label: string; note: string }[];
+  }[];
+};
+
+export function getEvalParamOptions() {
+  return request<EvalParamOptions>("/eval/params");
 }
 
 export function startSpecialRun(
@@ -1457,6 +1512,7 @@ export function startSpecialRun(
   compareMemory = false,
   modes: EvalMode[] = ["fixed"],
   corpusIds: string[] = [],
+  params: EvalParams = {},
 ) {
   return request<{ id: string; status: string }>("/eval/runs", {
     method: "POST",
@@ -1467,6 +1523,7 @@ export function startSpecialRun(
       compare_memory: compareMemory,
       modes,
       corpus_ids: corpusIds,
+      params,
     }),
   });
 }

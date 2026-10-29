@@ -23,7 +23,11 @@ import {
   listEvalCorpus,
   listEvalSuites,
   startSpecialRun,
+  getEvalParamOptions,
   type EvalCorpusEntry,
+  type EvalParamGroup,
+  type EvalParamOptions,
+  type EvalParams,
   type EvalSuiteBrief,
   deleteEvalRun,
   saveEvalRunNote,
@@ -55,6 +59,10 @@ import Corpus from "./Corpus";
 import Regression from "./Regression";
 import Special, { SpecialSection } from "./Special";
 import "./Special.css";
+import EvalParamsPanel, {
+  paramsSummary,
+  visibleParams,
+} from "./EvalParamsPanel";
 // 耗时格式化移到公共文件，知识库、问答、设置页共用同一套规则。
 import {
   durationTitle,
@@ -679,6 +687,11 @@ function Evaluation({
     null,
   );
   const [pickedCorpus, setPickedCorpus] = useState<string[]>([]);
+  // 参数配置：只对这次评测生效的模型、运行参数和提示词版本；没改的项跟随系统设置（不提交）。
+  const [paramOptions, setParamOptions] = useState<EvalParamOptions | null>(
+    null,
+  );
+  const [launchParams, setLaunchParams] = useState<EvalParams>({});
   const [launching, setLaunching] = useState(false);
 
   // 刷新评测列表时不再自动打开某条记录，让页面首次进入先展示历史表格。
@@ -769,6 +782,14 @@ function Evaluation({
       .catch((reason: Error) => setError(reason.message));
   }, [section]);
 
+  // 参数配置里显示的「系统当前值」每次打开历史记录页签重新读，设置页刚改过也能看到新值。
+  useEffect(() => {
+    if (section !== "history") return;
+    getEvalParamOptions()
+      .then(setParamOptions)
+      .catch((reason: Error) => setError(reason.message));
+  }, [section]);
+
   // 切到「专项」时读取专项列表（专项页签里可能刚新建过，每次切换都重新读）。
   useEffect(() => {
     if (section !== "history" || launchMode !== "special") return;
@@ -787,6 +808,12 @@ function Evaluation({
           compareMemory,
           specialModes,
           pickedCorpus,
+          visibleParams(
+            launchParams,
+            paramOptions,
+            specialParamGroups,
+            specialJudge,
+          ),
         );
         setSelectedId(started.id);
         await refreshRuns();
@@ -805,6 +832,12 @@ function Evaluation({
         suites,
         modes,
         pickedCorpus,
+        visibleParams(
+          launchParams,
+          paramOptions,
+          tuningParamGroups,
+          launchKind === "generation",
+        ),
       );
       setSelectedId(started.id);
       setDetailTab("overview");
@@ -881,6 +914,31 @@ function Evaluation({
     launchMode === "tuning" &&
     launchKind === "retrieval" &&
     launchModes.includes("agent");
+  // 参数配置显示哪几组：公共参数一直有；固定流程参数在跑固定流程（生成评测也走固定流程）时有；Agent 参数在勾了 Agent 时有。
+  const tuningParamGroups: EvalParamGroup[] = [
+    "common",
+    ...(launchKind === "generation" || launchModes.includes("fixed")
+      ? (["fixed"] as EvalParamGroup[])
+      : []),
+    ...(launchKind === "retrieval" && launchModes.includes("agent")
+      ? (["agent"] as EvalParamGroup[])
+      : []),
+  ];
+  const pickedSpecial = (specialSuites ?? []).filter((suite) =>
+    pickedSuites.includes(suite.id),
+  );
+  const specialParamGroups: EvalParamGroup[] = [
+    "common",
+    "fixed",
+    ...(specialModes.includes("agent") &&
+    pickedSpecial.some((suite) => suite.method === "retrieval")
+      ? (["agent"] as EvalParamGroup[])
+      : []),
+  ];
+  // 回答、多轮对话方式的专项要评审打分，才显示评审模型。
+  const specialJudge = pickedSpecial.some(
+    (suite) => suite.method === "answer" || suite.method === "dialogue",
+  );
 
   return (
     <section className="ev-root">
@@ -1084,6 +1142,18 @@ function Evaluation({
                       </span>
                     </div>
                   )}
+                  {pickedSpecial.length > 0 && (
+                    <div className="sp-mode-line evp-line">
+                      <span className="ev-option-title">参数配置</span>
+                      <EvalParamsPanel
+                        options={paramOptions}
+                        value={launchParams}
+                        onChange={setLaunchParams}
+                        groups={specialParamGroups}
+                        showJudge={specialJudge}
+                      />
+                    </div>
+                  )}
                 </div>
               ) : (
                 <>
@@ -1177,6 +1247,21 @@ function Evaluation({
                       </fieldset>
                     </div>
                   )}
+                  <div className="ev-launch-option is-stacked">
+                    <fieldset className="ev-radio-field">
+                      <legend>
+                        <span className="ev-option-title">参数配置</span>
+                      </legend>
+                      <EvalParamsPanel
+                        options={paramOptions}
+                        value={launchParams}
+                        onChange={setLaunchParams}
+                        groups={tuningParamGroups}
+                        showJudge={launchKind === "generation"}
+                      />
+                      <Hint text="默认全部跟随系统设置；改成自定义的项只对这次评测生效，不影响线上。" />
+                    </fieldset>
+                  </div>
                   <div className="ev-launch-option is-stacked">
                     <fieldset className="ev-radio-field">
                       <legend>
@@ -1764,6 +1849,22 @@ function RunConfig({ run }: { run: EvalRunBrief }) {
       `${SPLIT_LABELS[config.split ?? ""] ?? config.split}${config.dataset_size ? ` · ${config.dataset_size} 题` : ""}`,
     ],
     ["模式", modesLabel(run)],
+    ...(paramsSummary(run.params).length
+      ? [
+          ["自定义参数", paramsSummary(run.params).join("；")] as [
+            string,
+            string,
+          ],
+        ]
+      : []),
+    ...(run.effective?.llm
+      ? [
+          [
+            "大模型",
+            `${run.effective.llm.provider} · ${run.effective.llm.model}`,
+          ] as [string, string],
+        ]
+      : []),
     ...(config.corpus?.length
       ? [
           [
@@ -4012,6 +4113,15 @@ function RunHistory({
                             )
                           );
                         })()}
+                        {paramsSummary(item.params).length > 0 && (
+                          <Tag
+                            size="sm"
+                            tone="info"
+                            title={`这次评测单独指定的参数：\n${paramsSummary(item.params).join("\n")}`}
+                          >
+                            自定义参数
+                          </Tag>
+                        )}
                       </span>
                     </td>
                     <td className="ev-history-note-cell">
