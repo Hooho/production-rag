@@ -64,6 +64,12 @@ const many = summary([
 assert.equal(many.total, 4);
 assert.equal(many.items.length, 1);
 assert.equal(many.missing, 3); // 1/3：分母包含未召回的计分项，不包含最终命中的。
+assert.equal(many.unrecalled, 2); // 完全未召回 2/3，和被过滤 1/3 使用同一分母。
+assert.equal(
+  summary([evidence(["returned"])], { cleared: true }).unrecalled,
+  0,
+);
+assert.equal(summary([evidence(undefined)]).unrecalled, 0);
 assert.equal(summary([evidence([], { given: true })]).missing, 0);
 assert.equal(summary([evidence(["returned"])], { cleared: true }).missing, 1);
 const call = (status, reranked = true) => ({
@@ -99,5 +105,16 @@ assert.equal(
 assert.equal(agent([call("beyond_top_k")]).items[0].stage, "tool_limit");
 assert.equal(agent([call("returned")], true).missing, 0);
 assert.equal(agent([call("filtered_low_score")]).missing, 1);
+assert.equal(agent([call("filtered_low_score")]).unrecalled, 0);
+assert.equal(
+  agent([
+    {
+      name: "search_knowledge",
+      status: "ok",
+      retrieval_diagnostics: { config: {}, candidates: [] },
+    },
+  ]).unrecalled,
+  1,
+);
 assert.equal(agent([{ name: "search_knowledge", status: "ok" }]).unknown, 1);
 console.log("evidence filter coverage passed");

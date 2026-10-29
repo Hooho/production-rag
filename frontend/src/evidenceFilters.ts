@@ -39,6 +39,7 @@ export function evidenceFilters(
   const items: FilterItem[] = [];
   let total = 0;
   let missing = 0;
+  let unrecalled = 0;
   let unknown = 0;
   for (const question of questions) {
     if (!question.answerable) continue;
@@ -105,6 +106,8 @@ export function evidenceFilters(
         continue;
       }
       const stage = classify(events);
+      if (events.every((event) => event.status === "not_recalled"))
+        unrecalled++;
       if (stage)
         items.push({
           question: question.question,
@@ -113,5 +116,5 @@ export function evidenceFilters(
         });
     }
   }
-  return { items, total, missing, unknown };
+  return { items, total, missing, unrecalled, unknown };
 }
