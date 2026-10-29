@@ -112,6 +112,7 @@ type ShowToast = (kind: "success" | "error", message: string) => void;
 type Props = {
   Diagnostics: ComponentType<{ data: RetrievalDiagnosticsData }>;
   section: EvaluationSection;
+  runId?: string;
   // 巡检复测集页签里打开的评测集，来自地址 /eval/regression/<编号>。
   setId?: string;
   // 专项评测集页签里打开的专项，来自地址 /eval/special/<编号>。
@@ -653,6 +654,7 @@ function Evaluation({
   onToast,
   Diagnostics,
   section,
+  runId,
   setId,
   suiteId,
   onNavigate,
@@ -661,7 +663,7 @@ function Evaluation({
   const [runs, setRuns] = useState<EvalRunBrief[]>([]);
   const [running, setRunning] = useState<string | null>(null);
   const [suites, setSuites] = useState<EvalSuite[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedId = runId ?? null;
   const [run, setRun] = useState<EvalRun | null>(null);
   const [comparison, setComparison] = useState<EvalComparison | null>(null);
   const [dataset, setDataset] = useState<EvalDataset | null>(null);
@@ -700,11 +702,6 @@ function Evaluation({
     setRuns(data.runs);
     setRunning(data.running);
     setSuites(data.suites);
-    setSelectedId((current) => {
-      if (current && data.runs.some((item) => item.id === current))
-        return current;
-      return null;
-    });
     return data;
   }
 
@@ -718,29 +715,35 @@ function Evaluation({
       .finally(() => setDatasetLoading(false));
   }, []);
 
-  // 顶部页签现在由 URL 决定；离开历史记录时清掉详情状态，返回时从独立列表路由开始，避免显示上一个路由的旧记录。
+  // 地址切换时清掉旧记录和页签，详情只由 URL 中的评测 ID 决定。
   useEffect(() => {
-    setSelectedId(null);
+    setError("");
     setRun(null);
     setComparison(null);
     setDetailTab("overview");
-  }, [section]);
+  }, [section, selectedId]);
 
   // 有评测在运行时每两秒刷新进度；运行结束后重新读取当前选中的结果。
   useEffect(() => {
     if (!running) return;
+    let cancelled = false;
     const timer = window.setInterval(() => {
       refreshRuns()
         .then((data) => {
-          if (!data.running && selectedId) {
+          if (!cancelled && !data.running && selectedId) {
             getEvalRun(selectedId)
-              .then(setRun)
+              .then((data) => {
+                if (!cancelled) setRun(data);
+              })
               .catch(() => undefined);
           }
         })
         .catch(() => undefined);
     }, 2000);
-    return () => window.clearInterval(timer);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, [running, selectedId]);
 
   // 选中的评测变化时读取完整结果，并自动和上一次同类评测对比。
@@ -750,6 +753,8 @@ function Evaluation({
       return;
     }
     let cancelled = false;
+    setRun(null);
+    setComparison(null);
     getEvalRun(selectedId)
       .then((data) => {
         if (cancelled) return;
@@ -759,12 +764,16 @@ function Evaluation({
             .then((result) => {
               if (!cancelled) setComparison(result);
             })
-            .catch(() => setComparison(null));
+            .catch(() => {
+              if (!cancelled) setComparison(null);
+            });
         } else {
           setComparison(null);
         }
       })
-      .catch((reason: Error) => setError(reason.message));
+      .catch((reason: Error) => {
+        if (!cancelled) setError(reason.message);
+      });
     return () => {
       cancelled = true;
     };
@@ -815,7 +824,7 @@ function Evaluation({
             specialJudge,
           ),
         );
-        setSelectedId(started.id);
+        onNavigate(`/eval/runs/${encodeURIComponent(started.id)}`);
         await refreshRuns();
         onToast("success", "专项评测已启动。");
         return;
@@ -839,7 +848,7 @@ function Evaluation({
           launchKind === "generation",
         ),
       );
-      setSelectedId(started.id);
+      onNavigate(`/eval/runs/${encodeURIComponent(started.id)}`);
       setDetailTab("overview");
       await refreshRuns();
       // 评测进度继续留在页面内；Toast 只确认启动结果，避免把持续状态变成短暂提示。
@@ -856,7 +865,7 @@ function Evaluation({
     try {
       await deleteEvalRun(runId);
       if (selectedId === runId) {
-        setSelectedId(null);
+        onNavigate("/eval/runs");
         setRun(null);
         setComparison(null);
       }
@@ -971,7 +980,7 @@ function Evaluation({
           </button>
         ))}
       </div>
-      {section === "history" && (
+      {section === "history" && !selectedId && (
         <>
           {/* 操作区只属于历史记录，评测集 Tab 保持为题目管理入口。 */}
           <div className="ev-launch">
@@ -1481,12 +1490,20 @@ function Evaluation({
             }}
           />
         )
-      ) : runsLoading ? (
+      ) : selectedId && error && !run ? (
+        <button
+          className="ev-back-button"
+          onClick={() => onNavigate("/eval/runs")}
+        >
+          ← 返回历次记录
+        </button>
+      ) : runsLoading && !selectedId ? (
         <RunHistorySkeleton />
       ) : selectedId ? (
         <RunDetailView
-          onBack={() => setSelectedId(null)}
-          run={run}
+          key={selectedId}
+          onBack={() => onNavigate("/eval/runs")}
+          run={run?.id === selectedId ? run : null}
           running={running}
           detailTab={detailTab}
           setDetailTab={setDetailTab}
@@ -1498,7 +1515,7 @@ function Evaluation({
         <RunHistory
           runs={runs}
           onOpen={(id) => {
-            setSelectedId(id);
+            onNavigate(`/eval/runs/${encodeURIComponent(id)}`);
             setDetailTab("overview");
           }}
           onNote={(id, note) => {
@@ -1655,7 +1672,12 @@ function RunDetailView({
           ← 返回历次记录
         </button>
       </div>
-      {/* 详情页只展示当前评测配置；切换记录回到历史表格，避免下拉框和详情页职责重叠。 */}
+      {run && (
+        <details>
+          <summary>本次运行配置</summary>
+          <RunConfig run={run} />
+        </details>
+      )}
       {run?.kind === "special" ? (
         <div className="ev-body">
           {run.status !== "completed" ? (
@@ -1674,7 +1696,6 @@ function RunDetailView({
         </div>
       ) : (
         <>
-          {run && <RunConfig run={run} />}
           {activeMode && (
             <div
               className="document-detail-tabs ev-tabs ev-detail-tabs"
