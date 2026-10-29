@@ -1,0 +1,400 @@
+{
+  "created": "2026-10-29T20:31:03.458665+09:00",
+  "source_hashes": {
+    "北海慢游指南": "0084291fd0d880c601d122924974e439b447f007d1b16bde7aef42d2d2912c22",
+    "北海出游条件补记": "22350fa8c5d0ccd0ad15f4641baa8f966838b4dc38826629076406e25c582a88"
+  },
+  "questions_sha256": "bc90c4495e4c9aaf199098302a58d74d609aa7ae1aacfbffe3aefb5e7fa58677",
+  "embedding_model": "BAAI/bge-small-zh-v1.5",
+  "embedding_revision": "7999e1d3359715c523056ef9478215996d62a620",
+  "rerank_model": "BAAI/bge-reranker-base",
+  "rerank_revision": "2cfc18c9415c912f9d8155881c133215df768a70",
+  "backend": "local PyTorch CPU, float32, CLS/L2 embeddings, sigmoid rerank logits",
+  "config": {
+    "threshold": 0.85,
+    "threshold_source": "repository default; online settings not read",
+    "dense_limit": 12,
+    "rrf_k": 60,
+    "pool_size": 12,
+    "chunk_size": 400,
+    "overlap": 40
+  },
+  "document_chunks": 138,
+  "results": [
+    {
+      "id": "C01",
+      "question": "周日做完手作就要带箱子离开，蓝晒便笺和海铜敲字怎么选？请分别判断纸面作品能否立刻收进包里、金属纪念牌需不需要另买保护材料，再比较哪种收尾更省事。",
+      "qualified": true,
+      "evidence": [
+        {
+          "section": "B121",
+          "label": "蓝晒的时段、费用与成品形式",
+          "subquery": "蓝晒便笺 活动结束时间 纸张 材料 成品",
+          "full_query_dense_rank": 4,
+          "subquery_dense_rank": 1,
+          "in_subquery_rrf_pool": true,
+          "full_score": 0.7420463562011719,
+          "subquery_score": 0.9962232112884521,
+          "full_filtered": true,
+          "subquery_kept": true
+        },
+        {
+          "section": "B132",
+          "label": "纸面作品的平放等待与装包限制",
+          "subquery": "纸面作品 水洗后 晾干 平放多久 能否收进包",
+          "full_query_dense_rank": 26,
+          "subquery_dense_rank": 1,
+          "in_subquery_rrf_pool": true,
+          "full_score": 0.007191247772425413,
+          "subquery_score": 0.9043136835098267,
+          "full_filtered": true,
+          "subquery_kept": true
+        },
+        {
+          "section": "B143",
+          "label": "敲字的时段、费用与即时交付",
+          "subquery": "海铜敲字 活动结束 作品交付 费用",
+          "full_query_dense_rank": 2,
+          "subquery_dense_rank": 1,
+          "in_subquery_rrf_pool": true,
+          "full_score": 0.9260107278823853,
+          "subquery_score": 0.9948156476020813,
+          "full_filtered": false,
+          "subquery_kept": true
+        },
+        {
+          "section": "B154",
+          "label": "铜牌保护材料的必需性与附加费",
+          "subquery": "金属纪念牌 铜牌 保护材料 毡袋 另付多少钱",
+          "full_query_dense_rank": 11,
+          "subquery_dense_rank": 1,
+          "in_subquery_rrf_pool": true,
+          "full_score": 0.03412642702460289,
+          "subquery_score": 0.9483330249786377,
+          "full_filtered": true,
+          "subquery_kept": true
+        }
+      ],
+      "cross_option_embedding_cosines": [
+        {
+          "left": "B121",
+          "right": "B143",
+          "cosine": 0.6882544159889221
+        },
+        {
+          "left": "B121",
+          "right": "B154",
+          "cosine": 0.692657470703125
+        },
+        {
+          "left": "B132",
+          "right": "B143",
+          "cosine": 0.633407473564148
+        },
+        {
+          "left": "B132",
+          "right": "B154",
+          "cosine": 0.6389975547790527
+        }
+      ]
+    },
+    {
+      "id": "C02",
+      "question": "两个朋友不想在旅行最后一天被手续拖住，潮笺留影和浮标涂色哪个更合适？请分别查清电子纪念品是否会自动发送、实体作品是不是结束就能拿走，再比较还要额外做哪些事。",
+      "qualified": true,
+      "evidence": [
+        {
+          "section": "B123",
+          "label": "留影的拍摄与电子纪念版范围",
+          "subquery": "潮笺留影 电子纪念版 交付方式",
+          "full_query_dense_rank": 2,
+          "subquery_dense_rank": 1,
+          "in_subquery_rrf_pool": true,
+          "full_score": 0.8835721015930176,
+          "subquery_score": 0.995248019695282,
+          "full_filtered": false,
+          "subquery_kept": true
+        },
+        {
+          "section": "B134",
+          "label": "电子交付需主动申请与截止",
+          "subquery": "电子纪念品 是否自动发送 拍摄编号 接收地址 在线申请 截止",
+          "full_query_dense_rank": 13,
+          "subquery_dense_rank": 1,
+          "in_subquery_rrf_pool": true,
+          "full_score": 0.9093281030654907,
+          "subquery_score": 0.998728334903717,
+          "full_filtered": false,
+          "subquery_kept": true
+        },
+        {
+          "section": "B145",
+          "label": "涂色的时间、费用与木坯交付",
+          "subquery": "浮标涂色 木坯 结束 成品领取",
+          "full_query_dense_rank": 8,
+          "subquery_dense_rank": 1,
+          "in_subquery_rrf_pool": true,
+          "full_score": 0.8733492493629456,
+          "subquery_score": 0.9834195375442505,
+          "full_filtered": false,
+          "subquery_kept": true
+        },
+        {
+          "section": "B156",
+          "label": "实体作品的晾干、回店窗口与凭证",
+          "subquery": "涂色作品 结束能否拿走 晾干 领取窗口 领物牌",
+          "full_query_dense_rank": 3,
+          "subquery_dense_rank": 1,
+          "in_subquery_rrf_pool": true,
+          "full_score": 0.06256116181612015,
+          "subquery_score": 0.9960291385650635,
+          "full_filtered": true,
+          "subquery_kept": true
+        }
+      ],
+      "cross_option_embedding_cosines": [
+        {
+          "left": "B123",
+          "right": "B145",
+          "cosine": 0.735203742980957
+        },
+        {
+          "left": "B123",
+          "right": "B156",
+          "cosine": 0.7220413088798523
+        },
+        {
+          "left": "B134",
+          "right": "B145",
+          "cosine": 0.6491346955299377
+        },
+        {
+          "left": "B134",
+          "right": "B156",
+          "cosine": 0.699725329875946
+        }
+      ]
+    },
+    {
+      "id": "C03",
+      "question": "雨天不想来回折腾，砂谱听音和珊窗拼片哪种更有把握？请分别核实听音项目临时取消时钱怎么办、拼片项目如果客满是否还能确保参加，再判断预约能解决什么、解决不了什么。",
+      "qualified": true,
+      "evidence": [
+        {
+          "section": "B124",
+          "label": "听音预约不能消除横向风雨风险",
+          "subquery": "砂谱听音 雨天 停场 预约回执",
+          "full_query_dense_rank": 1,
+          "subquery_dense_rank": 1,
+          "in_subquery_rrf_pool": true,
+          "full_score": 0.9850937128067017,
+          "subquery_score": 0.9982989430427551,
+          "full_filtered": false,
+          "subquery_kept": true
+        },
+        {
+          "section": "B135",
+          "label": "主办方停场与自行缺席的退款区别",
+          "subquery": "活动主办方取消 退款 自行缺席 预约款",
+          "full_query_dense_rank": 23,
+          "subquery_dense_rank": 1,
+          "in_subquery_rrf_pool": true,
+          "full_score": 0.04933280497789383,
+          "subquery_score": 0.9481931328773499,
+          "full_filtered": true,
+          "subquery_kept": true
+        },
+        {
+          "section": "B146",
+          "label": "室内拼片的容量与停止开包时刻",
+          "subquery": "珊窗拼片 室内 材料券 桌位 容量",
+          "full_query_dense_rank": 12,
+          "subquery_dense_rank": 1,
+          "in_subquery_rrf_pool": true,
+          "full_score": 0.7319514155387878,
+          "subquery_score": 0.9968470931053162,
+          "full_filtered": true,
+          "subquery_kept": true
+        },
+        {
+          "section": "B157",
+          "label": "材料券不保座及满座退款条件",
+          "subquery": "购买材料券 能否保证参加 满座 排队 退款",
+          "full_query_dense_rank": 90,
+          "subquery_dense_rank": 1,
+          "in_subquery_rrf_pool": true,
+          "full_score": 0.0007191144395619631,
+          "subquery_score": 0.9696786999702454,
+          "full_filtered": true,
+          "subquery_kept": true
+        }
+      ],
+      "cross_option_embedding_cosines": [
+        {
+          "left": "B124",
+          "right": "B146",
+          "cosine": 0.6865297555923462
+        },
+        {
+          "left": "B124",
+          "right": "B157",
+          "cosine": 0.6736621260643005
+        },
+        {
+          "left": "B135",
+          "right": "B146",
+          "cosine": 0.6687825918197632
+        },
+        {
+          "left": "B135",
+          "right": "B157",
+          "cosine": 0.7933111190795898
+        }
+      ]
+    },
+    {
+      "id": "C04",
+      "question": "想在北海最后一天少跑腿，渡页小展和苇声录音哪个更合适？请分别确认展览借用设备要在哪里归还、声音体验的押金什么时候退，再比较离场后是否还有必须回来的事。",
+      "qualified": true,
+      "evidence": [
+        {
+          "section": "B125",
+          "label": "小展的参观与导览器借用条件",
+          "subquery": "渡页小展 导览器 出口 押金",
+          "full_query_dense_rank": 2,
+          "subquery_dense_rank": 1,
+          "in_subquery_rrf_pool": true,
+          "full_score": 0.9617175459861755,
+          "subquery_score": 0.9975608587265015,
+          "full_filtered": false,
+          "subquery_kept": true
+        },
+        {
+          "section": "B136",
+          "label": "导览器必须绕回入口归还",
+          "subquery": "导览器 从出口离开 去哪里归还 入口 绕行",
+          "full_query_dense_rank": 3,
+          "subquery_dense_rank": 1,
+          "in_subquery_rrf_pool": true,
+          "full_score": 0.9404703378677368,
+          "subquery_score": 0.9973124265670776,
+          "full_filtered": false,
+          "subquery_kept": true
+        },
+        {
+          "section": "B147",
+          "label": "录音的费用、设备与耳机交还",
+          "subquery": "苇声录音 耳机押金 电子交付",
+          "full_query_dense_rank": 1,
+          "subquery_dense_rank": 1,
+          "in_subquery_rrf_pool": true,
+          "full_score": 0.9943898320198059,
+          "subquery_score": 0.9954434633255005,
+          "full_filtered": false,
+          "subquery_kept": true
+        },
+        {
+          "section": "B158",
+          "label": "押金次日原路清算无需回来",
+          "subquery": "耳机押金 何时退还 是否需要次日回柜台",
+          "full_query_dense_rank": 5,
+          "subquery_dense_rank": 1,
+          "in_subquery_rrf_pool": true,
+          "full_score": 0.23270641267299652,
+          "subquery_score": 0.9774349927902222,
+          "full_filtered": true,
+          "subquery_kept": true
+        }
+      ],
+      "cross_option_embedding_cosines": [
+        {
+          "left": "B125",
+          "right": "B147",
+          "cosine": 0.6920358538627625
+        },
+        {
+          "left": "B125",
+          "right": "B158",
+          "cosine": 0.6503914594650269
+        },
+        {
+          "left": "B136",
+          "right": "B147",
+          "cosine": 0.7001973390579224
+        },
+        {
+          "left": "B136",
+          "right": "B158",
+          "cosine": 0.7429189682006836
+        }
+      ]
+    }
+  ],
+  "old_questions": [
+    {
+      "id": "C01",
+      "question": "带孩子在北海住一晚，不开车，白天想方便玩沙，晚上想步行吃热饭。白栈和松纹馆分别有什么得失？请同时比较房费、餐食和去海边的实际条件。",
+      "cross_option_embedding_cosine": 0.7786872386932373,
+      "scores": [
+        {
+          "section": "B003",
+          "score": 0.9964262843132019
+        },
+        {
+          "section": "B007",
+          "score": 0.9957320094108582
+        }
+      ]
+    },
+    {
+      "id": "C02",
+      "question": "长辈不愿走楼梯，但也希望住得离海近，南窗小院与青阶舍怎样选？请比较房价、进出客房的方式、往海边的路线和夜间响应条件。",
+      "cross_option_embedding_cosine": 0.8116350173950195,
+      "scores": [
+        {
+          "section": "B024",
+          "score": 0.974941611289978
+        },
+        {
+          "section": "B027",
+          "score": 0.9365929365158081
+        }
+      ]
+    },
+    {
+      "id": "C03",
+      "question": "两个人住两晚、不打算做饭，榆灯客舍和清潮公寓哪个固定支出低？结合早餐、海边路线、晚饭和有人协助的条件，说明省钱对应哪些取舍。",
+      "cross_option_embedding_cosine": 0.7170722484588623,
+      "scores": [
+        {
+          "section": "B030",
+          "score": 0.9876163601875305
+        },
+        {
+          "section": "B033",
+          "score": 0.9957464337348938
+        }
+      ]
+    },
+    {
+      "id": "C04",
+      "question": "周六晚到，想吃上热饭，又希望孩子二十一点后好睡，湾北客庭和渔灯住处各有什么限制？请比较房费、早餐、夜间服务、晚餐距离和看海便利。",
+      "cross_option_embedding_cosine": 0.8515671491622925,
+      "scores": [
+        {
+          "section": "B048",
+          "score": 0.9952247142791748
+        },
+        {
+          "section": "B066",
+          "score": 0.9969899654388428
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "不是线上或 Milvus 测试，未测 BM25、上下文增强、邻片恢复、工具预算和 Agent。",
+    "同名缓存权重的 PyTorch 实测，不是部署中的 fastembed ONNX 后端，分数可能有差异。",
+    "对子查询合并候选中的同一必要片做完整问题与对应子问题评分，未把召回差异归因于重排。"
+  ]
+}

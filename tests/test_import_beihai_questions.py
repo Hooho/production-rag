@@ -22,20 +22,26 @@ from test_evaluation import eval_dir, headers  # noqa: F401
 
 def catalog_for(size=400, overlap=40):
     spec, _ = load_materials()
-    records = chunk_document_records(
-        (MATERIALS / "corpus/北海慢游指南.md").read_text(encoding="utf-8"),
-        chunk_size=size,
-        chunk_overlap=overlap,
-    )
-    return [
-        {
-            "title": spec["title"],
-            "position": index,
-            "fingerprint": fingerprint(record["content"]),
-            "quote": record["content"],
-        }
-        for index, record in enumerate(records)
-    ]
+    result = []
+    for source in [
+        {"title": spec["title"], "file": "corpus/北海慢游指南.md"},
+        *spec.get("additional_corpora", []),
+    ]:
+        records = chunk_document_records(
+            (MATERIALS / source["file"]).read_text(encoding="utf-8"),
+            chunk_size=size,
+            chunk_overlap=overlap,
+        )
+        result.extend(
+            {
+                "title": source["title"],
+                "position": index,
+                "fingerprint": fingerprint(record["content"]),
+                "quote": record["content"],
+            }
+            for index, record in enumerate(records)
+        )
+    return result
 
 
 @pytest.mark.parametrize("size,overlap", [(800, 120), (400, 40), (300, 40)])
@@ -71,19 +77,33 @@ def test_missing_fragment_bad_fingerprint_and_limit_fail_before_import():
 
 
 def api_for(client, calls):
-    def api(method, path, body=None):
+    def api(method, path, body=None, *, files=None):
         calls.append((method, path))
-        response = client.request(method, path, headers=headers(), json=body)
+        kwargs = (
+            {
+                "files": [
+                    ("files", (name, content, "text/markdown"))
+                    for name, content in files
+                ]
+            }
+            if files
+            else {"json": body}
+        )
+        response = client.request(method, path, headers=headers(), **kwargs)
         assert response.status_code < 400, response.text
         return response.json()
 
     return api
 
 
-def upload_guide(client, store):
+def upload_guide(client, store, supplements=True):
     # 隔离本机 .env 中的模型地址；这里只验证入库和 HTTP API，不调用模型服务。
     client.app.state.models.embedding_mode = "demo"
     client.app.state.models.contextual = False
+    spec, _ = load_materials()
+    sources = [{"title": spec["title"], "file": "corpus/北海慢游指南.md"}]
+    if supplements:
+        sources += spec.get("additional_corpora", [])
     response = client.post(
         "/eval/corpus",
         headers=headers(),
@@ -91,16 +111,17 @@ def upload_guide(client, store):
             (
                 "files",
                 (
-                    "北海慢游指南.md",
-                    (MATERIALS / "corpus/北海慢游指南.md").read_bytes(),
+                    source["title"] + ".md",
+                    (MATERIALS / source["file"]).read_bytes(),
                     "text/markdown",
                 ),
             )
+            for source in sources
         ],
     )
     assert response.status_code == 201, response.text
-    assert len(response.json()["added"]) == 1
-    with limit_titles("eval", ["北海慢游指南"]):
+    assert len(response.json()["added"]) == len(sources)
+    with limit_titles("eval", [source["title"] for source in sources]):
         import_corpus(store, client.app.state.models)
 
 
@@ -214,6 +235,11 @@ def test_api_client_handles_prefix_auth_json_and_rejects_redirects(monkeypatch):
     assert seen[0].full_url == "http://127.0.0.1:8000/api/eval/suites"
     assert seen[0].get_header("Authorization") == "Bearer test-token"
     assert "北海" in seen[0].data.decode()
+    api("POST", "/eval/corpus", files=[("北海补记.md", "正文".encode())])
+    assert (
+        seen[-1].get_header("Content-type").startswith("multipart/form-data; boundary=")
+    )
+    assert b'name="files"' in seen[-1].data and "正文" in seen[-1].data.decode()
     with pytest.raises(ValueError, match="302"):
         api("GET", "/redirect")
     with pytest.raises(ValueError, match="API 地址"):
@@ -278,3 +304,112 @@ def test_one_command_uses_local_config_and_does_not_send_it_to_remote(
     expected = "https://example.invalid/api" if remote else "http://127.0.0.1:8123"
     assert calls == [(expected, ""), (expected, "test-token")]
     assert len(imported) == 1
+
+
+def test_updates_only_four_previous_comparisons_and_preserves_other_items(
+    setup, eval_dir
+):
+    client, store = setup
+    upload_guide(client, store)
+    spec, sections = load_materials()
+    calls = []
+    api = api_for(client, calls)
+    suite = api(
+        "POST",
+        "/eval/suites",
+        {"name": spec["suite_name"], "method": "retrieval", "search_mode": "hybrid"},
+    )
+    for definition, item in zip(
+        spec["items"],
+        build_items(spec, sections, api("GET", "/eval/target-chunks")["items"]),
+    ):
+        if definition.get("previous_question"):
+            item["question"] = definition["previous_question"]
+            item["reference_answer"] = "旧版比较答案"
+        api("POST", f"/eval/suites/{suite['id']}/items", item)
+    before = api("GET", f"/eval/suites/{suite['id']}")["items"]
+    calls.clear()
+    import_questions(api, spec, sections, spec["suite_name"], dry_run=True)
+    assert all(method == "GET" for method, _ in calls)
+    calls.clear()
+    import_questions(api, spec, sections, spec["suite_name"])
+    assert sum(method == "PUT" for method, _ in calls) == 4
+    assert not any(method in {"POST", "DELETE"} for method, _ in calls)
+    after = api("GET", f"/eval/suites/{suite['id']}")["items"]
+    assert [row["id"] for row in before] == [row["id"] for row in after]
+    assert [row for row in before if row["type"] != "比较"] == [
+        row for row in after if row["type"] != "比较"
+    ]
+    calls.clear()
+    import_questions(api, spec, sections, spec["suite_name"])
+    assert all(method == "GET" for method, _ in calls)
+
+
+def test_one_command_uploads_and_imports_missing_supplement(
+    setup, eval_dir, monkeypatch
+):
+    # 测试库共享一条 SQLite 连接，后台写入与轮询会互相影响事务；同步执行同一个导入任务。
+    class InlineThread:
+        def __init__(self, target, daemon):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr("app.api.main.Thread", InlineThread)
+    client, store = setup
+    upload_guide(client, store, supplements=False)
+    spec, sections = load_materials()
+    calls = []
+    api = api_for(client, calls)
+    import_questions(api, spec, sections, spec["suite_name"], dry_run=True)
+    assert all(method == "GET" for method, _ in calls)
+    calls.clear()
+    # 仍调用真实上传和导入 API，模型被隔离为 demo，不访问外部服务。
+    import_questions(api, spec, sections, spec["suite_name"])
+    assert ("POST", "/eval/corpus") in calls
+    assert any(method == "POST" and path.endswith("/import") for method, path in calls)
+    saved = api("GET", "/eval/corpus")["items"]
+    assert (
+        next(row for row in saved if row["title"] == "北海出游条件补记")["status"]
+        == "imported"
+    )
+
+
+@pytest.mark.parametrize(
+    "mode,qualified",
+    [
+        ("filtered", True),
+        ("all_kept", False),
+        ("not_recalled", False),
+        ("sub_filtered", False),
+    ],
+)
+def test_verification_requires_recall_and_distinct_rerank_loss(mode, qualified):
+    from scripts.verify_beihai_comparisons import verify
+
+    documents = [
+        {"section": f"B{i:03}", "title": "补记", "text": f"d{i}"} for i in range(20)
+    ]
+    item = {
+        "id": "C01",
+        "question": "full",
+        "scoring_items": [
+            {"label": "a", "section": "B000", "title": "补记", "query": "q0"},
+            {"label": "b", "section": "B001", "title": "补记", "query": "q1"},
+        ],
+    }
+
+    def rank(query):
+        return list(range(1, 20)) + [0] if mode == "not_recalled" else list(range(20))
+
+    def score(query, text):
+        return (
+            0.1
+            if text == "d0"
+            and (query == "full" and mode != "all_kept" or mode == "sub_filtered")
+            else 0.99
+        )
+
+    result = verify(rank, score, [item], documents, 0.85, 12)
+    assert result[0]["qualified"] is qualified
