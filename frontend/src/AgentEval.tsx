@@ -330,12 +330,20 @@ function EvidenceStatus({
       {rows.length > 0 ? (
         <ul>
           {rows.map((row, index) => (
-            <li key={index}>
-              <span
-                className={`ag-evidence-name ${row.tone === "danger" || row.tone === "neutral" ? "is-missed" : ""}`}
-              >
-                {itemName(index)}
+            <li
+              key={index}
+              className={
+                row.tone === "danger"
+                  ? "is-filtered"
+                  : row.tone === "neutral"
+                    ? "is-missed"
+                    : "is-hit"
+              }
+            >
+              <span className="ag-evidence-icon" aria-hidden="true">
+                {row.tone === "danger" || row.tone === "neutral" ? "—" : "✓"}
               </span>
+              <span className="ag-evidence-name">[{itemName(index)}]</span>
               <Tag
                 tone={row.tone}
                 hue={row.hue}

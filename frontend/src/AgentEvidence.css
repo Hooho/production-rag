@@ -17,3 +17,38 @@
   font-size: inherit;
   padding: 0 0.64em;
 }
+
+.ag-evidence-status > ul {
+  font-size: 11px;
+}
+
+.ag-evidence-status > ul > li.is-hit {
+  color: var(--tone-success-text);
+}
+
+.ag-evidence-status > ul > li.is-filtered {
+  color: var(--tone-danger-text);
+}
+
+.ag-evidence-status > ul > li.is-missed {
+  color: var(--ev-muted);
+}
+
+.ag-evidence-status > ul > li > small,
+.ag-evidence-status > ul > li > .tag {
+  font-size: inherit;
+}
+
+.ag-evidence-status > ul > li > small {
+  color: inherit;
+}
+
+.ag-evidence-status > ul > li > .tag {
+  padding: 0 0.64em;
+}
+
+.ag-evidence-status .ag-evidence-icon {
+  width: 1em;
+  flex-shrink: 0;
+  text-align: center;
+}
