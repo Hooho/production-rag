@@ -1,5 +1,28 @@
 import type { EvalAgentCall, EvalAgentQuestion } from "./api";
 
+type Candidate = NonNullable<
+  EvalAgentCall["retrieval_diagnostics"]
+>["candidates"][number];
+
+export function evidenceFilterReason(
+  call: EvalAgentCall,
+  candidate: Candidate,
+): string {
+  const config = call.retrieval_diagnostics?.config;
+  switch (candidate.agent_status ?? candidate.status) {
+    case "filtered_low_score":
+      return `进了重排，重排分 ${candidate.rerank_probability?.toFixed(4) ?? "未记录"}，低于阈值 ${config?.min_score ?? "未记录"}`;
+    case "not_in_pool":
+      return `合并后排第 ${candidate.rrf_rank} 名，没进候选池（前 ${config?.rerank_candidates ?? "未记录"} 段）`;
+    case "beyond_limit":
+      return `重排第 ${candidate.rerank_rank ?? "未记录"} 名，超出返回的 ${config?.return_limit ?? "未记录"} 段`;
+    case "beyond_top_k":
+      return `通过检索过滤，但超出本次 Top K ${call.top_k ?? "未记录"} 的返回范围`;
+    default:
+      return "进了候选池，但没交给模型";
+  }
+}
+
 // 首次命中按工具调用顺序计算，包含直接检索、父块扩展和读前后文。
 export function newEvidenceHits(
   calls: EvalAgentCall[],

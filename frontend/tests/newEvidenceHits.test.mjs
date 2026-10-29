@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { newEvidenceHits } from "../src/newEvidenceHits.ts";
+import {
+  newEvidenceHits,
+  evidenceFilterReason,
+} from "../src/newEvidenceHits.ts";
 
 const call = (number, changes = {}) => ({
   call: number,
@@ -54,3 +57,36 @@ assert.deepEqual(
   [],
 );
 console.log("New scoring evidence hit checks passed.");
+
+const retrievalCall = {
+  top_k: 5,
+  retrieval_diagnostics: {
+    config: { min_score: 0.85, rerank_candidates: 12, return_limit: 8 },
+  },
+};
+assert.match(
+  evidenceFilterReason(retrievalCall, {
+    status: "filtered_low_score",
+    rerank_probability: 0.02,
+  }),
+  /重排分 0.0200，低于阈值 0.85/,
+);
+assert.match(
+  evidenceFilterReason(retrievalCall, { status: "not_in_pool", rrf_rank: 35 }),
+  /第 35 名，没进候选池（前 12 段）/,
+);
+assert.match(
+  evidenceFilterReason(retrievalCall, {
+    status: "beyond_limit",
+    rerank_rank: 9,
+  }),
+  /重排第 9 名，超出返回的 8 段/,
+);
+assert.match(
+  evidenceFilterReason(retrievalCall, {
+    status: "returned",
+    agent_status: "beyond_top_k",
+  }),
+  /通过检索过滤，但超出本次 Top K 5/,
+);
+console.log("Scoring evidence filter reason checks passed.");
