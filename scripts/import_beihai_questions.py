@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import sys
 import unicodedata
 from urllib.error import HTTPError, URLError
@@ -15,6 +16,30 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 MATERIALS = Path(__file__).resolve().parents[1] / "eval/benchmarks/beihai"
+
+
+def local_defaults():
+    values = {}
+    path = MATERIALS.parents[2] / ".env"
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8-sig").splitlines():
+            key, separator, raw = line.strip().removeprefix("export ").partition("=")
+            key = key.strip()
+            if separator and key in {"ADMIN_PASSWORD", "API_PORT"}:
+                try:
+                    parts = shlex.split(raw, comments=True)
+                except ValueError:
+                    continue
+                if len(parts) == 1 and "${" not in parts[0]:
+                    values[key] = parts[0]
+    values.update(
+        {
+            key: os.environ[key]
+            for key in ("ADMIN_PASSWORD", "API_PORT")
+            if key in os.environ
+        }
+    )
+    return values
 
 
 def normalized(text):
@@ -233,12 +258,8 @@ def make_api(base_url, token=""):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--base-url", default="http://127.0.0.1:8000", help="API 地址，可带反向代理前缀"
-    )
-    parser.add_argument(
-        "--username", default="admin", help="管理员用户名；交互输入密码"
-    )
+    parser.add_argument("--base-url", help="默认本机 API，端口自动读取项目配置")
+    parser.add_argument("--username", default="admin", help="管理员用户名，默认 admin")
     parser.add_argument(
         "--suite-name", default="北海旅游三类检索", help="创建或复用的专项名称"
     )
@@ -249,10 +270,24 @@ def main():
     if not args.suite_name.strip() or len(args.suite_name.strip()) > 64:
         parser.error("专项名称需要 1 至 64 个字符")
     try:
+        defaults = local_defaults()
+        if args.base_url is None:
+            port = int(defaults.get("API_PORT") or "8000")
+            if not 1 <= port <= 65535:
+                raise ValueError("API_PORT 需要在 1 至 65535 之间")
+            args.base_url = f"http://127.0.0.1:{port}"
         spec, sections = load_materials()
         token = os.environ.get("BEIHAI_API_TOKEN", "").strip()
         if not token:
-            password = getpass.getpass(f"管理员 {args.username} 的密码：")
+            password = ""
+            if args.username == "admin" and urlsplit(args.base_url).hostname in {
+                "127.0.0.1",
+                "localhost",
+                "::1",
+            }:
+                password = defaults.get("ADMIN_PASSWORD", "")
+            if not password:
+                password = getpass.getpass(f"管理员 {args.username} 的密码：")
             token = make_api(args.base_url)(
                 "POST",
                 "/auth/login",

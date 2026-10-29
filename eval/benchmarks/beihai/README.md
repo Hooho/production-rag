@@ -38,15 +38,15 @@
 
 ## 通过 API 导入十二道题
 
-先上传与本仓库同版本的指南，并等待状态变为“已导入”。在仓库根目录运行 Python 3 脚本，无需额外依赖。先做预检查：
+先上传与本仓库同版本的指南，并等待状态变为“已导入”。在仓库根目录执行一条命令即可，无需额外依赖：
 
-> python3 scripts/import_beihai_questions.py --base-url http://127.0.0.1:8000 --username admin --dry-run
+> python3 scripts/import_beihai_questions.py
 
-检查通过后，去掉 --dry-run 正式导入：
+自动使用本机 API，从项目根目录 .env 或进程环境读取 API_PORT（默认 8000）和 ADMIN_PASSWORD，用 admin 登录；进程环境优先。只解析这两个配置值，不执行 .env，不打印密码。配置缺少密码时才提示输入。若管理员密码已在页面修改，需以当前密码为准，不能继续依赖首次初始化密码。
 
-> python3 scripts/import_beihai_questions.py --base-url http://127.0.0.1:8000 --username admin
+如需先检查不写入，在命令后加 --dry-run。非本机地址可用 --base-url，其他管理员账号可用 --username；这两种情况不会自动使用本机配置密码，而是提示输入。
 
-按提示输入管理员密码，输入不会显示。实际账号不是 admin 时替换 --username；API 地址不是本机 8000 端口时替换 --base-url，反向代理有 /api 前缀时保留该前缀。脚本不读取 .env、不会从浏览器提取登录信息。已有访问令牌时可通过环境变量 BEIHAI_API_TOKEN 提供，脚本就不再登录。
+输入密码不会显示。脚本不会从浏览器提取登录信息。已有访问令牌时可通过环境变量 BEIHAI_API_TOKEN 提供，脚本就不再登录。
 
 默认创建或复用“北海旅游三类检索”专项，评测方式为检索，检索方式为混合检索。可用 --suite-name 指定其他名称。预检查会鉴权和读取数据，不创建专项或题目；使用密码时登录本身会创建正常登录会话。
 

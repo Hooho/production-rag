@@ -218,3 +218,63 @@ def test_api_client_handles_prefix_auth_json_and_rejects_redirects(monkeypatch):
         api("GET", "/redirect")
     with pytest.raises(ValueError, match="API 地址"):
         make_api("http://admin:secret@localhost:8000")
+
+
+def test_local_defaults_reads_only_port_and_password_without_executing(
+    tmp_path, monkeypatch
+):
+    from scripts import import_beihai_questions as script
+
+    monkeypatch.setattr(script, "MATERIALS", tmp_path / "eval/benchmarks/beihai")
+    monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
+    monkeypatch.setenv("API_PORT", "8123")
+    (tmp_path / ".env").write_text(
+        "export ADMIN_PASSWORD='a password # with spaces'\nAPI_PORT=8111\n"
+        "UNUSED=$(touch should-not-exist)\n",
+        encoding="utf-8",
+    )
+    assert script.local_defaults() == {
+        "ADMIN_PASSWORD": "a password # with spaces",
+        "API_PORT": "8123",
+    }
+    assert not (tmp_path / "should-not-exist").exists()
+
+
+@pytest.mark.parametrize("remote", [False, True])
+def test_one_command_uses_local_config_and_does_not_send_it_to_remote(
+    monkeypatch, remote
+):
+    from scripts import import_beihai_questions as script
+
+    monkeypatch.delenv("BEIHAI_API_TOKEN", raising=False)
+    monkeypatch.setattr(
+        script,
+        "local_defaults",
+        lambda: {"ADMIN_PASSWORD": "configured", "API_PORT": "8123"},
+    )
+    monkeypatch.setattr(script.getpass, "getpass", lambda prompt: "typed")
+    argv = ["import_beihai_questions.py"]
+    if remote:
+        argv += ["--base-url", "https://example.invalid/api"]
+    monkeypatch.setattr(script.sys, "argv", argv)
+    calls = []
+
+    def factory(base_url, token=""):
+        calls.append((base_url, token))
+
+        def login(method, path, body):
+            assert body == {
+                "username": "admin",
+                "password": "typed" if remote else "configured",
+            }
+            return {"access_token": "test-token"}
+
+        return login
+
+    monkeypatch.setattr(script, "make_api", factory)
+    imported = []
+    monkeypatch.setattr(script, "import_questions", lambda *args: imported.append(args))
+    assert script.main() == 0
+    expected = "https://example.invalid/api" if remote else "http://127.0.0.1:8123"
+    assert calls == [(expected, ""), (expected, "test-token")]
+    assert len(imported) == 1
