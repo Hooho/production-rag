@@ -2411,6 +2411,18 @@ export function getLLMSettings() {
   return request<LLMSettings>("/settings/llm");
 }
 
+export function listLLMModels(
+  payload: Omit<LLMSettingsInput, "model">,
+  signal?: AbortSignal,
+) {
+  return request<{ models: string[] }>("/settings/llm/models", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
 // 保存后后端立即切换模型，不需要重启。
 export function saveLLMSettings(payload: LLMSettingsInput) {
   return request<LLMSettings>("/settings/llm", {

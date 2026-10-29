@@ -13,6 +13,7 @@ from typing import Any, Literal
 from uuid import UUID, uuid4
 
 import openai
+import httpx
 from fastapi import (
     Depends,
     FastAPI,
@@ -30,6 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from ..agent.service import Agent
+from ..model_catalog import SUPPORTED_PROVIDERS, list_models
 from ..agentic.records import (
     load_run as load_agent_run,
     save_run as save_agent_run,
@@ -510,12 +512,15 @@ class DataPermissionInput(BaseModel):
 
 # 设置页提交的聊天模型配置；所有厂商都走 OpenAI 兼容接口，只需地址、模型名和密钥。
 # api_key 留空表示沿用当前密钥，这样只改模型名时不必重新粘贴密钥。
-class LLMSettingsInput(BaseModel):
+class LLMModelListInput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     provider: str = Field("custom", max_length=32)
     base_url: str = Field(min_length=1, max_length=300, pattern="^https?://")
-    model: str = Field(min_length=1, max_length=100)
     api_key: str | None = Field(None, max_length=300)
+
+
+class LLMSettingsInput(LLMModelListInput):
+    model: str = Field(min_length=1, max_length=100)
 
 
 # 密钥只回显首尾几位，避免在浏览器和日志里暴露完整密钥。
@@ -754,6 +759,39 @@ def create_app(store=None, models=None, jwt_secret=None):
     @app.get("/settings/llm")
     def get_llm_settings(owner=Depends(identity)):
         return llm_settings_view()
+
+    @app.post("/settings/llm/models")
+    def get_llm_models(body: LLMModelListInput, admin=Depends(require_admin)):
+        if body.provider not in SUPPORTED_PROVIDERS:
+            raise HTTPException(422, "该服务商暂未接入模型列表查询")
+        # 自动查询只允许沿用同一服务商、同一地址的密钥。
+        if body.provider == "ollama":
+            api_key = ""
+        elif body.api_key:
+            api_key = body.api_key
+        elif body.provider == app.state.models.llm_provider:
+            api_key = resolve_llm_key(body)
+        else:
+            raise HTTPException(422, "请填写该服务的 API Key")
+        try:
+            return {"models": list_models(body.provider, body.base_url, api_key)}
+        except httpx.HTTPStatusError as error:
+            status = error.response.status_code
+            detail = {
+                401: "API Key 无效",
+                403: "API Key 无权查询模型列表",
+                404: "模型列表接口不存在，请检查服务地址（百炼可使用业务空间专属地址）",
+                429: "模型列表查询过于频繁，请稍后重试",
+            }.get(status, "服务商暂时无法返回模型列表")
+            raise HTTPException(502, f"{detail}（HTTP {status}）") from None
+        except httpx.TimeoutException:
+            raise HTTPException(504, "查询模型列表超时，请重试") from None
+        except httpx.RequestError:
+            raise HTTPException(
+                502, "无法连接模型列表接口，请检查服务地址及网络"
+            ) from None
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from None
 
     # 保存并立即切换聊天模型；配置对所有用户生效，因此只有管理员可以修改。
     @app.put("/settings/llm")
