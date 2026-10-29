@@ -3097,32 +3097,29 @@ function QueryExplanation({
   call: EvalAgentCall;
   question: EvalQuestion;
 }) {
-  const explanation = call.query_explanation;
-  if (!explanation) {
-    const raw = call.arguments.query_explanation;
-    if (
-      raw &&
-      typeof raw === "object" &&
-      "purpose" in raw &&
-      typeof raw.purpose === "string"
-    ) {
-      return (
-        <div className="ag-query-explanation">
-          <strong>查询说明</strong>
-          <p>{raw.purpose}</p>
-          <p className="ag-muted">
-            {"references" in raw &&
-            Array.isArray(raw.references) &&
-            raw.references.length > 0
-              ? "此历史记录未保存结构化的引用依据"
-              : "大模型没有返回引用依据"}
-          </p>
-        </div>
-      );
-    }
-    return <p className="ag-muted">大模型没有返回查询说明</p>;
-  }
-  const labels = {
+  const raw = call.arguments.query_explanation;
+  const outer =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  const nested = outer.query_explanation;
+  const inner =
+    nested && typeof nested === "object" && !Array.isArray(nested)
+      ? (nested as Record<string, unknown>)
+      : {};
+  // 校验失败的调用也展示模型已返回的字段；嵌套错误仅在展示时展开，不改变执行参数。
+  const fields = { ...inner, ...outer, ...call.query_explanation };
+  const strings = (value: unknown): string[] =>
+    Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === "string")
+      : [];
+  const explanation = {
+    purpose: typeof fields.purpose === "string" ? fields.purpose : "",
+    basis: strings(fields.basis),
+    references: Array.isArray(fields.references) ? fields.references : [],
+    assumptions: strings(fields.assumptions),
+  };
+  const labels: Record<string, string> = {
     user_question: "用户问题",
     previous_results: "此前返回资料",
     hypothesis: "待验证假设",
@@ -3135,9 +3132,12 @@ function QueryExplanation({
       </div>
       <dl>
         <dt>查询目的</dt>
-        <dd>{explanation.purpose}</dd>
+        <dd>{explanation.purpose || "大模型没有返回查询目的"}</dd>
         <dt>查询依据</dt>
         <dd className="ag-call-param-values">
+          {explanation.basis.length === 0 && (
+            <span className="ag-muted">大模型没有返回有效的查询依据</span>
+          )}
           {explanation.basis.map((basis) => (
             <Tag
               key={basis}
@@ -3145,7 +3145,7 @@ function QueryExplanation({
               tone={basis === "hypothesis" ? "warning" : "info"}
               plain
             >
-              {labels[basis]}
+              {labels[basis] ?? basis}
             </Tag>
           ))}
         </dd>
@@ -3159,7 +3159,24 @@ function QueryExplanation({
           <>
             <dt>参考资料</dt>
             <dd>
-              {explanation.references.map((reference, index) => {
+              {explanation.references.map((value: unknown, index: number) => {
+                const reference =
+                  value && typeof value === "object"
+                    ? (value as Record<string, unknown>)
+                    : {};
+                if (
+                  typeof reference.quote !== "string" ||
+                  typeof reference.source_id !== "string"
+                ) {
+                  return (
+                    <div className="ag-query-reference" key={index}>
+                      <p>{JSON.stringify(value)}</p>
+                      <small>
+                        大模型返回的引用格式不完整，缺少资料编号或引用原文
+                      </small>
+                    </div>
+                  );
+                }
                 const previous = question.agent?.calls.find(
                   (item) =>
                     item.round != null &&
@@ -3177,7 +3194,7 @@ function QueryExplanation({
                     <small>
                       {source
                         ? `第 ${previous?.round} 轮返回 · ${chunkLabel(source.position, source.chunk_id)} · ${source.title ?? "来源资料"}`
-                        : "未定位到此前轮次的引用资料"}
+                        : `${reference.source_id} · 未定位到此前轮次的引用资料`}
                     </small>
                     <p>“{reference.quote}”</p>
                   </div>
@@ -3199,6 +3216,11 @@ function QueryExplanation({
           </>
         )}
       </dl>
+      {nested != null && (
+        <p className="ag-muted">
+          大模型没有按约定组织查询说明：出现重复嵌套，以上列出已返回字段。
+        </p>
+      )}
     </div>
   );
 }
@@ -3214,6 +3236,16 @@ function AgentCall({
   fresh: Set<string>;
   evidenceChunks: Set<string>;
 }) {
+  const query = call.query ?? call.arguments.query;
+  const rawExplanation = call.arguments.query_explanation;
+  const rawTopK =
+    rawExplanation &&
+    typeof rawExplanation === "object" &&
+    "top_k" in rawExplanation
+      ? rawExplanation.top_k
+      : undefined;
+  const topK = call.top_k ?? call.arguments.top_k ?? rawTopK;
+  const mode = call.mode ?? call.arguments.mode;
   const status = CALL_STATUS[call.status] ?? call.status;
   const hit = call.hits.length > 0;
   const executed = call.status === "ok" || call.status === "error";
@@ -3293,16 +3325,18 @@ function AgentCall({
             </Tag>
           ))}
       </div>
-      {call.name === "search_knowledge" && call.query !== undefined ? (
+      {call.name === "search_knowledge" && typeof query === "string" ? (
         <>
           <div className="ag-call-query">
             <strong className="ag-query-title">Agent 查询</strong>
-            <span>{call.query}</span>
+            <span>{query}</span>
           </div>
           <SearchParams
             values={[
-              SEARCH_MODE_LABELS[call.mode ?? ""] ?? call.mode ?? "默认检索",
-              `Top K ${call.top_k ?? "—"}`,
+              typeof mode === "string"
+                ? (SEARCH_MODE_LABELS[mode] ?? mode)
+                : "默认检索",
+              `Top K ${typeof topK === "number" ? topK : "—"}`,
             ]}
           />
         </>
@@ -3317,6 +3351,12 @@ function AgentCall({
       )}
       {(call.name === "search_knowledge" || call.name === "read_context") && (
         <QueryExplanation call={call} question={question} />
+      )}
+      {call.error && (
+        <details className="ag-call-query">
+          <summary>查看模型返回的原始参数</summary>
+          <pre>{JSON.stringify(call.arguments, null, 2)}</pre>
+        </details>
       )}
       {status && (
         <div className="ag-call-meta">
