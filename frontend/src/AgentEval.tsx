@@ -2956,11 +2956,6 @@ function AgentCallEvidence({
     call,
     evidence,
   );
-  const orderedEvidence = evidence
-    .map((quote, index) => ({ quote, index }))
-    .sort(
-      (a, b) => Number(freshHits.has(b.index)) - Number(freshHits.has(a.index)),
-    );
   const returned = new Map<
     string,
     {
@@ -2992,7 +2987,7 @@ function AgentCallEvidence({
   return (
     <>
       <ul className="ag-evidence-trace ag-call-evidence">
-        {orderedEvidence.map(({ quote, index }) => {
+        {evidence.map((quote, index) => {
           const rows = new Map<
             string,
             {
@@ -3043,11 +3038,6 @@ function AgentCallEvidence({
             Boolean(call.read_hits?.includes(index));
           return (
             <li key={index} className={hit ? "is-hit" : "is-miss"}>
-              {hit && freshHits.has(index) && (
-                <Tag tone="success" size="sm">
-                  本次新命中
-                </Tag>
-              )}
               <b>{hit ? "✓" : "—"}</b>
               <span>
                 {quote.label
@@ -3055,6 +3045,11 @@ function AgentCallEvidence({
                   : `计分项 ${index + 1}`}
               </span>
               <small>{hit ? "命中了" : "本次没命中"}</small>
+              {hit && freshHits.has(index) && (
+                <Tag tone="success" size="sm">
+                  本次新命中
+                </Tag>
+              )}
               {[...rows].map(([key, row]) => (
                 <Tag
                   key={key}
