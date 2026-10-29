@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   newEvidenceHits,
   evidenceFilterReason,
+  filteredRankingText,
 } from "../src/newEvidenceHits.ts";
 
 const call = (number, changes = {}) => ({
@@ -90,3 +91,59 @@ assert.match(
   /通过检索过滤，但超出本次 Top K 5/,
 );
 console.log("Scoring evidence filter reason checks passed.");
+
+const rankingCandidates = [
+  {
+    status: "filtered_low_score",
+    rrf_rank: 7,
+    rerank_probability: 0.02,
+    contributions: [
+      { method: "dense", rank: 1 },
+      { method: "keyword", rank: 2 },
+    ],
+  },
+  {
+    status: "filtered_low_score",
+    rrf_rank: 3,
+    rerank_probability: 0.03,
+    contributions: [
+      { method: "dense", rank: 8 },
+      { method: "keyword", rank: 5 },
+    ],
+  },
+];
+assert.equal(
+  filteredRankingText(rankingCandidates),
+  "（向量第 8 名，关键词第 5 名，合并后第 3 名）",
+);
+assert.equal(
+  filteredRankingText([
+    {
+      status: "filtered_low_score",
+      rerank_probability: 0.02,
+      contributions: [{ method: "keyword", rank: 4 }],
+    },
+  ]),
+  "（关键词第 4 名）",
+);
+assert.equal(
+  filteredRankingText([{ status: "not_in_pool", rrf_rank: 35 }]),
+  "",
+);
+assert.equal(
+  filteredRankingText([
+    { status: "returned", rrf_rank: 1, rerank_probability: 0.9 },
+  ]),
+  "",
+);
+assert.equal(
+  filteredRankingText([
+    { status: "filtered_low_score", rerank_probability: 0.02 },
+  ]),
+  "",
+);
+assert.equal(
+  filteredRankingText([{ status: "beyond_limit", rrf_rank: 9 }]),
+  "",
+);
+console.log("Filtered ranking checks passed.");

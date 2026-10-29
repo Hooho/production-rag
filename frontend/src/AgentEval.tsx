@@ -17,7 +17,11 @@ import {
 } from "./api";
 import { EvidenceFilterSummary } from "./EvidenceFilterSummary";
 import { ScoringItems } from "./ScoringItems";
-import { newEvidenceHits, evidenceFilterReason } from "./newEvidenceHits";
+import {
+  newEvidenceHits,
+  evidenceFilterReason,
+  filteredRankingText,
+} from "./newEvidenceHits";
 import "./AgentEvidence.css";
 import { JsonView } from "./AgentTrace";
 import { formatDuration as formatMs } from "./format";
@@ -2270,6 +2274,7 @@ function FixedSearchResults({
   mergedEvidence,
   retryQuery,
   sourcesAvailable = true,
+  retrySearch = false,
 }: {
   question: EvalQuestion;
   items: ChunkItem[];
@@ -2279,6 +2284,7 @@ function FixedSearchResults({
   mergedEvidence?: EvidenceStatusRow[];
   retryQuery?: string | null;
   sourcesAvailable?: boolean;
+  retrySearch?: boolean;
 }) {
   const total = question.answerable ? evidenceChunkLists(question).length : 0;
   const routes =
@@ -2420,6 +2426,22 @@ function FixedSearchResults({
                     {match.label}
                   </Tag>
                   {match.detail && <small>{match.detail}</small>}
+                  {match.tone === "danger" &&
+                    (() => {
+                      const fixed = retrySearch
+                        ? question.retry?.evidence?.[index]
+                        : question.evidence[index];
+                      const ids = evidenceChunkLists(question)[index] ?? [];
+                      const candidates = !retrySearch
+                        ? question.diagnostics?.candidates.filter((candidate) =>
+                            ids.includes(candidate.chunk_id),
+                          )
+                        : undefined;
+                      const text = filteredRankingText(
+                        candidates?.length ? candidates : fixed ? [fixed] : [],
+                      );
+                      return text ? <small>{text}</small> : null;
+                    })()}
                 </span>
               ))}
             </li>
@@ -2683,6 +2705,7 @@ function FixedLog({
                     queries={retryQueries}
                     queryRoutes={retry.query_routes}
                     mergedEvidence={retryEvidence}
+                    retrySearch
                     retryQuery={sufficiency?.retry_query}
                     sourcesAvailable={Boolean(retry.sources)}
                   />
@@ -3084,14 +3107,25 @@ function AgentCallEvidence({
             call.hits.includes(index) ||
             Boolean(call.read_hits?.includes(index));
           const rejected = !hit
-            ? call.retrieval_diagnostics?.candidates.find(
-                (candidate) =>
-                  candidate.hits?.includes(index) &&
-                  (candidate.agent_status ?? candidate.status) !== "returned",
-              )
+            ? call.retrieval_diagnostics?.candidates
+                .filter(
+                  (candidate) =>
+                    candidate.hits?.includes(index) &&
+                    (candidate.agent_status ?? candidate.status) !== "returned",
+                )
+                .sort(
+                  (a, b) => (a.rrf_rank ?? Infinity) - (b.rrf_rank ?? Infinity),
+                )[0]
             : undefined;
           return (
-            <li key={index} className={hit ? "is-hit" : "is-miss"}>
+            <li
+              key={index}
+              className={
+                hit
+                  ? "is-hit"
+                  : `is-miss${rejected && rejected.agent_status !== "beyond_top_k" ? " is-filtered" : ""}`
+              }
+            >
               <b>{hit ? "✓" : "—"}</b>
               <span>
                 {quote.label
@@ -3117,7 +3151,12 @@ function AgentCallEvidence({
                 </Tag>
               )}
               {rejected && (
-                <small>（{evidenceFilterReason(call, rejected)}）</small>
+                <>
+                  <small>（{evidenceFilterReason(call, rejected)}）</small>
+                  {filteredRankingText([rejected]) && (
+                    <small>{filteredRankingText([rejected])}</small>
+                  )}
+                </>
               )}
               {hit && freshHits.has(index) && (
                 <Tag tone="success" size="sm">

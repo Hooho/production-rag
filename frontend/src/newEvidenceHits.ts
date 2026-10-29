@@ -1,4 +1,52 @@
-import type { EvalAgentCall, EvalAgentQuestion } from "./api";
+import type {
+  EvalAgentCall,
+  EvalAgentQuestion,
+  RetrievalCandidate,
+} from "./api";
+
+type RankedCandidate = {
+  status?: string;
+  agent_status?: string;
+  rrf_rank?: number | null;
+  rerank_rank?: number | null;
+  rerank_probability?: number | null;
+  contributions?: RetrievalCandidate["contributions"];
+};
+
+export function filteredRankingText(candidates: RankedCandidate[]): string {
+  const candidate = [...candidates].sort(
+    (a, b) => (a.rrf_rank ?? Infinity) - (b.rrf_rank ?? Infinity),
+  )[0];
+  if (
+    !candidate ||
+    !["filtered_low_score", "beyond_limit"].includes(
+      candidate.agent_status ?? candidate.status ?? "",
+    )
+  )
+    return "";
+  if (candidate.rerank_rank == null && candidate.rerank_probability == null)
+    return "";
+  const ranks: string[] = [];
+  for (const [method, label] of [
+    ["dense", "向量"],
+    ["keyword", "关键词"],
+  ]) {
+    const values = (candidate.contributions ?? [])
+      .filter(
+        (item) =>
+          item.method === method && Number.isFinite(item.rank) && item.rank > 0,
+      )
+      .map((item) => item.rank);
+    if (values.length) ranks.push(`${label}第 ${Math.min(...values)} 名`);
+  }
+  if (
+    candidate.rrf_rank != null &&
+    Number.isFinite(candidate.rrf_rank) &&
+    candidate.rrf_rank > 0
+  )
+    ranks.push(`合并后第 ${candidate.rrf_rank} 名`);
+  return ranks.length ? `（${ranks.join("，")}）` : "";
+}
 
 type Candidate = NonNullable<
   EvalAgentCall["retrieval_diagnostics"]
