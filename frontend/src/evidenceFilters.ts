@@ -1,4 +1,4 @@
-import type { EvalQuestion } from "./api";
+import type { EvalQuestion, RetrievalCandidate } from "./api";
 
 export const FILTER_LABELS = {
   not_in_pool: "召回后未进候选池",
@@ -8,12 +8,27 @@ export const FILTER_LABELS = {
   tool_limit: "超出工具 Top K",
 } as const;
 export type FilterStage = keyof typeof FILTER_LABELS;
-type Event = { status: string; reranked?: boolean };
+type Event = {
+  status: string;
+  reranked?: boolean;
+  vector_rank?: number | null;
+  keyword_rank?: number | null;
+  rrf_rank?: number | null;
+  rerank_probability?: number | null;
+};
 export type FilterItem = {
   question: string;
   label: string;
   stage: FilterStage;
+  ranks?: Event;
 };
+
+function rankOf(candidate: RetrievalCandidate | undefined, method: string) {
+  const ranks = (candidate?.contributions ?? [])
+    .filter((part) => part.method === method && part.rank > 0)
+    .map((part) => part.rank);
+  return ranks.length ? Math.min(...ranks) : null;
+}
 
 function classify(events: Event[]): FilterStage | null {
   // 多分片、多次检索取走得最远的阶段；已返回但后来被清空，不归因于检索过滤。
@@ -71,9 +86,35 @@ export function evidenceFilters(
             recorded = false;
             continue;
           }
-          entry.filter_stages.forEach((status) =>
-            events.push({ status, reranked: entry.filter_reranked }),
-          );
+          if (entry.filter_candidates) {
+            events.push(
+              ...entry.filter_candidates.map((candidate) => ({
+                ...candidate,
+                reranked: entry.filter_reranked,
+              })),
+            );
+          } else {
+            const candidate =
+              rows === question.evidence
+                ? question.diagnostics?.candidates.find(
+                    (row) => row.chunk_id === entry.chunk_id,
+                  )
+                : undefined;
+            entry.filter_stages.forEach((status) =>
+              events.push({
+                status,
+                reranked: entry.filter_reranked,
+                ...(status === entry.status
+                  ? {
+                      vector_rank: rankOf(candidate, "dense"),
+                      keyword_rank: rankOf(candidate, "keyword"),
+                      rrf_rank: entry.rrf_rank,
+                      rerank_probability: entry.rerank_probability,
+                    }
+                  : {}),
+              }),
+            );
+          }
         }
       } else {
         for (const call of question.agent?.calls ?? []) {
@@ -97,6 +138,10 @@ export function evidenceFilters(
               events.push({
                 status: candidate.agent_status ?? candidate.status,
                 reranked: diagnostics.config.reranked,
+                vector_rank: rankOf(candidate, "dense"),
+                keyword_rank: rankOf(candidate, "keyword"),
+                rrf_rank: candidate.rrf_rank,
+                rerank_probability: candidate.rerank_probability,
               });
           }
         }
@@ -113,6 +158,11 @@ export function evidenceFilters(
           question: question.question,
           label: item?.label || `计分项 ${index + 1}`,
           stage,
+          ranks: events
+            .filter((event) => classify([event]) === stage)
+            .sort(
+              (a, b) => (a.rrf_rank ?? Infinity) - (b.rrf_rank ?? Infinity),
+            )[0],
         });
     }
   }

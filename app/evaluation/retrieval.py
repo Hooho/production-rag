@@ -279,6 +279,30 @@ def score_question(item, retrieval, chunk_texts, pool_size):
                     }
                 ),
                 "filter_reranked": bool(config["reranked"]),
+                "filter_candidates": [
+                    {
+                        "chunk_id": row["chunk_id"],
+                        "status": row["status"],
+                        "rrf_rank": row.get("rrf_rank"),
+                        "rerank_probability": row.get("rerank_probability"),
+                        **{
+                            f"{name}_rank": min(
+                                (
+                                    part["rank"]
+                                    for part in row.get("contributions", [])
+                                    if part["method"] == method
+                                ),
+                                default=None,
+                            )
+                            for name, method in (
+                                ("vector", "dense"),
+                                ("keyword", "keyword"),
+                            )
+                        },
+                    }
+                    for row in candidates
+                    if index in hits.get(row["chunk_id"], [])
+                ],
                 "rrf_rank": best["rrf_rank"] if best else None,
                 "rerank_rank": best.get("rerank_rank") if best else None,
                 "rerank_probability": best.get("rerank_probability") if best else None,

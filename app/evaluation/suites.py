@@ -577,6 +577,7 @@ def run_search_suite(
                         "rerank_probability",
                         "filter_stages",
                         "filter_reranked",
+                        "filter_candidates",
                     )
                 }
                 for value in row.get("evidence") or []

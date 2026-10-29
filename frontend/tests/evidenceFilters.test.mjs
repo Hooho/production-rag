@@ -118,3 +118,55 @@ assert.equal(
 );
 assert.equal(agent([{ name: "search_knowledge", status: "ok" }]).unknown, 1);
 console.log("evidence filter coverage passed");
+
+const fixedRanks = summary([
+  evidence(["not_in_pool", "filtered_low_score"], {
+    filter_candidates: [
+      { status: "not_in_pool", vector_rank: 1, keyword_rank: 2, rrf_rank: 30 },
+      {
+        status: "filtered_low_score",
+        vector_rank: 8,
+        keyword_rank: 6,
+        rrf_rank: 3,
+        rerank_probability: 0.068,
+      },
+      {
+        status: "filtered_low_score",
+        vector_rank: 2,
+        keyword_rank: 1,
+        rrf_rank: 7,
+        rerank_probability: 0.04,
+      },
+    ],
+  }),
+]);
+assert.equal(fixedRanks.items[0].ranks.vector_rank, 8);
+assert.equal(fixedRanks.items[0].ranks.keyword_rank, 6);
+assert.equal(fixedRanks.items[0].ranks.rrf_rank, 3);
+assert.equal(fixedRanks.items[0].ranks.rerank_probability, 0.068);
+const numericAgent = agent([
+  {
+    name: "search_knowledge",
+    status: "ok",
+    retrieval_diagnostics: {
+      config: { reranked: true },
+      candidates: [
+        {
+          status: "filtered_low_score",
+          hits: [0],
+          rrf_rank: 4,
+          rerank_probability: 0.1,
+          contributions: [
+            { method: "dense", rank: 9 },
+            { method: "keyword", rank: 2 },
+          ],
+        },
+      ],
+    },
+  },
+]);
+assert.equal(numericAgent.items[0].ranks.vector_rank, 9);
+assert.equal(numericAgent.items[0].ranks.keyword_rank, 2);
+assert.equal(numericAgent.items[0].ranks.rrf_rank, 4);
+assert.equal(numericAgent.items[0].ranks.rerank_probability, 0.1);
+console.log("filter diagnostic numeric checks passed");

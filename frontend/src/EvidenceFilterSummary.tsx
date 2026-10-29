@@ -69,6 +69,42 @@ export function EvidenceFilterSummary({
                               </span>
                               <span>{item.label}</span>
                             </div>
+                            <div className="ag-filter-metrics">
+                              {(
+                                [
+                                  ["向量排名", item.ranks?.vector_rank, false],
+                                  [
+                                    "关键词排名",
+                                    item.ranks?.keyword_rank,
+                                    false,
+                                  ],
+                                  ["合并排名", item.ranks?.rrf_rank, false],
+                                  [
+                                    "重排分数",
+                                    item.ranks?.rerank_probability,
+                                    true,
+                                  ],
+                                ] as const
+                              ).map(([label, value, score]) => (
+                                <span key={label}>
+                                  <span>{label}</span>
+                                  <b>
+                                    {typeof value === "number" &&
+                                    Number.isFinite(value)
+                                      ? score
+                                        ? value.toFixed(4)
+                                        : value
+                                      : score &&
+                                          [
+                                            "not_in_pool",
+                                            "return_limit",
+                                          ].includes(item.stage)
+                                        ? "未重排"
+                                        : "未记录"}
+                                  </b>
+                                </span>
+                              ))}
+                            </div>
                           </li>
                         ))}
                       </ul>

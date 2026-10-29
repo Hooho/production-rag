@@ -882,6 +882,13 @@ export type EvalEvidenceGroup = {
   targets?: EvalEvidenceTarget[];
 };
 export type EvalEvidence = EvalEvidenceGroup & {
+  filter_candidates?: {
+    status: string;
+    vector_rank?: number | null;
+    keyword_rank?: number | null;
+    rrf_rank?: number | null;
+    rerank_probability?: number | null;
+  }[];
   filter_stages?: string[];
   filter_reranked?: boolean;
   text: string;
