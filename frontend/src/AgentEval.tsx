@@ -727,6 +727,7 @@ function modeRows(
     agent = {
       passed: ran.filter(
         (question, index) =>
+          question.agent!.status === "completed" &&
           question.evidence_count > 0 &&
           found[index] >=
             (question.agent!.evidence.length || question.evidence_count),
