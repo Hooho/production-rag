@@ -16,6 +16,7 @@ import {
   type EvalSummary,
 } from "./api";
 import { ScoringItems } from "./ScoringItems";
+import { newEvidenceHits } from "./newEvidenceHits";
 import { JsonView } from "./AgentTrace";
 import { formatDuration as formatMs } from "./format";
 import {
@@ -2949,6 +2950,16 @@ function AgentCallEvidence({
 }) {
   const [selected, setSelected] = useState<ChunkOriginal | null>(null);
   const evidence = question.answerable ? (question.agent?.evidence ?? []) : [];
+  const freshHits = newEvidenceHits(
+    question.agent?.calls ?? [],
+    call,
+    evidence,
+  );
+  const orderedEvidence = evidence
+    .map((quote, index) => ({ quote, index }))
+    .sort(
+      (a, b) => Number(freshHits.has(b.index)) - Number(freshHits.has(a.index)),
+    );
   const returned = new Map<
     string,
     {
@@ -2980,7 +2991,7 @@ function AgentCallEvidence({
   return (
     <>
       <ul className="ag-evidence-trace ag-call-evidence">
-        {evidence.map((quote, index) => {
+        {orderedEvidence.map(({ quote, index }) => {
           const rows = new Map<
             string,
             {
@@ -3031,6 +3042,11 @@ function AgentCallEvidence({
             Boolean(call.read_hits?.includes(index));
           return (
             <li key={index} className={hit ? "is-hit" : "is-miss"}>
+              {hit && freshHits.has(index) && (
+                <Tag tone="success" size="sm">
+                  本次新命中
+                </Tag>
+              )}
               <b>{hit ? "✓" : "—"}</b>
               <span>
                 {quote.label
