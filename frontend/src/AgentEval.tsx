@@ -3090,15 +3090,24 @@ function AgentCallEvidence({
                   ? `[计分项 ${index + 1}：${quote.label}]`
                   : `[计分项 ${index + 1}]`}
               </span>
-              <small>
-                {hit
-                  ? "命中了"
-                  : rejected
+              {hit ? (
+                <small>命中了</small>
+              ) : (
+                <Tag
+                  tone={
+                    rejected && rejected.agent_status !== "beyond_top_k"
+                      ? "danger"
+                      : "neutral"
+                  }
+                  size="sm"
+                >
+                  {rejected
                     ? rejected.agent_status === "beyond_top_k"
                       ? "未返回"
                       : "被过滤"
                     : "本次没命中"}
-              </small>
+                </Tag>
+              )}
               {rejected && (
                 <small>（{evidenceFilterReason(call, rejected)}）</small>
               )}
