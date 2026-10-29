@@ -1042,6 +1042,18 @@ export type AgentQueryExplanation = {
   assumptions: string[];
 };
 export type EvalAgentCall = {
+  retrieval_diagnostics?: Omit<RetrievalDiagnosticsData, "candidates"> & {
+    candidates: (RetrievalCandidate & {
+      hits?: number[];
+      agent_status?: string;
+    })[];
+  };
+  retrieval_stats?: {
+    relevance_filter?: string;
+    min_score?: number | null;
+    fallback_used?: boolean;
+    fallback_min_score?: number | null;
+  };
   query_explanation?: AgentQueryExplanation;
   full_text?: boolean;
   call: number;

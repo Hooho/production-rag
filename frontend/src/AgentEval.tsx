@@ -536,8 +536,24 @@ function agentEvidenceRows(question: EvalQuestion): EvidenceStatusRow[] {
   const agent = question.agent;
   if (!agent || !question.answerable) return [];
   return agent.evidence.map((evidence, index): EvidenceStatusRow => {
-    if (!evidence.found)
+    if (!evidence.found) {
+      for (const call of agent.calls) {
+        const candidate = call.retrieval_diagnostics?.candidates.find(
+          (item) =>
+            item.hits?.includes(index) &&
+            (item.agent_status ?? item.status) !== "returned",
+        );
+        if (candidate) {
+          const status = candidate.agent_status ?? candidate.status;
+          return {
+            label: status === "beyond_top_k" ? "未返回" : "被过滤",
+            tone: "danger",
+            detail: `第 ${call.call} 次检索 · ${CANDIDATE_STATUS_LABELS[status] ?? status}；合并排名 ${candidate.rrf_rank}；重排分 ${candidate.rerank_probability?.toFixed(4) ?? "未记录"}；阈值 ${call.retrieval_diagnostics?.config.min_score ?? "未启用"}`,
+          };
+        }
+      }
       return { label: "没拿到", tone: "neutral", detail: "" };
+    }
     const matches = new Map<string, EvidenceStatusEntry>();
     for (const where of [...evidence.where].sort((a, b) => a.call - b.call)) {
       const call = agent.calls.find((item) => item.call === where.call);
@@ -2949,6 +2965,15 @@ function groupByRound(calls: EvalAgentCall[]) {
   return groups;
 }
 
+const CANDIDATE_STATUS_LABELS: Record<string, string> = {
+  returned: "已返回",
+  filtered_low_score: "被过滤：低于重排阈值",
+  not_in_pool: "被过滤：未进入重排候选池",
+  beyond_limit: "被过滤：超出返回上限",
+  beyond_top_k: "未返回：超出本次 Top K",
+  in_pool: "进入候选池，未返回",
+};
+
 // 每次工具调用按计分项展示，标签指向实际含有该计分项的分片。
 function AgentCallEvidence({
   question,
@@ -3046,6 +3071,13 @@ function AgentCallEvidence({
             rows.size > 0 ||
             call.hits.includes(index) ||
             Boolean(call.read_hits?.includes(index));
+          const rejected = !hit
+            ? call.retrieval_diagnostics?.candidates.find(
+                (candidate) =>
+                  candidate.hits?.includes(index) &&
+                  (candidate.agent_status ?? candidate.status) !== "returned",
+              )
+            : undefined;
           return (
             <li key={index} className={hit ? "is-hit" : "is-miss"}>
               <b>{hit ? "✓" : "—"}</b>
@@ -3054,7 +3086,15 @@ function AgentCallEvidence({
                   ? `计分项 ${index + 1}：${quote.label}`
                   : `计分项 ${index + 1}`}
               </span>
-              <small>{hit ? "命中了" : "本次没命中"}</small>
+              <small>
+                {hit
+                  ? "命中了"
+                  : rejected
+                    ? (CANDIDATE_STATUS_LABELS[
+                        rejected.agent_status ?? rejected.status
+                      ] ?? "本次没命中")
+                    : "本次没命中"}
+              </small>
               {hit && freshHits.has(index) && (
                 <Tag tone="success" size="sm">
                   本次新命中
@@ -3168,6 +3208,59 @@ function AgentCallEvidence({
           )}
         </div>
       </div>
+      {call.name === "search_knowledge" && (
+        <details className="ag-returned-chunks">
+          <summary>
+            候选分片与过滤详情
+            {call.retrieval_diagnostics
+              ? `（${call.retrieval_diagnostics.candidates.length} 片）`
+              : ""}
+          </summary>
+          {call.retrieval_diagnostics ? (
+            <>
+              <p className="ag-muted">
+                重排阈值：
+                {call.retrieval_diagnostics.config.min_score ?? "未启用"} ·
+                重排候选池：
+                {call.retrieval_diagnostics.config.rerank_candidates} ·
+                返回上限：{call.retrieval_diagnostics.config.return_limit} ·
+                本次 Top K：{call.top_k ?? "未记录"}
+              </p>
+              {call.retrieval_stats?.fallback_used && (
+                <p className="ag-muted">本次启用了低相关性兜底。</p>
+              )}
+              {call.retrieval_diagnostics.candidates.length === 0 && (
+                <p className="ag-muted">本次未召回候选分片。</p>
+              )}
+              {call.retrieval_diagnostics.candidates.map((candidate) => {
+                const status = candidate.agent_status ?? candidate.status;
+                return (
+                  <details key={candidate.chunk_id}>
+                    <summary>
+                      {chunkLabel(undefined, candidate.chunk_id)} ·{" "}
+                      {candidate.title} ·{" "}
+                      {CANDIDATE_STATUS_LABELS[status] ?? status}
+                      {candidate.hits?.length
+                        ? ` · 对应计分项 ${candidate.hits.map((index) => index + 1).join("、")}`
+                        : ""}
+                    </summary>
+                    <p className="ag-muted">
+                      合并排名：{candidate.rrf_rank} · 重排排名：
+                      {candidate.rerank_rank ?? "未重排"} · 重排分数：
+                      {candidate.rerank_probability?.toFixed(4) ?? "未记录"}
+                    </p>
+                    <blockquote>{candidate.preview}</blockquote>
+                  </details>
+                );
+              })}
+            </>
+          ) : (
+            <p className="ag-muted">
+              历史记录未保存候选及过滤原因，重新运行评测后可查看。
+            </p>
+          )}
+        </details>
+      )}
       <ChunkOriginalDialog value={selected} onClose={() => setSelected(null)} />
     </>
   );
