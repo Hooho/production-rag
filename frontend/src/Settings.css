@@ -1,606 +1,660 @@
 /* 设置页，沿用主样式的蓝白配色：边框 #cedfec，辅助文字 #5e7a95，强调色 #2563eb。 */
 .settings-page {
-   max-width: 880px;
+  max-width: 880px;
 }
 
 .settings-current {
-   display: grid;
-   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-   gap: 14px;
-   padding: 18px 20px;
-   border: 1px solid var(--t-cedfec);
-   background: rgba(255, 255, 255, .9);
-   margin-bottom: 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--t-cedfec);
+  background: rgba(255, 255, 255, 0.9);
+  margin-bottom: 16px;
 }
 
 /* 设置接口返回前先保留卡片、供应商和表单轮廓；空字段不能再被误读成未配置。 */
 .settings-loading {
-   margin-top: 16px;
+  margin-top: 16px;
 }
 
 .settings-current-skeleton,
 .settings-provider-skeleton {
-   display: grid;
-   gap: 10px;
+  display: grid;
+  gap: 10px;
 }
 
 .settings-current-skeleton {
-   grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .settings-current-skeleton .skeleton-block {
-   height: 72px;
-   border: 1px solid var(--t-d6e4f1);
-   border-radius: 6px;
+  height: 72px;
+  border: 1px solid var(--t-d6e4f1);
+  border-radius: 6px;
 }
 
 .settings-provider-skeleton {
-   grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .settings-provider-skeleton .skeleton-block {
-   height: 68px;
-   border: 1px solid var(--t-d6e4f1);
-   border-radius: 6px;
+  height: 68px;
+  border: 1px solid var(--t-d6e4f1);
+  border-radius: 6px;
 }
 
 .settings-form-skeleton {
-   width: 100%;
-   height: 44px;
-   border: 1px solid var(--t-d6e4f1);
-   border-radius: 4px;
+  width: 100%;
+  height: 44px;
+  border: 1px solid var(--t-d6e4f1);
+  border-radius: 4px;
 }
 
 .settings-list-skeleton {
-   width: 100%;
-   height: 62px;
-   border: 1px solid var(--t-d6e4f1);
-   border-radius: 5px;
+  width: 100%;
+  height: 62px;
+  border: 1px solid var(--t-d6e4f1);
+  border-radius: 5px;
 }
 
 .settings-permission-skeleton {
-   width: 100%;
-   height: 112px;
-   border: 1px solid var(--t-d6e4f1);
-   border-radius: 6px;
+  width: 100%;
+  height: 112px;
+  border: 1px solid var(--t-d6e4f1);
+  border-radius: 6px;
 }
 
 .settings-current div {
-   display: flex;
-   flex-direction: column;
-   gap: 5px;
-   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
 }
 
 .settings-current span {
-   font-size: 11px;
-   color: var(--t-718ca4);
+  font-size: 11px;
+  color: var(--t-718ca4);
 }
 
 .settings-current code {
-   font-size: 12px;
-   color: var(--t-173b5b);
-   overflow-wrap: anywhere;
+  font-size: 12px;
+  color: var(--t-173b5b);
+  overflow-wrap: anywhere;
 }
 
 .settings-warning {
-   border: 1px solid #f1d49a;
-   background: #fff8e8;
-   color: #7a5a17;
-   padding: 12px 14px;
-   font-size: 13px;
-   line-height: 1.6;
-   margin-bottom: 16px;
+  border: 1px solid #f1d49a;
+  background: #fff8e8;
+  color: #7a5a17;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 16px;
 }
 
 .settings-section {
-   margin-top: 26px;
+  margin-top: 26px;
 }
 
 .settings-section h2 {
-   font-size: 16px;
-   margin-bottom: 12px;
+  font-size: 16px;
+  margin-bottom: 12px;
 }
 
 .provider-grid {
-   display: grid;
-   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-   gap: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
 }
 
 .provider-card {
-   display: flex;
-   flex-direction: column;
-   align-items: flex-start;
-   gap: 4px;
-   padding: 14px;
-   border: 1px solid var(--t-cedfec);
-   border-radius: 6px;
-   background: #ffffff;
-   color: var(--t-173b5b);
-   text-align: left;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid var(--t-cedfec);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--t-173b5b);
+  text-align: left;
 }
 
 .provider-card small {
-   color: var(--t-5e7a95);
-   font-size: 11px;
+  color: var(--t-5e7a95);
+  font-size: 11px;
 }
 
 .provider-card:hover {
-   border-color: var(--t-93b4d6);
+  border-color: var(--t-93b4d6);
 }
 
 .provider-card.active {
-   border-color: var(--t-2563eb);
-   box-shadow: 0 0 0 1px var(--t-2563eb) inset;
-   background: var(--t-f1f6ff);
+  border-color: var(--t-2563eb);
+  box-shadow: 0 0 0 1px var(--t-2563eb) inset;
+  background: var(--t-f1f6ff);
 }
 
 .settings-form {
-   display: flex;
-   flex-direction: column;
-   gap: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .settings-form label {
-   display: flex;
-   flex-direction: column;
-   gap: 6px;
-   font-size: 13px;
-   font-weight: 700;
-   color: var(--t-2f5577);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--t-2f5577);
 }
 
 .settings-form input {
-   width: 100%;
-   border: 1px solid var(--t-bcd0e3);
-   border-radius: 4px;
-   padding: 10px 12px;
-   background: #ffffff;
-   color: var(--t-173b5b);
-   font-weight: 400;
+  width: 100%;
+  border: 1px solid var(--t-bcd0e3);
+  border-radius: 4px;
+  padding: 10px 12px;
+  background: #ffffff;
+  color: var(--t-173b5b);
+  font-weight: 400;
 }
 
 .settings-form input:focus {
-   outline: none;
-   border-color: var(--t-2563eb);
+  outline: none;
+  border-color: var(--t-2563eb);
 }
 
 .key-input {
-   display: flex;
-   gap: 8px;
+  display: flex;
+  gap: 8px;
 }
 
 .key-input button,
 .model-chips button {
-   border: 1px solid var(--t-abc4dc);
-   border-radius: 6px;
-   background: transparent;
-   color: var(--t-2f5577);
-   padding: 6px 12px;
-   font-size: 12px;
-   white-space: nowrap;
+  border: 1px solid var(--t-abc4dc);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--t-2f5577);
+  padding: 6px 12px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .model-chips {
-   display: flex;
-   flex-wrap: wrap;
-   gap: 8px;
-   margin-top: -6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: -6px;
 }
 
 .model-chips button.active {
-   border-color: var(--t-2563eb);
-   color: var(--t-2563eb);
-   background: var(--t-f1f6ff);
+  border-color: var(--t-2563eb);
+  color: var(--t-2563eb);
+  background: var(--t-f1f6ff);
 }
 
 .key-link {
-   font-size: 12px;
-   color: var(--t-2563eb);
-   margin-top: -6px;
+  font-size: 12px;
+  color: var(--t-2563eb);
+  margin-top: -6px;
 }
 
 .test-result {
-   padding: 10px 12px;
-   font-size: 13px;
-   line-height: 1.5;
-   overflow-wrap: anywhere;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .test-result.ok {
-   border: 1px solid #b7e0c4;
-   background: #effaf2;
-   color: #1d6b3a;
+  border: 1px solid #b7e0c4;
+  background: #effaf2;
+  color: #1d6b3a;
 }
 
 .test-result.fail {
-   border: 1px solid #f0c2c2;
-   background: #fdf1f1;
-   color: #a12a2a;
+  border: 1px solid #f0c2c2;
+  background: #fdf1f1;
+  color: #a12a2a;
 }
 
 .settings-actions {
-   display: flex;
-   gap: 10px;
-   justify-content: flex-end;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
 }
 
 .settings-actions button:disabled {
-   opacity: .4;
-   cursor: not-allowed;
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .settings-hint {
-   font-size: 12px;
-   color: var(--t-5e7a95);
+  font-size: 12px;
+  color: var(--t-5e7a95);
 }
 
 .settings-tabs {
-   margin-bottom: 20px;
+  margin-bottom: 20px;
 }
 
 /* 部门改成列表后，名称、编号和操作列保持稳定对齐，长名称也不会挤压操作区。 */
 .settings-section-heading {
-   display: flex;
-   align-items: flex-start;
-   justify-content: space-between;
-   gap: 16px;
-   margin-bottom: 12px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
 }
 
 .settings-section-heading h2 {
-   margin: 0 0 4px;
+  margin: 0 0 4px;
 }
 
 .group-table {
-   border: 1px solid var(--t-cedfec);
-   background: rgba(255, 255, 255, .9);
+  border: 1px solid var(--t-cedfec);
+  background: rgba(255, 255, 255, 0.9);
 }
 
 .group-row {
-   display: grid;
-   grid-template-columns: minmax(160px, 1fr) minmax(140px, .8fr) auto;
-   gap: 16px;
-   align-items: center;
-   padding: 12px 14px;
-   color: var(--t-173b5b);
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(140px, 0.8fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 12px 14px;
+  color: var(--t-173b5b);
 }
 
 .group-row + .group-row {
-   border-top: 1px solid var(--t-e3eef7);
+  border-top: 1px solid var(--t-e3eef7);
 }
 
 .group-header {
-   background: var(--t-f4f9fd);
-   color: var(--t-5e7a95);
-   font-size: 12px;
-   font-weight: 700;
+  background: var(--t-f4f9fd);
+  color: var(--t-5e7a95);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .group-row code {
-   color: var(--t-5e7a95);
-   font-size: 12px;
+  color: var(--t-5e7a95);
+  font-size: 12px;
 }
 
 .group-actions {
-   display: flex;
-   justify-content: flex-end;
-   gap: 12px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
 }
 
 /* 表格操作使用纯文字按钮，降低视觉重量并与数据管理表格保持一致。 */
 .settings-text-button {
-   border: 0;
-   background: transparent;
-   color: var(--t-2563eb);
-   padding: 3px 0;
-   font-size: 12px;
+  border: 0;
+  background: transparent;
+  color: var(--t-2563eb);
+  padding: 3px 0;
+  font-size: 12px;
 }
 
 .settings-text-button:hover:not(:disabled) {
-   background: transparent;
-   text-decoration: underline;
+  background: transparent;
+  text-decoration: underline;
 }
 
 .settings-text-button.danger {
-   color: #c44e5e;
+  color: #c44e5e;
 }
 
 .settings-text-button.danger:hover:not(:disabled) {
-   color: #b42318;
+  color: #b42318;
 }
 
 .settings-text-button:disabled {
-   opacity: .4;
-   cursor: not-allowed;
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .group-empty {
-   padding: 28px 14px;
-   color: var(--t-829bb3);
-   text-align: center;
-   font-size: 13px;
+  padding: 28px 14px;
+  color: var(--t-829bb3);
+  text-align: center;
+  font-size: 13px;
 }
 
 /* 新增和编辑集中在同一个弹窗内，列表页只保留浏览和操作入口。 */
 .settings-modal-backdrop {
-   position: fixed;
-   inset: 0;
-   z-index: 50;
-   display: grid;
-   place-items: center;
-   padding: 24px;
-   background: rgb(var(--t-173b5b-rgb) / .28);
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(var(--t-173b5b-rgb) / 0.28);
 }
 
 .settings-modal {
-   width: min(440px, 100%);
-   padding: 22px;
-   border: 1px solid var(--t-cedfec);
-   background: #ffffff;
-   box-shadow: 0 18px 50px rgb(var(--t-173b5b-rgb) / .18);
+  width: min(440px, 100%);
+  padding: 22px;
+  border: 1px solid var(--t-cedfec);
+  background: #ffffff;
+  box-shadow: 0 18px 50px rgb(var(--t-173b5b-rgb) / 0.18);
 }
 
 /* 用户弹窗字段较多，放宽宽度并将账号信息并排展示，减少填写时的纵向滚动。 */
 .user-modal {
-   width: min(560px, 100%);
+  width: min(560px, 100%);
 }
 
 .user-modal-fields {
-   display: grid;
-   grid-template-columns: repeat(2, minmax(0, 1fr));
-   gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .user-modal-groups {
-   display: flex;
-   flex-direction: column;
-   gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .settings-field-label {
-   color: var(--t-2f5577);
-   font-size: 13px;
-   font-weight: 700;
+  color: var(--t-2f5577);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 /* 表单默认 label 是纵向布局；复选项需要让 checkbox 和部门名称保持一行。 */
 .settings-form .user-checks {
-   margin-top: 0;
+  margin-top: 0;
 }
 
 .settings-form .user-checks label {
-   flex-direction: row;
-   align-items: center;
+  flex-direction: row;
+  align-items: center;
 }
 
 .settings-form .user-checks input {
-   width: auto;
-   padding: 0;
+  width: auto;
+  padding: 0;
 }
 
 .settings-modal-header {
-   display: flex;
-   align-items: flex-start;
-   justify-content: space-between;
-   gap: 14px;
-   margin-bottom: 18px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 18px;
 }
 
 .settings-modal-header h2 {
-   margin: 0 0 5px;
-   color: var(--t-173b5b);
-   font-size: 17px;
+  margin: 0 0 5px;
+  color: var(--t-173b5b);
+  font-size: 17px;
 }
 
 .settings-modal-close {
-   border: 0;
-   background: transparent;
-   color: var(--t-5e7a95);
-   font-size: 22px;
-   line-height: 1;
-   padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--t-5e7a95);
+  font-size: 22px;
+  line-height: 1;
+  padding: 0 2px;
 }
 
 .settings-modal-close:hover:not(:disabled) {
-   color: var(--t-173b5b);
+  color: var(--t-173b5b);
 }
 
 .settings-modal-readonly {
-   display: flex;
-   align-items: center;
-   justify-content: space-between;
-   padding: 10px 12px;
-   border: 1px solid var(--t-e1ebf4);
-   background: var(--t-f7fafc);
-   color: var(--t-5e7a95);
-   font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px solid var(--t-e1ebf4);
+  background: var(--t-f7fafc);
+  color: var(--t-5e7a95);
+  font-size: 13px;
 }
 
 .settings-modal-readonly code {
-   color: var(--t-173b5b);
-   font-size: 12px;
+  color: var(--t-173b5b);
+  font-size: 12px;
 }
 
 .settings-modal-note {
-   margin: 0;
-   color: var(--t-5e7a95);
-   font-size: 12px;
+  margin: 0;
+  color: var(--t-5e7a95);
+  font-size: 12px;
 }
 
 .settings-modal-actions {
-   display: flex;
-   justify-content: flex-end;
-   gap: 10px;
-   margin-top: 4px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
 }
 
 /* 用户与部门相关组件：用户列表和部门管理共用紧凑的蓝白信息层级。 */
 .user-chip-list {
-   display: flex;
-   flex-wrap: wrap;
-   gap: 8px;
-   margin-bottom: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
 }
 
 .user-chip {
-   display: inline-flex;
-   gap: 6px;
-   align-items: baseline;
-   padding: 4px 10px;
-   border: 1px solid var(--t-cedfec);
-   border-radius: 999px;
-   color: var(--t-173b5b);
-   font-size: 12px;
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 4px 10px;
+  border: 1px solid var(--t-cedfec);
+  border-radius: 999px;
+  color: var(--t-173b5b);
+  font-size: 12px;
 }
 
 .user-chip small {
-   color: var(--t-7793ad);
-   font-size: 11px;
+  color: var(--t-7793ad);
+  font-size: 11px;
 }
 
 .user-table {
-   display: grid;
-   border: 1px solid var(--t-cedfec);
+  display: grid;
+  border: 1px solid var(--t-cedfec);
 }
 
 .user-row {
-   display: grid;
-   grid-template-columns: 160px 1fr auto;
-   gap: 12px;
-   align-items: center;
-   padding: 12px 14px;
-   border-top: 1px solid var(--t-e4eef6);
+  display: grid;
+  grid-template-columns: 160px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border-top: 1px solid var(--t-e4eef6);
 }
 
 .user-row:first-child {
-   border-top: 0;
+  border-top: 0;
 }
 
 .user-row.is-disabled {
-   opacity: .6;
+  opacity: 0.6;
 }
 
 .user-row .user-checks {
-   margin-top: 0;
+  margin-top: 0;
 }
 
 .user-name {
-   display: flex;
-   flex-direction: column;
-   gap: 3px;
-   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
 }
 
 .user-name strong {
-   color: var(--t-173b5b);
-   overflow-wrap: anywhere;
+  color: var(--t-173b5b);
+  overflow-wrap: anywhere;
 }
 
 .user-name small {
-   color: var(--t-7793ad);
-   font-size: 11px;
+  color: var(--t-7793ad);
+  font-size: 11px;
 }
 
 /* 角色和停用状态改成标签后并排显示。 */
 .user-tags {
-   display: flex;
-   flex-wrap: wrap;
-   gap: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .user-actions {
-   display: flex;
-   gap: 8px;
+  display: flex;
+  gap: 8px;
 }
 
 @media (max-width: 720px) {
-   .settings-section-heading {
-      flex-direction: column;
-   }
+  .settings-section-heading {
+    flex-direction: column;
+  }
 
-   .group-header {
-      display: none;
-   }
+  .group-header {
+    display: none;
+  }
 
-   .group-row {
-      grid-template-columns: minmax(0, 1fr) auto;
-   }
+  .group-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
 
-   .group-actions {
-      grid-column: 1 / -1;
-      justify-content: flex-start;
-   }
+  .group-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
 
-   .user-modal-fields {
-      grid-template-columns: 1fr;
-   }
+  .user-modal-fields {
+    grid-template-columns: 1fr;
+  }
 
-   .user-row {
-      grid-template-columns: 1fr;
-   }
+  .user-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* 行内操作按钮用紧凑尺寸，避免全局按钮样式在用户行里被挤压变形。 */
 .user-actions button {
-   width: auto;
-   padding: 6px 12px;
-   font-size: 12px;
-   white-space: nowrap;
+  width: auto;
+  padding: 6px 12px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 /* 数据权限：每个部门一块，每种数据一行四个勾选框。 */
 .data-permission-group {
-   border-top: 1px solid var(--t-e3eef7);
-   padding-top: 14px;
-   margin-top: 14px;
+  border-top: 1px solid var(--t-e3eef7);
+  padding-top: 14px;
+  margin-top: 14px;
 }
 
 .data-permission-group h3 {
-   color: var(--t-173b5b);
-   font-size: 14px;
-   margin: 0 0 10px;
-   display: flex;
-   gap: 8px;
-   align-items: baseline;
+  color: var(--t-173b5b);
+  font-size: 14px;
+  margin: 0 0 10px;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
 }
 
 .data-permission-group h3 small {
-   color: var(--t-718ca4);
-   font-size: 11px;
-   font-weight: 400;
+  color: var(--t-718ca4);
+  font-size: 11px;
+  font-weight: 400;
 }
 
 .data-permission-grid {
-   display: grid;
-   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-   gap: 6px 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 6px 20px;
 }
 
 .data-permission-row {
-   display: flex;
-   align-items: center;
-   gap: 12px;
-   font-size: 13px;
-   color: var(--t-5e7a95);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--t-5e7a95);
 }
 
 .data-permission-row strong {
-   width: 72px;
-   color: var(--t-173b5b);
-   font-weight: 600;
+  width: 72px;
+  color: var(--t-173b5b);
+  font-weight: 600;
 }
 
 /* 覆盖全局 label 的外边距和 input 的 100% 宽度，否则每个勾选框占一整行。 */
 .data-permission-row label {
-   display: flex;
-   align-items: center;
-   gap: 3px;
-   margin: 0;
-   font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0;
+  font-size: 12px;
 }
 
 .data-permission-row input {
-   width: auto;
+  width: auto;
+}
+
+.provider-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--t-f1f6ff);
+  color: var(--t-5e7a95);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.provider-status.enabled {
+  color: var(--t-2563eb);
+  border: 1px solid var(--t-93b4d6);
+}
+
+.provider-card .provider-model {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.provider-summary {
+  padding: 18px 20px;
+  border: 1px solid var(--t-cedfec);
+  border-radius: 6px;
+}
+
+.provider-summary-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.provider-summary dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin: 8px 0 20px;
+}
+
+.provider-summary dt {
+  color: var(--t-5e7a95);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.provider-summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 14px;
 }

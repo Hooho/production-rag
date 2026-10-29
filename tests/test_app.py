@@ -2535,6 +2535,224 @@ def test_llm_models_query_permissions_and_key_isolation(setup, monkeypatch):
     assert store.load_llm_settings() is None
 
 
+def test_llm_profiles_save_switch_and_reuse_keys(setup, monkeypatch):
+    import app.api.main as api_main
+
+    client, store = setup
+    admin = headers("admin")
+    minimax = {
+        "provider": "minimax",
+        "base_url": "https://api.minimaxi.com/v1",
+        "model": "MiniMax-M3",
+        "api_key": "minimax-secret-1234",
+    }
+    deepseek = {
+        "provider": "deepseek",
+        "base_url": "https://api.deepseek.com",
+        "model": "deepseek-flash",
+        "api_key": "deepseek-secret-5678",
+        "activate": False,
+    }
+    assert client.put("/settings/llm", json=minimax, headers=admin).status_code == 200
+    before = store.load_llm_settings()
+    result = client.put("/settings/llm", json=deepseek, headers=admin)
+    assert result.status_code == 200
+    assert result.json()["provider"] == "minimax"
+    assert store.load_llm_settings() == before
+    profiles = {item["provider"]: item for item in result.json()["profiles"]}
+    assert profiles["minimax"]["is_active"] and not profiles["deepseek"]["is_active"]
+    assert "secret" not in result.text
+
+    calls = []
+    monkeypatch.setattr(
+        api_main,
+        "list_models",
+        lambda provider, base_url, api_key: calls.append(api_key) or ["deepseek-flash"],
+    )
+    response = client.post(
+        "/settings/llm/models",
+        json={"provider": "deepseek", "base_url": deepseek["base_url"]},
+        headers=admin,
+    )
+    assert response.status_code == 200 and calls == [deepseek["api_key"]]
+    assert (
+        client.post(
+            "/settings/llm/activate", json={"provider": "deepseek"}, headers=headers()
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post("/settings/llm/activate", json={"provider": "deepseek"}).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/settings/llm/activate", json={"provider": "missing"}, headers=admin
+        ).status_code
+        == 404
+    )
+    result = client.post(
+        "/settings/llm/activate", json={"provider": "deepseek"}, headers=admin
+    )
+    assert result.status_code == 200 and result.json()["provider"] == "deepseek"
+    assert store.load_llm_settings()["api_key"] == deepseek["api_key"]
+    result = client.post(
+        "/settings/llm/activate", json={"provider": "minimax"}, headers=admin
+    )
+    assert result.status_code == 200 and result.json()["model"] == minimax["model"]
+    assert store.load_llm_settings()["api_key"] == minimax["api_key"]
+
+    result = client.put(
+        "/settings/llm",
+        json={**minimax, "api_key": None, "model": "MiniMax-M2.7", "activate": False},
+        headers=admin,
+    )
+    assert result.status_code == 200 and result.json()["model"] == "MiniMax-M3"
+    profile = next(
+        item for item in result.json()["profiles"] if item["provider"] == "minimax"
+    )
+    assert profile["model"] == "MiniMax-M2.7" and profile["has_changes"]
+    result = client.post(
+        "/settings/llm/activate", json={"provider": "minimax"}, headers=admin
+    )
+    assert result.json()["model"] == "MiniMax-M2.7"
+    assert not next(
+        item for item in result.json()["profiles"] if item["provider"] == "minimax"
+    )["has_changes"]
+
+
+def test_llm_profiles_legacy_config_preserved(setup):
+    from app.mysql.store import settings
+
+    client, store = setup
+    legacy = {
+        "provider": "minimax",
+        "base_url": "https://api.minimaxi.com/v1",
+        "model": "MiniMax-M3",
+        "api_key": "old-secret",
+    }
+    with store.engine.begin() as connection:
+        connection.execute(
+            settings.insert().values(key="llm", value=legacy, updated="2026-10-29")
+        )
+    client.app.state.models.apply_llm(legacy)
+    view = client.get("/settings/llm", headers=headers("admin")).json()
+    assert next(item for item in view["profiles"] if item["provider"] == "minimax")[
+        "is_active"
+    ]
+    result = client.put(
+        "/settings/llm",
+        json={
+            "provider": "deepseek",
+            "base_url": "https://api.deepseek.com",
+            "model": "deepseek-flash",
+            "api_key": "new-secret",
+        },
+        headers=headers("admin"),
+    )
+    assert result.status_code == 200
+    assert store.load_llm_profiles()["minimax"]["api_key"] == "old-secret"
+    assert store.load_llm_profiles()["deepseek"]["api_key"] == "new-secret"
+
+
+def test_llm_profile_save_only_survives_reload_without_activation(setup):
+    client, store = setup
+    before = (client.app.state.models.llm_provider, client.app.state.models.llm_model)
+    payload = {
+        "provider": "custom",
+        "base_url": "https://example.com/v1",
+        "model": "private-model",
+        "api_key": "private-key",
+        "activate": False,
+    }
+    result = client.put("/settings/llm", json=payload, headers=headers("admin"))
+    assert result.status_code == 200
+    assert store.load_llm_settings() is None
+    assert (result.json()["provider"], result.json()["model"]) == before
+    reloaded = client.get("/settings/llm", headers=headers("admin")).json()
+    assert any(item["model"] == "private-model" for item in reloaded["profiles"])
+    # 换地址不允许沿用该厂商之前保存的密钥。
+    assert (
+        client.put(
+            "/settings/llm",
+            json={**payload, "base_url": "https://other.example/v1", "api_key": None},
+            headers=headers("admin"),
+        ).status_code
+        == 422
+    )
+
+
+def test_llm_activation_failure_keeps_current_and_saved_profiles(setup, monkeypatch):
+    client, store = setup
+    admin = headers("admin")
+    first = {
+        "provider": "minimax",
+        "base_url": "https://api.minimaxi.com/v1",
+        "model": "MiniMax-M3",
+        "api_key": "minimax-secret",
+    }
+    second = {
+        "provider": "deepseek",
+        "base_url": "https://api.deepseek.com",
+        "model": "deepseek-flash",
+        "api_key": "deepseek-secret",
+        "activate": False,
+    }
+    assert client.put("/settings/llm", json=first, headers=admin).status_code == 200
+    assert client.put("/settings/llm", json=second, headers=admin).status_code == 200
+    saved = store.load_llm_settings()
+    monkeypatch.setattr(
+        store,
+        "save_llm_settings",
+        lambda value: (_ for _ in ()).throw(RuntimeError("db down")),
+    )
+    response = client.post(
+        "/settings/llm/activate", json={"provider": "deepseek"}, headers=admin
+    )
+    assert response.status_code == 500
+    assert store.load_llm_settings() == saved
+    assert client.app.state.models.llm_provider == "minimax"
+    assert len(store.load_llm_profiles()) >= 2
+
+
+def test_llm_activation_build_failure_restores_agent_and_memory(setup, monkeypatch):
+    client, store = setup
+    models = client.app.state.models
+    response_agent = client.app.state.agent.response_agent
+    before = (
+        models.llm_provider,
+        models.llm_model,
+        response_agent.agent,
+        response_agent.memory.middleware,
+    )
+    checkpoint = response_agent.memory.checkpointer
+
+    def fail_rebuild():
+        response_agent.memory.middleware = "incomplete"
+        raise RuntimeError("build failed")
+
+    monkeypatch.setattr(response_agent, "rebuild", fail_rebuild)
+    result = client.put(
+        "/settings/llm",
+        json={
+            "provider": "deepseek",
+            "base_url": "https://api.deepseek.com",
+            "model": "deepseek-flash",
+            "api_key": "secret",
+        },
+        headers=headers("admin"),
+    )
+    assert result.status_code == 500
+    assert (
+        models.llm_provider,
+        models.llm_model,
+        response_agent.agent,
+        response_agent.memory.middleware,
+    ) == before
+    assert response_agent.memory.checkpointer is checkpoint
+    assert store.load_llm_settings() is None
+
+
 def test_llm_settings_connection_test(setup, monkeypatch):
     client, store = setup
     monkeypatch.setattr(

@@ -521,6 +521,12 @@ class LLMModelListInput(BaseModel):
 
 class LLMSettingsInput(LLMModelListInput):
     model: str = Field(min_length=1, max_length=100)
+    activate: bool = True
+
+
+class LLMActivateInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    provider: str = Field(min_length=1, max_length=32)
 
 
 # 密钥只回显首尾几位，避免在浏览器和日志里暴露完整密钥。
@@ -639,6 +645,7 @@ def create_app(store=None, models=None, jwt_secret=None):
         saved_llm = app.state.store.load_llm_settings()
         if saved_llm:
             app.state.models.apply_llm(saved_llm)
+        app.state.llm_settings_lock = Lock()
         app.state.agent = Agent(app.state.models)
         # 注入攻击的向量样本库，和长期记忆共用 LangGraph Store；第一次启动时写入内置样本。
         app.state.agent.injection_samples = InjectionSamples(
@@ -734,6 +741,15 @@ def create_app(store=None, models=None, jwt_secret=None):
     def llm_settings_view():
         models = app.state.models
         saved = app.state.store.load_llm_settings()
+        profiles = app.state.store.load_llm_profiles()
+        if models.llm_api_key and models.llm_provider not in profiles:
+            profiles[models.llm_provider] = {
+                "provider": models.llm_provider,
+                "base_url": models.llm_base_url,
+                "model": models.llm_model,
+                "api_key": models.llm_api_key,
+                "updated": None,
+            }
         return {
             "model_mode": models.mode,
             "provider": models.llm_provider,
@@ -743,17 +759,40 @@ def create_app(store=None, models=None, jwt_secret=None):
             "has_api_key": bool(models.llm_api_key),
             "source": models.llm_source,
             "updated": saved["updated"] if saved else None,
+            "profiles": [
+                {
+                    "provider": value["provider"],
+                    "base_url": value["base_url"],
+                    "model": value["model"],
+                    "api_key_masked": mask_key(value.get("api_key")),
+                    "has_api_key": bool(value.get("api_key")),
+                    "updated": value["updated"],
+                    "is_active": provider == models.llm_provider,
+                    "has_changes": provider == models.llm_provider
+                    and any(
+                        value.get(field) != getattr(models, "llm_" + field)
+                        for field in ("base_url", "model", "api_key")
+                    ),
+                }
+                for provider, value in profiles.items()
+            ],
         }
 
     # 本次提交没有填写密钥时，只有地址不变才沿用当前密钥；换了厂商还沿用旧密钥必然鉴权失败。
     def resolve_llm_key(body):
         if body.api_key:
             return body.api_key
+        profile = app.state.store.load_llm_profiles().get(body.provider)
+        if profile and profile["base_url"] == body.base_url and profile.get("api_key"):
+            return profile["api_key"]
         if (
-            body.base_url == app.state.models.llm_base_url
+            body.provider == app.state.models.llm_provider
+            and body.base_url == app.state.models.llm_base_url
             and app.state.models.llm_api_key
         ):
             return app.state.models.llm_api_key
+        if body.provider == "ollama":
+            return "ollama"
         raise HTTPException(422, "请填写该服务的 API Key")
 
     @app.get("/settings/llm")
@@ -769,10 +808,8 @@ def create_app(store=None, models=None, jwt_secret=None):
             api_key = ""
         elif body.api_key:
             api_key = body.api_key
-        elif body.provider == app.state.models.llm_provider:
-            api_key = resolve_llm_key(body)
         else:
-            raise HTTPException(422, "请填写该服务的 API Key")
+            api_key = resolve_llm_key(body)
         try:
             return {"models": list_models(body.provider, body.base_url, api_key)}
         except httpx.HTTPStatusError as error:
@@ -793,26 +830,95 @@ def create_app(store=None, models=None, jwt_secret=None):
         except ValueError as error:
             raise HTTPException(422, str(error)) from None
 
-    # 保存并立即切换聊天模型；配置对所有用户生效，因此只有管理员可以修改。
+    def activate_llm(value):
+        models = app.state.models
+        response_agent = app.state.agent.response_agent
+        # 构建或持久化失败时恢复运行中的模型，数据库事务保留原启用快照。
+        previous = {
+            field: getattr(models, field)
+            for field in (
+                "llm_provider",
+                "llm_base_url",
+                "llm_model",
+                "llm_api_key",
+                "llm_source",
+                "chat_model",
+            )
+        }
+        previous_agent = response_agent.agent
+        previous_middleware = response_agent.memory.middleware
+        previous_summary = response_agent.memory.summary_identity
+        try:
+            models.apply_llm(value)
+            response_agent.rebuild()
+            app.state.store.save_llm_settings(value)
+        except Exception:
+            for field, old in previous.items():
+                setattr(models, field, old)
+            response_agent.agent = previous_agent
+            response_agent.memory.middleware = previous_middleware
+            response_agent.memory.summary_identity = previous_summary
+            raise HTTPException(500, "启用模型配置失败，已保留原来的启用配置") from None
+
+    # 只保存和保存并启用共用入口；旧客户端不传 activate 时仍立即启用。
     @app.put("/settings/llm")
     def save_llm_settings(body: LLMSettingsInput, admin=Depends(require_admin)):
-        owner = admin["username"]
-        value = {
-            "provider": body.provider,
-            "base_url": body.base_url,
-            "model": body.model,
-            "api_key": resolve_llm_key(body),
-        }
-        app.state.store.save_llm_settings(value)
-        app.state.models.apply_llm(value)
-        # 回答 Agent 和摘要中间件都绑定了聊天模型，切换模型时一起重建，会话记忆保留。
-        app.state.agent.response_agent.rebuild()
+        if body.provider not in {
+            "deepseek",
+            "minimax",
+            "qwen",
+            "kimi",
+            "zhipu",
+            "openai",
+            "ollama",
+            "custom",
+        }:
+            raise HTTPException(422, "未知的模型服务商")
+        with app.state.llm_settings_lock:
+            models = app.state.models
+            # .env 中的配置也保留为一套厂商配置，切走后仍可重新启用。
+            if (
+                models.llm_api_key
+                and models.llm_provider not in app.state.store.load_llm_profiles()
+            ):
+                app.state.store.save_llm_profile(
+                    {
+                        "provider": models.llm_provider,
+                        "base_url": models.llm_base_url,
+                        "model": models.llm_model,
+                        "api_key": models.llm_api_key,
+                    }
+                )
+            value = {
+                "provider": body.provider,
+                "base_url": body.base_url,
+                "model": body.model,
+                "api_key": resolve_llm_key(body),
+            }
+            if body.activate:
+                activate_llm(value)
+            else:
+                app.state.store.save_llm_profile(value)
         logger.info(
             "llm_settings_saved owner=%s provider=%s model=%s",
-            owner,
+            admin["username"],
             body.provider,
             body.model,
         )
+        return llm_settings_view()
+
+    @app.post("/settings/llm/activate")
+    def reactivate_llm(body: LLMActivateInput, admin=Depends(require_admin)):
+        with app.state.llm_settings_lock:
+            profile = app.state.store.load_llm_profiles().get(body.provider)
+            if not profile:
+                raise HTTPException(404, "该服务商尚未保存配置")
+            activate_llm(
+                {
+                    field: profile[field]
+                    for field in ("provider", "base_url", "model", "api_key")
+                }
+            )
         return llm_settings_view()
 
     # 用一次很短的请求检查地址、密钥和模型名是否可用，不保存配置；demo 模式下也能先测试再切换。

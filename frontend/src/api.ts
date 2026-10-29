@@ -2399,20 +2399,40 @@ export type LLMSettings = {
   has_api_key: boolean;
   source: "env" | "settings";
   updated: string | null;
+  profiles: LLMProfile[];
+};
+export type LLMProfile = {
+  provider: string;
+  base_url: string;
+  model: string;
+  api_key_masked: string;
+  has_api_key: boolean;
+  updated: string | null;
+  is_active: boolean;
+  has_changes: boolean;
 };
 export type LLMSettingsInput = {
   provider: string;
   base_url: string;
   model: string;
   api_key?: string | null;
+  activate?: boolean;
 };
 
 export function getLLMSettings() {
-  return request<LLMSettings>("/settings/llm");
+  return request<LLMSettings>("/settings/llm").then((value) => ({
+    ...value,
+    // 兼容旧版静态快照；快照只包含当前配置，且不包含真实密钥。
+    profiles:
+      value.profiles ??
+      (value.has_api_key
+        ? [{ ...value, is_active: true, has_changes: false }]
+        : []),
+  }));
 }
 
 export function listLLMModels(
-  payload: Omit<LLMSettingsInput, "model">,
+  payload: Pick<LLMSettingsInput, "provider" | "base_url" | "api_key">,
   signal?: AbortSignal,
 ) {
   return request<{ models: string[] }>("/settings/llm/models", {
@@ -2423,7 +2443,15 @@ export function listLLMModels(
   });
 }
 
-// 保存后后端立即切换模型，不需要重启。
+export function activateLLMProfile(provider: string) {
+  return request<LLMSettings>("/settings/llm/activate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ provider }),
+  });
+}
+
+// activate=false 只保存厂商配置，否则保存并立即启用。
 export function saveLLMSettings(payload: LLMSettingsInput) {
   return request<LLMSettings>("/settings/llm", {
     method: "PUT",

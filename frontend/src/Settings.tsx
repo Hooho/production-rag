@@ -6,6 +6,7 @@ import {
   deleteGroup,
   getDataPermissions,
   getLLMSettings,
+  activateLLMProfile,
   listLLMModels,
   saveDataPermission,
   listGroups,
@@ -259,7 +260,10 @@ export function ModelSettings({
   const [model, setModel] = useState("");
   const [key, setKey] = useState("");
   const [showKey, setShowKey] = useState(false);
-  const [busy, setBusy] = useState<"" | "test" | "save">("");
+  const [busy, setBusy] = useState<
+    "" | "test" | "save" | "save-only" | "activate"
+  >("");
+  const [editing, setEditing] = useState(false);
   const [testResult, setTestResult] = useState<{
     ok: boolean;
     text: string;
@@ -268,10 +272,16 @@ export function ModelSettings({
   const [catalog, setCatalog] = useState<ModelCatalog>({ status: "idle" });
   const [catalogRefresh, setCatalogRefresh] = useState(0);
   const supportsModelList = MODEL_LIST_PROVIDERS.has(provider);
-  const keepsCurrentKey =
-    Boolean(current?.has_api_key) &&
-    provider === current?.provider &&
-    baseUrl.trim() === current?.base_url;
+  const selectedProfile = current?.profiles.find(
+    (item) => item.provider === provider,
+  );
+  const keyProfile =
+    selectedProfile?.base_url === baseUrl.trim()
+      ? selectedProfile
+      : current?.provider === provider && current.base_url === baseUrl.trim()
+        ? current
+        : null;
+  const keepsCurrentKey = Boolean(keyProfile?.has_api_key);
 
   useEffect(() => {
     getLLMSettings()
@@ -280,6 +290,9 @@ export function ModelSettings({
         setProvider(value.provider);
         setBaseUrl(value.base_url);
         setModel(value.model);
+        setEditing(
+          !value.profiles.some((item) => item.provider === value.provider),
+        );
       })
       .catch((reason: Error) => onToast("error", explainError(reason)))
       .finally(() => setLoading(false));
@@ -325,22 +338,24 @@ export function ModelSettings({
     key,
     keepsCurrentKey,
     catalogRefresh,
+    selectedProfile?.updated,
   ]);
 
   if (loading) return <SettingsLoadingSkeleton kind="model" />;
 
   // 切换厂商时换成该厂商的地址和第一个推荐模型；密钥清空，避免把上一个厂商的密钥发给新厂商。
-  function chooseProvider(item: Provider) {
+  function chooseProvider(item: Provider, edit = false) {
+    const profile = current?.profiles.find(
+      (saved) => saved.provider === item.key,
+    );
+    setEditing(edit || !profile);
     setProvider(item.key);
     setTestResult(null);
     setCatalog({ status: "idle" });
+    setCatalogRefresh((value) => value + 1);
     setShowKey(false);
-    setBaseUrl(
-      current?.provider === item.key ? current.base_url : item.baseUrl,
-    );
-    setModel(
-      current?.provider === item.key ? current.model : (item.models[0] ?? ""),
-    );
+    setBaseUrl(profile?.base_url ?? item.baseUrl);
+    setModel(profile?.model ?? item.models[0] ?? "");
     setKey(item.defaultKey ?? "");
   }
 
@@ -349,7 +364,7 @@ export function ModelSettings({
     isAdmin &&
     baseUrl.trim() !== "" &&
     model.trim() !== "" &&
-    (key.trim() !== "" || keepsCurrentKey) &&
+    (provider === "ollama" || key.trim() !== "" || keepsCurrentKey) &&
     busy === "";
   const selected = findProvider(provider);
   const modelOptions =
@@ -384,15 +399,35 @@ export function ModelSettings({
     }
   }
 
-  async function save() {
-    setBusy("save");
+  async function save(activate: boolean) {
+    setBusy(activate ? "save" : "save-only");
     try {
-      const value = await saveLLMSettings(payload());
+      const value = await saveLLMSettings({ ...payload(), activate });
       setCurrent(value);
       setKey("");
+      setEditing(false);
       onToast(
         "success",
-        `已切换到 ${findProvider(value.provider).name} · ${value.model}`,
+        activate
+          ? `已启用 ${findProvider(provider).name} · ${model}`
+          : `已保存 ${findProvider(provider).name} 的配置，当前模型未切换`,
+      );
+    } catch (reason) {
+      onToast("error", explainError(reason));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function activate() {
+    setBusy("activate");
+    try {
+      const value = await activateLLMProfile(provider);
+      setCurrent(value);
+      chooseProvider(findProvider(provider));
+      onToast(
+        "success",
+        `已启用 ${findProvider(provider).name} · ${value.model}`,
       );
     } catch (reason) {
       onToast("error", explainError(reason));
@@ -444,139 +479,235 @@ export function ModelSettings({
               className={
                 item.key === provider ? "provider-card active" : "provider-card"
               }
+              disabled={busy !== ""}
+              aria-pressed={item.key === provider}
               onClick={() => chooseProvider(item)}
             >
               <strong>{item.name}</strong>
+              <span
+                className={
+                  current?.profiles.find((saved) => saved.provider === item.key)
+                    ?.is_active
+                    ? "provider-status enabled"
+                    : "provider-status"
+                }
+              >
+                {current?.profiles.some((saved) => saved.provider === item.key)
+                  ? current.provider === item.key
+                    ? "使用中"
+                    : "已配置"
+                  : "未配置"}
+              </span>
               <small>{item.note}</small>
+              {current?.profiles.find(
+                (saved) => saved.provider === item.key,
+              ) && (
+                <small className="provider-model">
+                  {
+                    current.profiles.find(
+                      (saved) => saved.provider === item.key,
+                    )?.model
+                  }
+                </small>
+              )}
             </button>
           ))}
         </div>
       </section>
 
-      <section className="settings-section settings-form">
-        <label>
-          服务地址（Base URL）
-          <input
-            value={baseUrl}
-            onChange={(event) => setBaseUrl(event.target.value)}
-            placeholder="https://example.com/v1"
-          />
-        </label>
-        <label>
-          模型名称
-          <input
-            value={model}
-            onChange={(event) => setModel(event.target.value)}
-            list="settings-model-options"
-            placeholder="例如 deepseek-flash"
-          />
-        </label>
-        <datalist id="settings-model-options">
-          {modelOptions.map((item) => (
-            <option key={item} value={item} />
-          ))}
-        </datalist>
-        {modelOptions.length > 0 && (
-          <div className="model-chips">
-            {modelOptions.slice(0, 12).map((item) => (
+      {selectedProfile && !editing && (
+        <section className="settings-section provider-summary">
+          <div className="provider-summary-heading">
+            <h2>
+              {selected.name} ·{" "}
+              {selectedProfile.is_active ? "当前启用" : "已配置"}
+            </h2>
+            {selectedProfile.has_changes && (
+              <span className="provider-status">有未启用的更改</span>
+            )}
+          </div>
+          <dl>
+            <div>
+              <dt>模型名称</dt>
+              <dd>{selectedProfile.model}</dd>
+            </div>
+            <div>
+              <dt>服务地址</dt>
+              <dd>{selectedProfile.base_url}</dd>
+            </div>
+            <div>
+              <dt>API Key</dt>
+              <dd>{selectedProfile.api_key_masked || "无需密钥"}</dd>
+            </div>
+          </dl>
+          {isAdmin && (
+            <div className="settings-actions">
               <button
                 type="button"
-                key={item}
-                className={item === model ? "active" : ""}
-                onClick={() => setModel(item)}
+                className="secondary-button"
+                disabled={busy !== ""}
+                onClick={() => chooseProvider(selected, true)}
               >
-                {item}
+                编辑配置
               </button>
+              {(!selectedProfile.is_active || selectedProfile.has_changes) && (
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={busy !== ""}
+                  onClick={() => void activate()}
+                >
+                  {busy === "activate" ? "启用中…" : "重新启用"}
+                </button>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
+      {editing && isAdmin && (
+        <section className="settings-section settings-form">
+          <label>
+            服务地址（Base URL）
+            <input
+              value={baseUrl}
+              onChange={(event) => setBaseUrl(event.target.value)}
+              placeholder="https://example.com/v1"
+            />
+          </label>
+          <label>
+            模型名称
+            <input
+              value={model}
+              onChange={(event) => setModel(event.target.value)}
+              list="settings-model-options"
+              placeholder="例如 deepseek-flash"
+            />
+          </label>
+          <datalist id="settings-model-options">
+            {modelOptions.map((item) => (
+              <option key={item} value={item} />
             ))}
-          </div>
-        )}
-        {supportsModelList && isAdmin && (
-          <div>
+          </datalist>
+          {modelOptions.length > 0 && (
+            <div className="model-chips">
+              {modelOptions.slice(0, 12).map((item) => (
+                <button
+                  type="button"
+                  key={item}
+                  className={item === model ? "active" : ""}
+                  onClick={() => setModel(item)}
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+          )}
+          {supportsModelList && isAdmin && (
+            <div>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={!canQueryModels || catalog.status === "loading"}
+                onClick={() => setCatalogRefresh((value) => value + 1)}
+              >
+                {catalog.status === "loading" ? "获取模型中…" : "刷新模型"}
+              </button>
+              <p className="settings-hint" role="status">
+                {catalog.status === "loading"
+                  ? "正在查询服务商模型列表…"
+                  : catalog.status === "success"
+                    ? catalog.models.length
+                      ? `已从服务商获取 ${catalog.models.length} 个模型；快捷展示前 12 个，在模型名称输入框中可搜索全部结果。`
+                      : "服务商返回的模型列表为空，可手动输入模型名称。"
+                    : catalog.status === "error"
+                      ? `${catalog.message}。当前显示预设候选，可重试或手动填写。`
+                      : "当前显示预设候选，填写 API Key 后自动获取模型列表，也可手动填写。"}
+              </p>
+            </div>
+          )}
+          <label>
+            API Key
+            <span className="key-input">
+              <input
+                type={showKey ? "text" : "password"}
+                value={key}
+                onChange={(event) => setKey(event.target.value)}
+                placeholder={
+                  keepsCurrentKey
+                    ? `留空沿用当前密钥 ${keyProfile?.api_key_masked}`
+                    : "粘贴该服务的 API Key"
+                }
+                autoComplete="off"
+              />
+              <button type="button" onClick={() => setShowKey(!showKey)}>
+                {showKey ? "隐藏" : "显示"}
+              </button>
+            </span>
+          </label>
+          {selected.keyUrl && (
+            <a
+              className="key-link"
+              href={selected.keyUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              去 {selected.name} 控制台获取 API Key ↗
+            </a>
+          )}
+          {testResult && (
+            <div
+              className={testResult.ok ? "test-result ok" : "test-result fail"}
+            >
+              {testResult.text}
+            </div>
+          )}
+          <div className="settings-actions">
             <button
               type="button"
               className="secondary-button"
-              disabled={!canQueryModels || catalog.status === "loading"}
-              onClick={() => setCatalogRefresh((value) => value + 1)}
+              disabled={!canSubmit}
+              onClick={() => void runTest()}
             >
-              {catalog.status === "loading" ? "获取模型中…" : "刷新模型"}
+              {busy === "test" ? "测试中…" : "测试连接"}
             </button>
-            <p className="settings-hint" role="status">
-              {catalog.status === "loading"
-                ? "正在查询服务商模型列表…"
-                : catalog.status === "success"
-                  ? catalog.models.length
-                    ? `已从服务商获取 ${catalog.models.length} 个模型；快捷展示前 12 个，在模型名称输入框中可搜索全部结果。`
-                    : "服务商返回的模型列表为空，可手动输入模型名称。"
-                  : catalog.status === "error"
-                    ? `${catalog.message}。当前显示预设候选，可重试或手动填写。`
-                    : "当前显示预设候选，填写 API Key 后自动获取模型列表，也可手动填写。"}
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={!canSubmit}
+              onClick={() => void save(false)}
+            >
+              {busy === "save-only" ? "保存中…" : "保存"}
+            </button>
+            {selectedProfile && (
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={busy !== ""}
+                onClick={() => chooseProvider(selected)}
+              >
+                取消
+              </button>
+            )}
+            <button
+              type="button"
+              className="primary-button"
+              disabled={!canSubmit}
+              onClick={() => void save(true)}
+            >
+              {busy === "save" ? "保存中…" : "保存并启用"}
+            </button>
+          </div>
+          {!isAdmin && (
+            <p className="settings-hint">
+              模型配置对所有用户生效，只有管理员可以修改。
             </p>
-          </div>
-        )}
-        <label>
-          API Key
-          <span className="key-input">
-            <input
-              type={showKey ? "text" : "password"}
-              value={key}
-              onChange={(event) => setKey(event.target.value)}
-              placeholder={
-                keepsCurrentKey
-                  ? `留空沿用当前密钥 ${current?.api_key_masked}`
-                  : "粘贴该服务的 API Key"
-              }
-              autoComplete="off"
-            />
-            <button type="button" onClick={() => setShowKey(!showKey)}>
-              {showKey ? "隐藏" : "显示"}
-            </button>
-          </span>
-        </label>
-        {selected.keyUrl && (
-          <a
-            className="key-link"
-            href={selected.keyUrl}
-            target="_blank"
-            rel="noreferrer"
-          >
-            去 {selected.name} 控制台获取 API Key ↗
-          </a>
-        )}
-        {testResult && (
-          <div
-            className={testResult.ok ? "test-result ok" : "test-result fail"}
-          >
-            {testResult.text}
-          </div>
-        )}
-        <div className="settings-actions">
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={!canSubmit}
-            onClick={() => void runTest()}
-          >
-            {busy === "test" ? "测试中…" : "测试连接"}
-          </button>
-          <button
-            type="button"
-            className="primary-button"
-            disabled={!canSubmit}
-            onClick={() => void save()}
-          >
-            {busy === "save" ? "保存中…" : "保存并启用"}
-          </button>
-        </div>
-        {!isAdmin && (
+          )}
           <p className="settings-hint">
-            模型配置对所有用户生效，只有管理员可以修改。
+            “保存”只更新该服务商的配置；“保存并启用”立即对所有用户生效，无需重启。
           </p>
-        )}
-        <p className="settings-hint">
-          保存后立即对所有用户生效，无需重启；文档导入（Contextual
-          Retrieval）会在处理下一个文档时换用新模型。
-        </p>
-      </section>
+        </section>
+      )}
     </div>
   );
 }
