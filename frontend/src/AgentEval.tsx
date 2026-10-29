@@ -17,6 +17,7 @@ import {
 } from "./api";
 import { ScoringItems } from "./ScoringItems";
 import { newEvidenceHits } from "./newEvidenceHits";
+import "./AgentEvidence.css";
 import { JsonView } from "./AgentTrace";
 import { formatDuration as formatMs } from "./format";
 import {
