@@ -22,7 +22,11 @@ METHODS = {"retrieval": "检索", "answer": "回答", "dialogue": "多轮对话"
 # 检索、回答方式用哪几路检索。默认和线上一样向量 + 关键词混合；只用一路时能单独看出这一路的表现，
 # 例如截断专项选「只用向量」，分片后半段被截掉的影响就不会被关键词检索兜回来、看不出来。
 SEARCH_MODES = {"hybrid": "混合检索", "dense": "只用向量", "keyword": "只用关键词"}
-SEARCH_METHODS = {"hybrid": ("dense", "keyword"), "dense": ("dense",), "keyword": ("keyword",)}
+SEARCH_METHODS = {
+    "hybrid": ("dense", "keyword"),
+    "dense": ("dense",),
+    "keyword": ("keyword",),
+}
 # 需要真实大模型的评测方式：回答要生成和评审，多轮对话要按顺序真的问一遍。
 LLM_METHODS = {"answer", "dialogue"}
 NAME_LIMIT = 64
@@ -35,15 +39,30 @@ TYPE_LIMIT = 20
 
 def suite_view(row, count=0, latest=None):
     search_mode = row["search_mode"] or "hybrid"
-    return {"id": row["id"], "name": row["name"], "description": row["description"] or "", "method": row["method"],
-        "method_label": METHODS.get(row["method"], row["method"]), "search_mode": search_mode,
-        "search_mode_label": SEARCH_MODES.get(search_mode, search_mode), "created_by": row["created_by"],
-        "created": row["created"], "updated": row["updated"], "item_count": count, "latest": latest}
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "description": row["description"] or "",
+        "method": row["method"],
+        "method_label": METHODS.get(row["method"], row["method"]),
+        "search_mode": search_mode,
+        "search_mode_label": SEARCH_MODES.get(search_mode, search_mode),
+        "created_by": row["created_by"],
+        "created": row["created"],
+        "updated": row["updated"],
+        "item_count": count,
+        "latest": latest,
+    }
 
 
 def item_view(row):
-    return {"id": row["id"], **(row["data"] or {}), "created_by": row["created_by"], "created": row["created"],
-        "updated": row["updated"]}
+    return {
+        "id": row["id"],
+        **(row["data"] or {}),
+        "created_by": row["created_by"],
+        "created": row["created"],
+        "updated": row["updated"],
+    }
 
 
 # 某个专项在历次专项评测里的结果（新的在前），来自评测记录的 summary.suites。
@@ -53,24 +72,50 @@ def suite_runs(suite_id, runs=None):
         if run.get("kind") != "special":
             continue
         entry = ((run.get("summary") or {}).get("suites") or {}).get(suite_id)
-        if entry is None and suite_id not in [item["id"] for item in
-                ((run.get("config") or {}).get("special") or {}).get("suites", [])]:
+        if entry is None and suite_id not in [
+            item["id"]
+            for item in ((run.get("config") or {}).get("special") or {}).get(
+                "suites", []
+            )
+        ]:
             continue
-        result.append({"id": run["id"], "status": run["status"], "created": run["created"],
-            "finished": run.get("finished"), "summary": entry})
+        result.append(
+            {
+                "id": run["id"],
+                "status": run["status"],
+                "created": run["created"],
+                "finished": run.get("finished"),
+                "summary": entry,
+            }
+        )
     return result
 
 
 def list_suites(engine):
     runs = list_runs()
     with engine.connect() as connection:
-        rows = connection.execute(select(eval_suites).order_by(eval_suites.c.created)).mappings().all()
-        counts = dict(connection.execute(select(eval_suite_items.c.suite_id, func.count()).group_by(
-            eval_suite_items.c.suite_id)).all())
+        rows = (
+            connection.execute(select(eval_suites).order_by(eval_suites.c.created))
+            .mappings()
+            .all()
+        )
+        counts = dict(
+            connection.execute(
+                select(eval_suite_items.c.suite_id, func.count()).group_by(
+                    eval_suite_items.c.suite_id
+                )
+            ).all()
+        )
     items = []
     for row in rows:
-        history = [entry for entry in suite_runs(row["id"], runs) if entry["status"] == "completed"]
-        items.append(suite_view(row, counts.get(row["id"], 0), history[0] if history else None))
+        history = [
+            entry
+            for entry in suite_runs(row["id"], runs)
+            if entry["status"] == "completed"
+        ]
+        items.append(
+            suite_view(row, counts.get(row["id"], 0), history[0] if history else None)
+        )
     return {"items": items, "methods": METHODS, "search_modes": SEARCH_MODES}
 
 
@@ -103,48 +148,102 @@ def create_suite(engine, name, description, method, username, search_mode="hybri
     suite_id = str(uuid4())
     with engine.begin() as connection:
         name, description = check_suite_fields(connection, name, description, method)
-        connection.execute(eval_suites.insert().values(id=suite_id, name=name, description=description,
-            method=method, search_mode=check_search_mode(search_mode), created_by=username, created=now, updated=now))
+        connection.execute(
+            eval_suites.insert().values(
+                id=suite_id,
+                name=name,
+                description=description,
+                method=method,
+                search_mode=check_search_mode(search_mode),
+                created_by=username,
+                created=now,
+                updated=now,
+            )
+        )
     return get_suite(engine, suite_id)
 
 
 # 改名称和说明；评测方式只有专项里还没有题目时才能改，因为不同方式的题目字段不一样。
 def update_suite(engine, suite_id, name, description, method, search_mode="hybrid"):
     with engine.begin() as connection:
-        row = connection.execute(select(eval_suites).where(eval_suites.c.id == suite_id)).mappings().first()
+        row = (
+            connection.execute(select(eval_suites).where(eval_suites.c.id == suite_id))
+            .mappings()
+            .first()
+        )
         if row is None:
             return None
-        name, description = check_suite_fields(connection, name, description, method, exclude=suite_id)
-        if method != row["method"] and connection.execute(select(func.count()).select_from(eval_suite_items).where(
-                eval_suite_items.c.suite_id == suite_id)).scalar():
+        name, description = check_suite_fields(
+            connection, name, description, method, exclude=suite_id
+        )
+        if (
+            method != row["method"]
+            and connection.execute(
+                select(func.count())
+                .select_from(eval_suite_items)
+                .where(eval_suite_items.c.suite_id == suite_id)
+            ).scalar()
+        ):
             raise ValueError("专项里已经有题目，不能再改评测方式")
-        connection.execute(eval_suites.update().where(eval_suites.c.id == suite_id).values(name=name,
-            description=description, method=method, search_mode=check_search_mode(search_mode), updated=now_text()))
+        connection.execute(
+            eval_suites.update()
+            .where(eval_suites.c.id == suite_id)
+            .values(
+                name=name,
+                description=description,
+                method=method,
+                search_mode=check_search_mode(search_mode),
+                updated=now_text(),
+            )
+        )
     return get_suite(engine, suite_id)
 
 
 def delete_suite(engine, suite_id):
     with engine.begin() as connection:
-        deleted = connection.execute(eval_suites.delete().where(eval_suites.c.id == suite_id)).rowcount
-        connection.execute(eval_suite_items.delete().where(eval_suite_items.c.suite_id == suite_id))
+        deleted = connection.execute(
+            eval_suites.delete().where(eval_suites.c.id == suite_id)
+        ).rowcount
+        connection.execute(
+            eval_suite_items.delete().where(eval_suite_items.c.suite_id == suite_id)
+        )
     return bool(deleted)
 
 
 def get_suite(engine, suite_id):
     with engine.connect() as connection:
-        row = connection.execute(select(eval_suites).where(eval_suites.c.id == suite_id)).mappings().first()
+        row = (
+            connection.execute(select(eval_suites).where(eval_suites.c.id == suite_id))
+            .mappings()
+            .first()
+        )
         if row is None:
             return None
-        items = connection.execute(select(eval_suite_items).where(eval_suite_items.c.suite_id == suite_id).order_by(
-            eval_suite_items.c.position)).mappings().all()
+        items = (
+            connection.execute(
+                select(eval_suite_items)
+                .where(eval_suite_items.c.suite_id == suite_id)
+                .order_by(eval_suite_items.c.position)
+            )
+            .mappings()
+            .all()
+        )
     view = suite_view(row, len(items))
     view["items"] = [item_view(item) for item in items]
-    if row["method"] in ("retrieval", "answer") and any(item.get("evidence") and not item.get("evidence_groups") for item in view["items"]):
+    if row["method"] in ("retrieval", "answer") and any(
+        item.get("evidence") and not item.get("evidence_groups")
+        for item in view["items"]
+    ):
         from .evidence import target_catalog
         from .grouped_evidence import legacy_groups
+
         catalog = target_catalog(engine)
-        view["items"] = [{**item, "evidence_groups": legacy_groups(item["evidence"], catalog)}
-            if item.get("evidence") and not item.get("evidence_groups") else item for item in view["items"]]
+        view["items"] = [
+            {**item, "evidence_groups": legacy_groups(item["evidence"], catalog)}
+            if item.get("evidence") and not item.get("evidence_groups")
+            else item
+            for item in view["items"]
+        ]
     view["runs"] = suite_runs(suite_id)
     return view
 
@@ -166,11 +265,16 @@ def check_item(method, data, corpus=None, catalog=None):
     cleaned = {"question": question}
     if method in ("retrieval", "answer") and data.get("evidence_groups") is not None:
         from .grouped_evidence import validate_groups
+
         groups = validate_groups(data["evidence_groups"], catalog or [])
         cleaned["evidence_groups"] = groups
         cleaned["evidence"] = [group["label"] for group in groups]
     elif method in ("retrieval", "answer"):
-        evidence = [text.strip() for text in data.get("evidence") or [] if isinstance(text, str) and text.strip()]
+        evidence = [
+            text.strip()
+            for text in data.get("evidence") or []
+            if isinstance(text, str) and text.strip()
+        ]
         if method == "retrieval" and not evidence:
             raise ValueError("检索方式的题目至少要有一条证据原文")
         folded = normalize(corpus if corpus is not None else corpus_text())
@@ -180,13 +284,22 @@ def check_item(method, data, corpus=None, catalog=None):
                 raise ValueError(f"证据不在评测语料中：{missing[0][:60]}")
         cleaned["evidence"] = evidence
     if method == "dialogue":
-        turns = [text.strip() for text in data.get("turns") or [] if isinstance(text, str) and text.strip()]
+        turns = [
+            text.strip()
+            for text in data.get("turns") or []
+            if isinstance(text, str) and text.strip()
+        ]
         if not turns:
             raise ValueError("多轮对话的题目至少要有一轮前面的提问")
         if len(turns) > TURN_LIMIT:
             raise ValueError(f"前面的提问不能超过 {TURN_LIMIT} 轮")
         cleaned["turns"] = [text[:QUESTION_LIMIT] for text in turns]
-    reference = text_value(data.get("reference_answer"), "参考答案", ANSWER_LIMIT, required=method in LLM_METHODS)
+    reference = text_value(
+        data.get("reference_answer"),
+        "参考答案",
+        ANSWER_LIMIT,
+        required=method in LLM_METHODS,
+    )
     if reference:
         cleaned["reference_answer"] = reference
     # 题目类型：可选的标签，名字自己起（同一个专项里用同样的写法），结果按类型统计通过数。
@@ -197,45 +310,80 @@ def check_item(method, data, corpus=None, catalog=None):
 
 
 def suite_method(connection, suite_id):
-    return connection.execute(select(eval_suites.c.method).where(eval_suites.c.id == suite_id)).scalar()
+    return connection.execute(
+        select(eval_suites.c.method).where(eval_suites.c.id == suite_id)
+    ).scalar()
 
 
 def add_item(engine, suite_id, data, username):
     from .evidence import target_catalog
-    catalog = target_catalog(engine) if data.get("evidence_groups") is not None else None
+
+    catalog = (
+        target_catalog(engine) if data.get("evidence_groups") is not None else None
+    )
     now = now_text()
     with engine.begin() as connection:
         method = suite_method(connection, suite_id)
         if method is None:
             return None
         cleaned = check_item(method, data, catalog=catalog)
-        position = connection.execute(select(func.max(eval_suite_items.c.position)).where(
-            eval_suite_items.c.suite_id == suite_id)).scalar()
+        position = connection.execute(
+            select(func.max(eval_suite_items.c.position)).where(
+                eval_suite_items.c.suite_id == suite_id
+            )
+        ).scalar()
         item_id = str(uuid4())
-        connection.execute(eval_suite_items.insert().values(id=item_id, suite_id=suite_id,
-            position=0 if position is None else position + 1, data=cleaned, created_by=username, created=now,
-            updated=now))
-        connection.execute(eval_suites.update().where(eval_suites.c.id == suite_id).values(updated=now))
+        connection.execute(
+            eval_suite_items.insert().values(
+                id=item_id,
+                suite_id=suite_id,
+                position=0 if position is None else position + 1,
+                data=cleaned,
+                created_by=username,
+                created=now,
+                updated=now,
+            )
+        )
+        connection.execute(
+            eval_suites.update().where(eval_suites.c.id == suite_id).values(updated=now)
+        )
     return get_suite(engine, suite_id)
 
 
 def update_item(engine, suite_id, item_id, data):
     from .evidence import target_catalog
-    catalog = target_catalog(engine) if data.get("evidence_groups") is not None else None
+
+    catalog = (
+        target_catalog(engine) if data.get("evidence_groups") is not None else None
+    )
     now = now_text()
     with engine.begin() as connection:
         method = suite_method(connection, suite_id)
         if method is None:
             return None
         cleaned = check_item(method, data, catalog=catalog)
-        previous = connection.execute(select(eval_suite_items.c.data).where(eval_suite_items.c.id == item_id,
-            eval_suite_items.c.suite_id == suite_id)).scalar()
-        if previous and previous.get("evidence_groups") and data.get("evidence_groups") is None:
+        previous = connection.execute(
+            select(eval_suite_items.c.data).where(
+                eval_suite_items.c.id == item_id,
+                eval_suite_items.c.suite_id == suite_id,
+            )
+        ).scalar()
+        if (
+            previous
+            and previous.get("evidence_groups")
+            and data.get("evidence_groups") is None
+        ):
             if len(cleaned.get("evidence", [])) != len(previous["evidence_groups"]):
                 raise ValueError("汇总题计分项数量变化，需要重新标注目标分片")
             cleaned["evidence_groups"] = previous["evidence_groups"]
-        updated = connection.execute(eval_suite_items.update().where(eval_suite_items.c.id == item_id,
-            eval_suite_items.c.suite_id == suite_id).values(data=cleaned, updated=now)).rowcount
+        updated = connection.execute(
+            eval_suite_items.update()
+            .where(
+                eval_suite_items.c.id == item_id,
+                eval_suite_items.c.suite_id == suite_id,
+            )
+            .values(data=cleaned, updated=now)
+        ).rowcount
         if not updated:
             return None
     return get_suite(engine, suite_id)
@@ -243,8 +391,12 @@ def update_item(engine, suite_id, item_id, data):
 
 def delete_item(engine, suite_id, item_id):
     with engine.begin() as connection:
-        deleted = connection.execute(eval_suite_items.delete().where(eval_suite_items.c.id == item_id,
-            eval_suite_items.c.suite_id == suite_id)).rowcount
+        deleted = connection.execute(
+            eval_suite_items.delete().where(
+                eval_suite_items.c.id == item_id,
+                eval_suite_items.c.suite_id == suite_id,
+            )
+        ).rowcount
     return get_suite(engine, suite_id) if deleted else None
 
 
@@ -255,15 +407,38 @@ def load_for_run(engine, suite_ids):
     loaded = []
     with engine.connect() as connection:
         for suite_id in dict.fromkeys(suite_ids):
-            row = connection.execute(select(eval_suites).where(eval_suites.c.id == suite_id)).mappings().first()
+            row = (
+                connection.execute(
+                    select(eval_suites).where(eval_suites.c.id == suite_id)
+                )
+                .mappings()
+                .first()
+            )
             if row is None:
                 raise ValueError("专项不存在或已被删除")
-            items = connection.execute(select(eval_suite_items).where(
-                eval_suite_items.c.suite_id == suite_id).order_by(eval_suite_items.c.position)).mappings().all()
+            items = (
+                connection.execute(
+                    select(eval_suite_items)
+                    .where(eval_suite_items.c.suite_id == suite_id)
+                    .order_by(eval_suite_items.c.position)
+                )
+                .mappings()
+                .all()
+            )
             if not items:
                 raise ValueError(f"「{row['name']}」还没有题目")
-            loaded.append({"id": row["id"], "name": row["name"], "description": row["description"] or "",
-                "method": row["method"], "search_mode": row["search_mode"] or "hybrid", "items": [{"id": item["id"], **(item["data"] or {})} for item in items]})
+            loaded.append(
+                {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "description": row["description"] or "",
+                    "method": row["method"],
+                    "search_mode": row["search_mode"] or "hybrid",
+                    "items": [
+                        {"id": item["id"], **(item["data"] or {})} for item in items
+                    ],
+                }
+            )
     return loaded
 
 
@@ -283,6 +458,7 @@ def method_ranks(row, chunk_id):
 # 专项题都是独立的完整问题，改写一般只是拆检索词；改写结果同样走缓存。
 def search_items(store, models, items, methods, progress, on_item=None):
     from .retrieval import evaluate_items, flow_config
+
     import_corpus(store, models)
     chunk_texts = current_chunk_texts(store)
     pool_size = runtime_snapshot()["rerank_candidates"]
@@ -294,17 +470,26 @@ def search_items(store, models, items, methods, progress, on_item=None):
         done[0] += 1
         progress(done[0])
 
-    rows = evaluate_items(store, models, items, chunk_texts, {"methods": methods}, True, advance, {}, True)
+    rows = evaluate_items(
+        store, models, items, chunk_texts, {"methods": methods}, True, advance, {}, True
+    )
     config = {}
     if rows:
         used = rows[-1]["diagnostics"]["config"]
-        config = {"pool_size": pool_size, "return_limit": used.get("return_limit"), "min_score": used.get("min_score"),
-            "reranked": used.get("reranked"), "flow": flow_config(models, rows)}
+        config = {
+            "pool_size": pool_size,
+            "return_limit": used.get("return_limit"),
+            "min_score": used.get("min_score"),
+            "reranked": used.get("reranked"),
+            "flow": flow_config(models, rows),
+        }
     return rows, config
 
 
 # 检索、回答方式：把专项题目当成调参题跑同一套检索（可选再回答），逐题整理成专项结果。
-def run_search_suite(store, models, suite, responder, run_id, progress, modes=("fixed",), agent_mode=None):
+def run_search_suite(
+    store, models, suite, responder, run_id, progress, modes=("fixed",), agent_mode=None
+):
     # 检索方式的专项可以选模式：只跑固定流程（原来的样子）、只跑 Agent，或者两个一起跑逐题对比。
     # 回答方式只有固定流程（Agent 的答案还不评分）。
     if suite["method"] != "retrieval":
@@ -313,54 +498,138 @@ def run_search_suite(store, models, suite, responder, run_id, progress, modes=("
         return run_agent_search_suite(store, models, suite, progress, modes, agent_mode)
     items = []
     for item in suite["items"]:
-        items.append({"id": item["id"], "question": item["question"], "type": item.get("type") or "", "answerable": True,
-            "evidence": item.get("evidence") or [], "evidence_groups": item.get("evidence_groups"), "reference_answer": item.get("reference_answer") or "",
-            "split": "dev", "reviewed": True})
-    on_item = answer_hook(store, models, responder, run_id) if suite["method"] == "answer" else None
-    rows, config = search_items(store, models, items, SEARCH_METHODS[suite["search_mode"]], progress, on_item)
+        items.append(
+            {
+                "id": item["id"],
+                "question": item["question"],
+                "type": item.get("type") or "",
+                "answerable": True,
+                "evidence": item.get("evidence") or [],
+                "evidence_groups": item.get("evidence_groups"),
+                "reference_answer": item.get("reference_answer") or "",
+                "split": "dev",
+                "reviewed": True,
+            }
+        )
+    on_item = (
+        answer_hook(store, models, responder, run_id)
+        if suite["method"] == "answer"
+        else None
+    )
+    rows, config = search_items(
+        store, models, items, SEARCH_METHODS[suite["search_mode"]], progress, on_item
+    )
     questions = []
     dense_found = keyword_found = evidence_total = 0
     for item, row in zip(items, rows):
         evidence = []
         for entry in row.get("evidence") or []:
-            ranks = method_ranks(row, entry.get("chunk_id")) if entry.get("chunk_id") else {}
-            evidence.append({**{key: entry[key] for key in ("text", "label", "targets") if key in entry}, "dense_rank": ranks.get("dense"),
-                "keyword_rank": ranks.get("keyword"), "rerank_rank": entry.get("rerank_rank"),
-                "status": entry.get("status")})
+            ranks = (
+                method_ranks(row, entry.get("chunk_id"))
+                if entry.get("chunk_id")
+                else {}
+            )
+            evidence.append(
+                {
+                    **{
+                        key: entry[key]
+                        for key in ("text", "label", "targets")
+                        if key in entry
+                    },
+                    "dense_rank": ranks.get("dense"),
+                    "keyword_rank": ranks.get("keyword"),
+                    "rerank_rank": entry.get("rerank_rank"),
+                    "status": entry.get("status"),
+                }
+            )
             evidence_total += 1
             dense_found += ranks.get("dense") is not None
             keyword_found += ranks.get("keyword") is not None
         found = ((row.get("stages") or {}).get("final") or {}).get("recall") or 0
-        entry = {"id": item["id"], "question": item["question"], "type": item["type"] or None, "evidence": evidence, "found": found >= 1,
-            "lost_stage": row.get("lost_stage"), "returned": row.get("returned"),
+        entry = {
+            "id": item["id"],
+            "question": item["question"],
+            "type": item["type"] or None,
+            "evidence": evidence,
+            "found": found >= 1,
+            "lost_stage": row.get("lost_stage"),
+            "returned": row.get("returned"),
             "reference_answer": item["reference_answer"] or None,
             # 和 Agent 逐题对比时要用：过滤后的召回、证据去向、交给回答模型的来源、检索词和耗时。
-            "recall_final": found, "given_recall": row.get("given_recall"),
+            "recall_final": found,
+            "given_recall": row.get("given_recall"),
             # 证据去向：status（没召回 / 没进候选池 / 低于阈值被过滤 / 超出返回段数 / 交给模型）和合并名次、重排名次、重排分，
             # 页面据此写出「召回到了但丢在哪一步」。
-            "fixed_evidence": [{key: value.get(key) for key in ("text", "label", "targets", "chunk_id", "source_id", "status", "given", "via",
-                "rrf_rank", "rerank_rank", "rerank_probability")}
-                for value in row.get("evidence") or []],
-            "sources": [{key: source.get(key) for key in ("id", "title", "heading", "text", "chunk_id", "position",
-                "parent_chunk_ids")} for source in row.get("sources") or []],
-            "queries": row.get("queries"), "rerank_query": row.get("rerank_query"), "latency_ms": row.get("latency_ms"),
+            "fixed_evidence": [
+                {
+                    key: value.get(key)
+                    for key in (
+                        "text",
+                        "label",
+                        "targets",
+                        "chunk_id",
+                        "source_id",
+                        "status",
+                        "given",
+                        "via",
+                        "rrf_rank",
+                        "rerank_rank",
+                        "rerank_probability",
+                        "filter_stages",
+                        "filter_reranked",
+                    )
+                }
+                for value in row.get("evidence") or []
+            ],
+            "sources": [
+                {
+                    key: source.get(key)
+                    for key in (
+                        "id",
+                        "title",
+                        "heading",
+                        "text",
+                        "chunk_id",
+                        "position",
+                        "parent_chunk_ids",
+                    )
+                }
+                for source in row.get("sources") or []
+            ],
+            "queries": row.get("queries"),
+            "rerank_query": row.get("rerank_query"),
+            "latency_ms": row.get("latency_ms"),
             # 完整检索流程：改写、充分性判断、补充检索（见 app/evaluation/flow.py）。
-            "first_given_recall": row.get("first_given_recall"), "rewrite": row.get("rewrite"),
-            "sufficiency": row.get("sufficiency"), "retry": row.get("retry"), "cleared": row.get("cleared"),
-            "flow_latency_ms": row.get("flow_latency_ms"), "query_routes": row.get("query_routes"), "material": row.get("material")}
+            "first_given_recall": row.get("first_given_recall"),
+            "rewrite": row.get("rewrite"),
+            "sufficiency": row.get("sufficiency"),
+            "retry": row.get("retry"),
+            "cleared": row.get("cleared"),
+            "flow_latency_ms": row.get("flow_latency_ms"),
+            "query_routes": row.get("query_routes"),
+            "material": row.get("material"),
+        }
         for index, value in enumerate(row.get("evidence") or []):
             entry["fixed_evidence"][index]["first_given"] = value.get("first_given")
         if suite["method"] == "answer":
             judgement = row.get("judgement") or {}
-            entry.update({"answer": row.get("answer"), "judgement": judgement,
-                "passed": judgement.get("correctness") == 1})
+            entry.update(
+                {
+                    "answer": row.get("answer"),
+                    "judgement": judgement,
+                    "passed": judgement.get("correctness") == 1,
+                }
+            )
         else:
             # 通过 = 最终交给模型的资料里证据全在（含父块扩展、补充检索；被清空就不通过），和线上用户拿到的一致。
             given = entry["given_recall"]
             entry["passed"] = entry["found"] if given is None else given >= 1
         questions.append(entry)
-    section = {"questions": questions, "search_mode": suite["search_mode"],
-        "search_mode_label": SEARCH_MODES[suite["search_mode"]]}
+    section = {
+        "questions": questions,
+        "search_mode": suite["search_mode"],
+        "search_mode_label": SEARCH_MODES[suite["search_mode"]],
+    }
     if evidence_total:
         section["evidence_total"] = evidence_total
         section["dense_found"] = dense_found
@@ -373,12 +642,16 @@ def run_search_suite(store, models, suite, responder, run_id, progress, modes=("
 # passed 仍表示固定流程是否通过（只跑 Agent 时就是 Agent 是否通过），专项的通过数和以前的记录口径一致。
 def run_agent_search_suite(store, models, suite, progress, modes, agent_mode):
     from .agent_retrieval import agent_config, chunk_positions, evaluate_agent
+
     with_fixed = "fixed" in modes
     total = len(suite["items"])
     if with_fixed:
-        fixed_section, config = run_search_suite(store, models, suite, None, None,
-            lambda done: progress(done), ("fixed",))
-        fixed_by_id = {question["id"]: question for question in fixed_section["questions"]}
+        fixed_section, config = run_search_suite(
+            store, models, suite, None, None, lambda done: progress(done), ("fixed",)
+        )
+        fixed_by_id = {
+            question["id"]: question for question in fixed_section["questions"]
+        }
     else:
         import_corpus(store, models)
         fixed_section, config, fixed_by_id = {}, {}, {}
@@ -388,26 +661,63 @@ def run_agent_search_suite(store, models, suite, progress, modes, agent_mode):
     agent_passed = 0
     for done, item in enumerate(suite["items"], 1):
         evidence = item.get("evidence") or []
-        agent = evaluate_agent(agent_mode, store, models, {"id": item["id"], "question": item["question"],
-            "evidence": evidence, "evidence_groups": item.get("evidence_groups"), "history": []}, chunk_texts, positions)
+        agent = evaluate_agent(
+            agent_mode,
+            store,
+            models,
+            {
+                "id": item["id"],
+                "question": item["question"],
+                "evidence": evidence,
+                "evidence_groups": item.get("evidence_groups"),
+                "history": [],
+            },
+            chunk_texts,
+            positions,
+        )
         passed_agent = agent["recall"] is not None and agent["recall"] >= 1
         agent_passed += passed_agent
-        entry = dict(fixed_by_id.get(item["id"]) or {"id": item["id"], "question": item["question"],
-            "type": item.get("type") or None, "reference_answer": item.get("reference_answer") or None})
-        entry.update({"evidence_count": len(evidence), "agent": agent, "agent_passed": passed_agent})
+        entry = dict(
+            fixed_by_id.get(item["id"])
+            or {
+                "id": item["id"],
+                "question": item["question"],
+                "type": item.get("type") or None,
+                "reference_answer": item.get("reference_answer") or None,
+            }
+        )
+        entry.update(
+            {
+                "evidence_count": len(evidence),
+                "agent": agent,
+                "agent_passed": passed_agent,
+            }
+        )
         if with_fixed:
             # 和 Agent 对比时，固定流程按“交给模型的资料”（含父块扩展）判断是否通过，两边口径一致。
             given = entry.get("given_recall")
             entry["passed"] = entry["passed"] if given is None else given >= 1
             entry["fixed_passed"] = entry["passed"]
-            entry["compare"] = ("both" if entry["passed"] and passed_agent else "fixed_only" if entry["passed"]
-                else "agent_only" if passed_agent else "neither")
+            entry["compare"] = (
+                "both"
+                if entry["passed"] and passed_agent
+                else "fixed_only"
+                if entry["passed"]
+                else "agent_only"
+                if passed_agent
+                else "neither"
+            )
         else:
             entry["passed"] = passed_agent
         questions.append(entry)
         progress(total + done if with_fixed else done)
-    section = {**fixed_section, "questions": questions, "modes": [mode for mode in ("fixed", "agent") if mode in modes],
-        "agent_passed": agent_passed, "agent": agent_config(models)}
+    section = {
+        **fixed_section,
+        "questions": questions,
+        "modes": [mode for mode in ("fixed", "agent") if mode in modes],
+        "agent_passed": agent_passed,
+        "agent": agent_config(models),
+    }
     section.setdefault("search_mode", suite["search_mode"])
     section.setdefault("search_mode_label", SEARCH_MODES[suite["search_mode"]])
     return section, config
@@ -416,6 +726,7 @@ def run_agent_search_suite(store, models, suite, progress, modes, agent_mode):
 # 多轮对话方式：每段对话按顺序问完，评审最后一问；compare 时每组记忆参数各跑一遍，通过与否看当前设置那组。
 def run_dialogue_suite(store, models, suite, run_id, compare, progress):
     from .memory import average, memory_variants, run_dialogue
+
     import_corpus(store, models)
     variants = memory_variants(runtime_snapshot())
     if not compare:
@@ -426,22 +737,54 @@ def run_dialogue_suite(store, models, suite, run_id, compare, progress):
         rows = []
         for item in suite["items"]:
             outcome = run_dialogue(store, models, run_id, variant, item)
-            judgement = judge_answer(models, {"question": item["question"], "history": item["turns"],
-                "answerable": True, "reference_answer": item["reference_answer"]}, outcome["answer"],
-                outcome["sources"])
-            rows.append({"id": item["id"], "question": item["question"], "type": item.get("type"), "turns": item["turns"],
-                "reference_answer": item["reference_answer"], "answer": outcome["answer"][:4000],
-                "summarized": outcome["summarized"], "input_tokens": outcome["input_tokens"],
-                "judgement": judgement, "passed": judgement.get("correctness") == 1})
+            judgement = judge_answer(
+                models,
+                {
+                    "question": item["question"],
+                    "history": item["turns"],
+                    "answerable": True,
+                    "reference_answer": item["reference_answer"],
+                },
+                outcome["answer"],
+                outcome["sources"],
+            )
+            rows.append(
+                {
+                    "id": item["id"],
+                    "question": item["question"],
+                    "type": item.get("type"),
+                    "turns": item["turns"],
+                    "reference_answer": item["reference_answer"],
+                    "answer": outcome["answer"][:4000],
+                    "summarized": outcome["summarized"],
+                    "input_tokens": outcome["input_tokens"],
+                    "judgement": judgement,
+                    "passed": judgement.get("correctness") == 1,
+                }
+            )
             done += 1
             progress(done)
-        results.append({"name": variant["name"], "label": variant["label"], "passed": sum(row["passed"] for row in rows),
-            "correctness": average([row["judgement"].get("correctness") for row in rows]),
-            "summarized_rate": average([1.0 if row["summarized"] else 0.0 for row in rows]),
-            "input_tokens_avg": average([row["input_tokens"] for row in rows]), "rows": rows})
+        results.append(
+            {
+                "name": variant["name"],
+                "label": variant["label"],
+                "passed": sum(row["passed"] for row in rows),
+                "correctness": average(
+                    [row["judgement"].get("correctness") for row in rows]
+                ),
+                "summarized_rate": average(
+                    [1.0 if row["summarized"] else 0.0 for row in rows]
+                ),
+                "input_tokens_avg": average([row["input_tokens"] for row in rows]),
+                "rows": rows,
+            }
+        )
     section = {"questions": results[0]["rows"]}
     if compare:
-        section["variants"] = [{key: value for key, value in result.items() if key != "rows"} for result in results]
+        section["variants"] = [
+            {key: value for key, value in result.items() if key != "rows"}
+            for result in results
+        ]
     return section
 
 
@@ -453,8 +796,11 @@ def run_special(store, models, run, on_progress, responder, agent_mode=None):
     compare = bool(special.get("compare_memory"))
     total = 0
     for suite in suites:
-        variants = len(memory_suites_variants(compare)) if suite["method"] == "dialogue" else \
-            (len(modes) if suite["method"] == "retrieval" else 1)
+        variants = (
+            len(memory_suites_variants(compare))
+            if suite["method"] == "dialogue"
+            else (len(modes) if suite["method"] == "retrieval" else 1)
+        )
         total += len(suite["items"]) * variants
     offset = [0]
     sections = []
@@ -465,36 +811,73 @@ def run_special(store, models, run, on_progress, responder, agent_mode=None):
 
         def progress(done, start=start):
             on_progress(start + done, total)
+
         if suite["method"] == "dialogue":
-            section = run_dialogue_suite(store, models, suite, run["id"], compare, progress)
+            section = run_dialogue_suite(
+                store, models, suite, run["id"], compare, progress
+            )
             offset[0] += len(suite["items"]) * len(memory_suites_variants(compare))
         else:
-            section, config = run_search_suite(store, models, suite, responder, run["id"], progress, modes, agent_mode)
+            section, config = run_search_suite(
+                store, models, suite, responder, run["id"], progress, modes, agent_mode
+            )
             search_config = config or search_config
-            offset[0] += len(suite["items"]) * (len(modes) if suite["method"] == "retrieval" else 1)
+            offset[0] += len(suite["items"]) * (
+                len(modes) if suite["method"] == "retrieval" else 1
+            )
         passed = sum(1 for question in section["questions"] if question["passed"])
         attach_scores(section)
         section["by_type"] = by_type(section["questions"])
-        section.update({"suite_id": suite["id"], "name": suite["name"], "description": suite["description"],
-            "method": suite["method"], "method_label": METHODS[suite["method"]], "count": len(suite["items"]),
-            "passed": passed})
+        section.update(
+            {
+                "suite_id": suite["id"],
+                "name": suite["name"],
+                "description": suite["description"],
+                "method": suite["method"],
+                "method_label": METHODS[suite["method"]],
+                "count": len(suite["items"]),
+                "passed": passed,
+            }
+        )
         sections.append(section)
         run["special"] = sections
     settings = runtime_snapshot()
-    run["config"].update({"settings": settings, "model_mode": models.mode, "llm_model": models.llm_model,
-        "embedding_model": models.embedding_model, "rerank_model": models.rerank_model})
+    run["config"].update(
+        {
+            "settings": settings,
+            "model_mode": models.mode,
+            "llm_model": models.llm_model,
+            "embedding_model": models.embedding_model,
+            "rerank_model": models.rerank_model,
+        }
+    )
     if search_config:
         for key in ("pool_size", "return_limit", "min_score", "reranked", "flow"):
             run["config"][key] = search_config.get(key)
     count = sum(section["count"] for section in sections)
     passed = sum(section["passed"] for section in sections)
-    run["summary"] = {"count": count, "passed": passed, "pass_rate": round(passed / count, 4) if count else None,
-        "suites": {section["suite_id"]: {"name": section["name"], "method": section["method"],
-            "count": section["count"], "passed": section["passed"], "modes": section.get("modes") or ["fixed"],
-            "agent_passed": section.get("agent_passed"), "fixed_score": section.get("fixed_score"),
-            "agent_score": section.get("agent_score")} for section in sections}}
+    run["summary"] = {
+        "count": count,
+        "passed": passed,
+        "pass_rate": round(passed / count, 4) if count else None,
+        "suites": {
+            section["suite_id"]: {
+                "name": section["name"],
+                "method": section["method"],
+                "count": section["count"],
+                "passed": section["passed"],
+                "modes": section.get("modes") or ["fixed"],
+                "agent_passed": section.get("agent_passed"),
+                "fixed_score": section.get("fixed_score"),
+                "agent_score": section.get("agent_score"),
+            }
+            for section in sections
+        },
+    }
     if any("agent" in (section.get("modes") or []) for section in sections):
-        run["summary"]["agent_passed"] = sum(section.get("agent_passed") or 0 for section in sections)
+        run["summary"]["agent_passed"] = sum(
+            section.get("agent_passed") or 0 for section in sections
+        )
     return run
 
 
@@ -506,7 +889,9 @@ def by_type(questions):
         question_type = question.get("type")
         if not question_type:
             continue
-        group = groups.setdefault(question_type, {"type": question_type, "count": 0, "passed": 0})
+        group = groups.setdefault(
+            question_type, {"type": question_type, "count": 0, "passed": 0}
+        )
         group["count"] += 1
         group["passed"] += bool(question.get("passed"))
         for key in ("fixed_passed", "agent_passed"):
@@ -534,6 +919,7 @@ def by_type(questions):
 # 检索方式的专项：每题两边各自的得分（规则见 score.py），专项上记两边的平均分和分档计数。
 def attach_scores(section):
     from .score import question_score, summarize_scores
+
     items = {"fixed": [], "agent": []}
     for question in section["questions"]:
         fixed_hits, agent_hits, total = evidence_counts(question)
@@ -545,7 +931,10 @@ def attach_scores(section):
     for mode, selected in items.items():
         if selected:
             scored = summarize_scores(selected)
-            section[f"{mode}_score"], section[f"{mode}_score_bands"] = scored["score"], scored["score_bands"]
+            section[f"{mode}_score"], section[f"{mode}_score_bands"] = (
+                scored["score"],
+                scored["score_bands"],
+            )
 
 
 # 一道专项题两边各命中几条证据、一共几条：固定流程按最后交给模型的资料（given），Agent 按它拿到的全部资料。
@@ -553,7 +942,9 @@ def attach_scores(section):
 def evidence_counts(question):
     fixed = question.get("fixed_evidence")
     agent = (question.get("agent") or {}).get("evidence")
-    total = question.get("evidence_count") or len(fixed or agent or question.get("evidence") or [])
+    total = question.get("evidence_count") or len(
+        fixed or agent or question.get("evidence") or []
+    )
     fixed_hits = sum(1 for item in fixed if item.get("given")) if fixed else None
     agent_hits = sum(1 for item in agent if item.get("found")) if agent else None
     return fixed_hits, agent_hits, total
@@ -561,6 +952,7 @@ def evidence_counts(question):
 
 def memory_suites_variants(compare):
     from .memory import memory_variants
+
     variants = memory_variants(runtime_snapshot())
     return variants if compare else variants[:1]
 
@@ -569,19 +961,31 @@ def memory_suites_variants(compare):
 # 固定流程和 Agent 分开找：各自找上一次跑过这个专项、而且跑了这个模式的评测（旧记录没有 modes，都是固定流程）。
 def attach_previous(run, runs=None):
     from .results import load_run
+
     runs = runs if runs is not None else list_runs()
     loaded = {}
 
     def previous_section(suite_id, mode):
         for candidate in runs:
-            if candidate["id"] >= run["id"] or candidate.get("kind") != "special" or candidate.get("status") != "completed":
+            if (
+                candidate["id"] >= run["id"]
+                or candidate.get("kind") != "special"
+                or candidate.get("status") != "completed"
+            ):
                 continue
             brief = ((candidate.get("summary") or {}).get("suites") or {}).get(suite_id)
             if brief is None or mode not in (brief.get("modes") or ["fixed"]):
                 continue
             if candidate["id"] not in loaded:
                 loaded[candidate["id"]] = load_run(candidate["id"]) or {}
-            before = next((item for item in loaded[candidate["id"]].get("special") or [] if item["suite_id"] == suite_id), None)
+            before = next(
+                (
+                    item
+                    for item in loaded[candidate["id"]].get("special") or []
+                    if item["suite_id"] == suite_id
+                ),
+                None,
+            )
             if before is not None:
                 return candidate, before
         return None, None
@@ -591,17 +995,31 @@ def attach_previous(run, runs=None):
         if "fixed" in modes:
             candidate, before = previous_section(section["suite_id"], "fixed")
             if before is not None:
-                passed = {question["id"]: question.get("fixed_passed", question["passed"]) for question in before["questions"]}
-                section["previous"] = {"id": candidate["id"], "created": candidate["created"], "count": before["count"],
-                    "passed": sum(1 for value in passed.values() if value)}
+                passed = {
+                    question["id"]: question.get("fixed_passed", question["passed"])
+                    for question in before["questions"]
+                }
+                section["previous"] = {
+                    "id": candidate["id"],
+                    "created": candidate["created"],
+                    "count": before["count"],
+                    "passed": sum(1 for value in passed.values() if value),
+                }
                 for question in section["questions"]:
                     question["previous_passed"] = passed.get(question["id"])
         if "agent" in modes:
             candidate, before = previous_section(section["suite_id"], "agent")
             if before is not None:
-                passed = {question["id"]: question.get("agent_passed") for question in before["questions"]}
-                section["previous_agent"] = {"id": candidate["id"], "created": candidate["created"], "count": before["count"],
-                    "passed": before.get("agent_passed")}
+                passed = {
+                    question["id"]: question.get("agent_passed")
+                    for question in before["questions"]
+                }
+                section["previous_agent"] = {
+                    "id": candidate["id"],
+                    "created": candidate["created"],
+                    "count": before["count"],
+                    "passed": before.get("agent_passed"),
+                }
                 for question in section["questions"]:
                     question["previous_agent_passed"] = passed.get(question["id"])
         if modes == ["agent"]:

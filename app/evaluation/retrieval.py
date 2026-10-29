@@ -25,12 +25,28 @@ for step in range(1, 19):
     SWEEP_THRESHOLDS.append(round(step * 0.05, 2))
 # 消融实验与参数对比的变体。每个变体只改一个因素，其他保持默认，这样分数的差异才能归因到这个因素上。
 VARIANTS = {
-    "dense_only": {"label": "仅向量", "suite": "ablation", "options": {"methods": ["dense"]}},
-    "keyword_only": {"label": "仅 BM25", "suite": "ablation", "options": {"methods": ["keyword"]}},
-    "hybrid_no_rerank": {"label": "混合（不重排）", "suite": "ablation", "options": {"rerank": False}},
+    "dense_only": {
+        "label": "仅向量",
+        "suite": "ablation",
+        "options": {"methods": ["dense"]},
+    },
+    "keyword_only": {
+        "label": "仅 BM25",
+        "suite": "ablation",
+        "options": {"methods": ["keyword"]},
+    },
+    "hybrid_no_rerank": {
+        "label": "混合（不重排）",
+        "suite": "ablation",
+        "options": {"rerank": False},
+    },
     "pool_12": {"label": "候选池 12", "suite": "params", "options": {"pool_size": 12}},
     "pool_30": {"label": "候选池 30", "suite": "params", "options": {"pool_size": 30}},
-    "fusion_best": {"label": "多查询取最好名次", "suite": "params", "options": {"fusion": "best"}},
+    "fusion_best": {
+        "label": "多查询取最好名次",
+        "suite": "params",
+        "options": {"fusion": "best"},
+    },
 }
 SUITES = {"ablation": "消融实验", "params": "参数对比"}
 
@@ -46,39 +62,75 @@ def import_corpus(store, models):
         filename = entry["filename"]
         content_sha256 = hashlib.sha256(content.encode()).hexdigest()
         with store.engine.connect() as connection:
-            head = connection.execute(select(document_heads.c.current_document_id).where(
-                document_heads.c.owner == EVAL_OWNER, document_heads.c.title == title)).first()
+            head = connection.execute(
+                select(document_heads.c.current_document_id).where(
+                    document_heads.c.owner == EVAL_OWNER,
+                    document_heads.c.title == title,
+                )
+            ).first()
         replace_id = head[0] if head else None
         doc_key, version = store.next_version(EVAL_OWNER, replace_id)
         # 带上 Contextual Retrieval 开关：开关变化后语料要重新导入，评测才能反映开关的效果。
-        duplicate = store.find_duplicate(EVAL_OWNER, content_sha256, doc_key, getattr(models, "contextual", False))
+        duplicate = store.find_duplicate(
+            EVAL_OWNER, content_sha256, doc_key, getattr(models, "contextual", False)
+        )
         if duplicate:
-            report.append({"title": title, "document_id": duplicate, "status": "unchanged", "sha256": content_sha256})
+            report.append(
+                {
+                    "title": title,
+                    "document_id": duplicate,
+                    "status": "unchanged",
+                    "sha256": content_sha256,
+                }
+            )
             continue
         document_id = str(uuid4())
-        store.mysql.create_document(document_id, EVAL_OWNER, title, filename, "", {"sha256": content_sha256},
-            doc_key=doc_key, version=version, version_note="评测语料", content_sha256=content_sha256)
+        store.mysql.create_document(
+            document_id,
+            EVAL_OWNER,
+            title,
+            filename,
+            "",
+            {"sha256": content_sha256},
+            doc_key=doc_key,
+            version=version,
+            version_note="评测语料",
+            content_sha256=content_sha256,
+        )
         try:
-            count = store.ingest(EVAL_OWNER, title, content, models, document_id, doc_key or document_id)
+            count = store.ingest(
+                EVAL_OWNER, title, content, models, document_id, doc_key or document_id
+            )
             store.activate_version(document_id, count)
         except Exception:
             store.mysql.update_document(document_id, "failed", "评测语料导入失败")
             store.remove_version_data(document_id)
             raise
-        report.append({"title": title, "document_id": document_id, "status": "imported", "chunks": count,
-            "sha256": content_sha256})
+        report.append(
+            {
+                "title": title,
+                "document_id": document_id,
+                "status": "imported",
+                "chunks": count,
+                "sha256": content_sha256,
+            }
+        )
     return report
 
 
 # 读取评测用户当前版本的全部分片原文 {分片 id: 文本}。
 # 检索诊断里只有 80 字预览，判断"分片是否包含证据原文"需要完整文本，所以一次性从 MySQL 取出。
 def current_chunk_texts(store):
-    joined = document_heads.join(document_chunks,
-        document_chunks.c.document_id == document_heads.c.current_document_id).join(
-        chunks, chunks.c.id == document_chunks.c.chunk_id)
+    joined = document_heads.join(
+        document_chunks,
+        document_chunks.c.document_id == document_heads.c.current_document_id,
+    ).join(chunks, chunks.c.id == document_chunks.c.chunk_id)
     with store.engine.connect() as connection:
-        rows = connection.execute(select(chunks.c.id, chunks.c.text).select_from(joined).where(
-            document_heads.c.owner == EVAL_OWNER)).all()
+        rows = connection.execute(
+            select(chunks.c.id, chunks.c.text)
+            .select_from(joined)
+            .where(document_heads.c.owner == EVAL_OWNER)
+        ).all()
     texts = {}
     for chunk_id, text in rows:
         texts[chunk_id] = normalize(text)
@@ -86,16 +138,33 @@ def current_chunk_texts(store):
 
 
 def scoring_item(store, item):
-    if not item.get("evidence_groups") or any(isinstance(value, dict) for value in item.get("evidence", [])):
+    if not item.get("evidence_groups") or any(
+        isinstance(value, dict) for value in item.get("evidence", [])
+    ):
         return item
-    joined = document_heads.join(document_chunks,
-        document_chunks.c.document_id == document_heads.c.current_document_id).join(
-        chunks, chunks.c.id == document_chunks.c.chunk_id)
+    joined = document_heads.join(
+        document_chunks,
+        document_chunks.c.document_id == document_heads.c.current_document_id,
+    ).join(chunks, chunks.c.id == document_chunks.c.chunk_id)
     with store.engine.connect() as connection:
-        catalog = connection.execute(select(document_heads.c.title, document_chunks.c.position,
-            document_chunks.c.chunk_id, chunks.c.content).select_from(joined).where(
-            document_heads.c.owner == EVAL_OWNER)).mappings().all()
-    return {**item, "evidence": bind_groups(item["evidence"], item["evidence_groups"], catalog)}
+        catalog = (
+            connection.execute(
+                select(
+                    document_heads.c.title,
+                    document_chunks.c.position,
+                    document_chunks.c.chunk_id,
+                    chunks.c.content,
+                )
+                .select_from(joined)
+                .where(document_heads.c.owner == EVAL_OWNER)
+            )
+            .mappings()
+            .all()
+        )
+    return {
+        **item,
+        "evidence": bind_groups(item["evidence"], item["evidence_groups"], catalog),
+    }
 
 
 # 按规则补全指代、用原问题检索（不调用模型）。固定流程现在和线上一样用大模型改写（见 app/evaluation/flow.py），
@@ -198,23 +267,42 @@ def score_question(item, retrieval, chunk_texts, pool_size):
             if index in hits.get(row["chunk_id"], []):
                 if best is None or row["rrf_rank"] < best["rrf_rank"]:
                     best = row
-        evidence_rows.append({**evidence_fields(text), "chunk_id": best["chunk_id"] if best else None,
-            "rrf_rank": best["rrf_rank"] if best else None,
-            "rerank_rank": best.get("rerank_rank") if best else None,
-            "rerank_probability": best.get("rerank_probability") if best else None,
-            "source_id": best.get("source_id") if best else None,
-            "status": best["status"] if best else "not_recalled"})
+        evidence_rows.append(
+            {
+                **evidence_fields(text),
+                "chunk_id": best["chunk_id"] if best else None,
+                "filter_stages": sorted(
+                    {
+                        row["status"]
+                        for row in candidates
+                        if index in hits.get(row["chunk_id"], [])
+                    }
+                ),
+                "filter_reranked": bool(config["reranked"]),
+                "rrf_rank": best["rrf_rank"] if best else None,
+                "rerank_rank": best.get("rerank_rank") if best else None,
+                "rerank_probability": best.get("rerank_probability") if best else None,
+                "source_id": best.get("source_id") if best else None,
+                "status": best["status"] if best else "not_recalled",
+            }
+        )
     # 交给回答模型的资料（given）：最终来源经过父块扩展，正文里拼进了相邻分片；这些分片里的证据模型也看得到。
     # 上面三个阶段只认命中的那一个分片（用来调召回、重排、阈值），这里把父块里的分片都算上，
     # 和 Agent 比较时用它，两边口径一致（Agent 那边同样算父块里的分片，再加上 read_context 读到的）。
-    given_found = sorted(evidence_found(retrieval.get("sources"), evidence, chunk_texts))
+    given_found = sorted(
+        evidence_found(retrieval.get("sources"), evidence, chunk_texts)
+    )
     for index, row in enumerate(evidence_rows):
         row["given"] = index in given_found
     # 候选池的精简记录（按重排顺序的概率和包含的证据），用于离线阈值扫描。
     pool = []
     for row in pool_rows:
-        pool.append({"p": row["rerank_probability"] if config["reranked"] else None,
-            "ev": hits.get(row["chunk_id"], [])})
+        pool.append(
+            {
+                "p": row["rerank_probability"] if config["reranked"] else None,
+                "ev": hits.get(row["chunk_id"], []),
+            }
+        )
     stats = retrieval["stats"]
     # 每一路检索词各自召回了什么：固定流程把扩展出来的几路检索词分别检索（向量、关键词各一张排名表），
     # 再用 RRF 合并、重排。这里按检索词拆开记：召回了几段、其中含哪几条证据、证据最好排第几、有几段留到了最后。
@@ -222,8 +310,16 @@ def score_question(item, retrieval, chunk_texts, pool_size):
     routes = {}
     for row in candidates:
         for contribution in row.get("contributions") or []:
-            route = routes.setdefault(contribution["query"], {"query": contribution["query"], "chunks": set(),
-                "evidence": set(), "best": {}, "kept": set()})
+            route = routes.setdefault(
+                contribution["query"],
+                {
+                    "query": contribution["query"],
+                    "chunks": set(),
+                    "evidence": set(),
+                    "best": {},
+                    "kept": set(),
+                },
+            )
             route["chunks"].add(row["chunk_id"])
             if row["status"] == "returned":
                 route["kept"].add(row["chunk_id"])
@@ -234,54 +330,105 @@ def score_question(item, retrieval, chunk_texts, pool_size):
                 if label not in best or contribution["rank"] < best[label]:
                     best[label] = contribution["rank"]
     # kept_ids：这一路召回、最后交给模型的分片，页面上逐段列资料时写「第几路命中」。
-    query_routes = [{"query": route["query"], "recalled": len(route["chunks"]), "kept": len(route["kept"]),
-        "kept_ids": sorted(str(chunk_id) for chunk_id in route["kept"]),
-        "evidence": sorted(route["evidence"]),
-        "best": [{"evidence": index, **ranks} for index, ranks in sorted(route["best"].items())]} for route in routes.values()]
-    return {"id": item["id"], "question": item["question"], "type": item["type"],
+    query_routes = [
+        {
+            "query": route["query"],
+            "recalled": len(route["chunks"]),
+            "kept": len(route["kept"]),
+            "kept_ids": sorted(str(chunk_id) for chunk_id in route["kept"]),
+            "evidence": sorted(route["evidence"]),
+            "best": [
+                {"evidence": index, **ranks}
+                for index, ranks in sorted(route["best"].items())
+            ],
+        }
+        for route in routes.values()
+    ]
+    return {
+        "id": item["id"],
+        "question": item["question"],
+        "type": item["type"],
         # 题目仍独立计分；保留题对关系只用于评测结果中的成对分析。
-        "pair_id": item.get("pair_id"), "pair_role": item.get("pair_role"),
-        "answerable": bool(item.get("answerable")), "evidence_count": len(evidence),
-        "stages": stages, "lost_stage": lost, "evidence": evidence_rows,
+        "pair_id": item.get("pair_id"),
+        "pair_role": item.get("pair_role"),
+        "answerable": bool(item.get("answerable")),
+        "evidence_count": len(evidence),
+        "stages": stages,
+        "lost_stage": lost,
+        "evidence": evidence_rows,
         "given_recall": len(given_found) / len(evidence) if evidence else None,
-        "returned": stats["returned"], "pool": pool,
-        "max_probability": max((row["p"] for row in pool if row["p"] is not None), default=None),
+        "returned": stats["returned"],
+        "pool": pool,
+        "max_probability": max(
+            (row["p"] for row in pool if row["p"] is not None), default=None
+        ),
         "query_routes": query_routes,
-        "recall_ms": stats.get("recall_ms"), "rerank_ms": stats.get("rerank_ms")}
+        "recall_ms": stats.get("recall_ms"),
+        "rerank_ms": stats.get("rerank_ms"),
+    }
 
 
 # 交给模型的资料有多少：几段、多少字、约多少 token（按记忆模块的估算：中日韩文字一个算 1，其他 4 个字符算 1）。
 # 只算资料正文，不含提示词和对话；Agent 的输入 token 里同一份资料每轮都会再发一次，所以比这个大得多。
 def material(sources):
     from ..memory.framework import text_tokens
-    texts = [source.get("text") or source.get("answer") or "" for source in sources or []]
+
+    texts = [
+        source.get("text") or source.get("answer") or "" for source in sources or []
+    ]
     # items：每段各多少字、约多少 token（按分片编号对应），页面上逐段列出交给模型的资料时用。
-    items = [{"chunk_id": source.get("chunk_id"), "chars": len(text), "tokens": text_tokens(text)}
-        for source, text in zip(sources or [], texts)]
-    return {"count": len(texts), "chars": sum(len(text) for text in texts), "tokens": sum(text_tokens(text) for text in texts),
-        "items": items}
+    items = [
+        {
+            "chunk_id": source.get("chunk_id"),
+            "chars": len(text),
+            "tokens": text_tokens(text),
+        }
+        for source, text in zip(sources or [], texts)
+    ]
+    return {
+        "count": len(texts),
+        "chars": sum(len(text) for text in texts),
+        "tokens": sum(text_tokens(text) for text in texts),
+        "items": items,
+    }
 
 
 # 一组题平均交给模型多少资料（段数、token）；没有记录（旧结果）时是 None。
 def material_summary(materials, prefix):
     materials = [item for item in materials if item]
     if not materials:
-        return {f"{prefix}material_avg_count": None, f"{prefix}material_avg_tokens": None, f"{prefix}material_avg_chars": None}
-    return {f"{prefix}material_avg_count": mean([item["count"] for item in materials]),
+        return {
+            f"{prefix}material_avg_count": None,
+            f"{prefix}material_avg_tokens": None,
+            f"{prefix}material_avg_chars": None,
+        }
+    return {
+        f"{prefix}material_avg_count": mean([item["count"] for item in materials]),
         f"{prefix}material_avg_tokens": mean([item["tokens"] for item in materials]),
-        f"{prefix}material_avg_chars": mean([item["chars"] for item in materials])}
+        f"{prefix}material_avg_chars": mean([item["chars"] for item in materials]),
+    }
 
 
 # 一批来源交给模型的分片（含父块扩展拼进来的）里找到了哪几条证据，返回证据序号集合。
 def evidence_found(sources, evidence, chunk_texts):
-    hits = evidence_hits([{"chunk_id": chunk_id} for chunk_id in given_chunk_ids(sources)], evidence, chunk_texts)
+    hits = evidence_hits(
+        [{"chunk_id": chunk_id} for chunk_id in given_chunk_ids(sources)],
+        evidence,
+        chunk_texts,
+    )
     return {index for indexes in hits.values() for index in indexes}
 
 
 # 一批来源里，检索命中的那一片本身（不算父块扩展拼进来的相邻分片）含哪几条证据。
 def evidence_found_main(sources, evidence, chunk_texts):
-    ids = [str(source["chunk_id"]) for source in sources or [] if source.get("chunk_id") is not None]
-    hits = evidence_hits([{"chunk_id": chunk_id} for chunk_id in ids], evidence, chunk_texts)
+    ids = [
+        str(source["chunk_id"])
+        for source in sources or []
+        if source.get("chunk_id") is not None
+    ]
+    hits = evidence_hits(
+        [{"chunk_id": chunk_id} for chunk_id in ids], evidence, chunk_texts
+    )
     return {index for indexes in hits.values() for index in indexes}
 
 
@@ -293,7 +440,9 @@ def mark_extension(row, sources, evidence, chunk_texts):
     row["given_hits"] = len(given)
     row["ext_hits"] = len(given - main)
     for index, entry in enumerate(row.get("evidence") or []):
-        entry["via"] = None if index not in given else "direct" if index in main else "extension"
+        entry["via"] = (
+            None if index not in given else "direct" if index in main else "extension"
+        )
 
 
 # 求平均，空列表返回 None（表示这一组没有可统计的题），避免除零。
@@ -323,7 +472,11 @@ def summarize(rows):
             answerable.append(row)
         else:
             unanswerable.append(row)
-    summary = {"count": len(rows), "answerable_count": len(answerable), "unanswerable_count": len(unanswerable)}
+    summary = {
+        "count": len(rows),
+        "answerable_count": len(answerable),
+        "unanswerable_count": len(unanswerable),
+    }
     for stage in ("pool", "top", "final"):
         recalls = []
         reciprocals = []
@@ -332,21 +485,36 @@ def summarize(rows):
             reciprocals.append(row["stages"][stage]["rr"])
         summary[f"recall_{stage}"] = mean(recalls)
         summary[f"mrr_{stage}"] = mean(reciprocals)
-    given = [row["given_recall"] for row in answerable if row.get("given_recall") is not None]
+    given = [
+        row["given_recall"] for row in answerable if row.get("given_recall") is not None
+    ]
     summary["recall_given"] = mean(given)
     summary.update(material_summary([row.get("material") for row in rows], ""))
     # 得分：全部找到 100，部分按比例最高 90，一条没找到按证据条数扣分（规则见 score.py）。
     from .score import fixed_item, summarize_scores
+
     scored = summarize_scores([fixed_item(row) for row in rows if row.get("stages")])
     summary["score"], summary["score_bands"] = scored["score"], scored["score_bands"]
     summary.update(summarize_flow(rows, answerable, unanswerable))
     # 扩展命中率：拿到的证据里靠父块扩展拿到的比例；不扩展的话，这部分证据就拿不到。
     counted = [row for row in answerable if "ext_hits" in row]
     given_total = sum(row["given_hits"] for row in counted)
-    summary["ext_hit_rate"] = round(sum(row["ext_hits"] for row in counted) / given_total, 4) if given_total else None
+    summary["ext_hit_rate"] = (
+        round(sum(row["ext_hits"] for row in counted) / given_total, 4)
+        if given_total
+        else None
+    )
     # 检索命中率：证据命中里去掉靠父块扩展拿到的，只算检索本身命中的那一片（分母和资料命中率一样，是全部证据条数）。
     evidence_total = sum(row["evidence_count"] for row in counted)
-    summary["recall_direct"] = round(sum(row["given_hits"] - row["ext_hits"] for row in counted) / evidence_total, 4) if evidence_total else None
+    summary["recall_direct"] = (
+        round(
+            sum(row["given_hits"] - row["ext_hits"] for row in counted)
+            / evidence_total,
+            4,
+        )
+        if evidence_total
+        else None
+    )
     rejected = 0
     for row in answerable:
         if row["returned"] == 0:
@@ -355,15 +523,21 @@ def summarize(rows):
     for row in unanswerable:
         if row["returned"] > 0:
             accepted += 1
-    summary["false_reject_rate"] = round(rejected / len(answerable), 4) if answerable else None
-    summary["false_accept_rate"] = round(accepted / len(unanswerable), 4) if unanswerable else None
+    summary["false_reject_rate"] = (
+        round(rejected / len(answerable), 4) if answerable else None
+    )
+    summary["false_accept_rate"] = (
+        round(accepted / len(unanswerable), 4) if unanswerable else None
+    )
     latencies = []
     rerank_times = []
     for row in rows:
         latencies.append(row["latency_ms"])
         if row.get("rerank_ms") is not None:
             rerank_times.append(row["rerank_ms"])
-    summary["latency_avg_ms"] = round(sum(latencies) / len(latencies)) if latencies else None
+    summary["latency_avg_ms"] = (
+        round(sum(latencies) / len(latencies)) if latencies else None
+    )
     summary["latency_p95_ms"] = percentile(latencies, 0.95)
     summary["rerank_max_ms"] = max(rerank_times) if rerank_times else None
     return summary
@@ -379,27 +553,66 @@ def summarize(rows):
 #   rewrite_cache_rate：大模型改写里用了缓存的比例；flow_latency_avg_ms：改写 + 检索 + 判断的平均耗时。
 def summarize_flow(rows, answerable, unanswerable):
     checked = [row for row in rows if (row.get("sufficiency") or {}).get("checked")]
-    first = [row["first_given_recall"] for row in answerable if row.get("first_given_recall") is not None]
-    rescued = sum(1 for row in answerable if row.get("first_given_recall") is not None and row.get("given_recall") is not None
-        and row["given_recall"] > row["first_given_recall"])
+    first = [
+        row["first_given_recall"]
+        for row in answerable
+        if row.get("first_given_recall") is not None
+    ]
+    rescued = sum(
+        1
+        for row in answerable
+        if row.get("first_given_recall") is not None
+        and row.get("given_recall") is not None
+        and row["given_recall"] > row["first_given_recall"]
+    )
     checked_ids = {id(row) for row in checked}
     answerable_checked = [row for row in answerable if id(row) in checked_ids]
     unanswerable_checked = [row for row in unanswerable if id(row) in checked_ids]
     llm = [row for row in rows if (row.get("rewrite") or {}).get("classifier") == "llm"]
-    flow_latencies = [row["flow_latency_ms"] for row in rows if row.get("flow_latency_ms") is not None]
+    flow_latencies = [
+        row["flow_latency_ms"] for row in rows if row.get("flow_latency_ms") is not None
+    ]
     return {
         "recall_given_first": mean(first),
-        "sufficiency_checked": len(checked) if any("sufficiency" in row for row in rows) else None,
+        "sufficiency_checked": len(checked)
+        if any("sufficiency" in row for row in rows)
+        else None,
         "rescued_count": rescued if checked else None,
-        "wrong_clear_rate": round(sum(1 for row in answerable_checked if row.get("cleared")) / len(answerable), 4)
-            if answerable_checked else None,
-        "right_clear_rate": round(sum(1 for row in unanswerable_checked if row.get("cleared")) / len(unanswerable), 4)
-            if unanswerable_checked else None,
-        "retry_rate": round(sum(1 for row in checked if row["sufficiency"].get("retried")) / len(checked), 4) if checked else None,
-        "avg_judge_calls": mean([row["sufficiency"].get("calls", 0) for row in checked]),
-        "judge_error_count": sum(row["sufficiency"].get("errors", 0) for row in checked) if checked else None,
-        "rewrite_cache_rate": round(sum(1 for row in llm if row["rewrite"].get("cached")) / len(llm), 4) if llm else None,
-        "flow_latency_avg_ms": round(sum(flow_latencies) / len(flow_latencies)) if flow_latencies else None,
+        "wrong_clear_rate": round(
+            sum(1 for row in answerable_checked if row.get("cleared"))
+            / len(answerable),
+            4,
+        )
+        if answerable_checked
+        else None,
+        "right_clear_rate": round(
+            sum(1 for row in unanswerable_checked if row.get("cleared"))
+            / len(unanswerable),
+            4,
+        )
+        if unanswerable_checked
+        else None,
+        "retry_rate": round(
+            sum(1 for row in checked if row["sufficiency"].get("retried"))
+            / len(checked),
+            4,
+        )
+        if checked
+        else None,
+        "avg_judge_calls": mean(
+            [row["sufficiency"].get("calls", 0) for row in checked]
+        ),
+        "judge_error_count": sum(row["sufficiency"].get("errors", 0) for row in checked)
+        if checked
+        else None,
+        "rewrite_cache_rate": round(
+            sum(1 for row in llm if row["rewrite"].get("cached")) / len(llm), 4
+        )
+        if llm
+        else None,
+        "flow_latency_avg_ms": round(sum(flow_latencies) / len(flow_latencies))
+        if flow_latencies
+        else None,
     }
 
 
@@ -459,19 +672,31 @@ def summarize_paraphrase_pairs(rows):
                 statuses[stage] = "gained"
             else:
                 statuses[stage] = "both_missed"
-        pairs.append({
-            "pair_id": pair_id,
-            "original": {"id": original["id"], "question": original["question"]},
-            "paraphrase": {"id": paraphrase["id"], "question": paraphrase["question"]},
-            "statuses": statuses,
-        })
+        pairs.append(
+            {
+                "pair_id": pair_id,
+                "original": {"id": original["id"], "question": original["question"]},
+                "paraphrase": {
+                    "id": paraphrase["id"],
+                    "question": paraphrase["question"],
+                },
+                "statuses": statuses,
+            }
+        )
 
     if not pairs:
         return None
 
     original_summary = summarize(original_rows)
     paraphrase_summary = summarize(paraphrase_rows)
-    metric_keys = ["recall_pool", "recall_top", "recall_final", "mrr_top", "false_reject_rate", "false_accept_rate"]
+    metric_keys = [
+        "recall_pool",
+        "recall_top",
+        "recall_final",
+        "mrr_top",
+        "false_reject_rate",
+        "false_accept_rate",
+    ]
     metrics = {}
     for key in metric_keys:
         original_value = original_summary.get(key)
@@ -479,7 +704,9 @@ def summarize_paraphrase_pairs(rows):
         metrics[key] = {
             "original": original_value,
             "paraphrase": paraphrase_value,
-            "delta": round(paraphrase_value - original_value, 4) if original_value is not None and paraphrase_value is not None else None,
+            "delta": round(paraphrase_value - original_value, 4)
+            if original_value is not None and paraphrase_value is not None
+            else None,
         }
 
     # 保持率只看原问题已经完整命中的题对，避免把原问题本身失败造成的噪声算成改写损失。
@@ -488,17 +715,27 @@ def summarize_paraphrase_pairs(rows):
         eligible = 0
         retained = 0
         for pair in pairs:
-            original = next(row for row in original_rows if row["id"] == pair["original"]["id"])
-            paraphrase = next(row for row in paraphrase_rows if row["id"] == pair["paraphrase"]["id"])
+            original = next(
+                row for row in original_rows if row["id"] == pair["original"]["id"]
+            )
+            paraphrase = next(
+                row for row in paraphrase_rows if row["id"] == pair["paraphrase"]["id"]
+            )
             if original["stages"][stage]["recall"] == 1:
                 eligible += 1
                 if paraphrase["stages"][stage]["recall"] == 1:
                     retained += 1
         retention[stage] = round(retained / eligible, 4) if eligible else None
 
-    return {"pair_count": len(pairs), "question_count": len(pairs) * 2,
-        "original": original_summary, "paraphrase": paraphrase_summary,
-        "metrics": metrics, "retention": retention, "pairs": pairs}
+    return {
+        "pair_count": len(pairs),
+        "question_count": len(pairs) * 2,
+        "original": original_summary,
+        "paraphrase": paraphrase_summary,
+        "metrics": metrics,
+        "retention": retention,
+        "pairs": pairs,
+    }
 
 
 # 离线阈值扫描：对每个阈值重算误杀率、漏放率和过滤后召回率。
@@ -521,15 +758,25 @@ def threshold_sweep(rows, return_limit):
                 for item in kept:
                     for index in item["ev"]:
                         found.add(index)
-                recalls.append(len(found) / row["evidence_count"] if row["evidence_count"] else 0)
+                recalls.append(
+                    len(found) / row["evidence_count"] if row["evidence_count"] else 0
+                )
             else:
                 unanswerable += 1
                 if kept:
                     accepted += 1
-        points.append({"threshold": threshold,
-            "false_reject_rate": round(rejected / answerable, 4) if answerable else None,
-            "false_accept_rate": round(accepted / unanswerable, 4) if unanswerable else None,
-            "recall_final": mean(recalls)})
+        points.append(
+            {
+                "threshold": threshold,
+                "false_reject_rate": round(rejected / answerable, 4)
+                if answerable
+                else None,
+                "false_accept_rate": round(accepted / unanswerable, 4)
+                if unanswerable
+                else None,
+                "recall_final": mean(recalls),
+            }
+        )
     return points
 
 
@@ -547,7 +794,9 @@ def return_limit_sweep(rows, threshold, pool_size):
         for row in rows:
             kept = filter_pool(row["pool"], threshold, limit)
             returned.append(len(kept))
-            passing = sum(1 for item in row["pool"] if item["p"] is None or item["p"] >= threshold)
+            passing = sum(
+                1 for item in row["pool"] if item["p"] is None or item["p"] >= threshold
+            )
             if passing > limit:
                 capped += 1
             if not row["answerable"] or not row["evidence_count"]:
@@ -561,9 +810,19 @@ def return_limit_sweep(rows, threshold, pool_size):
             complete += recall == 1
             if row["evidence_count"] > 1:
                 multi.append(recall)
-        points.append({"return_limit": limit, "recall_final": mean(recalls), "complete": complete,
-            "answerable": len(recalls), "multi_evidence_recall": mean(multi) if multi else None,
-            "multi_evidence": len(multi), "avg_returned": mean(returned), "capped": capped, "total": len(rows)})
+        points.append(
+            {
+                "return_limit": limit,
+                "recall_final": mean(recalls),
+                "complete": complete,
+                "answerable": len(recalls),
+                "multi_evidence_recall": mean(multi) if multi else None,
+                "multi_evidence": len(multi),
+                "avg_returned": mean(returned),
+                "capped": capped,
+                "total": len(rows),
+            }
+        )
     return points
 
 
@@ -573,8 +832,17 @@ def return_limit_sweep(rows, threshold, pool_size):
 # 这样变体和基线的差别只来自参数。
 # 耗时：latency_ms 只算第一次检索（调参看这个，和旧记录可比）；flow_latency_ms 是改写 + 检索 + 判断的总耗时
 # （用了改写缓存时，改写按当时实际花的时间算），和 Agent 比耗时用它。
-def evaluate_items(store, models, items, chunk_texts, options, keep_diagnostics, on_item=None, rewrites=None,
-        judge=False):
+def evaluate_items(
+    store,
+    models,
+    items,
+    chunk_texts,
+    options,
+    keep_diagnostics,
+    on_item=None,
+    rewrites=None,
+    judge=False,
+):
     tool = DocumentSearchTool()
     pool_size = options.get("pool_size") or runtime_snapshot()["rerank_candidates"]
     rows = []
@@ -587,26 +855,58 @@ def evaluate_items(store, models, items, chunk_texts, options, keep_diagnostics,
                 rewrites[item["id"]] = rewrite
         queries, rerank_query = rewrite["queries"], rewrite["standalone_query"]
         started = time.monotonic()
-        retrieval = tool.execute(store, models, EVAL_OWNER, queries, rerank_query, **options)
+        retrieval = tool.execute(
+            store, models, EVAL_OWNER, queries, rerank_query, **options
+        )
         latency_ms = round((time.monotonic() - started) * 1000)
         row = score_question(item, retrieval, chunk_texts, pool_size)
-        row.update({"latency_ms": latency_ms, "queries": queries, "rerank_query": rerank_query,
-            "query_source": rewrite["classifier"],
-            "rewrite": {key: rewrite.get(key) for key in ("classifier", "route", "intent", "cached", "duration_ms", "fallback_reason")}})
+        row.update(
+            {
+                "latency_ms": latency_ms,
+                "queries": queries,
+                "rerank_query": rerank_query,
+                "query_source": rewrite["classifier"],
+                "rewrite": {
+                    key: rewrite.get(key)
+                    for key in (
+                        "classifier",
+                        "route",
+                        "intent",
+                        "cached",
+                        "duration_ms",
+                        "fallback_reason",
+                    )
+                },
+            }
+        )
         if judge:
             evidence = item.get("evidence") or []
             started = time.monotonic()
-            check = tool.check_sufficiency(store, models, EVAL_OWNER, queries, rerank_query, retrieval, **options)
+            check = tool.check_sufficiency(
+                store, models, EVAL_OWNER, queries, rerank_query, retrieval, **options
+            )
             check_ms = round((time.monotonic() - started) * 1000)
-            apply_sufficiency(row, check, lambda sources: evidence_found(sources, evidence, chunk_texts),
-                retrieval["sources"], len(evidence), keep_diagnostics)
+            apply_sufficiency(
+                row,
+                check,
+                lambda sources: evidence_found(sources, evidence, chunk_texts),
+                retrieval["sources"],
+                len(evidence),
+                keep_diagnostics,
+            )
             if check.get("retried"):
                 retry = check["retry_retrieval"]
                 retry_score = score_question(item, retry, chunk_texts, pool_size)
                 mark_extension(retry_score, retry["sources"], evidence, chunk_texts)
-                row["retry"].update({"queries": [*queries, check["retry_query"]],
-                    "query_routes": retry_score["query_routes"], "evidence": retry_score["evidence"],
-                    "recall_ms": retry_score["recall_ms"], "rerank_ms": retry_score["rerank_ms"]})
+                row["retry"].update(
+                    {
+                        "queries": [*queries, check["retry_query"]],
+                        "query_routes": retry_score["query_routes"],
+                        "evidence": retry_score["evidence"],
+                        "recall_ms": retry_score["recall_ms"],
+                        "rerank_ms": retry_score["rerank_ms"],
+                    }
+                )
             row["check_ms"] = check_ms
             mark_extension(row, check["sources"], evidence, chunk_texts)
             row["material"] = material(check["sources"])
@@ -614,7 +914,9 @@ def evaluate_items(store, models, items, chunk_texts, options, keep_diagnostics,
             # 生成评测接着回答时直接用这次的判断结果，不再判断一次（见 results.answer_hook）。
             retrieval["sufficiency_check"] = check
         if not judge:
-            mark_extension(row, retrieval["sources"], item.get("evidence") or [], chunk_texts)
+            mark_extension(
+                row, retrieval["sources"], item.get("evidence") or [], chunk_texts
+            )
             row["material"] = material(retrieval["sources"])
         if keep_diagnostics:
             row["diagnostics"] = retrieval["diagnostics"]
@@ -629,16 +931,25 @@ def evaluate_items(store, models, items, chunk_texts, options, keep_diagnostics,
 # 对比两次评测时据此提示"检索口径不同"（旧记录没有 flow，是规则检索词、只检索）。
 def flow_config(models, rows):
     from .. import prompts
+
     rewrites = [row.get("rewrite") or {} for row in rows]
     llm = [item for item in rewrites if item.get("classifier") == "llm"]
-    return {"name": "full", "intent_prompt": prompts.tag("intent"), "model": models.llm_model,
-        "rewrite_cached": sum(1 for item in llm if item.get("cached")), "rewrite_fresh": sum(1 for item in llm if not item.get("cached")),
-        "sufficiency": models.mode == "openai" and bool(runtime_snapshot()["sufficiency_check"])}
+    return {
+        "name": "full",
+        "intent_prompt": prompts.tag("intent"),
+        "model": models.llm_model,
+        "rewrite_cached": sum(1 for item in llm if item.get("cached")),
+        "rewrite_fresh": sum(1 for item in llm if not item.get("cached")),
+        "sufficiency": models.mode == "openai"
+        and bool(runtime_snapshot()["sufficiency_check"]),
+    }
 
 
 # 运行一次完整的检索评测：导入语料 → 基线逐题评测 → 汇总、分组、漏斗、阈值扫描 → 可选的消融与参数对比。
 # on_progress(已完成, 总数) 用于把进度写回结果文件，前端据此显示进度条。
-def run_retrieval(store, models, items, split, suites=(), on_progress=None, on_item=None):
+def run_retrieval(
+    store, models, items, split, suites=(), on_progress=None, on_item=None
+):
     corpus = import_corpus(store, models)
     chunk_texts = current_chunk_texts(store)
     selected = select_split(items, split)
@@ -661,7 +972,9 @@ def run_retrieval(store, models, items, split, suites=(), on_progress=None, on_i
         advance()
 
     rewrites = {}
-    rows = evaluate_items(store, models, selected, chunk_texts, {}, True, advance_baseline, rewrites, True)
+    rows = evaluate_items(
+        store, models, selected, chunk_texts, {}, True, advance_baseline, rewrites, True
+    )
     # 重排关闭或调用失败时没有相关性阈值，也无法做阈值扫描；配置里如实记录，避免把"未过滤"误读成"阈值很低"。
     min_score = None
     reranked = False
@@ -676,22 +989,62 @@ def run_retrieval(store, models, items, split, suites=(), on_progress=None, on_i
     variants = []
     for name in variant_names:
         variant = VARIANTS[name]
-        variant_rows = evaluate_items(store, models, selected, chunk_texts, variant["options"], False,
-            advance, rewrites)
-        variants.append({"name": name, "label": variant["label"], "suite": variant["suite"],
-            "options": variant["options"], "summary": summarize(variant_rows), "funnel": funnel(variant_rows),
-            "by_type": summarize_by_type(variant_rows)})
+        variant_rows = evaluate_items(
+            store,
+            models,
+            selected,
+            chunk_texts,
+            variant["options"],
+            False,
+            advance,
+            rewrites,
+        )
+        variants.append(
+            {
+                "name": name,
+                "label": variant["label"],
+                "suite": variant["suite"],
+                "options": variant["options"],
+                "summary": summarize(variant_rows),
+                "funnel": funnel(variant_rows),
+                "by_type": summarize_by_type(variant_rows),
+            }
+        )
     # 记下这次评测实际用的全部系统参数（设置页可改），对比两次评测时能看出参数是否相同。
     settings = runtime_snapshot()
-    config = {"split": split, "dataset_size": len(selected), "suites": list(suites), "rrf_k": settings["rrf_k"],
-        "pool_size": settings["rerank_candidates"], "return_limit": settings["return_limit"], "min_score": min_score,
-        "reranked": reranked, "fusion": "sum", "methods": ["dense", "keyword"],
-        "model_mode": models.mode, "embedding_mode": models.embedding_mode,
-        "embedding_model": models.embedding_model, "rerank_model": models.rerank_model,
-        "rerank_mode": "local" if settings["rerank_enabled"] else "off", "query_source": sorted(query_sources),
+    config = {
+        "split": split,
+        "dataset_size": len(selected),
+        "suites": list(suites),
+        "rrf_k": settings["rrf_k"],
+        "pool_size": settings["rerank_candidates"],
+        "return_limit": settings["return_limit"],
+        "min_score": min_score,
+        "reranked": reranked,
+        "fusion": "sum",
+        "methods": ["dense", "keyword"],
+        "model_mode": models.mode,
+        "embedding_mode": models.embedding_mode,
+        "embedding_model": models.embedding_model,
+        "rerank_model": models.rerank_model,
+        "rerank_mode": "local" if settings["rerank_enabled"] else "off",
+        "query_source": sorted(query_sources),
         "flow": flow_config(models, rows),
-        "corpus": corpus, "settings": settings}
-    return {"config": config, "summary": summarize(rows), "by_type": summarize_by_type(rows),
-        "funnel": funnel(rows), "sweep": threshold_sweep(rows, settings["return_limit"]) if reranked else [],
-        "limit_sweep": return_limit_sweep(rows, min_score, settings["rerank_candidates"]) if reranked else [],
-        "variants": variants, "paraphrase": summarize_paraphrase_pairs(rows), "questions": rows}
+        "corpus": corpus,
+        "settings": settings,
+    }
+    return {
+        "config": config,
+        "summary": summarize(rows),
+        "by_type": summarize_by_type(rows),
+        "funnel": funnel(rows),
+        "sweep": threshold_sweep(rows, settings["return_limit"]) if reranked else [],
+        "limit_sweep": return_limit_sweep(
+            rows, min_score, settings["rerank_candidates"]
+        )
+        if reranked
+        else [],
+        "variants": variants,
+        "paraphrase": summarize_paraphrase_pairs(rows),
+        "questions": rows,
+    }

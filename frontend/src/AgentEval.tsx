@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { ChunkOriginalDialog, type ChunkOriginal } from "./ChunkOriginalDialog";
 import { DetailDialog } from "./DetailDialog";
 import {
@@ -15,6 +15,7 @@ import {
   type EvalSpecialSection,
   type EvalSummary,
 } from "./api";
+import { EvidenceFilterSummary } from "./EvidenceFilterSummary";
 import { ScoringItems } from "./ScoringItems";
 import { newEvidenceHits, evidenceFilterReason } from "./newEvidenceHits";
 import "./AgentEvidence.css";
@@ -888,11 +889,14 @@ function modeRows(
     label: "扩展命中",
     ...pick(
       fixedVia
-        ? { value: `${fixed.ext} 条`, note: "只在父块扩展的分片里" }
+        ? {
+            value: ratio(fixed.ext, evidenceTotal),
+            note: "只在父块扩展的分片里",
+          }
         : noVia,
       agentVia
         ? {
-            value: `${agent.ext} 条`,
+            value: ratio(agent.ext, evidenceTotal),
             note: agent.context
               ? `只在父块扩展的分片里 · 读前后文 ${agent.context} 条`
               : "只在父块扩展的分片里",
@@ -1140,21 +1144,25 @@ function ModeCards({
         const cell = row[side];
         if (!cell) return null;
         return (
-          <div
-            key={row.label}
-            className={`ag-mode-row is-${row.group}${index > 0 && rows[index - 1].group !== row.group ? " is-break" : ""}`}
-          >
-            <span className="ag-mode-label">{row.label}</span>
-            <span className="ag-mode-value">
-              <b>{cell.value}</b>
-              {cell.best && (
-                <Tag tone="success" size="sm">
-                  {row.label === "得分" ? "✓ 更高" : "✓ 更多"}
-                </Tag>
-              )}
-              {cell.note && <small>{cell.note}</small>}
-            </span>
-          </div>
+          <Fragment key={row.label}>
+            <div
+              className={`ag-mode-row is-${row.group}${index > 0 && rows[index - 1].group !== row.group ? " is-break" : ""}`}
+            >
+              <span className="ag-mode-label">{row.label}</span>
+              <span className="ag-mode-value">
+                <b>{cell.value}</b>
+                {cell.best && (
+                  <Tag tone="success" size="sm">
+                    {row.label === "得分" ? "✓ 更高" : "✓ 更多"}
+                  </Tag>
+                )}
+                {cell.note && <small>{cell.note}</small>}
+              </span>
+            </div>
+            {row.label === "扩展命中" && (
+              <EvidenceFilterSummary questions={questions} mode={side} />
+            )}
+          </Fragment>
         );
       })}
     </section>

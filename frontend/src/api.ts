@@ -882,6 +882,8 @@ export type EvalEvidenceGroup = {
   targets?: EvalEvidenceTarget[];
 };
 export type EvalEvidence = EvalEvidenceGroup & {
+  filter_stages?: string[];
+  filter_reranked?: boolean;
   text: string;
   chunk_id: string | null;
   rrf_rank: number | null;
@@ -1641,6 +1643,8 @@ export type EvalSpecialQuestion = {
   recall_final?: number;
   given_recall?: number | null;
   fixed_evidence?: (EvalEvidenceGroup & {
+    filter_stages?: string[];
+    filter_reranked?: boolean;
     text: string;
     chunk_id: string | null;
     source_id: string | null;
