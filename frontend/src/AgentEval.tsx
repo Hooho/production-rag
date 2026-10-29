@@ -3087,8 +3087,8 @@ function AgentCallEvidence({
               <b>{hit ? "✓" : "—"}</b>
               <span>
                 {quote.label
-                  ? `计分项 ${index + 1}：${quote.label}`
-                  : `计分项 ${index + 1}`}
+                  ? `[计分项 ${index + 1}：${quote.label}]`
+                  : `[计分项 ${index + 1}]`}
               </span>
               <small>
                 {hit
