@@ -15,6 +15,7 @@ import {
   type EvalSpecialSection,
   type EvalSummary,
 } from "./api";
+import { AgentError } from "./AgentError";
 import { EvidenceFilterSummary } from "./EvidenceFilterSummary";
 import { ScoringItems } from "./ScoringItems";
 import {
@@ -2255,7 +2256,7 @@ function QuestionDetail({
   return (
     <div className="ev-question-body">
       {agent?.error && (
-        <p className="ev-lost-hint">Agent 运行失败：{agent.error}</p>
+        <AgentError title="Agent 运行失败" message={agent.error} />
       )}
       {question.answerable ? (
         <ScoringItems items={texts} />
@@ -2797,7 +2798,7 @@ function SufficiencySteps({
             </strong>
             {judgement.missing && <span>缺：{judgement.missing}</span>}
             {judgement.error && (
-              <span className="ag-warn">{judgement.error}</span>
+              <AgentError title="判断出错" message={judgement.error} />
             )}
             {index === 0 &&
               judgement.rewrite_query &&
@@ -2952,7 +2953,7 @@ function AgentLog({ question }: { question: EvalQuestion }) {
                           </p>
                         </div>
                       )}
-                      {error && <p className="ag-warn">本轮出错：{error}</p>}
+                      {error && <AgentError title="本轮出错" message={error} />}
                       {kind === "forced" && (
                         <p className="ag-muted">
                           {agent.stop_reason === "timeout"
@@ -3571,13 +3572,13 @@ function AgentCall({
       {(call.name === "search_knowledge" || call.name === "read_context") && (
         <QueryExplanation call={call} question={question} />
       )}
-      {call.error && <RawArguments value={call.arguments} />}
-      {status && (
-        <div className="ag-call-meta">
-          {status}
-          {call.error ? `：${call.error}` : ""}
-        </div>
+      {call.error && (
+        <>
+          <AgentError title="工具调用出错" message={call.error} />
+          <RawArguments value={call.arguments} />
+        </>
       )}
+      {status && <div className="ag-call-meta">{status}</div>}
       {call.error?.includes("依据此前返回资料时") && (
         <p className="ag-muted">
           这是当次运行保存的校验错误。修复不会改写历史结果，需重新运行评测确认检索结果。

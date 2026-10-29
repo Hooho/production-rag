@@ -1,0 +1,15 @@
+.ag-error-quote {
+  margin: 12px 0;
+  padding: 14px 18px;
+  border-left: 4px solid #dc3545;
+  border-radius: 6px;
+  background: color-mix(in srgb, #dc3545 8%, var(--surface, white));
+  color: #c6283d;
+}
+.ag-error-quote pre {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  font-family: monospace;
+}
