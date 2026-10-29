@@ -52,3 +52,8 @@
   flex-shrink: 0;
   text-align: center;
 }
+
+.ag-evidence-status > ul > li.is-filtered,
+.ag-evidence-status > ul > li.is-missed {
+  font-size: 10px;
+}
