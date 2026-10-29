@@ -938,7 +938,14 @@ function Evaluation({
   );
   const specialParamGroups: EvalParamGroup[] = [
     "common",
-    "fixed",
+    ...(pickedSpecial.some(
+      (suite) =>
+        suite.method === "answer" ||
+        suite.method === "dialogue" ||
+        (suite.method === "retrieval" && specialModes.includes("fixed")),
+    )
+      ? (["fixed"] as EvalParamGroup[])
+      : []),
     ...(specialModes.includes("agent") &&
     pickedSpecial.some((suite) => suite.method === "retrieval")
       ? (["agent"] as EvalParamGroup[])
