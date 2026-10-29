@@ -358,6 +358,7 @@ def run_brief(run):
         "summary",
         "progress",
         "error",
+        "params",
     ):
         brief[key] = run.get(key)
     # 历史页的指标解释依赖实际证据数量，和列表内容一起返回，避免展开每行时补请求完整结果。
@@ -492,6 +493,31 @@ def compare_runs(base, target):
                         "target": target_agent.get(key),
                     }
                 )
+    # 发起评测时单独指定的评审模型、充分性判断和回答的提示词版本：只在 effective 里有（旧记录没有，不比较）。
+    base_effective = base.get("effective") or {}
+    target_effective = target.get("effective") or {}
+    if base_effective and target_effective:
+        pairs = [
+            (
+                "评审模型",
+                (base_effective.get("judge") or {}).get("model"),
+                (target_effective.get("judge") or {}).get("model"),
+            )
+        ]
+        for prompt_id, label in (
+            ("sufficiency", "充分性判断提示词版本"),
+            ("answer", "回答提示词版本"),
+        ):
+            pairs.append(
+                (
+                    label,
+                    (base_effective.get("prompts") or {}).get(prompt_id),
+                    (target_effective.get("prompts") or {}).get(prompt_id),
+                )
+            )
+        for label, before, after in pairs:
+            if before is not None and after is not None and before != after:
+                settings_diff.append({"key": label, "base": before, "target": after})
     return {
         "base": run_brief(base),
         "target": run_brief(target),
@@ -535,7 +561,9 @@ def run_modes(run):
 # 新建一次评测记录并立即保存为 running，前端马上就能在列表里看到它和进度。
 # modes：检索评测跑哪些模式（fixed 固定流程、agent），可以只跑一个，也可以一起跑。
 # corpus：这次用的评测语料（编号、标题、内容指纹），见 app/evaluation/corpus.py。
-def start_run(kind, split, suites, special=None, modes=("fixed",), corpus=None):
+def start_run(
+    kind, split, suites, special=None, modes=("fixed",), corpus=None, params=None
+):
     commit = git_commit()
     config = {
         "split": split,
@@ -558,6 +586,9 @@ def start_run(kind, split, suites, special=None, modes=("fixed",), corpus=None):
         "summary": None,
         "progress": {"done": 0, "total": 0},
         "error": None,
+        # 这次评测单独指定的参数（只记改了的项，见 app/evaluation/params.py）；空表示全部跟随系统设置。
+        # 实际生效的全部配置在开跑时写进 effective。
+        "params": params or {},
     }
     save_run(run)
     return run

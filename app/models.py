@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import json
 import math
@@ -87,7 +88,11 @@ class Models:
         self.llm_provider = os.getenv("LLM_PROVIDER", "custom")
         self.llm_api_key = os.getenv("LLM_API_KEY", "")
         self.llm_source = "env"
-        provider = os.getenv("EMBEDDING_BASE_URL", "") if self.embedding_mode == "openai" else os.getenv("EMBEDDING_URL", "")
+        provider = (
+            os.getenv("EMBEDDING_BASE_URL", "")
+            if self.embedding_mode == "openai"
+            else os.getenv("EMBEDDING_URL", "")
+        )
         # 集合结构变化时同时更换 collection，旧集合不会被新代码误用。
         # bm25 之后又增加了版本和定位字段，结构版本升为 versions，需执行 scripts.reindex 迁移。
         identity = f"{self.mode}:{self.embedding_mode}:{provider}:{self.embedding_model}:{self.dimension}:bm25:versions"
@@ -97,7 +102,9 @@ class Models:
                 raise ValueError("缺少 LLM_API_KEY")
             # 原来在这里直接创建 ChatOpenAI，模型只能在启动时由 .env 决定；
             # 抽成 build_chat_model 后，设置页保存新配置时可以复用同一套参数重新创建。
-            self.chat_model = self.build_chat_model(self.llm_base_url, self.llm_api_key, self.llm_model)
+            self.chat_model = self.build_chat_model(
+                self.llm_base_url, self.llm_api_key, self.llm_model
+            )
         else:
             self.chat_model = None
         if self.embedding_mode == "openai" and not os.getenv("EMBEDDING_API_KEY"):
@@ -128,12 +135,18 @@ class Models:
     # 按给定地址、密钥和模型名创建 OpenAI 兼容的聊天模型；DeepSeek、MiniMax、通义千问、Kimi、智谱、Ollama 都走这个接口。
     @staticmethod
     def build_chat_model(base_url, api_key, model, timeout=20):
-        return ChatOpenAI(model=model, api_key=api_key, base_url=base_url,
+        return ChatOpenAI(
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
             # 以前 max_retries=0，网络或代理抖一下（Connection error）整次问答就失败；
             # 改为自动重试 2 次，OpenAI 客户端只对连接失败、超时、429 和 5xx 重试，并带退避间隔。
-            temperature=0, timeout=timeout, max_retries=2,
+            temperature=0,
+            timeout=timeout,
+            max_retries=2,
             # 流式输出时默认不返回 Token 用量，开启后追踪记录才能统计每次回答的用量和费用。
-            stream_usage=True)
+            stream_usage=True,
+        )
 
     # 用设置页保存的配置替换聊天模型，不需要重启服务。
     # demo 模式没有聊天模型：只记录配置，不创建模型，否则检索、回答流程会误以为已启用大模型。
@@ -145,7 +158,16 @@ class Models:
         self.llm_api_key = settings.get("api_key") or ""
         self.llm_source = "settings"
         if self.mode == "openai":
-            self.chat_model = self.build_chat_model(self.llm_base_url, self.llm_api_key, self.llm_model)
+            self.chat_model = self.build_chat_model(
+                self.llm_base_url, self.llm_api_key, self.llm_model
+            )
+
+    # 复制一份、换成另一个聊天模型，原对象不变：评测指定模型时用，不影响线上正在用的 app.state.models。
+    # 向量、重排还是同一个服务；没有聊天模型的 demo 模式下只换记录的配置（和 apply_llm 一样）。
+    def fork(self, settings):
+        clone = copy.copy(self)
+        clone.apply_llm(settings)
+        return clone
 
     # 生成向量；demo 的字符二元组哈希只用于流程演示，不是语义模型。
     def embed(self, texts):
@@ -160,7 +182,7 @@ class Models:
             text = re.sub(r"\s+", "", text.lower())
             vector = [0.0] * self.dimension
             for index in range(max(1, len(text) - 1)):
-                token = text[index:index + 2]
+                token = text[index : index + 2]
                 digest = hashlib.sha256(token.encode()).digest()
                 position = int.from_bytes(digest[:4], "big") % self.dimension
                 vector[position] += 1 if digest[4] % 2 else -1
@@ -178,7 +200,7 @@ class Models:
     def embed_remote(self, texts, request):
         vectors = []
         for start in range(0, len(texts), 64):
-            batch = texts[start:start + 64]
+            batch = texts[start : start + 64]
             data = request(batch)
             items = sorted(data["data"], key=lambda item: item["index"])
             for item in items:
@@ -192,15 +214,27 @@ class Models:
 
     # 调用外部 Embedding 接口的一批文本。
     def remote_embedding(self, texts):
-        return self.call("EMBEDDING", "embeddings", {
-            "model": self.embedding_model, "input": texts,
-        }, timeout=runtime_value("embedding_timeout"))
+        return self.call(
+            "EMBEDDING",
+            "embeddings",
+            {
+                "model": self.embedding_model,
+                "input": texts,
+            },
+            timeout=runtime_value("embedding_timeout"),
+        )
 
     # 调用本地 Embedding 接口的一批文本。
     def local_embedding(self, texts):
-        return self.call_url(os.getenv("EMBEDDING_URL", "http://embedding:8090/v1"), "embeddings", {
-            "model": self.embedding_model, "input": texts,
-        }, timeout=runtime_value("embedding_timeout"))
+        return self.call_url(
+            os.getenv("EMBEDDING_URL", "http://embedding:8090/v1"),
+            "embeddings",
+            {
+                "model": self.embedding_model,
+                "input": texts,
+            },
+            timeout=runtime_value("embedding_timeout"),
+        )
 
     # 统计每段文字在本地向量模型下的真实 token 数，返回 (token 数列表, 模型最大输入长度)。
     # 以前分片只记字符数，token_count 恒为空，超过模型上限被截断的分片完全看不出来。
@@ -212,8 +246,11 @@ class Models:
         max_tokens = None
         try:
             for start in range(0, len(texts), 64):
-                data = self.call_url(os.getenv("EMBEDDING_URL", "http://embedding:8090/v1"), "tokenize", {
-                    "input": texts[start:start + 64]})
+                data = self.call_url(
+                    os.getenv("EMBEDDING_URL", "http://embedding:8090/v1"),
+                    "tokenize",
+                    {"input": texts[start : start + 64]},
+                )
                 items = sorted(data["data"], key=lambda item: item["index"])
                 for item in items:
                     counts.append(int(item["tokens"]))
@@ -232,12 +269,20 @@ class Models:
         try:
             cuts = []
             for start in range(0, len(texts), 64):
-                data = self.call_url(os.getenv("EMBEDDING_URL", "http://embedding:8090/v1"), "tokenize", {
-                    "input": texts[start:start + 64]})
+                data = self.call_url(
+                    os.getenv("EMBEDDING_URL", "http://embedding:8090/v1"),
+                    "tokenize",
+                    {"input": texts[start : start + 64]},
+                )
                 items = sorted(data["data"], key=lambda item: item["index"])
                 for item in items:
-                    cuts.append({"tokens": int(item["tokens"]), "cut": item.get("cut"),
-                        "max_tokens": int(data["max_tokens"])})
+                    cuts.append(
+                        {
+                            "tokens": int(item["tokens"]),
+                            "cut": item.get("cut"),
+                            "max_tokens": int(data["max_tokens"]),
+                        }
+                    )
             return cuts if len(cuts) == len(texts) else None
         except (KeyError, TypeError, ValueError, httpx.HTTPError):
             return None
@@ -248,9 +293,15 @@ class Models:
             return None
         timeout = runtime_value("rerank_timeout")
         try:
-            data = self.call_url(os.getenv("RERANK_URL", "http://embedding:8090/v1"), "rerank", {
-                "query": query, "documents": documents,
-            }, timeout=timeout)
+            data = self.call_url(
+                os.getenv("RERANK_URL", "http://embedding:8090/v1"),
+                "rerank",
+                {
+                    "query": query,
+                    "documents": documents,
+                },
+                timeout=timeout,
+            )
             scores = [0.0] * len(documents)
             for item in data["data"]:
                 # fastembed 的 TextCrossEncoder 返回原始 logit（约 -10 到 10），不是 0~1 的概率。
@@ -263,7 +314,9 @@ class Models:
         except httpx.TimeoutException as error:
             raise RerankError(f"重排服务超时（超过 {timeout:g} 秒）") from error
         except httpx.HTTPStatusError as error:
-            raise RerankError(f"重排服务返回错误 {error.response.status_code}") from error
+            raise RerankError(
+                f"重排服务返回错误 {error.response.status_code}"
+            ) from error
         except httpx.HTTPError as error:
             raise RerankError(f"连不上重排服务：{str(error)[:200]}") from error
         except (KeyError, TypeError, ValueError) as error:
@@ -273,19 +326,38 @@ class Models:
     # 识别过程 trace 按顺序记录每一环（规则 → 本地小模型 → 大模型 → 规则兜底）的结果和是否采纳。
     # 以前只保留最终结果，没被采纳的小模型结果直接丢掉，页面上看不出先试了什么、为什么还要调用大模型。
     # profile：用户的长期记忆（app/memory/long_term.py），只有大模型这一环用得上。
-    def analyze_query(self, question, history, last_order, summary="", on_memory=None, profile=None):
+    def analyze_query(
+        self, question, history, last_order, summary="", on_memory=None, profile=None
+    ):
         trace = []
-        analysis = self.analyze_query_steps(question, history, last_order, summary, on_memory, trace, profile or [])
+        analysis = self.analyze_query_steps(
+            question, history, last_order, summary, on_memory, trace, profile or []
+        )
         return {**analysis, "trace": trace}
 
-    def analyze_query_steps(self, question, history, last_order, summary, on_memory, trace, profile=()):
+    def analyze_query_steps(
+        self, question, history, last_order, summary, on_memory, trace, profile=()
+    ):
         fallback = self.fallback_query(question, history, last_order)
         rule = self.rule_query(question, history, last_order)
         if rule:
-            trace.append({"stage": "rule", "title": "规则匹配", "result": f"命中：{rule['reason']}", "accepted": True})
+            trace.append(
+                {
+                    "stage": "rule",
+                    "title": "规则匹配",
+                    "result": f"命中：{rule['reason']}",
+                    "accepted": True,
+                }
+            )
             return rule
-        trace.append({"stage": "rule", "title": "规则匹配", "result": "未命中（不是订单、数据查询或问候）",
-            "accepted": False})
+        trace.append(
+            {
+                "stage": "rule",
+                "title": "规则匹配",
+                "result": "未命中（不是订单、数据查询或问候）",
+                "accepted": False,
+            }
+        )
         local = self.local_intent(question, history, last_order, on_memory=on_memory)
         # 每一环收到的上下文直接写进识别过程里，以前单独列在"各次模型调用收到的上下文"，
         # 看不出哪一段是发给小模型、哪一段是发给大模型的。小模型只收到最近 3 个问题（不含答案）。
@@ -293,31 +365,58 @@ class Models:
         for item in history[-3:]:
             recent_questions.append(item["question"])
         if self.intent_mode == "local":
-            trace.append({**self.local_trace(local), "context": self.intent_context(recent_questions, last_order)})
+            trace.append(
+                {
+                    **self.local_trace(local),
+                    "context": self.intent_context(recent_questions, last_order),
+                }
+            )
         if local and local.get("accepted"):
             confidence = float(local.get("confidence", 0))
             label = local.get("confidence_label", "medium")
             standalone = fallback["standalone_query"]
-            return self.normalize_analysis({
-                "route": local.get("route"), "intent": local.get("intent"),
-                "confidence": label, "order_id": local.get("order_id") or last_order,
-                "standalone_query": standalone, "queries": [standalone],
-                "reason": "本地小模型完成意图分类",
-                "classifier": "small_model", "classifier_confidence": confidence,
-                "candidates": local.get("candidates", []),
-            }, fallback, classifier="small_model")
+            return self.normalize_analysis(
+                {
+                    "route": local.get("route"),
+                    "intent": local.get("intent"),
+                    "confidence": label,
+                    "order_id": local.get("order_id") or last_order,
+                    "standalone_query": standalone,
+                    "queries": [standalone],
+                    "reason": "本地小模型完成意图分类",
+                    "classifier": "small_model",
+                    "classifier_confidence": confidence,
+                    "candidates": local.get("candidates", []),
+                },
+                fallback,
+                classifier="small_model",
+            )
         if self.mode != "openai":
-            trace.append({"stage": "fallback", "title": "规则兜底",
-                "result": f"未启用大模型，{fallback['reason']}", "accepted": True})
+            trace.append(
+                {
+                    "stage": "fallback",
+                    "title": "规则兜底",
+                    "result": f"未启用大模型，{fallback['reason']}",
+                    "accepted": True,
+                }
+            )
             return fallback
         # 提示词在「提示词」页管理（app/prompts.py）：指令可以修改，输出格式固定。
-        prompt = ChatPromptTemplate.from_messages([("system", prompts.compose("intent", template=True)),
-            ("human", "{payload}")])
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", prompts.compose("intent", template=True)),
+                ("human", "{payload}"),
+            ]
+        )
         history_text = []
         for item in history[-3:]:
             history_text.append(item["question"])
-        payload = {"question": question, "history_summary": summary,
-            "recent_questions": history_text, "last_order": last_order}
+        payload = {
+            "question": question,
+            "history_summary": summary,
+            "recent_questions": history_text,
+            "last_order": last_order,
+        }
         if profile:
             payload["user_profile"] = [item["content"] for item in profile]
         payload = json.dumps(payload, ensure_ascii=False)
@@ -325,7 +424,9 @@ class Models:
         # 大模型除了最近 3 个问题，还收到滚动摘要（较早对话压缩成的摘要）。
         llm_context = self.intent_context(recent_questions, last_order, summary)
         try:
-            content = self.chat_completion(prompt.format_messages(payload=payload), INTENT_MAX_TOKENS)
+            content = self.chat_completion(
+                prompt.format_messages(payload=payload), INTENT_MAX_TOKENS
+            )
             if on_memory:
                 # 标题用实际模型名；以前写死成"DeepSeek 查询分析"，换了模型也不变。
                 memory = {"memory_summary": summary, "history_questions": history_text}
@@ -337,18 +438,53 @@ class Models:
             parsed = self.parse_json(content)
             analysis = self.normalize_analysis(parsed, fallback, classifier="llm")
         except (KeyError, TypeError, ValueError, httpx.HTTPError, OpenAIError) as error:
-            trace.append({"stage": "llm", "title": llm_title, "result": f"调用失败（{model_error_text(error)}）",
-                "accepted": False, "context": llm_context})
-            trace.append({"stage": "fallback", "title": "规则兜底", "result": fallback["reason"], "accepted": True})
+            trace.append(
+                {
+                    "stage": "llm",
+                    "title": llm_title,
+                    "result": f"调用失败（{model_error_text(error)}）",
+                    "accepted": False,
+                    "context": llm_context,
+                }
+            )
+            trace.append(
+                {
+                    "stage": "fallback",
+                    "title": "规则兜底",
+                    "result": fallback["reason"],
+                    "accepted": True,
+                }
+            )
             return fallback
         # normalize_analysis 发现输出不合规时返回的就是规则兜底结果本身。
         if analysis is fallback:
-            trace.append({"stage": "llm", "title": llm_title, "result": "输出不符合格式要求", "accepted": False,
-                "context": llm_context})
-            trace.append({"stage": "fallback", "title": "规则兜底", "result": fallback["reason"], "accepted": True})
+            trace.append(
+                {
+                    "stage": "llm",
+                    "title": llm_title,
+                    "result": "输出不符合格式要求",
+                    "accepted": False,
+                    "context": llm_context,
+                }
+            )
+            trace.append(
+                {
+                    "stage": "fallback",
+                    "title": "规则兜底",
+                    "result": fallback["reason"],
+                    "accepted": True,
+                }
+            )
             return fallback
-        trace.append({"stage": "llm", "title": llm_title, "accepted": True, "context": llm_context,
-            "result": f"{analysis['intent']}（置信度 {analysis['confidence']}），改写出 {len(analysis['queries'])} 个检索词"})
+        trace.append(
+            {
+                "stage": "llm",
+                "title": llm_title,
+                "accepted": True,
+                "context": llm_context,
+                "result": f"{analysis['intent']}（置信度 {analysis['confidence']}），改写出 {len(analysis['queries'])} 个检索词",
+            }
+        )
         return analysis
 
     # 识别过程里一环收到的上下文：最近 3 个问题（只有问题，没有答案）、滚动摘要（只有大模型收到）、最近订单号。
@@ -365,23 +501,35 @@ class Models:
     @staticmethod
     def local_trace(local):
         if local is None:
-            return {"stage": "small_model", "title": "本地小模型", "result": "调用失败，跳过", "accepted": False}
+            return {
+                "stage": "small_model",
+                "title": "本地小模型",
+                "result": "调用失败，跳过",
+                "accepted": False,
+            }
         confidence = float(local.get("confidence", 0))
         result = f"{local.get('intent')}，置信度 {confidence:.2f}"
         reason = None
         if not local.get("accepted"):
             reason = local.get("reject_reason") or "置信度不足"
             result += f"，{reason}"
-        return {"stage": "small_model", "title": f"本地小模型 {local.get('model') or ''}".strip(),
-            "result": result, "accepted": bool(local.get("accepted")), "candidates": local.get("candidates", []),
-            "reject_reason": reason}
+        return {
+            "stage": "small_model",
+            "title": f"本地小模型 {local.get('model') or ''}".strip(),
+            "result": result,
+            "accepted": bool(local.get("accepted")),
+            "candidates": local.get("candidates", []),
+            "reject_reason": reason,
+        }
 
     # 处理订单号、问候语和明确订单关键词，避免为确定问题调用模型。
     @staticmethod
     def rule_query(question, history, last_order):
         match = re.search(r"\b[AB]\d{4}\b", question, re.IGNORECASE)
         explicit_order = match or "订单" in question
-        follow_up = last_order and any(word in question for word in ("它", "到货", "什么时候到"))
+        follow_up = last_order and any(
+            word in question for word in ("它", "到货", "什么时候到")
+        )
         greeting = question.strip(" ！!。. ") in {"你好", "您好", "hi", "hello"}
         # 数据查询也由规则优先识别："缺货的商品""这周有几单待发货"这类问题关键词很明确，不必调用模型。
         data = looks_like_data_query(question)
@@ -401,9 +549,16 @@ class Models:
         for item in history[-3:]:
             history_text.append(item["question"])
         try:
-            result = self.call_url(self.intent_url, "intent/classify", {
-                "question": question, "history": history_text, "last_order": last_order,
-            }, timeout=2)
+            result = self.call_url(
+                self.intent_url,
+                "intent/classify",
+                {
+                    "question": question,
+                    "history": history_text,
+                    "last_order": last_order,
+                },
+                timeout=2,
+            )
             if on_memory:
                 # 没有最近订单时不记录，页面上不再显示"近期订单记忆：无"。
                 memory = {"history_questions": history_text}
@@ -420,30 +575,72 @@ class Models:
         # 数据查询放在订单判断之前："A1001 的快递到哪了"虽然带订单号，问的是物流单；
         # "这周有几单待发货"虽然含"订单"类的词，问的是统计。单个订单的状态仍交给原来的订单工具。
         if looks_like_data_query(question):
-            return {"route": "data", "intent": "data_query", "confidence": "high",
-                "order_id": last_order, "standalone_query": question, "queries": [question],
-                "reason": "规则识别到业务数据查询", "classifier": "fallback",
-                "classifier_confidence": 0.0, "candidates": []}
+            return {
+                "route": "data",
+                "intent": "data_query",
+                "confidence": "high",
+                "order_id": last_order,
+                "standalone_query": question,
+                "queries": [question],
+                "reason": "规则识别到业务数据查询",
+                "classifier": "fallback",
+                "classifier_confidence": 0.0,
+                "candidates": [],
+            }
         match = re.search(r"\b[AB]\d{4}\b", question, re.IGNORECASE)
-        if match or "订单" in question or (last_order and any(word in question for word in ("它", "到货", "什么时候到"))):
-            intent = "order_follow_up" if last_order and not match and "订单" not in question else "order_lookup"
-            return {"route": "order", "intent": intent, "confidence": "high",
+        if (
+            match
+            or "订单" in question
+            or (
+                last_order
+                and any(word in question for word in ("它", "到货", "什么时候到"))
+            )
+        ):
+            intent = (
+                "order_follow_up"
+                if last_order and not match and "订单" not in question
+                else "order_lookup"
+            )
+            return {
+                "route": "order",
+                "intent": intent,
+                "confidence": "high",
                 "order_id": match.group().upper() if match else last_order,
-                "standalone_query": question, "queries": [question],
-                "reason": "规则识别到订单相关问题", "classifier": "fallback",
-                "classifier_confidence": 0.0, "candidates": []}
+                "standalone_query": question,
+                "queries": [question],
+                "reason": "规则识别到订单相关问题",
+                "classifier": "fallback",
+                "classifier_confidence": 0.0,
+                "candidates": [],
+            }
         if question.strip(" ！!。. ") in {"你好", "您好", "hi", "hello"}:
-            return {"route": "greeting", "intent": "greeting", "confidence": "high",
-                "order_id": last_order, "standalone_query": question, "queries": [question],
-                "reason": "命中问候词", "classifier": "fallback",
-                "classifier_confidence": 0.0, "candidates": []}
+            return {
+                "route": "greeting",
+                "intent": "greeting",
+                "confidence": "high",
+                "order_id": last_order,
+                "standalone_query": question,
+                "queries": [question],
+                "reason": "命中问候词",
+                "classifier": "fallback",
+                "classifier_confidence": 0.0,
+                "candidates": [],
+            }
         standalone = question
         if history and any(word in question for word in ("它", "这个", "那么")):
             standalone = history[-1]["question"] + " " + question
-        return {"route": "knowledge", "intent": "knowledge_qa", "confidence": "medium",
-            "order_id": last_order, "standalone_query": standalone, "queries": [standalone],
-            "reason": "未命中业务工具规则，转知识库检索", "classifier": "fallback",
-            "classifier_confidence": 0.0, "candidates": []}
+        return {
+            "route": "knowledge",
+            "intent": "knowledge_qa",
+            "confidence": "medium",
+            "order_id": last_order,
+            "standalone_query": standalone,
+            "queries": [standalone],
+            "reason": "未命中业务工具规则，转知识库检索",
+            "classifier": "fallback",
+            "classifier_confidence": 0.0,
+            "candidates": [],
+        }
 
     # 严格限制模型输出字段，防止模型改变权限和工具边界。
     @staticmethod
@@ -453,7 +650,11 @@ class Models:
         route = value.get("route")
         intent = value.get("intent")
         if route not in {"order", "data", "knowledge", "greeting"} or intent not in {
-            "order_lookup", "order_follow_up", "data_query", "knowledge_qa", "greeting",
+            "order_lookup",
+            "order_follow_up",
+            "data_query",
+            "knowledge_qa",
+            "greeting",
         }:
             return fallback
         if (route == "data") != (intent == "data_query"):
@@ -467,7 +668,9 @@ class Models:
         queries = value.get("queries")
         if not isinstance(queries, list):
             queries = []
-        queries = [item.strip() for item in queries if isinstance(item, str) and item.strip()][:3]
+        queries = [
+            item.strip() for item in queries if isinstance(item, str) and item.strip()
+        ][:3]
         standalone = value.get("standalone_query")
         if not isinstance(standalone, str) or not standalone.strip():
             standalone = fallback["standalone_query"]
@@ -478,12 +681,19 @@ class Models:
         candidates = value.get("candidates", [])
         if not isinstance(candidates, list):
             candidates = []
-        return {"route": route, "intent": intent, "confidence": value.get("confidence", "medium"),
-            "order_id": order_id, "standalone_query": standalone.strip(), "queries": queries,
+        return {
+            "route": route,
+            "intent": intent,
+            "confidence": value.get("confidence", "medium"),
+            "order_id": order_id,
+            "standalone_query": standalone.strip(),
+            "queries": queries,
             "reason": value.get("reason", "模型完成意图识别和检索词改写"),
-            "classifier": source, "classifier_confidence": value.get("classifier_confidence"),
+            "classifier": source,
+            "classifier_confidence": value.get("classifier_confidence"),
             "classifier_model": value.get("model"),
-            "candidates": candidates[:3]}
+            "candidates": candidates[:3],
+        }
 
     # 从模型内容中提取 JSON，兼容模型偶尔包裹的代码围栏。
     @staticmethod
@@ -497,8 +707,13 @@ class Models:
 
     # 调用外部模型，设置网络超时，不自动重试以避免重复费用。
     def call(self, prefix, endpoint, payload, timeout=20):
-        return self.call_url(os.environ[f"{prefix}_BASE_URL"], endpoint, payload,
-            os.environ[f"{prefix}_API_KEY"], timeout=timeout)
+        return self.call_url(
+            os.environ[f"{prefix}_BASE_URL"],
+            endpoint,
+            payload,
+            os.environ[f"{prefix}_API_KEY"],
+            timeout=timeout,
+        )
 
     # 调用兼容接口；本地服务不需要 Authorization 头。
     def call_url(self, base_url, endpoint, payload, api_key=None, timeout=20):
@@ -518,9 +733,13 @@ class Models:
         if not isinstance(content, str):
             raise ValueError("聊天模型没有返回文本")
         text = strip_think(content)
-        finish_reason = (getattr(response, "response_metadata", None) or {}).get("finish_reason")
+        finish_reason = (getattr(response, "response_metadata", None) or {}).get(
+            "finish_reason"
+        )
         if finish_reason == "length" and not text.strip():
-            raise TruncatedOutput(f"输出被截断：思考过程用完了 {max_tokens} 个 token 的额度，没写出结果")
+            raise TruncatedOutput(
+                f"输出被截断：思考过程用完了 {max_tokens} 个 token 的额度，没写出结果"
+            )
         return text
 
     # Contextual Retrieval：让模型读全文（或全文中的一段）后，用一两句话说明这个分片在全文里讲的是什么。
@@ -529,13 +748,22 @@ class Models:
     # 文档放在分片之前：同一文档的所有请求前缀相同，DeepSeek 的上下文缓存可以命中，费用和耗时都会下降。
     def chunk_context(self, document, chunk):
         # 提示词在「提示词」页管理；缓存按 prompts.identity("chunk_context") 区分，改了提示词旧缓存就不再用。
-        prompt = ChatPromptTemplate.from_messages([("system", prompts.compose("chunk_context", template=True)),
-            ("human", "<document>\n{document}\n</document>\n<chunk>\n{chunk}\n</chunk>")])
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", prompts.compose("chunk_context", template=True)),
+                (
+                    "human",
+                    "<document>\n{document}\n</document>\n<chunk>\n{chunk}\n</chunk>",
+                ),
+            ]
+        )
         # 以前只给 150 个 token：推理模型先输出思考过程，还没写到说明就被截断，
         # 而当时还没去掉未闭合的 <think>，于是半截英文思考过程被当成说明写进了分片。
         # 现在给足思考的额度；去掉思考过程后没有内容就当作生成失败，不写入分片和缓存，之后可以重试。
-        content = self.chat_completion(prompt.format_messages(document=document, chunk=chunk),
-            runtime_value("chunk_context_max_tokens"))
+        content = self.chat_completion(
+            prompt.format_messages(document=document, chunk=chunk),
+            runtime_value("chunk_context_max_tokens"),
+        )
         context = " ".join(content.split())[:300]
         if not context or "<think" in context:
             raise ValueError("模型没有输出上下文说明（可能只输出了思考过程）")
@@ -554,19 +782,37 @@ class Models:
             if source.get("relevance") is not None:
                 note = f"（相关性 {source['relevance']:.2f}{'，相关性较低' if source.get('low_relevance') else ''}）"
             source_lines.append(f"[{source['id']}]{note} {source['text']}")
-        prompt = ChatPromptTemplate.from_messages([("system", prompts.compose("sufficiency", template=True)),
-            ("human", "{payload}")])
-        payload = json.dumps({"question": question, "sources": "\n".join(source_lines)}, ensure_ascii=False)
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", prompts.compose("sufficiency", template=True)),
+                ("human", "{payload}"),
+            ]
+        )
+        payload = json.dumps(
+            {"question": question, "sources": "\n".join(source_lines)},
+            ensure_ascii=False,
+        )
         try:
-            value = self.parse_json(self.chat_completion(prompt.format_messages(payload=payload), SUFFICIENCY_MAX_TOKENS))
+            value = self.parse_json(
+                self.chat_completion(
+                    prompt.format_messages(payload=payload), SUFFICIENCY_MAX_TOKENS
+                )
+            )
         except (KeyError, TypeError, ValueError, httpx.HTTPError, OpenAIError) as error:
-            return {"verdict": "sufficient", "missing": "", "rewrite_query": "",
-                "error": f"判断失败，按资料充分处理：{model_error_text(error)}"}
+            return {
+                "verdict": "sufficient",
+                "missing": "",
+                "rewrite_query": "",
+                "error": f"判断失败，按资料充分处理：{model_error_text(error)}",
+            }
         verdict = value.get("verdict")
         if verdict not in {"sufficient", "partial", "insufficient"}:
             verdict = "sufficient"
-        return {"verdict": verdict, "missing": str(value.get("missing") or "")[:200],
-            "rewrite_query": str(value.get("rewrite_query") or "").strip()[:100]}
+        return {
+            "verdict": verdict,
+            "missing": str(value.get("missing") or "")[:200],
+            "rewrite_query": str(value.get("rewrite_query") or "").strip()[:100],
+        }
 
     # 检查模型引用只指向本轮真实检索来源。
     @staticmethod
@@ -582,7 +828,16 @@ class Models:
         allowed = []
         for source in sources:
             allowed.append(source["id"])
-        cited = sorted(set(re.findall(r"\[(S\d+)\]", answer or "")), key=lambda value: int(value[1:]))
+        cited = sorted(
+            set(re.findall(r"\[(S\d+)\]", answer or "")),
+            key=lambda value: int(value[1:]),
+        )
         unknown = [value for value in cited if value not in allowed]
         reason = "no_citation" if not cited else "unknown_source" if unknown else None
-        return {"passed": reason is None, "reason": reason, "source_ids": allowed, "cited": cited, "unknown": unknown}
+        return {
+            "passed": reason is None,
+            "reason": reason,
+            "source_ids": allowed,
+            "cited": cited,
+            "unknown": unknown,
+        }

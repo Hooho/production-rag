@@ -99,6 +99,7 @@ from ..evaluation.results import (
 )
 from ..evaluation.retrieval import SUITES, VARIANTS, import_corpus
 from ..evaluation import corpus as eval_corpus, regression, suites as special_suites
+from ..evaluation import params as eval_params
 from ..evaluation.retrieval import EVAL_OWNER
 from ..tools.search import limit_titles
 from ..evaluation.evidence import locate_evidence, load_chunk
@@ -183,6 +184,9 @@ class EvalRunInput(BaseModel):
     )
     # 用评测语料库里的哪几份语料（编号）；不传或为空就是全部。只导入、只检索勾选的。
     corpus_ids: list[str] = Field(default_factory=list, max_length=200)
+    # 只对这一次评测生效的参数：模型、评审模型、运行参数、提示词版本，不写的项跟随系统设置
+    # （结构和校验见 app/evaluation/params.py）。
+    params: dict | None = None
 
 
 class EvalTargetInput(BaseModel):
@@ -2860,6 +2864,11 @@ def create_app(store=None, models=None, jwt_secret=None):
             raise HTTPException(404, "评测不存在")
         return compare_runs(base_run, target_run)
 
+    # 发起评测页「参数配置」：可以单独指定的参数分组、当前系统值，可选的模型配置和提示词版本。
+    @app.get("/eval/params", dependencies=[Depends(require_admin)])
+    def eval_params_options(owner=Depends(identity)):
+        return eval_params.options(app.state.store, app.state.models)
+
     # 界面上发起一次评测，在后台线程执行并立即返回编号，前端轮询进度。
     @app.post("/eval/runs", status_code=202, dependencies=[Depends(require_admin)])
     def create_eval_run(body: EvalRunInput, owner=Depends(identity)):
@@ -2931,6 +2940,13 @@ def create_app(store=None, models=None, jwt_secret=None):
             if not select_split(load_dataset(), body.split):
                 raise HTTPException(422, "当前题目范围没有已审核题目，请先审核评测题")
         corpus = pick_corpus(body.corpus_ids)
+        # 只对这次评测生效的参数，启动前先校验：参数范围、模型配置、提示词版本不对时直接拒绝，不留下失败的记录。
+        try:
+            run_params, prepared = eval_params.prepare(
+                app.state.store, app.state.models, body.params
+            )
+        except ValueError as error:
+            raise HTTPException(422, str(error))
         if app.state.corpus_importing:
             raise HTTPException(409, "正在导入评测语料，等导入完再发起评测")
         if not app.state.eval_lock.acquire(blocking=False):
@@ -2943,6 +2959,7 @@ def create_app(store=None, models=None, jwt_secret=None):
                 special,
                 body.modes if body.kind in ("retrieval", "special") else ("fixed",),
                 corpus,
+                run_params,
             )
         except Exception:
             app.state.eval_lock.release()
@@ -2952,20 +2969,26 @@ def create_app(store=None, models=None, jwt_secret=None):
         def work():
             responder = None
             try:
-                if needs_responder:
-                    # 生成评测只验证回答质量，不应把评测题写进线上会话的持久化记忆，回答 Agent 用进程内记忆。
-                    responder = ResponseAgent(app.state.models, use_postgres=False)
-                # 评测账号这次只检索勾选的语料：导入、固定流程、补充检索、Agent、完整问答都经过同一个检索入口。
-                with limit_titles(EVAL_OWNER, [item["title"] for item in corpus]):
-                    execute_run(
-                        app.state.store,
-                        app.state.models,
-                        [] if special else load_dataset(),
-                        run,
-                        generate=body.kind == "generation",
-                        responder=responder,
-                        agent_mode=app.state.agent_mode,
-                    )
+                # 评测线程里套上这次的参数：覆盖的运行参数、提示词版本只在这个线程生效，模型用复制出来的一份，线上不受影响。
+                with eval_params.applied(app.state.models, prepared) as (
+                    run_models,
+                    judge_models,
+                ):
+                    run["effective"] = eval_params.effective(run_models, judge_models)
+                    if needs_responder:
+                        # 生成评测只验证回答质量，不应把评测题写进线上会话的持久化记忆，回答 Agent 用进程内记忆。
+                        responder = ResponseAgent(run_models, use_postgres=False)
+                    # 评测账号这次只检索勾选的语料：导入、固定流程、补充检索、Agent、完整问答都经过同一个检索入口。
+                    with limit_titles(EVAL_OWNER, [item["title"] for item in corpus]):
+                        execute_run(
+                            app.state.store,
+                            run_models,
+                            [] if special else load_dataset(),
+                            run,
+                            generate=body.kind == "generation",
+                            responder=responder,
+                            agent_mode=app.state.agent_mode,
+                        )
             except Exception:
                 logger.exception("eval_run_failed run_id=%s", run["id"])
             finally:

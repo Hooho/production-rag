@@ -3,6 +3,8 @@ import re
 
 from langchain_core.prompts import ChatPromptTemplate
 
+from .params import judge as judge_model
+
 
 # 回答阶段的两句固定拒答文本：来源为空时由回答 Agent（ResponseAgent）直接返回，引用校验失败时由 Models 替换。
 # 这两种情况不需要评审模型判断，确定就是拒答。
@@ -25,9 +27,13 @@ JUDGE_SYSTEM = (
 # 每道题使用独立的会话线程，避免上一题的对话记忆影响下一题；多轮追问题用补全后的完整问题提问，
 # 因为评测时没有真实的上一轮对话可供回答模型理解"它""那么"指的是什么。
 # coverage 是检索充分性判断的结论，和线上一样传给回答模型。
-def answer_question(models, responder, run_id, item, standalone_query, sources, coverage=None):
+def answer_question(
+    models, responder, run_id, item, standalone_query, sources, coverage=None
+):
     session_id = f"{run_id}:{item['id']}"
-    answer, _ = responder.answer("eval", session_id, standalone_query, sources, coverage=coverage)
+    answer, _ = responder.answer(
+        "eval", session_id, standalone_query, sources, coverage=coverage
+    )
     # 与线上一致：没有来源时是固定拒答文本，不做引用校验。
     if models.mode == "openai" and sources:
         answer = models.validate_citations(answer, sources)
@@ -43,21 +49,41 @@ def judge_answer(models, item, answer, sources):
     source_lines = []
     for source in sources:
         source_lines.append(f"[{source['id']}] {source['text']}")
-    payload = json.dumps({"question": item["question"], "history": item.get("history", []),
-        "answerable": bool(item.get("answerable")), "reference_answer": item.get("reference_answer", ""),
-        "sources": "\n".join(source_lines), "answer": answer}, ensure_ascii=False)
-    prompt = ChatPromptTemplate.from_messages([("system", JUDGE_SYSTEM), ("human", "{payload}")])
-    content = models.chat_completion(prompt.format_messages(payload=payload), 600)
-    return parse_judgement(models.parse_json(content))
+    payload = json.dumps(
+        {
+            "question": item["question"],
+            "history": item.get("history", []),
+            "answerable": bool(item.get("answerable")),
+            "reference_answer": item.get("reference_answer", ""),
+            "sources": "\n".join(source_lines),
+            "answer": answer,
+        },
+        ensure_ascii=False,
+    )
+    prompt = ChatPromptTemplate.from_messages(
+        [("system", JUDGE_SYSTEM), ("human", "{payload}")]
+    )
+    # 发起评测时单独选了评审模型就用它（app/evaluation/params.py），否则和回答用同一个模型。
+    reviewer = judge_model(models)
+    content = reviewer.chat_completion(prompt.format_messages(payload=payload), 600)
+    return parse_judgement(reviewer.parse_json(content))
 
 
 # 固定拒答文本不需要花钱请评审：可回答的题被拒答算回答错误，无法回答的题被拒答算正确。
 def fixed_refusal_judgement(item):
     answerable = bool(item.get("answerable"))
-    return {"refused": True, "faithfulness": 1.0, "correctness": 0.0 if answerable else 1.0, "citation": 1.0,
+    return {
+        "refused": True,
+        "faithfulness": 1.0,
+        "correctness": 0.0 if answerable else 1.0,
+        "citation": 1.0,
         "faithfulness_reason": "系统拒答，没有陈述事实。",
-        "correctness_reason": "可回答的题被拒答。" if answerable else "无法回答的题正确拒答。",
-        "citation_reason": "系统拒答，没有引用。", "judge": "rule"}
+        "correctness_reason": "可回答的题被拒答。"
+        if answerable
+        else "无法回答的题正确拒答。",
+        "citation_reason": "系统拒答，没有引用。",
+        "judge": "rule",
+    }
 
 
 # 把评审输出限制在约定的取值里；模型偶尔给出 0.8 这类中间值时就近归到 0、0.5、1。
@@ -95,10 +121,16 @@ def summarize_generation(rows):
             citation.append(judgement["citation"])
         if row["answerable"]:
             correctness.append(judgement["correctness"])
-        refusal_correct.append(1.0 if judgement["refused"] != row["answerable"] else 0.0)
-    return {"faithfulness": average(faithfulness), "correctness": average(correctness),
-        "refusal_accuracy": average(refusal_correct), "citation_validity": average(citation),
-        "judged": len(refusal_correct)}
+        refusal_correct.append(
+            1.0 if judgement["refused"] != row["answerable"] else 0.0
+        )
+    return {
+        "faithfulness": average(faithfulness),
+        "correctness": average(correctness),
+        "refusal_accuracy": average(refusal_correct),
+        "citation_validity": average(citation),
+        "judged": len(refusal_correct),
+    }
 
 
 # 求平均，空列表返回 None。
