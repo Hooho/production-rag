@@ -38,6 +38,7 @@ export function evidenceFilters(
 ) {
   const items: FilterItem[] = [];
   let total = 0;
+  let missing = 0;
   let unknown = 0;
   for (const question of questions) {
     if (!question.answerable) continue;
@@ -45,6 +46,7 @@ export function evidenceFilters(
       mode === "agent" ? question.agent?.evidence : question.evidence;
     total += question.evidence_count;
     if (!evidence) {
+      missing += question.evidence_count;
       unknown += question.evidence_count;
       continue;
     }
@@ -55,6 +57,7 @@ export function evidenceFilters(
           ? question.agent?.evidence[index]?.found
           : !question.cleared && question.evidence[index]?.given;
       if (final) continue;
+      missing++;
       const events: Event[] = [];
       let recorded = true;
       if (mode === "fixed") {
@@ -110,5 +113,5 @@ export function evidenceFilters(
         });
     }
   }
-  return { items, total, unknown };
+  return { items, total, missing, unknown };
 }

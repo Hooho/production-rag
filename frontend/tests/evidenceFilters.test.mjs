@@ -62,7 +62,10 @@ const many = summary([
   evidence([]),
 ]);
 assert.equal(many.total, 4);
-assert.equal(many.items.length, 1); // 1/4，不是1/已召回
+assert.equal(many.items.length, 1);
+assert.equal(many.missing, 3); // 1/3：分母包含未召回的计分项，不包含最终命中的。
+assert.equal(summary([evidence([], { given: true })]).missing, 0);
+assert.equal(summary([evidence(["returned"])], { cleared: true }).missing, 1);
 const call = (status, reranked = true) => ({
   name: "search_knowledge",
   status: "ok",
@@ -94,5 +97,7 @@ assert.equal(
   "threshold",
 );
 assert.equal(agent([call("beyond_top_k")]).items[0].stage, "tool_limit");
+assert.equal(agent([call("returned")], true).missing, 0);
+assert.equal(agent([call("filtered_low_score")]).missing, 1);
 assert.equal(agent([{ name: "search_knowledge", status: "ok" }]).unknown, 1);
 console.log("evidence filter coverage passed");
