@@ -1277,6 +1277,9 @@ export type EvalConfig = {
   }[];
 };
 export type EvalRunBrief = {
+  note?: string;
+  note_updated?: string;
+  note_updated_by?: string;
   id: string;
   // memory 是以前单独的多轮对话评测（现在并入专项评测集），旧记录仍然能打开。
   kind: "retrieval" | "generation" | "memory" | "special";
@@ -1400,6 +1403,19 @@ export function listEvalRuns() {
 
 export function getEvalRun(runId: string) {
   return request<EvalRun>(`/eval/runs/${encodeURIComponent(runId)}`);
+}
+
+export function saveEvalRunNote(runId: string, note: string) {
+  return request<{
+    id: string;
+    note: string;
+    note_updated: string;
+    note_updated_by: string;
+  }>(`/eval/runs/${encodeURIComponent(runId)}/note`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ note }),
+  });
 }
 
 // 删除单条已经完成或失败的评测记录，服务端会拒绝删除正在运行的记录。

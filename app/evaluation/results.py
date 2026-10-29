@@ -24,6 +24,7 @@ IMPORT_KEY = "eval_results_imported"
 # （SQLite 测试库只有一个共享连接，MySQL 上也只是多等几毫秒）。
 _lock = threading.RLock()
 RUN_ID_PATTERN = re.compile(r"^\d{8}-\d{6}_[0-9A-Za-z-]+$")
+NOTE_PREFIX = "eval_run_note:"
 # 对比时每个指标的方向：higher 表示越大越好，lower 表示越小越好。
 # 没有方向就无法判断"变好还是变差"，例如误杀率上升是变差，召回率上升是变好。
 METRICS = [
@@ -73,8 +74,13 @@ def git_commit():
     if configured:
         return configured
     try:
-        output = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
-            timeout=5, check=True).stdout.strip()
+        output = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        ).stdout.strip()
         return output or "unknown"
     except (OSError, subprocess.SubprocessError):
         return "unknown"
@@ -88,7 +94,9 @@ def new_run_id(commit):
     while True:
         run_id = moment.strftime("%Y%m%d-%H%M%S") + "_" + safe_commit
         with _lock, target_engine().connect() as connection:
-            taken = connection.execute(select(eval_runs.c.id).where(eval_runs.c.id == run_id)).first()
+            taken = connection.execute(
+                select(eval_runs.c.id).where(eval_runs.c.id == run_id)
+            ).first()
         if not taken:
             return run_id
         moment += timedelta(seconds=1)
@@ -114,11 +122,18 @@ def target_engine(engine=None):
 # 评测进行中会反复保存进度，每次整条覆盖，读到的总是完整的一版。
 def save_run(run, engine=None):
     check_run_id(run["id"])
-    values = {"kind": run.get("kind") or "", "status": run.get("status") or "", "created": run.get("created") or now(),
-        "brief": json.loads(json.dumps(run_brief(run), default=str)), "data": json.loads(json.dumps(run, default=str)),
-        "updated": now()}
+    values = {
+        "kind": run.get("kind") or "",
+        "status": run.get("status") or "",
+        "created": run.get("created") or now(),
+        "brief": json.loads(json.dumps(run_brief(run), default=str)),
+        "data": json.loads(json.dumps(run, default=str)),
+        "updated": now(),
+    }
     with _lock, target_engine(engine).begin() as connection:
-        updated = connection.execute(eval_runs.update().where(eval_runs.c.id == run["id"]).values(**values)).rowcount
+        updated = connection.execute(
+            eval_runs.update().where(eval_runs.c.id == run["id"]).values(**values)
+        ).rowcount
         if not updated:
             connection.execute(eval_runs.insert().values(id=run["id"], **values))
 
@@ -127,21 +142,67 @@ def save_run(run, engine=None):
 def load_run(run_id, engine=None):
     check_run_id(run_id)
     with _lock, target_engine(engine).connect() as connection:
-        data = connection.execute(select(eval_runs.c.data).where(eval_runs.c.id == run_id)).scalar()
-    return dict(data) if data is not None else None
+        data = connection.execute(
+            select(eval_runs.c.data).where(eval_runs.c.id == run_id)
+        ).scalar()
+        note = connection.execute(
+            select(settings_table.c.value).where(
+                settings_table.c.key == NOTE_PREFIX + run_id
+            )
+        ).scalar()
+    return {**data, **(note or {})} if data is not None else None
+
+
+def save_run_note(run_id, note, author, engine=None):
+    check_run_id(run_id)
+    value = {"note": note.strip(), "note_updated": now(), "note_updated_by": author}
+    with _lock, target_engine(engine).begin() as connection:
+        if (
+            connection.execute(
+                select(eval_runs.c.id).where(eval_runs.c.id == run_id)
+            ).first()
+            is None
+        ):
+            return None
+        key = NOTE_PREFIX + run_id
+        updated = connection.execute(
+            settings_table.update()
+            .where(settings_table.c.key == key)
+            .values(value=value, updated=value["note_updated"])
+        ).rowcount
+        if not updated:
+            connection.execute(
+                settings_table.insert().values(
+                    key=key, value=value, updated=value["note_updated"]
+                )
+            )
+    return {"id": run_id, **value}
 
 
 # 删除一条评测记录。
 def delete_run(run_id, engine=None):
     check_run_id(run_id)
     with _lock, target_engine(engine).begin() as connection:
-        return bool(connection.execute(eval_runs.delete().where(eval_runs.c.id == run_id)).rowcount)
+        deleted = bool(
+            connection.execute(
+                eval_runs.delete().where(eval_runs.c.id == run_id)
+            ).rowcount
+        )
+        if deleted:
+            connection.execute(
+                settings_table.delete().where(
+                    settings_table.c.key == NOTE_PREFIX + run_id
+                )
+            )
+        return deleted
 
 
 # 首次启动时把 eval/results 下的旧结果文件导入数据库（已有同编号的跳过），只做一次；文件原样保留，可以自己删。
 def import_result_files(engine):
     with engine.connect() as connection:
-        if connection.execute(select(settings_table.c.key).where(settings_table.c.key == IMPORT_KEY)).first():
+        if connection.execute(
+            select(settings_table.c.key).where(settings_table.c.key == IMPORT_KEY)
+        ).first():
             return 0
         existing = set(connection.execute(select(eval_runs.c.id)).scalars().all())
     imported = 0
@@ -150,13 +211,20 @@ def import_result_files(engine):
             run = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if not isinstance(run, dict) or not RUN_ID_PATTERN.match(str(run.get("id", ""))) or run["id"] in existing:
+        if (
+            not isinstance(run, dict)
+            or not RUN_ID_PATTERN.match(str(run.get("id", "")))
+            or run["id"] in existing
+        ):
             continue
         save_run(run, engine)
         imported += 1
     with engine.begin() as connection:
-        connection.execute(settings_table.insert().values(key=IMPORT_KEY, value={"at": now(), "count": imported},
-            updated=now()))
+        connection.execute(
+            settings_table.insert().values(
+                key=IMPORT_KEY, value={"at": now(), "count": imported}, updated=now()
+            )
+        )
     return imported
 
 
@@ -216,14 +284,20 @@ def summarize_history_metrics(run):
             if returned == 0:
                 false_reject_questions += 1
             if question.get("given_recall") is not None:
-                given_hits = (given_hits or 0) + int(question["given_recall"] * evidence_count + 0.5)
+                given_hits = (given_hits or 0) + int(
+                    question["given_recall"] * evidence_count + 0.5
+                )
             agent = question.get("agent") or {}
             if agent.get("recall") is not None:
-                agent_hits = (agent_hits or 0) + int(agent["recall"] * evidence_count + 0.5)
+                agent_hits = (agent_hits or 0) + int(
+                    agent["recall"] * evidence_count + 0.5
+                )
             if "ext_hits" in question:
                 ext_hits = (ext_hits or 0) + question["ext_hits"]
             if "cleared" in question:
-                cleared_questions = (cleared_questions or 0) + bool(question.get("cleared"))
+                cleared_questions = (cleared_questions or 0) + bool(
+                    question.get("cleared")
+                )
         else:
             unanswerable_questions += 1
             if returned > 0:
@@ -253,14 +327,38 @@ def summarize_history_metrics(run):
 # 列出历次评测（新的在前），只返回列表需要的概要；逐题明细很大，列表里不带。
 def list_runs(engine=None):
     with _lock, target_engine(engine).connect() as connection:
-        rows = connection.execute(select(eval_runs.c.brief).order_by(eval_runs.c.id.desc())).scalars().all()
-    return [dict(row) for row in rows]
+        rows = (
+            connection.execute(
+                select(eval_runs.c.brief).order_by(eval_runs.c.id.desc())
+            )
+            .scalars()
+            .all()
+        )
+        notes = dict(
+            connection.execute(
+                select(settings_table.c.key, settings_table.c.value).where(
+                    settings_table.c.key.startswith(NOTE_PREFIX, autoescape=True)
+                )
+            ).all()
+        )
+    return [{**row, **(notes.get(NOTE_PREFIX + row["id"]) or {})} for row in rows]
 
 
 # 一次评测的概要：编号、时间、提交号、配置、主要指标和进度。
 def run_brief(run):
     brief = {}
-    for key in ("id", "kind", "status", "created", "finished", "commit", "config", "summary", "progress", "error"):
+    for key in (
+        "id",
+        "kind",
+        "status",
+        "created",
+        "finished",
+        "commit",
+        "config",
+        "summary",
+        "progress",
+        "error",
+    ):
         brief[key] = run.get(key)
     # 历史页的指标解释依赖实际证据数量，和列表内容一起返回，避免展开每行时补请求完整结果。
     brief["history_metrics"] = summarize_history_metrics(run)
@@ -309,8 +407,17 @@ def compare_runs(base, target):
                 change = "better"
             else:
                 change = "worse"
-        rows.append({"key": key, "label": label, "direction": direction, "base": before, "target": after,
-            "delta": delta, "change": change})
+        rows.append(
+            {
+                "key": key,
+                "label": label,
+                "direction": direction,
+                "base": before,
+                "target": after,
+                "delta": delta,
+                "change": change,
+            }
+        )
     # 两次评测用的系统参数不同时（设置页改过），列出不同的项，提醒分数变化可能来自参数而不是代码。
     # 旧记录没有保存完整参数，只比较双方都有的项。
     base_settings = (base.get("config") or {}).get("settings") or {}
@@ -318,7 +425,9 @@ def compare_runs(base, target):
     settings_diff = []
     for key in sorted(set(base_settings) & set(target_settings)):
         if base_settings[key] != target_settings[key]:
-            settings_diff.append({"key": key, "base": base_settings[key], "target": target_settings[key]})
+            settings_diff.append(
+                {"key": key, "base": base_settings[key], "target": target_settings[key]}
+            )
     # 跑的模式、Agent 提示词版本和模型不在设置页参数里，单独比较：改提示词后对比评测，最需要看到这一项。
     base_config = base.get("config") or {}
     target_config = target.get("config") or {}
@@ -326,8 +435,14 @@ def compare_runs(base, target):
     base_flow = flow_label(base_config)
     target_flow = flow_label(target_config)
     if base_flow and target_flow and base_flow != target_flow:
-        settings_diff.append({"key": "检索口径", "base": base_flow, "target": target_flow})
-    for key, label in (("intent_prompt", "意图（改写）提示词版本"), ("model", "改写模型"), ("sufficiency", "充分性判断")):
+        settings_diff.append(
+            {"key": "检索口径", "base": base_flow, "target": target_flow}
+        )
+    for key, label in (
+        ("intent_prompt", "意图（改写）提示词版本"),
+        ("model", "改写模型"),
+        ("sufficiency", "充分性判断"),
+    ):
         before = (base_config.get("flow") or {}).get(key)
         after = (target_config.get("flow") or {}).get(key)
         if before is not None and after is not None and before != after:
@@ -335,21 +450,54 @@ def compare_runs(base, target):
     # 评测语料不同（勾的语料不一样，或者同名语料内容改过）：分数变化可能来自语料。旧记录没有这一项，不比较。
     base_corpus = base_config.get("corpus")
     target_corpus = target_config.get("corpus")
-    if base_corpus is not None and target_corpus is not None and corpus_signature(base_corpus) != corpus_signature(target_corpus):
-        settings_diff.append({"key": "评测语料", "base": corpus_label(base_corpus, target_corpus),
-            "target": corpus_label(target_corpus, base_corpus)})
+    if (
+        base_corpus is not None
+        and target_corpus is not None
+        and corpus_signature(base_corpus) != corpus_signature(target_corpus)
+    ):
+        settings_diff.append(
+            {
+                "key": "评测语料",
+                "base": corpus_label(base_corpus, target_corpus),
+                "target": corpus_label(target_corpus, base_corpus),
+            }
+        )
     if run_modes(base) != run_modes(target):
-        settings_diff.append({"key": "模式", "base": "+".join(run_modes(base)), "target": "+".join(run_modes(target))})
+        settings_diff.append(
+            {
+                "key": "模式",
+                "base": "+".join(run_modes(base)),
+                "target": "+".join(run_modes(target)),
+            }
+        )
     base_agent = base_config.get("agent") or {}
     target_agent = target_config.get("agent") or {}
     if base_agent and target_agent:
-        for key, label in (("prompt_version", "Agent 提示词版本"), ("prompt_identity", "Agent 提示词内容"), ("model", "Agent 模型")):
-            if key == "prompt_identity" and (base_agent.get("prompt_version") != target_agent.get("prompt_version")
-                    or not base_agent.get(key) or not target_agent.get(key)):
+        for key, label in (
+            ("prompt_version", "Agent 提示词版本"),
+            ("prompt_identity", "Agent 提示词内容"),
+            ("model", "Agent 模型"),
+        ):
+            if key == "prompt_identity" and (
+                base_agent.get("prompt_version") != target_agent.get("prompt_version")
+                or not base_agent.get(key)
+                or not target_agent.get(key)
+            ):
                 continue  # 版本号已经不同（内容当然不同）或旧记录没有指纹时不列
             if base_agent.get(key) != target_agent.get(key):
-                settings_diff.append({"key": label, "base": base_agent.get(key), "target": target_agent.get(key)})
-    return {"base": run_brief(base), "target": run_brief(target), "metrics": rows, "settings_diff": settings_diff}
+                settings_diff.append(
+                    {
+                        "key": label,
+                        "base": base_agent.get(key),
+                        "target": target_agent.get(key),
+                    }
+                )
+    return {
+        "base": run_brief(base),
+        "target": run_brief(target),
+        "metrics": rows,
+        "settings_diff": settings_diff,
+    }
 
 
 def corpus_signature(corpus):
@@ -361,7 +509,9 @@ def corpus_label(corpus, other):
     other_sha = {item["title"]: item.get("sha256") for item in other}
     names = []
     for item in sorted(corpus, key=lambda entry: entry["title"]):
-        changed = item["title"] in other_sha and other_sha[item["title"]] != item.get("sha256")
+        changed = item["title"] in other_sha and other_sha[item["title"]] != item.get(
+            "sha256"
+        )
         names.append(f"《{item['title']}》" + ("（内容不同）" if changed else ""))
     return "、".join(names) or "（无）"
 
@@ -370,7 +520,11 @@ def corpus_label(corpus, other):
 def flow_label(config):
     if "fixed" not in (config.get("modes") or ["fixed"]):
         return None
-    return "完整检索（改写 + 判断）" if (config.get("flow") or {}).get("name") == "full" else "只检索（规则检索词）"
+    return (
+        "完整检索（改写 + 判断）"
+        if (config.get("flow") or {}).get("name") == "full"
+        else "只检索（规则检索词）"
+    )
 
 
 # 这次评测跑了哪些模式；旧记录没有这一项，都是只跑固定流程。
@@ -383,15 +537,28 @@ def run_modes(run):
 # corpus：这次用的评测语料（编号、标题、内容指纹），见 app/evaluation/corpus.py。
 def start_run(kind, split, suites, special=None, modes=("fixed",), corpus=None):
     commit = git_commit()
-    config = {"split": split, "suites": list(suites), "modes": [mode for mode in MODES if mode in modes]}
+    config = {
+        "split": split,
+        "suites": list(suites),
+        "modes": [mode for mode in MODES if mode in modes],
+    }
     if corpus is not None:
         config["corpus"] = list(corpus)
     # 专项评测：要跑的专项（编号和名称）以及多轮对话是否对比记忆参数。
     if special is not None:
         config["special"] = special
-    run = {"id": new_run_id(commit), "kind": kind, "status": "running", "created": now(), "finished": None,
-        "commit": commit, "config": config, "summary": None,
-        "progress": {"done": 0, "total": 0}, "error": None}
+    run = {
+        "id": new_run_id(commit),
+        "kind": kind,
+        "status": "running",
+        "created": now(),
+        "finished": None,
+        "commit": commit,
+        "config": config,
+        "summary": None,
+        "progress": {"done": 0, "total": 0},
+        "error": None,
+    }
     save_run(run)
     return run
 
@@ -402,23 +569,42 @@ def start_run(kind, split, suites, special=None, modes=("fixed",), corpus=None):
 def answer_hook(store, models, responder, run_id):
     def on_item(item, row, retrieval):
         # 检索评测已经按线上流程判断过（evaluate_items 的 judge）就直接用，不再判断一次。
-        check = retrieval.get("sufficiency_check") or DocumentSearchTool().check_sufficiency(store, models, EVAL_OWNER,
-            row["queries"], row["rerank_query"], retrieval)
-        coverage = {"verdict": check["verdict"], "missing": check["missing"]} if check["checked"] else None
+        check = retrieval.get(
+            "sufficiency_check"
+        ) or DocumentSearchTool().check_sufficiency(
+            store, models, EVAL_OWNER, row["queries"], row["rerank_query"], retrieval
+        )
+        coverage = (
+            {"verdict": check["verdict"], "missing": check["missing"]}
+            if check["checked"]
+            else None
+        )
         sources = check["sources"]
-        answer = answer_question(models, responder, run_id, item, row["rerank_query"], sources, coverage)
+        answer = answer_question(
+            models, responder, run_id, item, row["rerank_query"], sources, coverage
+        )
         row["answer"] = answer
         row["cited"] = cited_ids(answer)
-        row["sufficiency"] = row.get("sufficiency") or {"checked": check["checked"], "verdict": check["verdict"],
-            "missing": check["missing"], "retried": check["retried"], "retry_query": check["retry_query"], "retry_used": check.get("retry_used", False),
-            "refused": check["refused"], "source_count": len(sources)}
+        row["sufficiency"] = row.get("sufficiency") or {
+            "checked": check["checked"],
+            "verdict": check["verdict"],
+            "missing": check["missing"],
+            "retried": check["retried"],
+            "retry_query": check["retry_query"],
+            "retry_used": check.get("retry_used", False),
+            "refused": check["refused"],
+            "source_count": len(sources),
+        }
         row["judgement"] = judge_answer(models, item, answer, sources)
+
     return on_item
 
 
 # 执行一次评测并把结果写回同一个文件。generate=True 时在检索之后继续生成回答并请大模型评审。
 # 任何异常都记录到结果里再抛出，避免界面上永远显示"运行中"。
-def execute_run(store, models, items, run, generate=False, responder=None, agent_mode=None):
+def execute_run(
+    store, models, items, run, generate=False, responder=None, agent_mode=None
+):
     last_saved = [0.0]
 
     # 进度最多每秒写一次文件，逐题写入会让慢速磁盘上的评测明显变慢。
@@ -435,6 +621,7 @@ def execute_run(store, models, items, run, generate=False, responder=None, agent
         # 专项评测：每个专项按自己的评测方式跑，结果分开（见 app/evaluation/suites.py）。
         if run["kind"] == "special":
             from .suites import run_special
+
             run_special(store, models, run, on_progress, responder, agent_mode)
             run["status"] = "completed"
             return run
@@ -444,9 +631,21 @@ def execute_run(store, models, items, run, generate=False, responder=None, agent
         if "agent" in modes:
             # 勾选了 Agent：只跑 Agent，或者和固定流程一起跑（见 app/evaluation/agent_retrieval.py）。
             from .agent_retrieval import run_agent_retrieval
-            result = run_agent_retrieval(store, models, agent_mode, items, split, suites, "fixed" in modes, on_progress)
+
+            result = run_agent_retrieval(
+                store,
+                models,
+                agent_mode,
+                items,
+                split,
+                suites,
+                "fixed" in modes,
+                on_progress,
+            )
         else:
-            result = run_retrieval(store, models, items, split, suites, on_progress, on_item)
+            result = run_retrieval(
+                store, models, items, split, suites, on_progress, on_item
+            )
         result["config"]["modes"] = modes
         run.update(result)
         if generate:

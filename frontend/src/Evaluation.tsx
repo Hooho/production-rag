@@ -1,3 +1,5 @@
+import "./EvaluationNotes.css";
+import { DetailDialog } from "./DetailDialog";
 import { ScoringItems } from "./ScoringItems";
 import { ScoringItemEditor } from "./ScoringItemEditor";
 import { EvidenceTargetTags } from "./EvidenceTargetTags";
@@ -24,6 +26,7 @@ import {
   type EvalCorpusEntry,
   type EvalSuiteBrief,
   deleteEvalRun,
+  saveEvalRunNote,
   generateEvalDatasetItems,
   getEvalDataset,
   getEvalRun,
@@ -1412,6 +1415,12 @@ function Evaluation({
           onOpen={(id) => {
             setSelectedId(id);
             setDetailTab("overview");
+          }}
+          onNote={(id, note) => {
+            setRuns((items) =>
+              items.map((item) => (item.id === id ? { ...item, note } : item)),
+            );
+            setRun((item) => (item?.id === id ? { ...item, note } : item));
           }}
           onDelete={removeRun}
         />
@@ -3782,11 +3791,31 @@ function RunHistory({
   runs,
   onOpen,
   onDelete,
+  onNote,
 }: {
   runs: EvalRunBrief[];
   onOpen: (id: string) => void;
   onDelete: (id: string) => Promise<void>;
+  onNote: (id: string, note: string) => void;
 }) {
+  const [noteTarget, setNoteTarget] = useState<EvalRunBrief | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteError, setNoteError] = useState("");
+  async function saveNote() {
+    if (!noteTarget) return;
+    setNoteSaving(true);
+    setNoteError("");
+    try {
+      const value = await saveEvalRunNote(noteTarget.id, noteDraft);
+      onNote(value.id, value.note);
+      setNoteTarget(null);
+    } catch (reason) {
+      setNoteError((reason as Error).message);
+    } finally {
+      setNoteSaving(false);
+    }
+  }
   const [picked, setPicked] = useState<string[]>([]);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   // 指标子项不能跨表格行使用 details；显式记录展开项。记录默认都收起，点一行才展开它的指标。
@@ -3891,6 +3920,7 @@ function RunHistory({
               <th>范围</th>
               <th>题数</th>
               <th>结果</th>
+              <th>备注</th>
               <th>耗时</th>
               <th>状态</th>
               <th />
@@ -3983,6 +4013,9 @@ function RunHistory({
                         })()}
                       </span>
                     </td>
+                    <td className="ev-history-note-cell">
+                      <span title={item.note || ""}>{item.note || "—"}</span>
+                    </td>
                     <td
                       className="num ev-history-latency"
                       title={durationTitle(
@@ -4009,6 +4042,25 @@ function RunHistory({
                     </td>
                     <td>
                       <div className="ev-history-actions">
+                        <details
+                          className="ev-note-options"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <summary className="ev-link">选项</summary>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.currentTarget
+                                .closest("details")
+                                ?.removeAttribute("open");
+                              setNoteTarget(item);
+                              setNoteDraft(item.note || "");
+                              setNoteError("");
+                            }}
+                          >
+                            {item.note ? "编辑备注" : "添加备注"}
+                          </button>
+                        </details>
                         <button
                           className="ev-link ev-expand-link"
                           aria-expanded={metricsExpanded}
@@ -4054,7 +4106,7 @@ function RunHistory({
                       id={`history-metrics-${item.id}`}
                       className="ev-history-metrics-row"
                     >
-                      <td colSpan={9}>
+                      <td colSpan={10}>
                         <div className="ev-history-metrics-panel">
                           <div className="ev-history-metrics-heading">
                             各专项结果
@@ -4132,7 +4184,7 @@ function RunHistory({
                       id={`history-metrics-${item.id}`}
                       className="ev-history-metrics-row"
                     >
-                      <td colSpan={9}>
+                      <td colSpan={10}>
                         <div className="ev-history-metrics-panel">
                           <div className="ev-history-metrics-heading">
                             本条记录指标
@@ -4246,6 +4298,61 @@ function RunHistory({
           </tbody>
         </table>
       </div>
+      <DetailDialog
+        open={noteTarget !== null}
+        title={noteTarget?.note ? "编辑评测备注" : "添加评测备注"}
+        onClose={() => {
+          if (!noteSaving) setNoteTarget(null);
+        }}
+        className="ev-run-note-dialog"
+      >
+        <form
+          className="ev-run-note-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void saveNote();
+          }}
+        >
+          <p>{noteTarget ? formatTime(noteTarget.created) : ""}</p>
+          <label htmlFor="eval-run-note">备注</label>
+          <textarea
+            id="eval-run-note"
+            value={noteDraft}
+            onChange={(event) => setNoteDraft(event.target.value)}
+            maxLength={1000}
+            rows={5}
+            disabled={noteSaving}
+            autoFocus
+          />
+          <small>{noteDraft.length} / 1000</small>
+          {noteError && <p role="alert">{noteError}</p>}
+          <div className="ev-run-note-actions">
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={noteSaving}
+              onClick={() => setNoteDraft("")}
+            >
+              清空
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={noteSaving}
+              onClick={() => setNoteTarget(null)}
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              className="primary-button"
+              disabled={noteSaving}
+            >
+              {noteSaving ? "保存中…" : "保存"}
+            </button>
+          </div>
+        </form>
+      </DetailDialog>
       {comparison && (
         <div
           className="ev-add-modal-backdrop"

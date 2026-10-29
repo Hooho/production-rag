@@ -1,0 +1,57 @@
+.ev-history-note-cell {
+  min-width: 160px;
+  max-width: 260px;
+}
+
+.ev-history-note-cell > span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ev-note-options {
+  position: relative;
+}
+
+.ev-note-options > summary {
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ev-note-options > button {
+  position: absolute;
+  z-index: 5;
+  right: 0;
+  top: 100%;
+  padding: 10px 14px;
+  white-space: nowrap;
+  background: var(--t-ffffff, white);
+  color: var(--t-173b5b);
+  border: 1px solid var(--t-cedfec);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px #173b5b1a;
+}
+
+.ev-run-note-form {
+  display: grid;
+  gap: 10px;
+}
+
+.ev-run-note-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 10px;
+  font: inherit;
+  border: 1px solid var(--t-cedfec);
+  border-radius: 6px;
+}
+
+.ev-run-note-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

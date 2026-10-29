@@ -95,6 +95,7 @@ from ..evaluation.results import (
     load_run,
     previous_run,
     start_run,
+    save_run_note,
 )
 from ..evaluation.retrieval import SUITES, VARIANTS, import_corpus
 from ..evaluation import corpus as eval_corpus, regression, suites as special_suites
@@ -527,6 +528,11 @@ class LLMSettingsInput(LLMModelListInput):
 class LLMActivateInput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     provider: str = Field(min_length=1, max_length=32)
+
+
+class EvalRunNoteInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    note: str = Field(max_length=1000)
 
 
 # 密钥只回显首尾几位，避免在浏览器和日志里暴露完整密钥。
@@ -2816,6 +2822,18 @@ def create_app(store=None, models=None, jwt_secret=None):
         base = previous_run(run, runs)
         run["previous_id"] = base["id"] if base else None
         return normalize_report(run)
+
+    @app.put("/eval/runs/{run_id}/note")
+    def update_eval_run_note(
+        run_id: str, body: EvalRunNoteInput, admin=Depends(require_admin)
+    ):
+        try:
+            value = save_run_note(run_id, body.note, admin["username"])
+        except ValueError:
+            raise HTTPException(404, "评测不存在") from None
+        if value is None:
+            raise HTTPException(404, "评测不存在")
+        return value
 
     # 删除单条已落盘评测记录；运行中的记录仍在持续写入，必须等它结束后才能删除。
     @app.delete("/eval/runs/{run_id}", dependencies=[Depends(require_admin)])
