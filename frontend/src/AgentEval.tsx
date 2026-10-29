@@ -1003,7 +1003,7 @@ function modeRows(
       ? "演示模式（未调用大模型）"
       : agentConfig?.model || "未记录";
   const localIntent = config?.settings?.intent_local;
-  const models: { label: string; fixed: ModeCell; agent: ModeCell }[] = [
+  const models: { label: string; fixed?: ModeCell; agent?: ModeCell }[] = [
     {
       label: "聊天大模型",
       fixed: { value: fixedModel },
@@ -1014,15 +1014,10 @@ function modeRows(
       fixed: {
         value: flow ? (flow.sufficiency ? fixedModel : "未启用") : "未记录",
       },
-      agent: {
-        value: agentModel,
-        note: "由 Agent 自行判断，不单独调用充分性判断模型",
-      },
     },
     {
       label: "问题改写模型",
       fixed: { value: fixedModel },
-      agent: { value: agentModel, note: "由 Agent 直接生成检索词" },
     },
     {
       label: "意图识别模型",
@@ -1039,7 +1034,6 @@ function modeRows(
                   ? "历史记录未保存本地分类模型开关"
                   : "规则未命中时由大模型识别",
             },
-      agent: { value: agentModel, note: "由 Agent 直接理解问题并选择工具" },
     },
     {
       label: "向量模型",
@@ -1064,6 +1058,19 @@ function modeRows(
       },
     },
   ];
+  if (agentConfig) {
+    models.push(
+      {
+        label: "工具调用预算",
+        agent: { value: `${agentConfig.tool_budget} 次` },
+      },
+      { label: "执行超时", agent: { value: `${agentConfig.timeout} 秒` } },
+      {
+        label: "提示词版本",
+        agent: { value: agentConfig.prompt_version || "未记录" },
+      },
+    );
+  }
   for (const model of models) {
     rows.push({
       group: "config",
