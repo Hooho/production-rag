@@ -13,7 +13,7 @@
   color: var(--tone-danger-text);
 }
 
-.ag-call-evidence .tag {
+.ag-call-evidence > li > .tag {
   font-size: inherit;
   padding: 0 0.64em;
 }
