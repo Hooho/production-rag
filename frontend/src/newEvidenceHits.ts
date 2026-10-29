@@ -63,7 +63,7 @@ export function evidenceFilterReason(
     case "not_in_pool":
       return `合并后排第 ${candidate.rrf_rank} 名，没进候选池（前 ${config?.rerank_candidates ?? "未记录"} 段）`;
     case "beyond_limit":
-      return `重排第 ${candidate.rerank_rank ?? "未记录"} 名，超出返回的 ${config?.return_limit ?? "未记录"} 段`;
+      return `重排第 ${candidate.rerank_rank ?? "未记录"} 名，重排分 ${candidate.rerank_probability?.toFixed(4) ?? "未记录"}，超出返回的 ${config?.return_limit ?? "未记录"} 段`;
     case "beyond_top_k":
       return `通过检索过滤，但超出本次 Top K ${call.top_k ?? "未记录"} 的返回范围`;
     default:

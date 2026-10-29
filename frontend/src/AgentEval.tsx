@@ -2221,7 +2221,7 @@ function mergeOutcome(
     case "beyond_limit":
       return {
         ok: false,
-        text: `${score ? `${score}，` : ""}重排第 ${fixed.rerank_rank ?? "—"} 名，超出返回的 ${config.return_limit ?? "—"} 段`,
+        text: `重排第 ${fixed.rerank_rank ?? "—"} 名，重排分 ${fixed.rerank_probability?.toFixed(4) ?? "未记录"}，超出返回的 ${config.return_limit ?? "—"} 段`,
       };
     default:
       return { ok: false, text: "进了候选池，但没交给模型" };

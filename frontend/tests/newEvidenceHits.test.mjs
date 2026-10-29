@@ -80,8 +80,9 @@ assert.match(
   evidenceFilterReason(retrievalCall, {
     status: "beyond_limit",
     rerank_rank: 9,
+    rerank_probability: 0.91234,
   }),
-  /重排第 9 名，超出返回的 8 段/,
+  /重排第 9 名，重排分 0.9123，超出返回的 8 段/,
 );
 assert.match(
   evidenceFilterReason(retrievalCall, {
