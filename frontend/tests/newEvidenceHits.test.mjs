@@ -70,7 +70,7 @@ assert.match(
     status: "filtered_low_score",
     rerank_probability: 0.02,
   }),
-  /重排分 0.0200，低于阈值 0.85/,
+  /重排分 0.02，低于阈值 0.85/,
 );
 assert.match(
   evidenceFilterReason(retrievalCall, { status: "not_in_pool", rrf_rank: 35 }),
@@ -82,7 +82,7 @@ assert.match(
     rerank_rank: 9,
     rerank_probability: 0.91234,
   }),
-  /重排第 9 名，重排分 0.9123，超出返回的 8 段/,
+  /重排第 9 名，重排分 0.91，超出返回的 8 段/,
 );
 assert.match(
   evidenceFilterReason(retrievalCall, {

@@ -59,11 +59,11 @@ export function evidenceFilterReason(
   const config = call.retrieval_diagnostics?.config;
   switch (candidate.agent_status ?? candidate.status) {
     case "filtered_low_score":
-      return `进了重排，重排分 ${candidate.rerank_probability?.toFixed(4) ?? "未记录"}，低于阈值 ${config?.min_score ?? "未记录"}`;
+      return `进了重排，重排分 ${candidate.rerank_probability?.toFixed(2) ?? "未记录"}，低于阈值 ${config?.min_score ?? "未记录"}`;
     case "not_in_pool":
       return `合并后排第 ${candidate.rrf_rank} 名，没进候选池（前 ${config?.rerank_candidates ?? "未记录"} 段）`;
     case "beyond_limit":
-      return `重排第 ${candidate.rerank_rank ?? "未记录"} 名，重排分 ${candidate.rerank_probability?.toFixed(4) ?? "未记录"}，超出返回的 ${config?.return_limit ?? "未记录"} 段`;
+      return `重排第 ${candidate.rerank_rank ?? "未记录"} 名，重排分 ${candidate.rerank_probability?.toFixed(2) ?? "未记录"}，超出返回的 ${config?.return_limit ?? "未记录"} 段`;
     case "beyond_top_k":
       return `通过检索过滤，但超出本次 Top K ${call.top_k ?? "未记录"} 的返回范围`;
     default:
