@@ -993,31 +993,84 @@ function modeRows(
       ),
     });
   const flow = config?.flow;
-  const rewrite = flow ? flow.rewrite_cached + flow.rewrite_fresh : 0;
   const agentConfig = config?.agent;
-  rows.push({
-    group: "config",
-    label: "配置",
-    ...pick(
-      // 检索参数两边共用（写在卡片上方），这里只放各自独有的：固定流程是改写和充分性判断，Agent 是预算、超时和提示词。
-      {
-        value: flow
-          ? `大模型改写${flow.sufficiency ? " + 充分性判断" : "（充分性判断未启用）"}`
-          : "—",
-        note: rewrite
-          ? `改写 ${rewrite} 题，${flow!.rewrite_cached} 题来自缓存${flow?.model ? ` · ${flow.model}` : ""}`
-          : undefined,
+  const fixedModel =
+    config?.model_mode === "demo"
+      ? "演示模式（未调用大模型）"
+      : flow?.model || "未记录";
+  const agentModel =
+    config?.model_mode === "demo"
+      ? "演示模式（未调用大模型）"
+      : agentConfig?.model || "未记录";
+  const localIntent = config?.settings?.intent_local;
+  const models: { label: string; fixed: ModeCell; agent: ModeCell }[] = [
+    {
+      label: "聊天大模型",
+      fixed: { value: fixedModel },
+      agent: { value: agentModel },
+    },
+    {
+      label: "充分性判断模型",
+      fixed: {
+        value: flow ? (flow.sufficiency ? fixedModel : "未启用") : "未记录",
       },
-      {
-        value: agentConfig
-          ? `预算 ${agentConfig.tool_budget} 次 · 超时 ${agentConfig.timeout} 秒`
-          : "—",
-        note: agentConfig
-          ? `提示词 ${agentConfig.prompt_version}${agentConfig.model ? ` · ${agentConfig.model}` : ""}`
-          : undefined,
+      agent: {
+        value: agentModel,
+        note: "由 Agent 自行判断，不单独调用充分性判断模型",
       },
-    ),
-  });
+    },
+    {
+      label: "问题改写模型",
+      fixed: { value: fixedModel },
+      agent: { value: agentModel, note: "由 Agent 直接生成检索词" },
+    },
+    {
+      label: "意图识别模型",
+      fixed:
+        localIntent === true
+          ? {
+              value: "TF-IDF + 逻辑回归（本地）",
+              note: `未接受时由大模型处理：${fixedModel}`,
+            }
+          : {
+              value: fixedModel,
+              note:
+                localIntent === undefined
+                  ? "历史记录未保存本地分类模型开关"
+                  : "规则未命中时由大模型识别",
+            },
+      agent: { value: agentModel, note: "由 Agent 直接理解问题并选择工具" },
+    },
+    {
+      label: "向量模型",
+      fixed: { value: config?.embedding_model || "未记录" },
+      agent: { value: config?.embedding_model || "未记录" },
+    },
+    {
+      label: "重排模型",
+      fixed: {
+        value:
+          config?.settings?.rerank_enabled === false ||
+          config?.rerank_mode === "off"
+            ? "未启用"
+            : config?.rerank_model || "未记录",
+      },
+      agent: {
+        value:
+          config?.settings?.rerank_enabled === false ||
+          config?.rerank_mode === "off"
+            ? "未启用"
+            : config?.rerank_model || "未记录",
+      },
+    },
+  ];
+  for (const model of models) {
+    rows.push({
+      group: "config",
+      label: model.label,
+      ...pick(model.fixed, model.agent),
+    });
+  }
   return rows;
 }
 
