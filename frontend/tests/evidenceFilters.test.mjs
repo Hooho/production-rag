@@ -170,3 +170,33 @@ assert.equal(numericAgent.items[0].ranks.keyword_rank, 2);
 assert.equal(numericAgent.items[0].ranks.rrf_rank, 4);
 assert.equal(numericAgent.items[0].ranks.rerank_probability, 0.1);
 console.log("filter diagnostic numeric checks passed");
+
+// 腾讯：第3次检索未进候选池，第4次参数校验失败，第5次超出返回数量。
+const invalidCall = {
+  name: "search_knowledge",
+  status: "error",
+  note: "参数错误：query_explanation.assumptions 应为字符串数组",
+};
+const tencent = agent([call("not_in_pool"), invalidCall, call("beyond_limit")]);
+assert.equal(tencent.items.length, 1);
+assert.equal(tencent.items[0].stage, "rerank_limit");
+assert.equal(tencent.unknown, 0);
+assert.equal(tencent.unrecalled, 0);
+// 失败调用不否定其他轮次已经确认的过滤，但真实诊断缺失仍需保守处理。
+assert.equal(
+  agent([call("not_in_pool"), { name: "search_knowledge", status: "error" }])
+    .items.length,
+  1,
+);
+const emptySearch = {
+  name: "search_knowledge",
+  status: "ok",
+  retrieval_diagnostics: { config: {}, candidates: [] },
+};
+assert.equal(agent([emptySearch, invalidCall]).unrecalled, 1);
+assert.equal(agent([emptySearch, invalidCall]).unknown, 0);
+assert.equal(
+  agent([emptySearch, { name: "search_knowledge", status: "error" }]).unknown,
+  1,
+);
+console.log("Agent failed-call filter regression checks passed.");

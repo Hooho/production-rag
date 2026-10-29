@@ -120,7 +120,10 @@ export function evidenceFilters(
         for (const call of question.agent?.calls ?? []) {
           if (
             call.name !== "search_knowledge" ||
-            !["ok", "error"].includes(call.status)
+            !["ok", "error"].includes(call.status) ||
+            (call.status === "error" &&
+              !call.retrieval_diagnostics &&
+              call.note?.startsWith("参数错误："))
           )
             continue;
           const diagnostics = call.retrieval_diagnostics;
@@ -146,11 +149,12 @@ export function evidenceFilters(
           }
         }
       }
-      if (!recorded) {
+      const stage = classify(events);
+      // 已有明确的过滤记录，不因另一轮缺少诊断而丢弃已确认结果。
+      if (!recorded && !(mode === "agent" && stage)) {
         unknown++;
         continue;
       }
-      const stage = classify(events);
       if (events.every((event) => event.status === "not_recalled"))
         unrecalled++;
       if (stage)
