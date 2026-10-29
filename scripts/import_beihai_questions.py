@@ -1,4 +1,4 @@
-"""通过 HTTP API 导入北海评测十二题；语料须已上传并完成导入。"""
+"""通过 HTTP API 原位更新北海指南并导入十二道评测题。"""
 
 import argparse
 import getpass
@@ -55,15 +55,6 @@ def load_materials():
         raise ValueError("本地指南与 questions.json 版本不同，请使用同一提交的材料")
     parts = re.split(r"^## (B\d{3})｜[^\n]+\n", text, flags=re.M)
     sections = {parts[i]: normalized(parts[i + 1]) for i in range(1, len(parts), 2)}
-    for source in spec.get("additional_corpora", []):
-        extra = (MATERIALS / source["file"]).read_bytes().decode("utf-8-sig")
-        if hashlib.sha256(extra.encode()).hexdigest() != source["sha256"]:
-            raise ValueError(f"本地《{source['title']}》与题目版本不同")
-        parts = re.split(r"^## (B\d{3})｜[^\n]+\n", extra, flags=re.M)
-        for index in range(1, len(parts), 2):
-            if parts[index] in sections:
-                raise ValueError(f"资料小节编号重复：{parts[index]}")
-            sections[parts[index]] = normalized(parts[index + 1])
     return spec, sections
 
 
@@ -147,67 +138,85 @@ def signature(item):
     }
 
 
-def ensure_supplements(api, spec, dry_run):
-    for source in spec.get("additional_corpora", []):
-        entries = api("GET", "/eval/corpus")["items"]
-        entry = next((row for row in entries if row["title"] == source["title"]), None)
-        if entry and (entry.get("missing") or entry["sha256"] != source["sha256"]):
-            raise ValueError(f"已有《{source['title']}》版本不同，未覆盖；请先核对语料")
-        if not entry or entry["status"] != "imported":
-            if dry_run:
-                print(f"正式运行将上传并导入《{source['title']}》；本次不写入。")
+def moved_from_supplement(existing, item):
+    """仅迁移先前四道比较题的相同证据，不覆盖人工修改的答案或计分项。"""
+    if existing.get("type") != "比较" or item["type"] != "比较":
+        return False
+    old, new = signature(existing), signature(item)
+    for value in (old, new):
+        for group in value["evidence_groups"]:
+            if not group["targets"]:
                 return False
-            if entry is None:
-                result = api(
-                    "POST",
-                    "/eval/corpus",
-                    files=[
-                        (
-                            Path(source["file"]).name,
-                            (MATERIALS / source["file"]).read_bytes(),
-                        )
-                    ],
-                )
-                if result.get("rejected") or len(result.get("added", [])) != 1:
-                    raise ValueError("补充语料上传未成功，请查看语料库")
-                entry = result["added"][0]
-            source_id = entry["id"]
-            entry_id = quote(source_id, safe="")
-            if entry.get("status") != "importing":
-                api("POST", f"/eval/corpus/{entry_id}/import")
-            print(f"等待《{source['title']}》导入完成……", flush=True)
-            deadline = time.monotonic() + 600
-            while True:
-                entries = api("GET", "/eval/corpus")["items"]
-                entry = next((row for row in entries if row["id"] == source_id), None)
-                if entry is None or entry.get("missing"):
-                    raise ValueError("补充语料在导入期间不可用")
-                if entry["sha256"] != source["sha256"]:
-                    raise ValueError("补充语料在导入期间版本变化")
-                if entry["status"] == "imported":
-                    break
-                if entry.get("import_error"):
-                    raise ValueError("补充语料导入失败，请查看语料库中的错误信息")
-                if time.monotonic() >= deadline:
-                    raise ValueError("等待补充语料超过十分钟；可稍后重复运行")
-                time.sleep(2)
-    return True
+    if not all(
+        target[0] == "北海出游条件补记"
+        for group in old["evidence_groups"]
+        for target in group["targets"]
+    ):
+        return False
+    for value in (old, new):
+        for group in value["evidence_groups"]:
+            group["targets"] = sorted(target[2] for target in group["targets"])
+    return old == new
 
 
-def import_questions(api, spec, sections, suite_name, dry_run=False):
+def ensure_guide(api, spec, dry_run):
     entries = [
         row
         for row in api("GET", "/eval/corpus")["items"]
         if row["title"] == spec["title"]
     ]
-    if len(entries) != 1:
-        raise ValueError(f"请先在评测语料库上传《{spec['title']}》")
-    entry = entries[0]
-    if entry.get("missing") or entry["status"] != "imported":
-        raise ValueError(f"语料状态为 {entry['status']}，请先点击“导入”并等待完成")
-    if entry["sha256"] != spec["corpus_sha256"]:
-        raise ValueError("服务器上的指南与本地材料版本不同，未创建专项或题目")
-    if not ensure_supplements(api, spec, dry_run):
+    if len(entries) > 1:
+        raise ValueError("同名语料不唯一，未更新")
+    entry = entries[0] if entries else None
+    path = MATERIALS / "corpus/北海慢游指南.md"
+    expected = spec["corpus_sha256"]
+    if entry and entry["sha256"] not in {
+        expected,
+        *spec.get("previous_corpus_sha256", []),
+    }:
+        raise ValueError("服务器上的指南不是已知版本，未覆盖人工修改")
+    if not entry or entry.get("missing") or entry["sha256"] != expected:
+        if dry_run:
+            print("正式运行将上传或更新《北海慢游指南》并重新导入；本次不写入。")
+            return False
+        if entry:
+            api(
+                "PUT",
+                f"/eval/corpus/{quote(entry['id'], safe='')}",
+                files=[(path.name, path.read_bytes())],
+            )
+            entry = {**entry, "sha256": expected, "status": "not_imported"}
+        else:
+            result = api("POST", "/eval/corpus", files=[(path.name, path.read_bytes())])
+            if result.get("rejected") or len(result.get("added", [])) != 1:
+                raise ValueError("指南上传未成功，请查看语料库")
+            entry = result["added"][0]
+    if entry.get("status") == "imported":
+        return True
+    if dry_run:
+        print("正式运行将重新导入指南；本次不写入。")
+        return False
+    source_id = entry["id"]
+    if entry.get("status") != "importing":
+        api("POST", f"/eval/corpus/{quote(source_id, safe='')}/import")
+    print("等待《北海慢游指南》导入完成……", flush=True)
+    deadline = time.monotonic() + 600
+    while True:
+        entries = api("GET", "/eval/corpus")["items"]
+        entry = next((row for row in entries if row["id"] == source_id), None)
+        if not entry or entry.get("missing") or entry["sha256"] != expected:
+            raise ValueError("指南在导入期间不可用或版本变化")
+        if entry["status"] == "imported":
+            return True
+        if entry.get("import_error"):
+            raise ValueError("指南导入失败，请查看语料库中的错误信息")
+        if time.monotonic() >= deadline:
+            raise ValueError("等待指南导入超过十分钟，可稍后重复运行")
+        time.sleep(2)
+
+
+def import_questions(api, spec, sections, suite_name, dry_run=False):
+    if not ensure_guide(api, spec, dry_run):
         return
     items = build_items(spec, sections, api("GET", "/eval/target-chunks")["items"])
     matches = [
@@ -232,9 +241,13 @@ def import_questions(api, spec, sections, suite_name, dry_run=False):
         if len(existing) > 1 or (
             existing and signature(existing[0]) != signature(item)
         ):
-            raise ValueError(
-                f"同题内容或目标分片冲突，未执行导入：{item['question']}；可用 --suite-name 新建专项"
-            )
+            if len(existing) == 1 and moved_from_supplement(existing[0], item):
+                pending.append((existing[0]["id"], item))
+                continue
+            else:
+                raise ValueError(
+                    f"同题内容或目标分片冲突，未执行导入：{item['question']}；可用 --suite-name 新建专项"
+                )
         if not existing:
             previous = definition.get("previous_question")
             old = [

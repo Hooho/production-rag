@@ -109,7 +109,6 @@ def main():
     ).eval()
     sources = [
         {"title": spec["title"], "file": "corpus/北海慢游指南.md"},
-        *spec["additional_corpora"],
     ]
     documents = []
     source_hashes = {}

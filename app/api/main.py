@@ -3143,6 +3143,29 @@ def create_app(store=None, models=None, jwt_secret=None):
             )
         return {"added": added, "rejected": rejected}
 
+    @app.put("/eval/corpus/{entry_id}", dependencies=[Depends(require_admin)])
+    def eval_corpus_replace(entry_id: str, files: list[UploadFile] = File(...)):
+        if len(files) != 1:
+            raise HTTPException(422, "每次只能更新一份语料")
+        if not app.state.eval_lock.acquire(blocking=False):
+            raise HTTPException(409, "有评测或导入正在进行，请等它完成")
+        try:
+            entry = eval_corpus.replace_entry(
+                app.state.store.engine,
+                entry_id,
+                files[0].file.read(eval_corpus.MAX_BYTES + 1),
+            )
+            if entry is None:
+                raise HTTPException(404, "语料不存在")
+            return {
+                key: entry[key]
+                for key in ("id", "title", "filename", "sha256", "char_count")
+            }
+        except eval_corpus.CorpusError as error:
+            raise HTTPException(422, str(error))
+        finally:
+            app.state.eval_lock.release()
+
     # 删除语料：评测正在跑时不能删（它可能正在检索这份）。评测账号里导入过的这份文档一起删掉。
     @app.delete("/eval/corpus/{entry_id}", dependencies=[Depends(require_admin)])
     def eval_corpus_delete(entry_id: str):

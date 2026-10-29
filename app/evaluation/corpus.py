@@ -9,14 +9,20 @@
 - 评测开跑时勾选用哪几份（不勾就是全部）：只导入、只检索勾选的（见 app/tools/search.py 的 limit_titles）；
 - 删除语料时，评测账号里导入过的这份文档、上传目录里的文件一起删掉。
 """
+
 from hashlib import sha256
 import os
 from pathlib import Path
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
-from ..mysql.store import document_heads, documents, eval_corpus, settings as settings_table
+from ..mysql.store import (
+    document_heads,
+    documents,
+    eval_corpus,
+    settings as settings_table,
+)
 from ..runtime_config import bound_engine
 from . import dataset
 
@@ -54,8 +60,19 @@ def store_entry(connection, title, filename, content, username):
     target.write_text(content, encoding="utf-8")
     now = dataset.now_text()
     try:
-        connection.execute(eval_corpus.insert().values(id=entry_id, title=title, filename=filename, path=str(target),
-            sha256=text_fingerprint(content), char_count=len(content), created_by=username, created=now, updated=now))
+        connection.execute(
+            eval_corpus.insert().values(
+                id=entry_id,
+                title=title,
+                filename=filename,
+                path=str(target),
+                sha256=text_fingerprint(content),
+                char_count=len(content),
+                created_by=username,
+                created=now,
+                updated=now,
+            )
+        )
     except Exception:
         target.unlink(missing_ok=True)
         raise
@@ -65,15 +82,25 @@ def store_entry(connection, title, filename, content, username):
 # 第一次用到语料库时，把 eval/seed/corpus 下的初始语料复制进来。
 def ensure_seeded(engine):
     with engine.begin() as connection:
-        if connection.execute(select(settings_table.c.key).where(settings_table.c.key == SEED_KEY)).first():
+        if connection.execute(
+            select(settings_table.c.key).where(settings_table.c.key == SEED_KEY)
+        ).first():
             return False
         titles = set(connection.execute(select(eval_corpus.c.title)).scalars().all())
         for path in seed_files():
             title = path.stem[:TITLE_LENGTH]
             if title not in titles:
-                store_entry(connection, title, path.name, path.read_text(encoding="utf-8"), "system")
+                store_entry(
+                    connection,
+                    title,
+                    path.name,
+                    path.read_text(encoding="utf-8"),
+                    "system",
+                )
         now = dataset.now_text()
-        connection.execute(settings_table.insert().values(key=SEED_KEY, value={"at": now}, updated=now))
+        connection.execute(
+            settings_table.insert().values(key=SEED_KEY, value={"at": now}, updated=now)
+        )
     return True
 
 
@@ -87,14 +114,22 @@ def entry_view(row):
 def list_entries(engine):
     ensure_seeded(engine)
     with engine.connect() as connection:
-        rows = connection.execute(select(eval_corpus).order_by(eval_corpus.c.title)).mappings().all()
+        rows = (
+            connection.execute(select(eval_corpus).order_by(eval_corpus.c.title))
+            .mappings()
+            .all()
+        )
     return [entry_view(row) for row in rows]
 
 
 def get_entry(engine, entry_id):
     ensure_seeded(engine)
     with engine.connect() as connection:
-        row = connection.execute(select(eval_corpus).where(eval_corpus.c.id == entry_id)).mappings().first()
+        row = (
+            connection.execute(select(eval_corpus).where(eval_corpus.c.id == entry_id))
+            .mappings()
+            .first()
+        )
     return entry_view(row) if row else None
 
 
@@ -115,8 +150,14 @@ def documents_for(titles=None, engine=None):
     for entry in list_entries(engine):
         if wanted is not None and entry["title"] not in wanted:
             continue
-        items.append({"id": entry["id"], "title": entry["title"], "filename": entry["filename"],
-            "content": read_content(entry)})
+        items.append(
+            {
+                "id": entry["id"],
+                "title": entry["title"],
+                "filename": entry["filename"],
+                "content": read_content(entry),
+            }
+        )
     return items
 
 
@@ -132,7 +173,9 @@ def add_entry(engine, filename, data, username):
     try:
         content = data.decode("utf-8-sig")
     except UnicodeDecodeError:
-        raise CorpusError(f"{name}：不是 UTF-8 编码的文本，请另存为 UTF-8 后再上传") from None
+        raise CorpusError(
+            f"{name}：不是 UTF-8 编码的文本，请另存为 UTF-8 后再上传"
+        ) from None
     if not content.strip():
         raise CorpusError(f"{name}：文件是空的")
     title = Path(name).stem.strip()[:TITLE_LENGTH]
@@ -140,31 +183,102 @@ def add_entry(engine, filename, data, username):
         raise CorpusError("文件名不能为空")
     fingerprint = text_fingerprint(content)
     with engine.begin() as connection:
-        if connection.execute(select(eval_corpus.c.id).where(eval_corpus.c.title == title)).first():
-            raise CorpusError(f"{name}：已经有同名的语料《{title}》，要替换请先删掉旧的")
-        same = connection.execute(select(eval_corpus.c.title).where(eval_corpus.c.sha256 == fingerprint)).first()
+        if connection.execute(
+            select(eval_corpus.c.id).where(eval_corpus.c.title == title)
+        ).first():
+            raise CorpusError(
+                f"{name}：已经有同名的语料《{title}》，要替换请先删掉旧的"
+            )
+        same = connection.execute(
+            select(eval_corpus.c.title).where(eval_corpus.c.sha256 == fingerprint)
+        ).first()
         if same:
             raise CorpusError(f"{name}：内容和《{same[0]}》完全相同")
         entry_id = store_entry(connection, title, name, content, username)
     return get_entry(engine, entry_id)
 
 
+def replace_entry(engine, entry_id, data):
+    """更新一份语料原文，保持编号与标题；重新导入前仍使用旧检索版本。"""
+    entry = get_entry(engine, entry_id)
+    if entry is None:
+        return None
+    if len(data) > MAX_BYTES:
+        raise CorpusError("单个文件不能超过 5 MB")
+    try:
+        content = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise CorpusError("不是 UTF-8 编码的文本") from None
+    if not content.strip():
+        raise CorpusError("语料内容不能为空")
+    digest = text_fingerprint(content)
+    if digest == entry["sha256"] and not entry["missing"]:
+        return entry
+    # 先写新文件再切换数据库指向，保留旧原文用于恢复，不原地覆盖正在读取的文件。
+    target = storage_dir() / f"{uuid4()}{Path(entry['filename']).suffix.lower()}"
+    target.write_text(content, encoding="utf-8")
+    try:
+        with engine.begin() as connection:
+            same = connection.execute(
+                select(eval_corpus.c.id).where(
+                    eval_corpus.c.id != entry_id, eval_corpus.c.sha256 == digest
+                )
+            ).first()
+            if same:
+                raise CorpusError("内容与其他语料完全相同")
+            result = connection.execute(
+                update(eval_corpus)
+                .where(
+                    eval_corpus.c.id == entry_id,
+                    eval_corpus.c.sha256 == entry["sha256"],
+                )
+                .values(
+                    path=str(target),
+                    sha256=digest,
+                    char_count=len(content),
+                    updated=dataset.now_text(),
+                )
+            )
+            if result.rowcount != 1:
+                raise CorpusError("语料已被其他操作修改，请刷新后重试")
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+    return get_entry(engine, entry_id)
+
+
 # 评测账号里每份语料当前导入的版本：{标题: {"document_id", "status", "sha256"}}。
 def imported_versions(engine):
     from .retrieval import EVAL_OWNER
-    joined = document_heads.join(documents, documents.c.id == document_heads.c.current_document_id)
+
+    joined = document_heads.join(
+        documents, documents.c.id == document_heads.c.current_document_id
+    )
     with engine.connect() as connection:
-        rows = connection.execute(select(document_heads.c.title, documents.c.id, documents.c.status,
-            documents.c.document_metadata).select_from(joined).where(document_heads.c.owner == EVAL_OWNER)).all()
+        rows = connection.execute(
+            select(
+                document_heads.c.title,
+                documents.c.id,
+                documents.c.status,
+                documents.c.document_metadata,
+            )
+            .select_from(joined)
+            .where(document_heads.c.owner == EVAL_OWNER)
+        ).all()
     result = {}
     for title, document_id, status, metadata in rows:
-        result[title] = {"document_id": document_id, "status": status, "sha256": (metadata or {}).get("sha256")}
+        result[title] = {
+            "document_id": document_id,
+            "status": status,
+            "sha256": (metadata or {}).get("sha256"),
+        }
     return result
 
 
 # 删除一份语料：表里的记录、上传目录里的文件，以及评测账号里导入过的这份文档。
 def delete_entry(store, entry_id):
     from .retrieval import EVAL_OWNER
+
     entry = get_entry(store.engine, entry_id)
     if entry is None:
         return None

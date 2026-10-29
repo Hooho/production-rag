@@ -22,26 +22,20 @@ from test_evaluation import eval_dir, headers  # noqa: F401
 
 def catalog_for(size=400, overlap=40):
     spec, _ = load_materials()
-    result = []
-    for source in [
-        {"title": spec["title"], "file": "corpus/北海慢游指南.md"},
-        *spec.get("additional_corpora", []),
-    ]:
-        records = chunk_document_records(
-            (MATERIALS / source["file"]).read_text(encoding="utf-8"),
-            chunk_size=size,
-            chunk_overlap=overlap,
-        )
-        result.extend(
-            {
-                "title": source["title"],
-                "position": index,
-                "fingerprint": fingerprint(record["content"]),
-                "quote": record["content"],
-            }
-            for index, record in enumerate(records)
-        )
-    return result
+    records = chunk_document_records(
+        (MATERIALS / "corpus/北海慢游指南.md").read_text(encoding="utf-8"),
+        chunk_size=size,
+        chunk_overlap=overlap,
+    )
+    return [
+        {
+            "title": spec["title"],
+            "position": index,
+            "fingerprint": fingerprint(record["content"]),
+            "quote": record["content"],
+        }
+        for index, record in enumerate(records)
+    ]
 
 
 @pytest.mark.parametrize("size,overlap", [(800, 120), (400, 40), (300, 40)])
@@ -96,32 +90,22 @@ def api_for(client, calls):
     return api
 
 
-def upload_guide(client, store, supplements=True):
-    # 隔离本机 .env 中的模型地址；这里只验证入库和 HTTP API，不调用模型服务。
+def upload_guide(client, store, content=None):
     client.app.state.models.embedding_mode = "demo"
     client.app.state.models.contextual = False
-    spec, _ = load_materials()
-    sources = [{"title": spec["title"], "file": "corpus/北海慢游指南.md"}]
-    if supplements:
-        sources += spec.get("additional_corpora", [])
+    content = (
+        content
+        if content is not None
+        else (MATERIALS / "corpus/北海慢游指南.md").read_bytes()
+    )
     response = client.post(
         "/eval/corpus",
         headers=headers(),
-        files=[
-            (
-                "files",
-                (
-                    source["title"] + ".md",
-                    (MATERIALS / source["file"]).read_bytes(),
-                    "text/markdown",
-                ),
-            )
-            for source in sources
-        ],
+        files=[("files", ("北海慢游指南.md", content, "text/markdown"))],
     )
     assert response.status_code == 201, response.text
-    assert len(response.json()["added"]) == len(sources)
-    with limit_titles("eval", [source["title"] for source in sources]):
+    assert len(response.json()["added"]) == 1
+    with limit_titles("eval", ["北海慢游指南"]):
         import_corpus(store, client.app.state.models)
 
 
@@ -209,8 +193,11 @@ def test_not_ready_or_different_corpus_makes_no_write(change):
             ]
         }
 
-    with pytest.raises(ValueError):
-        import_questions(api, spec, sections, spec["suite_name"])
+    if "sha256" in change:
+        with pytest.raises(ValueError):
+            import_questions(api, spec, sections, spec["suite_name"], dry_run=True)
+    else:
+        import_questions(api, spec, sections, spec["suite_name"], dry_run=True)
     assert calls == [("GET", "/eval/corpus")]
 
 
@@ -345,9 +332,7 @@ def test_updates_only_four_previous_comparisons_and_preserves_other_items(
     assert all(method == "GET" for method, _ in calls)
 
 
-def test_one_command_uploads_and_imports_missing_supplement(
-    setup, eval_dir, monkeypatch
-):
+def test_one_command_updates_and_reimports_the_same_guide(setup, eval_dir, monkeypatch):
     # 测试库共享一条 SQLite 连接，后台写入与轮询会互相影响事务；同步执行同一个导入任务。
     class InlineThread:
         def __init__(self, target, daemon):
@@ -358,8 +343,19 @@ def test_one_command_uploads_and_imports_missing_supplement(
 
     monkeypatch.setattr("app.api.main.Thread", InlineThread)
     client, store = setup
-    upload_guide(client, store, supplements=False)
+    import hashlib
+
     spec, sections = load_materials()
+    current = (MATERIALS / "corpus/北海慢游指南.md").read_text(encoding="utf-8")
+    old = (current.split("\n\n## B121", 1)[0] + "\n").encode()
+    assert hashlib.sha256(old).hexdigest() in spec["previous_corpus_sha256"]
+    upload_guide(client, store, content=old)
+    before = next(
+        row
+        for row in client.get("/eval/corpus", headers=headers()).json()["items"]
+        if row["title"] == spec["title"]
+    )
+
     calls = []
     api = api_for(client, calls)
     import_questions(api, spec, sections, spec["suite_name"], dry_run=True)
@@ -367,13 +363,14 @@ def test_one_command_uploads_and_imports_missing_supplement(
     calls.clear()
     # 仍调用真实上传和导入 API，模型被隔离为 demo，不访问外部服务。
     import_questions(api, spec, sections, spec["suite_name"])
-    assert ("POST", "/eval/corpus") in calls
+    assert ("PUT", f"/eval/corpus/{before['id']}") in calls
+    assert ("POST", "/eval/corpus") not in calls
     assert any(method == "POST" and path.endswith("/import") for method, path in calls)
     saved = api("GET", "/eval/corpus")["items"]
-    assert (
-        next(row for row in saved if row["title"] == "北海出游条件补记")["status"]
-        == "imported"
-    )
+    guide = next(row for row in saved if row["title"] == spec["title"])
+    assert guide["status"] == "imported" and guide["id"] == before["id"]
+    assert guide["sha256"] == spec["corpus_sha256"]
+    assert not any(row["title"] == "北海出游条件补记" for row in saved)
 
 
 @pytest.mark.parametrize(
@@ -413,3 +410,21 @@ def test_verification_requires_recall_and_distinct_rerank_loss(mode, qualified):
 
     result = verify(rank, score, [item], documents, 0.85, 12)
     assert result[0]["qualified"] is qualified
+
+
+def test_only_identical_comparison_evidence_can_move_back_into_guide():
+    from scripts.import_beihai_questions import moved_from_supplement
+
+    spec, sections = load_materials()
+    item = next(
+        row
+        for row in build_items(spec, sections, catalog_for())
+        if row["type"] == "比较"
+    )
+    old = deepcopy(item)
+    for group in old["evidence_groups"]:
+        group["targets"][0]["title"] = "北海出游条件补记"
+        group["targets"][0]["position"] -= 100
+    assert moved_from_supplement(old, item)
+    old["reference_answer"] = "人工修改的答案"
+    assert not moved_from_supplement(old, item)
