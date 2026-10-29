@@ -288,12 +288,14 @@ type EvidenceStatusRow = EvidenceStatusEntry & {
 
 // 卡片显示简洁摘要，完整计分项命中记录通过标题旁的详情按钮查看。
 function EvidenceStatus({
+  question,
   rows,
   expanded,
   onToggle,
   children,
   agent = false,
 }: {
+  question: EvalQuestion;
   rows: EvidenceStatusRow[];
   expanded: boolean;
   onToggle: () => void;
@@ -301,6 +303,12 @@ function EvidenceStatus({
   agent?: boolean;
 }) {
   const [detailOpen, setDetailOpen] = useState(false);
+  const itemName = (index: number) => {
+    const label =
+      question.agent?.evidence[index]?.label ||
+      question.evidence?.[index]?.label;
+    return `计分项 ${index + 1}${label ? `：${label}` : ""}`;
+  };
   return (
     <div className="ag-evidence-status">
       <div className="ag-evidence-status-head">
@@ -321,7 +329,7 @@ function EvidenceStatus({
               <span
                 className={`ag-evidence-name ${row.tone === "danger" || row.tone === "neutral" ? "is-missed" : ""}`}
               >
-                计分项 {index + 1}
+                {itemName(index)}
               </span>
               <Tag
                 tone={row.tone}
@@ -369,7 +377,7 @@ function EvidenceStatus({
                     : undefined
                 }
               >
-                计分项 {index + 1}
+                {itemName(index)}
               </h4>
               {row.hitCount !== undefined && (
                 <small className="ag-muted">累计命中 {row.hitCount} 次</small>
@@ -2504,6 +2512,7 @@ function FixedLog({
         </small>
       </div>
       <EvidenceStatus
+        question={question}
         rows={fixedEvidenceRows(question, config)}
         expanded={expanded}
         onToggle={() => setExpanded(!expanded)}
@@ -2789,6 +2798,7 @@ function AgentLog({ question }: { question: EvalQuestion }) {
         </small>
       </div>
       <EvidenceStatus
+        question={question}
         agent
         rows={agentEvidenceRows(question)}
         expanded={expanded}
