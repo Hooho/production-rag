@@ -6,11 +6,17 @@
 3. 调用原来的函数（DocumentSearchTool、OrderTool、DataQueryTool），检索、权限、脱敏逻辑全部沿用；
 4. 返回两份结果：content 是给模型看的带编号纯文本，trace 是完整结果，存进执行记录供页面展示。
 """
+
 import inspect
 import json
 from dataclasses import dataclass, field
 
-from .query_explanation import QUERY_EXPLANATION_SCHEMA, RETRIEVAL_TOOLS, query_explanation, retrieval_arguments
+from .query_explanation import (
+    QUERY_EXPLANATION_SCHEMA,
+    RETRIEVAL_TOOLS,
+    query_explanation,
+    retrieval_arguments,
+)
 
 from ..business.service import DataError
 from ..runtime_config import snapshot as runtime_snapshot
@@ -20,7 +26,11 @@ from ..tools.orders import OrderTool
 from ..tools.search import DocumentSearchTool
 
 # 检索方式对应 DocumentSearchTool 的召回方式：hybrid 向量 + BM25，keyword 只用 BM25，vector 只用向量。
-SEARCH_MODES = {"hybrid": ("dense", "keyword"), "keyword": ("keyword",), "vector": ("dense",)}
+SEARCH_MODES = {
+    "hybrid": ("dense", "keyword"),
+    "keyword": ("keyword",),
+    "vector": ("dense",),
+}
 TOP_K_DEFAULT = 5
 TOP_K_MAX = 10
 CONTEXT_COUNT_MAX = 3
@@ -55,6 +65,7 @@ class EvidencePool:
 @dataclass
 class AgentContext:
     """一次问答的工具运行环境。身份和存储由服务端设置，模型只能通过工具参数影响查询内容。"""
+
     store: object
     models: object
     owner: str
@@ -75,6 +86,7 @@ def invalid(message):
 
 # ---------- search_knowledge ----------
 
+
 def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
     if not isinstance(query, str) or not query.strip():
         return invalid("query 不能为空")
@@ -85,34 +97,62 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
     top_k = max(1, min(top_k, TOP_K_MAX))
     query = query.strip()
     # Agent 的检索词按提示词要求写成完整问句，所以重排也直接用它，不再另外补全问题。
-    retrieval = ctx.search_tool.execute(ctx.store, ctx.models, ctx.owner, [query], query,
-        methods=SEARCH_MODES[mode])
+    # 相关度阈值用 Agent 自己的 agent_rerank_min_score，和固定流程的 rerank_min_score 分开设。
+    retrieval = ctx.search_tool.execute(
+        ctx.store,
+        ctx.models,
+        ctx.owner,
+        [query],
+        query,
+        methods=SEARCH_MODES[mode],
+        min_score=runtime_snapshot()["agent_rerank_min_score"],
+    )
     # 返回几条由重排阈值和设置页的 return_limit 决定，top_k 只能在这之内再少取，不能绕过阈值。
     sources = retrieval["sources"][:top_k]
     if not sources:
-        return result("没有找到相关资料。可以换一种问法，或者用 keyword 模式搜索名称、编号等原话。",
-            query=query, mode=mode, top_k=top_k, evidence_ids=[], retrieval=retrieval)
+        return result(
+            "没有找到相关资料。可以换一种问法，或者用 keyword 模式搜索名称、编号等原话。",
+            query=query,
+            mode=mode,
+            top_k=top_k,
+            evidence_ids=[],
+            retrieval=retrieval,
+        )
     blocks = []
     evidence_ids = []
     repeated = []
     for source in sources:
         # 原来的 id 是这次检索内的编号（每次从 S1 开始），换成整次问答的编号后不再保留。
         item = {key: value for key, value in source.items() if key != "id"}
-        evidence_id, is_new = ctx.evidence.add("S", {"type": "knowledge", **item}, chunk_id=source["chunk_id"])
+        evidence_id, is_new = ctx.evidence.add(
+            "S", {"type": "knowledge", **item}, chunk_id=source["chunk_id"]
+        )
         evidence_ids.append(evidence_id)
         if not is_new:
             repeated.append(evidence_id)
-            blocks.append(f"[{evidence_id}] 和前面返回的 {evidence_id} 是同一段资料，见上文。")
+            blocks.append(
+                f"[{evidence_id}] 和前面返回的 {evidence_id} 是同一段资料，见上文。"
+            )
             continue
         blocks.append(format_source(evidence_id, source))
     # 这次返回的资料前面全都给过：明确告诉模型这次检索没有新资料。原来只逐条写“同一段资料”，模型要自己比对编号，
     # 评测里常见换几种说法反复拿回同一批资料（无新增检索）。这里只给信息、不强制停，查不查由模型决定。
     if len(repeated) == len(evidence_ids):
-        blocks.insert(0, f"这次检索没有新资料：返回的 {'、'.join(repeated)} 前面都已经给过。"
+        blocks.insert(
+            0,
+            f"这次检索没有新资料：返回的 {'、'.join(repeated)} 前面都已经给过。"
             "换说法再查大多还是拿回同一批资料；已有资料能回答用户的问题就直接回答，"
-            "还缺某一部分时，只针对缺的那部分换一个角度查，或者用 keyword 模式查名称、编号、原话。")
-    return result("\n\n".join(blocks), query=query, mode=mode, top_k=top_k, evidence_ids=evidence_ids,
-        retrieval=retrieval, no_new=len(repeated) == len(evidence_ids))
+            "还缺某一部分时，只针对缺的那部分换一个角度查，或者用 keyword 模式查名称、编号、原话。",
+        )
+    return result(
+        "\n\n".join(blocks),
+        query=query,
+        mode=mode,
+        top_k=top_k,
+        evidence_ids=evidence_ids,
+        retrieval=retrieval,
+        no_new=len(repeated) == len(evidence_ids),
+    )
 
 
 # 一条资料：编号、标题和小节，然后是正文（父块已带"标题路径"时正文里有完整路径）。
@@ -126,6 +166,7 @@ def format_source(evidence_id, source):
 
 
 # ---------- read_context ----------
+
 
 def read_context(ctx, source_id, direction="after", count=1):
     """读取一条知识库资料的前文或后文。
@@ -141,10 +182,18 @@ def read_context(ctx, source_id, direction="after", count=1):
     count = max(1, min(count, CONTEXT_COUNT_MAX))
     item = ctx.evidence.get(source_id) if isinstance(source_id, str) else None
     if item is None or item.get("type") != "knowledge":
-        return invalid(f"{source_id} 不是已检索到的知识库资料编号，只能读取 S 开头的编号")
-    positions = [part["position"] for part in item.get("parent_parts") or [] if part.get("position") is not None]
+        return invalid(
+            f"{source_id} 不是已检索到的知识库资料编号，只能读取 S 开头的编号"
+        )
+    positions = [
+        part["position"]
+        for part in item.get("parent_parts") or []
+        if part.get("position") is not None
+    ]
     if item.get("document_id") is None or not positions:
-        return result(f"{source_id} 没有位置信息，无法读取前后文。", ok=False, source_id=source_id)
+        return result(
+            f"{source_id} 没有位置信息，无法读取前后文。", ok=False, source_id=source_id
+        )
     # 记录已经读到的范围，连续读后文时从上次的末尾继续，不重复返回同一段。
     start = item.get("read_start", min(positions))
     end = item.get("read_end", max(positions))
@@ -156,8 +205,12 @@ def read_context(ctx, source_id, direction="after", count=1):
         picked = [row for row in rows if row["position"] > edge]
     label = "前文" if direction == "before" else "后文"
     if not picked:
-        return result(f"[{source_id} {label}] 已经到文档{'开头' if direction == 'before' else '结尾'}，没有更多内容。",
-            source_id=source_id, direction=direction, chunk_ids=[])
+        return result(
+            f"[{source_id} {label}] 已经到文档{'开头' if direction == 'before' else '结尾'}，没有更多内容。",
+            source_id=source_id,
+            direction=direction,
+            chunk_ids=[],
+        )
     limit = runtime_snapshot()["parent_max_chars"]
     parts = []
     chunk_ids = []
@@ -178,11 +231,18 @@ def read_context(ctx, source_id, direction="after", count=1):
         item["read_start"] = min(covered)
     else:
         item["read_end"] = max(covered)
-    return result(f"[{source_id} {label}] 《{item['title']}》\n{text}", source_id=source_id, direction=direction,
-        positions=covered, chunk_ids=chunk_ids, injection=injection_hits)
+    return result(
+        f"[{source_id} {label}] 《{item['title']}》\n{text}",
+        source_id=source_id,
+        direction=direction,
+        positions=covered,
+        chunk_ids=chunk_ids,
+        injection=injection_hits,
+    )
 
 
 # ---------- lookup_order ----------
+
 
 def lookup_order(ctx, order_id):
     if not isinstance(order_id, str) or not order_id.strip():
@@ -193,14 +253,25 @@ def lookup_order(ctx, order_id):
     if outcome["answer"].startswith("没有找到"):
         return result(outcome["answer"], order_id=order_id, found=False)
     evidence_id, _ = ctx.evidence.add("O", {"type": "order", **outcome})
-    return result(f"[{evidence_id}] {outcome['answer']}", order_id=order_id, found=True, evidence_id=evidence_id)
+    return result(
+        f"[{evidence_id}] {outcome['answer']}",
+        order_id=order_id,
+        found=True,
+        evidence_id=evidence_id,
+    )
 
 
 # ---------- query_data ----------
 
+
 def query_data(ctx, data_type, filters=None, aggregate=None, order_by=None, limit=10):
-    plan = {"data_type": data_type, "filters": filters or [], "aggregate": aggregate, "order_by": order_by,
-        "limit": limit}
+    plan = {
+        "data_type": data_type,
+        "filters": filters or [],
+        "aggregate": aggregate,
+        "order_by": order_by,
+        "limit": limit,
+    }
     try:
         outcome = ctx.data_tool.execute_plan(ctx.store, ctx.owner, plan)
     except (DataError, KeyError, TypeError, ValueError) as error:
@@ -208,7 +279,9 @@ def query_data(ctx, data_type, filters=None, aggregate=None, order_by=None, limi
         message = str(getattr(error, "message", error))
         return result(f"查询失败：{message}", ok=False, plan=plan, error=message)
     evidence_id, _ = ctx.evidence.add("D", {"type": "data", **outcome})
-    return result(f"[{evidence_id}] {outcome['answer']}", evidence_id=evidence_id, **outcome)
+    return result(
+        f"[{evidence_id}] {outcome['answer']}", evidence_id=evidence_id, **outcome
+    )
 
 
 # ---------- 工具定义 ----------
@@ -229,46 +302,119 @@ def tool_definitions(ctx):
     """
     readable, _ = ctx.data_tool.load_access(ctx.store, ctx.owner)
     definitions = [
-        function("search_knowledge",
+        function(
+            "search_knowledge",
             "在知识库中检索资料（制度、政策、说明文档等）。内部会做召回、融合、重排和相关性过滤，"
             "返回带编号的资料 [S1]、[S2]…。",
-            {"query": {"type": "string", "description": "检索词。hybrid、vector 模式写完整问句，代词换成具体名称；"
-                "keyword 模式只写要精确匹配的词，如名称、编号、原话。"},
-             "mode": {"type": "string", "enum": list(SEARCH_MODES), "description": "检索方式，默认 hybrid。"},
-             "top_k": {"type": "integer", "minimum": 1, "maximum": TOP_K_MAX,
-                "description": f"最多返回几条，默认 {TOP_K_DEFAULT}。"},
-             "query_explanation": QUERY_EXPLANATION_SCHEMA},
-            ["query", "query_explanation"]),
-        function("read_context",
+            {
+                "query": {
+                    "type": "string",
+                    "description": "检索词。hybrid、vector 模式写完整问句，代词换成具体名称；"
+                    "keyword 模式只写要精确匹配的词，如名称、编号、原话。",
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": list(SEARCH_MODES),
+                    "description": "检索方式，默认 hybrid。",
+                },
+                "top_k": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": TOP_K_MAX,
+                    "description": f"最多返回几条，默认 {TOP_K_DEFAULT}。",
+                },
+                "query_explanation": QUERY_EXPLANATION_SCHEMA,
+            },
+            ["query", "query_explanation"],
+        ),
+        function(
+            "read_context",
             "读取一条已检索到的知识库资料的前文或后文，用于资料被截断、需要看上下文的情况。读到的内容沿用原编号。",
-            {"source_id": {"type": "string", "description": "已检索到的资料编号，如 S1。"},
-             "direction": {"type": "string", "enum": ["before", "after"], "description": "before 前文，after 后文。"},
-             "count": {"type": "integer", "minimum": 1, "maximum": CONTEXT_COUNT_MAX,
-                "description": "读几个相邻分片，默认 1。"},
-             "query_explanation": QUERY_EXPLANATION_SCHEMA},
-            ["source_id", "direction", "query_explanation"]),
-        function("lookup_order",
+            {
+                "source_id": {
+                    "type": "string",
+                    "description": "已检索到的资料编号，如 S1。",
+                },
+                "direction": {
+                    "type": "string",
+                    "enum": ["before", "after"],
+                    "description": "before 前文，after 后文。",
+                },
+                "count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": CONTEXT_COUNT_MAX,
+                    "description": "读几个相邻分片，默认 1。",
+                },
+                "query_explanation": QUERY_EXPLANATION_SCHEMA,
+            },
+            ["source_id", "direction", "query_explanation"],
+        ),
+        function(
+            "lookup_order",
             "按订单号查询单个订单的状态和预计送达时间，返回 [O1]…。",
             {"order_id": {"type": "string", "description": "订单号，如 A1001。"}},
-            ["order_id"]),
+            ["order_id"],
+        ),
     ]
     if readable:
-        definitions.append(function("query_data", query_data_description(ctx, readable), {
-            "data_type": {"type": "string", "enum": readable, "description": "要查询的数据类型。"},
-            "filters": {"type": "array", "description": "筛选条件，最多 10 个，条件之间是“并且”。",
-                "items": {"type": "object", "properties": {
-                    "field": {"type": "string", "description": "字段名（name），不是中文名。"},
-                    "op": {"type": "string", "enum": list(OPERATORS)},
-                    "value": {"description": "比较的值；op 为 field_lt 时填另一个字段名。"}},
-                    "required": ["field", "op", "value"]}},
-            "aggregate": {"type": "object", "description": "需要统计时填写；只看明细时不填。",
-                "properties": {"op": {"type": "string", "enum": list(AGGREGATES)},
-                    "field": {"type": "string", "description": "统计的数值字段；count 不需要。"}},
-                "required": ["op"]},
-            "order_by": {"type": "object", "properties": {"field": {"type": "string"},
-                "direction": {"type": "string", "enum": ["asc", "desc"]}}},
-            "limit": {"type": "integer", "minimum": 1, "maximum": ROW_LIMIT, "description": "最多返回几行明细，默认 10。"},
-        }, ["data_type"]))
+        definitions.append(
+            function(
+                "query_data",
+                query_data_description(ctx, readable),
+                {
+                    "data_type": {
+                        "type": "string",
+                        "enum": readable,
+                        "description": "要查询的数据类型。",
+                    },
+                    "filters": {
+                        "type": "array",
+                        "description": "筛选条件，最多 10 个，条件之间是“并且”。",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "field": {
+                                    "type": "string",
+                                    "description": "字段名（name），不是中文名。",
+                                },
+                                "op": {"type": "string", "enum": list(OPERATORS)},
+                                "value": {
+                                    "description": "比较的值；op 为 field_lt 时填另一个字段名。"
+                                },
+                            },
+                            "required": ["field", "op", "value"],
+                        },
+                    },
+                    "aggregate": {
+                        "type": "object",
+                        "description": "需要统计时填写；只看明细时不填。",
+                        "properties": {
+                            "op": {"type": "string", "enum": list(AGGREGATES)},
+                            "field": {
+                                "type": "string",
+                                "description": "统计的数值字段；count 不需要。",
+                            },
+                        },
+                        "required": ["op"],
+                    },
+                    "order_by": {
+                        "type": "object",
+                        "properties": {
+                            "field": {"type": "string"},
+                            "direction": {"type": "string", "enum": ["asc", "desc"]},
+                        },
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": ROW_LIMIT,
+                        "description": "最多返回几行明细，默认 10。",
+                    },
+                },
+                ["data_type"],
+            )
+        )
     return definitions
 
 
@@ -276,16 +422,28 @@ def tool_definitions(ctx):
 def query_data_description(ctx, readable):
     schemas = ctx.data_tool.build_schemas(readable)
     operators = "、".join(f"{key}（{label}）" for key, label in OPERATORS.items())
-    return ("查询业务数据（订单、物流、库存、售后等记录），返回 [D1]…。数字和明细直接来自数据库。\n"
+    return (
+        "查询业务数据（订单、物流、库存、售后等记录），返回 [D1]…。数字和明细直接来自数据库。\n"
         f"filters 里的 field 必须使用下面数据字典中的字段名；op 可选：{operators}；"
         "field_lt 表示和同一行另一个字段比较，例如库存 < 安全库存。\n"
         "枚举字段的 value 只能从 options 里选；日期写成 YYYY-MM-DD。\n"
-        "数据字典：\n" + json.dumps(schemas, ensure_ascii=False))
+        "数据字典：\n" + json.dumps(schemas, ensure_ascii=False)
+    )
 
 
 def function(name, description, properties, required):
-    return {"type": "function", "function": {"name": name, "description": description,
-        "parameters": {"type": "object", "properties": properties, "required": required}}}
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {
+                "type": "object",
+                "properties": properties,
+                "required": required,
+            },
+        },
+    }
 
 
 def execute_tool(ctx, name, arguments):
@@ -297,7 +455,11 @@ def execute_tool(ctx, name, arguments):
     if handler is None:
         return invalid(f"没有名为 {name} 的工具，可用的工具：{'、'.join(TOOLS)}")
     try:
-        parsed = json.loads(arguments) if isinstance(arguments, str) and arguments.strip() else (arguments or {})
+        parsed = (
+            json.loads(arguments)
+            if isinstance(arguments, str) and arguments.strip()
+            else (arguments or {})
+        )
     except json.JSONDecodeError as error:
         return invalid(f"arguments 不是合法的 JSON：{error.msg}")
     if not isinstance(parsed, dict):

@@ -555,6 +555,7 @@ def agent_config(models):
     return {
         "tool_budget": settings["agent_tool_budget"],
         "timeout": settings["agent_timeout"],
+        "rerank_min_score": settings["agent_rerank_min_score"],
         "prompt_version": prompts.tag("agent"),
         "model": getattr(models, "llm_model", None),
         # 提示词内容的指纹：改了内置提示词时版本号仍是「内置」，靠它区分前后两次用的是不是同一段提示词。

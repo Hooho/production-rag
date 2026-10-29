@@ -10,6 +10,8 @@
 # 回滚就是把「当前使用的版本」指回旧版本，不删除任何版本。
 # 版本内容存在 prompt_versions 表，当前使用哪个版本存在 settings 表（key = prompts）。
 # api 和 worker 各自缓存 CACHE_SECONDS 秒，保存后几秒内两边都会生效。
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 import hashlib
 import logging
@@ -29,13 +31,23 @@ MAX_LENGTH = 4000
 NOTE_LENGTH = 200
 
 GROUPS = [
-    {"key": "online", "label": "线上问答", "description": "每次提问时调用，改了下一次提问就生效。"},
-    {"key": "import", "label": "文档导入", "description": "上传文档时调用，只影响之后导入的文档。"},
+    {
+        "key": "online",
+        "label": "线上问答",
+        "description": "每次提问时调用，改了下一次提问就生效。",
+    },
+    {
+        "key": "import",
+        "label": "文档导入",
+        "description": "上传文档时调用，只影响之后导入的文档。",
+    },
 ]
 
 SPECS = [
     {
-        "id": "intent", "group": "online", "label": "意图识别与问题改写",
+        "id": "intent",
+        "group": "online",
+        "label": "意图识别与问题改写",
         "where": "每次提问的第一步：判断问题该走知识问答、订单查询、数据查询还是问候，并把追问补成完整的问题、拆出检索词。",
         "input": "{payload}：JSON，包括本轮问题、滚动摘要、最近 3 个问题、最近订单号和用户的长期记忆（user_profile）。",
         "instructions": (
@@ -56,7 +68,9 @@ SPECS = [
         "locked_reason": "代码按这些字段和取值解析分流结果，格式不对就会退回规则兜底。",
     },
     {
-        "id": "sufficiency", "group": "online", "label": "检索充分性判断",
+        "id": "sufficiency",
+        "group": "online",
+        "label": "检索充分性判断",
         "where": "检索之后、回答之前：判断这批资料够不够回答，不够时说明缺什么并给出补充检索的问题。",
         "input": "{payload}：JSON，包括问题和本轮全部检索来源。",
         "instructions": (
@@ -73,7 +87,9 @@ SPECS = [
         "locked_reason": "代码按 verdict 决定是否补充检索、是否提示模型只回答一部分。",
     },
     {
-        "id": "answer", "group": "online", "label": "生成回答",
+        "id": "answer",
+        "group": "online",
+        "label": "生成回答",
         "where": "知识问答的最后一步：依据检索来源和对话记忆生成回答。",
         "input": "系统说明后面接本轮检索来源（每条放在 <source> 标签里）；资料只能回答一部分时，还会加一句缺什么；用户有长期记忆时，再接 <user_profile> 和一句使用说明。对话记忆作为历史消息发送。",
         "instructions": (
@@ -91,7 +107,9 @@ SPECS = [
         "locked_reason": "引用检查要求回答里有 [S1] 这样的编号；防注入和防泄露的规则也锁定，输出检查靠其中的原句识别模型是否在复述系统说明。",
     },
     {
-        "id": "memory_summary", "group": "online", "label": "对话记忆压缩",
+        "id": "memory_summary",
+        "group": "online",
+        "label": "对话记忆压缩",
         "where": "对话记忆超过压缩阈值时：把旧摘要和较早的原文一起总结成新的摘要。",
         "input": "{messages}：旧摘要和这次要压掉的历史消息。",
         "instructions": (
@@ -103,7 +121,9 @@ SPECS = [
         "locked_reason": "历史消息由压缩组件填进 {messages}。",
     },
     {
-        "id": "data_query", "group": "online", "label": "数据查询计划",
+        "id": "data_query",
+        "group": "online",
+        "label": "数据查询计划",
         "where": "数据查询时：把用户的问题转换成查询计划（查哪张表、什么条件、怎么统计），由代码执行，模型不直接写 SQL。",
         "input": "{payload}：JSON，包括问题、今天的日期和星期、可查询的数据类型及字段。",
         "instructions": (
@@ -114,15 +134,17 @@ SPECS = [
         "locked": (
             "只输出 JSON，不要输出 Markdown。字段：\n"
             "data_type：要查询的数据类型，只能从给定列表中选；都不合适时为 null。\n"
-            "filters：条件列表，每项 {\"field\", \"op\", \"value\"}。op 只能是 eq、ne、gt、gte、lt、lte、contains、field_lt；"
+            'filters：条件列表，每项 {"field", "op", "value"}。op 只能是 eq、ne、gt、gte、lt、lte、contains、field_lt；'
             "field_lt 表示字段小于同一行的另一个字段，value 填另一个字段名。enum 字段的 value 必须是 options 中的值。\n"
-            "aggregate：统计时为 {\"op\": \"count|sum|avg|min|max\", \"field\": 字段名}，count 的 field 为 null；列出明细时为 null。\n"
-            "order_by：{\"field\": 字段名, \"direction\": \"asc|desc\"} 或 null。limit：返回条数，最多 20。"
+            'aggregate：统计时为 {"op": "count|sum|avg|min|max", "field": 字段名}，count 的 field 为 null；列出明细时为 null。\n'
+            'order_by：{"field": 字段名, "direction": "asc|desc"} 或 null。limit：返回条数，最多 20。'
         ),
         "locked_reason": "代码按这个结构校验并执行查询计划，不合法时退回规则查询。",
     },
     {
-        "id": "long_memory", "group": "online", "label": "长期记忆提取",
+        "id": "long_memory",
+        "group": "online",
+        "label": "长期记忆提取",
         "where": "每轮回答返回给用户之后在后台调用：从这一轮问答里找出值得跨会话记住的用户信息，决定新增、修改或删除哪几条长期记忆。",
         "input": "{payload}：JSON，包括本轮问题、回答（前 1500 字）和这个用户已有的长期记忆（带编号）。",
         "instructions": (
@@ -136,14 +158,16 @@ SPECS = [
         ),
         "locked": (
             "只输出 JSON，不要输出 Markdown。字段：\n"
-            "add：要新增的记忆列表，每项 {\"category\": \"preference|identity|interest\", \"content\": 一句话}；\n"
-            "update：要修改的记忆列表，每项 {\"id\": 已有记忆的编号, \"content\": 新的内容}；\n"
+            'add：要新增的记忆列表，每项 {"category": "preference|identity|interest", "content": 一句话}；\n'
+            'update：要修改的记忆列表，每项 {"id": 已有记忆的编号, "content": 新的内容}；\n'
             "delete：要删除的已有记忆编号列表。"
         ),
         "locked_reason": "代码按这三个列表校验后写入长期记忆；category 只能是这三种。",
     },
     {
-        "id": "chunk_context", "group": "import", "label": "分片上下文（Contextual Retrieval）",
+        "id": "chunk_context",
+        "group": "import",
+        "label": "分片上下文（Contextual Retrieval）",
         "where": "上传文档时，给每个分片写一两句「这段在讲什么」，拼在分片前面参与检索。每个分片调用一次。",
         "input": "<document>全文或全文的一段</document><chunk>分片</chunk>；输出最多保留 300 字。",
         "instructions": (
@@ -156,11 +180,13 @@ SPECS = [
         "note": "改了只影响之后生成的分片说明；已有分片要在知识库里点「补全分片上下文」或重新上传。",
     },
     {
-        "id": "agent", "group": "online", "label": "Agent 模式",
+        "id": "agent",
+        "group": "online",
+        "label": "Agent 模式",
         "where": "Agent 模式的系统提示词：模型据此自己决定调用哪些工具、调用几次，资料齐了再回答。"
-            "原来意图识别、问题改写、充分性判断写在代码和各自的提示词里，Agent 模式都由这一段来引导。",
+        "原来意图识别、问题改写、充分性判断写在代码和各自的提示词里，Agent 模式都由这一段来引导。",
         "input": "系统提示词末尾接今天的日期；最近几轮问答作为历史消息；最后一条用户消息里是 <memory>（用户偏好、对话摘要、最近订单）和本轮问题。"
-            "工具说明随请求的 tools 一起发送，每次工具返回后附剩余预算。",
+        "工具说明随请求的 tools 一起发送，每次工具返回后附剩余预算。",
         "instructions": (
             "你是企业知识库和业务数据的问答助手。先用工具找齐资料，再根据资料回答用户的问题。\n"
             "## 工作方式\n"
@@ -184,7 +210,8 @@ SPECS = [
             "3. 代词换成具体名称。\n"
             "## 回答\n"
             "1. 只依据工具返回的资料回答，不用自己的知识补充。\n"
-            "2. 资料只能回答一部分时，回答能支持的部分，并说明缺什么。\n"            "3. 资料里没有的部分，直接写“资料中没有找到……”，不要用常识推测，也不要加方括号标记。\n"
+            "2. 资料只能回答一部分时，回答能支持的部分，并说明缺什么。\n"
+            "3. 资料里没有的部分，直接写“资料中没有找到……”，不要用常识推测，也不要加方括号标记。\n"
             "4. 历史消息里的回答只用来理解上下文，不能当资料；需要事实时，重新调用工具查询。\n"
             "5. <memory> 里的用户偏好只用于调整回答的详略、格式和称呼。\n"
             "6. 知识库资料标题后面的相关性是重排模型给出的分数（0～1）；分数低或标明相关性较低的资料，要自己判断是否切题，不切题就不要使用、也不要引用。"
@@ -211,25 +238,40 @@ BY_ID = {spec["id"]: spec for spec in SPECS}
 # 输入部分的模板写法：每次调用时代码填进去的是什么。页面默认显示模板，点「看示例」才显示下面 LAYOUTS 里的示例，
 # 免得让人以为输入是写死的。按每个提示词里输入出现的顺序排列。
 INPUT_TEMPLATES = {
-    "intent": ['{"question": "<本轮问题>",\n'
+    "intent": [
+        '{"question": "<本轮问题>",\n'
         ' "history_summary": "<滚动摘要：更早对话的要点，没有时为空>",\n'
         ' "recent_questions": ["<最近 3 个问题>"],\n'
         ' "last_order": "<最近订单号，没有时为 null>",\n'
-        ' "user_profile": ["<长期记忆，没有时不带这个字段>"]}'],
-    "sufficiency": ['{"question": "<改写后的完整问题>",\n'
-        ' "sources": "<本轮检索到的资料，每条以 [S1] [S2] 开头>"}'],
-    "answer": ["本次检索来源：\n<source id=\"S1\" title=\"<文档标题>\">\n<资料内容>\n</source>\n……\n\n"
+        ' "user_profile": ["<长期记忆，没有时不带这个字段>"]}'
+    ],
+    "sufficiency": [
+        '{"question": "<改写后的完整问题>",\n'
+        ' "sources": "<本轮检索到的资料，每条以 [S1] [S2] 开头>"}'
+    ],
+    "answer": [
+        '本次检索来源：\n<source id="S1" title="<文档标题>">\n<资料内容>\n</source>\n……\n\n'
         "<资料只能回答一部分时：一句话说明缺什么>\n\n"
         "<用户有长期记忆时：<user_profile> 列出每条记忆，再加一句使用说明>",
-        "<滚动摘要>\n<保留的最近几轮问答原文>\n<本轮问题>"],
+        "<滚动摘要>\n<保留的最近几轮问答原文>\n<本轮问题>",
+    ],
     "memory_summary": ["<旧摘要 + 这次要压掉的历史消息>"],
-    "data_query": ['{"question": "<本轮问题>",\n "today": "<今天的日期>", "weekday": <星期几>,\n'
-        ' "data_types": [<可以查询的数据类型和字段>]}'],
-    "long_memory": ['{"question": "<本轮问题>",\n "answer": "<本轮回答，前 1500 字>",\n'
-        ' "memories": [<这个用户已有的长期记忆，带编号>]}'],
-    "chunk_context": ["<document>\n<全文，或全文中的一段>\n</document>\n<chunk>\n<要补充说明的分片>\n</chunk>"],
-    "agent": ["今天是 <日期>（星期<几>）。", "<最近几轮的问题和最终回答，作为 user / assistant 消息>",
-        "<memory>\n<用户偏好、对话摘要、最近订单，有才写>\n</memory>\n本轮问题：<本轮问题>"],
+    "data_query": [
+        '{"question": "<本轮问题>",\n "today": "<今天的日期>", "weekday": <星期几>,\n'
+        ' "data_types": [<可以查询的数据类型和字段>]}'
+    ],
+    "long_memory": [
+        '{"question": "<本轮问题>",\n "answer": "<本轮回答，前 1500 字>",\n'
+        ' "memories": [<这个用户已有的长期记忆，带编号>]}'
+    ],
+    "chunk_context": [
+        "<document>\n<全文，或全文中的一段>\n</document>\n<chunk>\n<要补充说明的分片>\n</chunk>"
+    ],
+    "agent": [
+        "今天是 <日期>（星期<几>）。",
+        "<最近几轮的问题和最终回答，作为 user / assistant 消息>",
+        "<memory>\n<用户偏好、对话摘要、最近订单，有才写>\n</memory>\n本轮问题：<本轮问题>",
+    ],
 }
 
 
@@ -237,7 +279,10 @@ def boxes(prompt_id):
     templates = iter(INPUT_TEMPLATES[prompt_id])
     result = []
     for box in LAYOUTS[prompt_id]["boxes"]:
-        parts = [dict(part, template=next(templates)) if isinstance(part, dict) else part for part in box["parts"]]
+        parts = [
+            dict(part, template=next(templates)) if isinstance(part, dict) else part
+            for part in box["parts"]
+        ]
         result.append({**box, "parts": parts})
     return result
 
@@ -256,56 +301,164 @@ PAYLOAD_INTENT = (
 )
 SOURCE_EXAMPLE = (
     '<source id="S1" title="段永平投资问答录">\n'
-    '段永平谈到自己犯过的错误时说，最大的错误是错过而不是做错……\n'
-    '</source>'
+    "段永平谈到自己犯过的错误时说，最大的错误是错过而不是做错……\n"
+    "</source>"
 )
 LAYOUTS = {
-    "intent": {"locked_label": "输出格式", "boxes": [
-        {"title": "系统提示词", "parts": ["instructions", "locked"]},
-        {"title": "用户消息", "parts": [{"input": PAYLOAD_INTENT}]},
-    ]},
-    "sufficiency": {"locked_label": "输出格式", "boxes": [
-        {"title": "系统提示词", "parts": ["instructions", "locked"]},
-        {"title": "用户消息", "parts": [{"input": '{"question": "段永平最失败的投资是什么",\n'
-            ' "sources": "[S1] 段永平谈到自己犯过的错误时说，最大的错误是错过而不是做错……\n[S2] ……"}'}]},
-    ]},
-    "answer": {"locked_label": "引用和安全规则", "boxes": [
-        {"title": "系统提示词", "parts": ["instructions", "locked", {"input": "本次检索来源：\n" + SOURCE_EXAMPLE + "\n\n"
-            "<user_profile>\n- [长期关注] 用户长期关注段永平的投资\n</user_profile>\n"
-            "<user_profile> 里是这个用户的长期信息……只用于调整回答的详略、格式和称呼……"}]},
-        {"title": "对话记忆和本轮问题", "parts": [{"input": "[摘要] 用户在了解段永平的投资经历……\n"
-            "[用户] 段永平最大的一笔投资是什么\n[助手] 根据检索来源，段永平最大的一笔投资是苹果 [S1]……\n"
-            "[用户] 他最失败的投资是什么"}]},
-    ]},
-    "memory_summary": {"locked_label": "固定格式", "locked_display": "历史消息：", "boxes": [
-        {"title": "发给模型的消息", "parts": ["instructions", "locked", {"input": "[摘要] 用户在了解段永平的投资经历……\n"
-            "[用户] 段永平最大的一笔投资是什么\n[助手] 根据检索来源……"}]},
-    ]},
-    "data_query": {"locked_label": "输出格式", "boxes": [
-        {"title": "系统提示词", "parts": ["instructions", "locked"]},
-        {"title": "用户消息", "parts": [{"input": '{"question": "上周华东区退了多少单",\n "today": "2026-10-06", "weekday": 2,\n'
-            ' "data_types": [{"data_type": "after_sales", "label": "售后工单", "fields": [……]}, ……]}'}]},
-    ]},
-    "long_memory": {"locked_label": "输出格式", "boxes": [
-        {"title": "系统提示词", "parts": ["instructions", "locked"]},
-        {"title": "用户消息", "parts": [{"input": '{"question": "以后回答先给结论，我主要关注段永平的投资",\n'
-            ' "answer": "好的……",\n "memories": [{"id": "a1", "category": "identity", "content": "用户负责华东区售后"}]}'}]},
-    ]},
-    "agent": {"locked_label": "引用和安全规则", "boxes": [
-        {"title": "系统提示词", "parts": ["instructions", "locked", {"input": "今天是 2026-10-20（星期二）。"}]},
-        {"title": "历史消息", "parts": [{"input": "[用户] 段永平最大的一笔投资是什么\n[助手] 段永平最大的一笔投资是苹果 [S1]……"}]},
-        {"title": "本轮用户消息", "parts": [{"input": "<memory>\n## 用户偏好\n- 用户偏好先给结论\n"
-            "## 最近查过的订单\nA1001\n</memory>\n本轮问题：A1001 到哪了？还没签收的话能退货吗？"}]},
-    ]},
-    "chunk_context": {"locked_label": "", "boxes": [
-        {"title": "系统提示词", "parts": ["instructions"]},
-        {"title": "用户消息", "parts": [{"input": "<document>\n段永平投资问答录（全文或全文的一段）……\n</document>\n"
-            "<chunk>\n他后来把这部分股票卖了，回头看卖早了……\n</chunk>"}]},
-    ]},
+    "intent": {
+        "locked_label": "输出格式",
+        "boxes": [
+            {"title": "系统提示词", "parts": ["instructions", "locked"]},
+            {"title": "用户消息", "parts": [{"input": PAYLOAD_INTENT}]},
+        ],
+    },
+    "sufficiency": {
+        "locked_label": "输出格式",
+        "boxes": [
+            {"title": "系统提示词", "parts": ["instructions", "locked"]},
+            {
+                "title": "用户消息",
+                "parts": [
+                    {
+                        "input": '{"question": "段永平最失败的投资是什么",\n'
+                        ' "sources": "[S1] 段永平谈到自己犯过的错误时说，最大的错误是错过而不是做错……\n[S2] ……"}'
+                    }
+                ],
+            },
+        ],
+    },
+    "answer": {
+        "locked_label": "引用和安全规则",
+        "boxes": [
+            {
+                "title": "系统提示词",
+                "parts": [
+                    "instructions",
+                    "locked",
+                    {
+                        "input": "本次检索来源：\n" + SOURCE_EXAMPLE + "\n\n"
+                        "<user_profile>\n- [长期关注] 用户长期关注段永平的投资\n</user_profile>\n"
+                        "<user_profile> 里是这个用户的长期信息……只用于调整回答的详略、格式和称呼……"
+                    },
+                ],
+            },
+            {
+                "title": "对话记忆和本轮问题",
+                "parts": [
+                    {
+                        "input": "[摘要] 用户在了解段永平的投资经历……\n"
+                        "[用户] 段永平最大的一笔投资是什么\n[助手] 根据检索来源，段永平最大的一笔投资是苹果 [S1]……\n"
+                        "[用户] 他最失败的投资是什么"
+                    }
+                ],
+            },
+        ],
+    },
+    "memory_summary": {
+        "locked_label": "固定格式",
+        "locked_display": "历史消息：",
+        "boxes": [
+            {
+                "title": "发给模型的消息",
+                "parts": [
+                    "instructions",
+                    "locked",
+                    {
+                        "input": "[摘要] 用户在了解段永平的投资经历……\n"
+                        "[用户] 段永平最大的一笔投资是什么\n[助手] 根据检索来源……"
+                    },
+                ],
+            },
+        ],
+    },
+    "data_query": {
+        "locked_label": "输出格式",
+        "boxes": [
+            {"title": "系统提示词", "parts": ["instructions", "locked"]},
+            {
+                "title": "用户消息",
+                "parts": [
+                    {
+                        "input": '{"question": "上周华东区退了多少单",\n "today": "2026-10-06", "weekday": 2,\n'
+                        ' "data_types": [{"data_type": "after_sales", "label": "售后工单", "fields": [……]}, ……]}'
+                    }
+                ],
+            },
+        ],
+    },
+    "long_memory": {
+        "locked_label": "输出格式",
+        "boxes": [
+            {"title": "系统提示词", "parts": ["instructions", "locked"]},
+            {
+                "title": "用户消息",
+                "parts": [
+                    {
+                        "input": '{"question": "以后回答先给结论，我主要关注段永平的投资",\n'
+                        ' "answer": "好的……",\n "memories": [{"id": "a1", "category": "identity", "content": "用户负责华东区售后"}]}'
+                    }
+                ],
+            },
+        ],
+    },
+    "agent": {
+        "locked_label": "引用和安全规则",
+        "boxes": [
+            {
+                "title": "系统提示词",
+                "parts": [
+                    "instructions",
+                    "locked",
+                    {"input": "今天是 2026-10-20（星期二）。"},
+                ],
+            },
+            {
+                "title": "历史消息",
+                "parts": [
+                    {
+                        "input": "[用户] 段永平最大的一笔投资是什么\n[助手] 段永平最大的一笔投资是苹果 [S1]……"
+                    }
+                ],
+            },
+            {
+                "title": "本轮用户消息",
+                "parts": [
+                    {
+                        "input": "<memory>\n## 用户偏好\n- 用户偏好先给结论\n"
+                        "## 最近查过的订单\nA1001\n</memory>\n本轮问题：A1001 到哪了？还没签收的话能退货吗？"
+                    }
+                ],
+            },
+        ],
+    },
+    "chunk_context": {
+        "locked_label": "",
+        "boxes": [
+            {"title": "系统提示词", "parts": ["instructions"]},
+            {
+                "title": "用户消息",
+                "parts": [
+                    {
+                        "input": "<document>\n段永平投资问答录（全文或全文的一段）……\n</document>\n"
+                        "<chunk>\n他后来把这部分股票卖了，回头看卖早了……\n</chunk>"
+                    }
+                ],
+            },
+        ],
+    },
 }
 
 _lock = threading.Lock()
 _cache = {"at": 0.0, "state": None}
+# 评测指定的提示词版本：{prompt_id: {"version", "text"}}，只在发起评测的后台线程里有值，线上请求读不到。
+_overrides = ContextVar("prompt_overrides", default=None)
+# 能在评测里换版本的提示词，以及它属于哪条流程（和 runtime_config.EVAL_GROUPS 同一套分组）。
+EVAL_PROMPTS = {
+    "intent": "fixed",
+    "sufficiency": "fixed",
+    "answer": "fixed",
+    "agent": "agent",
+}
 
 
 def clear_cache():
@@ -319,6 +472,7 @@ def now():
 
 def _table():
     from .mysql.tables import prompt_versions
+
     return prompt_versions
 
 
@@ -343,8 +497,11 @@ def _state():
 
 def active_map(engine):
     from .mysql.tables import settings
+
     with engine.connect() as connection:
-        row = connection.execute(select(settings.c.value).where(settings.c.key == SETTING_KEY)).first()
+        row = connection.execute(
+            select(settings.c.value).where(settings.c.key == SETTING_KEY)
+        ).first()
     return dict(row[0]) if row and isinstance(row[0], dict) else {}
 
 
@@ -356,15 +513,21 @@ def load_state(engine):
         if prompt_id not in BY_ID or not version:
             continue
         with engine.connect() as connection:
-            row = connection.execute(select(table.c.text).where(table.c.prompt_id == prompt_id,
-                table.c.version == version)).first()
+            row = connection.execute(
+                select(table.c.text).where(
+                    table.c.prompt_id == prompt_id, table.c.version == version
+                )
+            ).first()
         if row:
             state[prompt_id] = {"version": version, "text": row[0]}
     return state
 
 
-# 当前生效的指令文字和版本号（0 = 内置）。
+# 当前生效的指令文字和版本号（0 = 内置）。评测里套了 override() 时用评测指定的版本。
 def current(prompt_id):
+    extra = _overrides.get()
+    if extra and prompt_id in extra:
+        return extra[prompt_id]["version"], extra[prompt_id]["text"]
     item = _state().get(prompt_id)
     if item:
         return item["version"], item["text"]
@@ -392,7 +555,11 @@ def compose(prompt_id, template=False):
     locked = spec["locked"]
     if template:
         text = text.replace("{", "{{").replace("}", "}}")
-        locked = locked.replace("{", "{{").replace("}", "}}").replace("{{messages}}", "{messages}")
+        locked = (
+            locked.replace("{", "{{")
+            .replace("}", "}}")
+            .replace("{{messages}}", "{messages}")
+        )
     if not locked:
         return text
     separator = "\n\n" if prompt_id == "memory_summary" else "\n"
@@ -408,11 +575,67 @@ def identity(prompt_id):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
+# 某段提示词全部可选的版本（新的在前，最后是内置 v0），评测页的版本下拉框用。
+def versions(engine, prompt_id):
+    table = _table()
+    with engine.connect() as connection:
+        rows = connection.execute(
+            select(table.c.version, table.c.note)
+            .where(table.c.prompt_id == prompt_id)
+            .order_by(table.c.version.desc())
+        ).all()
+    return [
+        {"version": row[0], "label": version_label(row[0]), "note": row[1] or ""}
+        for row in rows
+    ] + [{"version": 0, "label": version_label(0), "note": "代码里写的原始版本"}]
+
+
+# 读出评测要用的版本内容：{prompt_id: 版本号} → {prompt_id: {"version", "text"}}。版本不存在时抛 ValueError。
+def resolve_versions(engine, chosen):
+    unknown = [prompt_id for prompt_id in chosen if prompt_id not in EVAL_PROMPTS]
+    if unknown:
+        raise ValueError("这些提示词不能在评测里换版本：" + "、".join(unknown))
+    table = _table()
+    picked = {}
+    for prompt_id, version in chosen.items():
+        if isinstance(version, bool) or not isinstance(version, int) or version < 0:
+            raise ValueError(f"{prompt_id} 的版本号不正确")
+        if version == 0:
+            picked[prompt_id] = {"version": 0, "text": BY_ID[prompt_id]["instructions"]}
+            continue
+        with engine.connect() as connection:
+            row = connection.execute(
+                select(table.c.text).where(
+                    table.c.prompt_id == prompt_id, table.c.version == version
+                )
+            ).first()
+        if row is None:
+            raise ValueError(f"{BY_ID[prompt_id]['label']}没有 v{version} 这个版本")
+        picked[prompt_id] = {"version": version, "text": row[0]}
+    return picked
+
+
+# 在 with 块里用评测指定的提示词版本（resolve_versions 的结果）；只影响当前线程，退出后恢复。
+@contextmanager
+def override(picked):
+    token = _overrides.set(dict(picked) if picked else None)
+    try:
+        yield
+    finally:
+        _overrides.reset(token)
+
+
 def _brief(spec, active, counts, latest):
     item = {key: spec[key] for key in ("id", "group", "label", "where")}
     version = (active.get(spec["id"]) or {}).get("version") or 0
-    item.update({"active_version": version, "active_label": version_label(version),
-        "versions": counts.get(spec["id"], 0), "updated": latest.get(spec["id"])})
+    item.update(
+        {
+            "active_version": version,
+            "active_label": version_label(version),
+            "versions": counts.get(spec["id"], 0),
+            "updated": latest.get(spec["id"]),
+        }
+    )
     return item
 
 
@@ -420,15 +643,25 @@ def _brief(spec, active, counts, latest):
 def view(engine):
     table = _table()
     with engine.connect() as connection:
-        rows = connection.execute(select(table.c.prompt_id, func.count(), func.max(table.c.created)).group_by(
-            table.c.prompt_id)).all()
+        rows = connection.execute(
+            select(table.c.prompt_id, func.count(), func.max(table.c.created)).group_by(
+                table.c.prompt_id
+            )
+        ).all()
     counts = {row[0]: row[1] for row in rows}
     latest = {row[0]: row[2] for row in rows}
     active = active_map(engine)
     for prompt_id, info in active.items():
-        if info and info.get("at") and (not latest.get(prompt_id) or info["at"] > latest[prompt_id]):
+        if (
+            info
+            and info.get("at")
+            and (not latest.get(prompt_id) or info["at"] > latest[prompt_id])
+        ):
             latest[prompt_id] = info["at"]
-    return {"groups": GROUPS, "items": [_brief(spec, active, counts, latest) for spec in SPECS]}
+    return {
+        "groups": GROUPS,
+        "items": [_brief(spec, active, counts, latest) for spec in SPECS],
+    }
 
 
 # 详情：内置版本、全部保存过的版本（新的在前）和当前使用的版本。
@@ -438,31 +671,82 @@ def detail(engine, prompt_id):
         return None
     table = _table()
     with engine.connect() as connection:
-        rows = connection.execute(select(table).where(table.c.prompt_id == prompt_id).order_by(
-            table.c.version.desc())).mappings().all()
+        rows = (
+            connection.execute(
+                select(table)
+                .where(table.c.prompt_id == prompt_id)
+                .order_by(table.c.version.desc())
+            )
+            .mappings()
+            .all()
+        )
     info = active_map(engine).get(prompt_id) or {}
     version = info.get("version") or 0
-    versions = [{"version": row["version"], "label": version_label(row["version"]), "text": row["text"],
-        "note": row["note"], "created_by": row["created_by"], "created": row["created"]} for row in rows]
-    versions.append({"version": 0, "label": version_label(0), "text": spec["instructions"],
-        "note": "代码里写的原始版本", "created_by": None, "created": None})
+    versions = [
+        {
+            "version": row["version"],
+            "label": version_label(row["version"]),
+            "text": row["text"],
+            "note": row["note"],
+            "created_by": row["created_by"],
+            "created": row["created"],
+        }
+        for row in rows
+    ]
+    versions.append(
+        {
+            "version": 0,
+            "label": version_label(0),
+            "text": spec["instructions"],
+            "note": "代码里写的原始版本",
+            "created_by": None,
+            "created": None,
+        }
+    )
     layout = LAYOUTS[prompt_id]
-    return {**{key: spec.get(key, "") for key in ("id", "group", "label", "where", "input", "locked", "locked_reason", "note")},
-        "locked_label": layout["locked_label"], "locked_display": layout.get("locked_display", spec["locked"]),
+    return {
+        **{
+            key: spec.get(key, "")
+            for key in (
+                "id",
+                "group",
+                "label",
+                "where",
+                "input",
+                "locked",
+                "locked_reason",
+                "note",
+            )
+        },
+        "locked_label": layout["locked_label"],
+        "locked_display": layout.get("locked_display", spec["locked"]),
         "boxes": boxes(prompt_id),
-        "active_version": version, "active_label": version_label(version),
-        "activated_by": info.get("by"), "activated_at": info.get("at"), "versions": versions}
+        "active_version": version,
+        "active_label": version_label(version),
+        "activated_by": info.get("by"),
+        "activated_at": info.get("at"),
+        "versions": versions,
+    }
 
 
 def _set_active(connection, prompt_id, version, username, at):
     from .mysql.tables import settings
-    row = connection.execute(select(settings.c.value).where(settings.c.key == SETTING_KEY)).first()
+
+    row = connection.execute(
+        select(settings.c.value).where(settings.c.key == SETTING_KEY)
+    ).first()
     value = dict(row[0]) if row and isinstance(row[0], dict) else {}
     value[prompt_id] = {"version": version, "by": username, "at": at}
     if row is None:
-        connection.execute(settings.insert().values(key=SETTING_KEY, value=value, updated=at))
+        connection.execute(
+            settings.insert().values(key=SETTING_KEY, value=value, updated=at)
+        )
     else:
-        connection.execute(settings.update().where(settings.c.key == SETTING_KEY).values(value=value, updated=at))
+        connection.execute(
+            settings.update()
+            .where(settings.c.key == SETTING_KEY)
+            .values(value=value, updated=at)
+        )
 
 
 # 保存修改：生成新版本并立即生效。和当前生效的内容一样时不保存。
@@ -481,15 +765,28 @@ def save(engine, prompt_id, text, note, username):
         info = active_map_in(connection).get(prompt_id) or {}
         active_text = BY_ID[prompt_id]["instructions"]
         if info.get("version"):
-            row = connection.execute(select(table.c.text).where(table.c.prompt_id == prompt_id,
-                table.c.version == info["version"])).first()
+            row = connection.execute(
+                select(table.c.text).where(
+                    table.c.prompt_id == prompt_id, table.c.version == info["version"]
+                )
+            ).first()
             active_text = row[0] if row else active_text
         if text == active_text.strip():
             raise ValueError("内容和当前使用的版本一样，没有保存")
-        latest = connection.execute(select(func.max(table.c.version)).where(table.c.prompt_id == prompt_id)).scalar()
+        latest = connection.execute(
+            select(func.max(table.c.version)).where(table.c.prompt_id == prompt_id)
+        ).scalar()
         version = (latest or 0) + 1
-        connection.execute(table.insert().values(prompt_id=prompt_id, version=version, text=text, note=note,
-            created_by=username, created=at))
+        connection.execute(
+            table.insert().values(
+                prompt_id=prompt_id,
+                version=version,
+                text=text,
+                note=note,
+                created_by=username,
+                created=at,
+            )
+        )
         _set_active(connection, prompt_id, version, username, at)
     clear_cache()
     return version
@@ -497,7 +794,10 @@ def save(engine, prompt_id, text, note, username):
 
 def active_map_in(connection):
     from .mysql.tables import settings
-    row = connection.execute(select(settings.c.value).where(settings.c.key == SETTING_KEY)).first()
+
+    row = connection.execute(
+        select(settings.c.value).where(settings.c.key == SETTING_KEY)
+    ).first()
     return dict(row[0]) if row and isinstance(row[0], dict) else {}
 
 
@@ -508,8 +808,11 @@ def activate(engine, prompt_id, version, username):
     table = _table()
     with engine.begin() as connection:
         if version:
-            exists = connection.execute(select(table.c.version).where(table.c.prompt_id == prompt_id,
-                table.c.version == version)).first()
+            exists = connection.execute(
+                select(table.c.version).where(
+                    table.c.prompt_id == prompt_id, table.c.version == version
+                )
+            ).first()
             if not exists:
                 raise ValueError("没有这个版本")
         _set_active(connection, prompt_id, version, username, now())
