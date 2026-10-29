@@ -589,7 +589,7 @@ export function ModelSettings({
               <option key={item} value={item} />
             ))}
           </datalist>
-          {modelOptions.length > 0 && (
+          {(modelOptions.length > 0 || (supportsModelList && isAdmin)) && (
             <div className="model-chips">
               {modelOptions.slice(0, 12).map((item) => (
                 <button
@@ -601,18 +601,27 @@ export function ModelSettings({
                   {item}
                 </button>
               ))}
+              {supportsModelList && isAdmin && (
+                <button
+                  type="button"
+                  className="model-refresh-button"
+                  aria-busy={catalog.status === "loading"}
+                  disabled={!canQueryModels || catalog.status === "loading"}
+                  onClick={() => setCatalogRefresh((value) => value + 1)}
+                >
+                  {catalog.status === "loading" && (
+                    <span
+                      className="model-refresh-spinner"
+                      aria-hidden="true"
+                    />
+                  )}
+                  {catalog.status === "loading" ? "加载中…" : "刷新模型"}
+                </button>
+              )}
             </div>
           )}
           {supportsModelList && isAdmin && (
             <div>
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={!canQueryModels || catalog.status === "loading"}
-                onClick={() => setCatalogRefresh((value) => value + 1)}
-              >
-                {catalog.status === "loading" ? "获取模型中…" : "刷新模型"}
-              </button>
               <p className="settings-hint" role="status">
                 {catalog.status === "loading"
                   ? "正在查询服务商模型列表…"
