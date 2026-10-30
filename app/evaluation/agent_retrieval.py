@@ -110,7 +110,8 @@ def call_log(number, round_no, call, evidence, chunk_texts):
         return entry
     if name == "search_knowledge" and "retrieval" in trace:
         sources = (trace.get("retrieval") or {}).get("sources") or []
-        sources = sources[: trace.get("top_k") or len(sources)]
+        # 实际给模型的条数：given（不低于优秀阈值的不受 top_k 限制）；旧记录没有，按 top_k。
+        sources = sources[: trace.get("given") or trace.get("top_k") or len(sources)]
         diagnostics = (trace.get("retrieval") or {}).get("diagnostics")
         candidates = {
             str(row["chunk_id"]): row
@@ -557,6 +558,7 @@ def agent_config(models):
         "timeout": settings["agent_timeout"],
         "rerank_min_score": settings["agent_rerank_min_score"],
         "return_limit": settings["agent_return_limit"],
+        "excellent_score": settings["agent_excellent_score"],
         "parent_context": settings["agent_parent_context"],
         "prompt_version": prompts.tag("agent"),
         "model": getattr(models, "llm_model", None),

@@ -95,6 +95,18 @@ SPECS = [
         "max": 1.0,
         "eval": "common",
     },
+    # 优秀阈值：重排得分不低于它的资料全部交给模型，不受返回段数限制（最多就是候选池里的全部）；
+    # 在相关度阈值和它之间的照常按段数截断。列举类问题常有十来条都高度相关，按段数截断会丢掉其中几条。
+    # 1.0 表示不启用（重排概率可能正好算到 1.0，所以 1.0 当作关闭），默认不启用，行为和以前一样。
+    {
+        "key": "rerank_excellent_score",
+        "group": "retrieval",
+        "type": "float",
+        "default": 1.0,
+        "min": 0.0,
+        "max": 1.0,
+        "eval": "fixed",
+    },
     {
         "key": "rerank_candidates",
         "group": "retrieval",
@@ -212,6 +224,16 @@ SPECS = [
         "group": "answer",
         "type": "float",
         "default": 0.85,
+        "min": 0.0,
+        "max": 1.0,
+        "eval": "agent",
+    },
+    # Agent 的优秀阈值，和固定流程的 rerank_excellent_score 分开；高于它的资料全部返回，不受返回上限和模型自己要的 top_k 限制。
+    {
+        "key": "agent_excellent_score",
+        "group": "answer",
+        "type": "float",
+        "default": 1.0,
         "min": 0.0,
         "max": 1.0,
         "eval": "agent",
@@ -552,6 +574,10 @@ def check_relations(values):
         raise ValueError("分片重叠不能超过分片大小的三分之一")
     if values["rerank_fallback_min_score"] > values["rerank_min_score"]:
         raise ValueError("兜底分数线不能高于相关度阈值")
+    if values["rerank_excellent_score"] < values["rerank_min_score"]:
+        raise ValueError("优秀阈值不能低于相关度阈值")
+    if values["agent_excellent_score"] < values["agent_rerank_min_score"]:
+        raise ValueError("Agent 优秀阈值不能低于 Agent 相关度阈值")
     if values["return_limit"] > values["rerank_candidates"]:
         raise ValueError("交给模型的段数不能超过候选池大小")
     if values["agent_return_limit"] > values["rerank_candidates"]:

@@ -234,6 +234,17 @@ def score_question(item, retrieval, chunk_texts, pool_size):
         pool_rows.sort(key=lambda row: row["rerank_rank"])
     else:
         pool_rows.sort(key=lambda row: row["rrf_rank"])
+    # 启用了优秀阈值时，不低于它的候选不受返回段数限制，这一阶段的条数也跟着放宽，和实际返回一致。
+    excellent = config.get("excellent_score")
+    if excellent is not None and config["reranked"]:
+        return_limit = max(
+            return_limit,
+            sum(
+                1
+                for row in pool_rows
+                if (row.get("rerank_probability") or 0) >= excellent
+            ),
+        )
     top_ids = []
     for row in pool_rows[:return_limit]:
         top_ids.append(row["chunk_id"])

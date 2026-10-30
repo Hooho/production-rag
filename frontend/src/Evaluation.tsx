@@ -4103,6 +4103,7 @@ function runResult(item: EvalRunBrief) {
 const RESULT_SETTINGS = new Set([
   "rerank_min_score",
   "rerank_fallback_min_score",
+  "rerank_excellent_score",
   "rerank_candidates",
   "return_limit",
   "parent_context",
@@ -4120,6 +4121,7 @@ const RESULT_SETTINGS = new Set([
   "agent_timeout",
   "agent_rerank_min_score",
   "agent_return_limit",
+  "agent_excellent_score",
   "agent_parent_context",
 ]);
 

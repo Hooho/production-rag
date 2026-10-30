@@ -1268,6 +1268,7 @@ export type EvalConfig = {
     // Agent 单独的检索参数（旧记录没有，当时和固定流程共用）。
     rerank_min_score?: number;
     return_limit?: number;
+    excellent_score?: number;
     parent_context?: boolean;
   };
   // 固定流程怎么跑的：name=full 是完整检索（改写 + 判断，旧记录没有，是规则检索词、只检索）。

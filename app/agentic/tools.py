@@ -111,21 +111,22 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
         min_score=settings["agent_rerank_min_score"],
         parent=settings["agent_parent_context"],
         return_limit=cap,
+        excellent_score=settings["agent_excellent_score"],
     )
     # 过了相关度阈值的资料，最多给 agent_return_limit 条；模型要得更少（top_k）就再少取，不能绕过阈值。
-    sources = retrieval["sources"][:top_k]
+    # 不低于 Agent 优秀阈值的资料全部给，不受模型自己要的 top_k 限制（检索那边也已经不受上限限制）。
+    stats = retrieval.get("stats") or {}
+    given = max(top_k, stats.get("excellent", 0))
+    sources = retrieval["sources"][:given]
     # 过了阈值却没给模型的条数：超出上限被截掉的，加上模型自己要得少没取的。以前不说，模型以为拿到的就是全部。
-    hidden = (
-        len(retrieval["sources"])
-        - len(sources)
-        + (retrieval.get("stats") or {}).get("beyond_limit", 0)
-    )
+    hidden = len(retrieval["sources"]) - len(sources) + stats.get("beyond_limit", 0)
     if not sources:
         return result(
             "没有找到相关资料。可以换一种问法，或者用 keyword 模式搜索名称、编号等原话。",
             query=query,
             mode=mode,
             top_k=top_k,
+            given=0,
             evidence_ids=[],
             retrieval=retrieval,
         )
@@ -155,7 +156,9 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
             "换说法再查大多还是拿回同一批资料；已有资料能回答用户的问题就直接回答，"
             "还缺某一部分时，只针对缺的那部分换一个角度查，或者用 keyword 模式查名称、编号、原话。",
         )
-    truncated = truncation_note(requested, top_k, cap, hidden)
+    truncated = truncation_note(
+        requested, top_k, cap, hidden, len(sources), stats.get("excellent_score")
+    )
     if truncated:
         blocks.insert(0, truncated)
     return result(
@@ -164,6 +167,7 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
         mode=mode,
         top_k=top_k,
         requested_top_k=requested,
+        given=len(sources),
         hidden=hidden,
         evidence_ids=evidence_ids,
         retrieval=retrieval,
@@ -172,7 +176,13 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
 
 
 # 还有过了相关度阈值、没给模型的资料时，告诉它没给全、为什么没给全，下一步怎么做由它自己决定。
-def truncation_note(requested, top_k, cap, hidden):
+# given 比 top_k 多：多出来的是相关性不低于优秀阈值（excellent）的资料，也告诉模型为什么比它要的多。
+def truncation_note(requested, top_k, cap, hidden, given=None, excellent=None):
+    if given is not None and given > top_k:
+        note = f"你要了 {top_k} 条，相关性 {excellent:.2f} 以上的资料有 {given} 条，都给你了。"
+        if hidden > 0:
+            note += f"另有 {hidden} 条相关性低一些、过了相关度线没有返回；需要时换一个更具体的说法再查。"
+        return note
     if hidden <= 0:
         return ""
     if requested > cap:

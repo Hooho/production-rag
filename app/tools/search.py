@@ -74,6 +74,7 @@ class DocumentSearchTool:
         parent=True,
         scope=None,
         return_limit=None,
+        excellent_score=None,
     ):
         # 一次检索只读一次参数，整条检索用同一份；实际用到的值写进诊断配置，事后能查到这次用的是哪组参数。
         config = runtime_snapshot()
@@ -201,6 +202,21 @@ class DocumentSearchTool:
         use_parent = parent and config["parent_context"]
         # 最多返回几条：不传就用设置页的 return_limit（固定流程）；Agent 传自己的 agent_return_limit。
         limit = config["return_limit"] if return_limit is None else return_limit
+        # 优秀阈值：重排得分不低于它的全部返回，不受上面的条数限制；不传就用设置页的（固定流程），Agent 传自己的。
+        # 1.0 表示不启用。没有重排分（重排关闭或失败）、兜底返回时也不启用。ranked 已按得分从高到低排好，
+        # 优秀的都在最前面，所以只要把条数放宽到优秀的条数。
+        excellent = (
+            config["rerank_excellent_score"]
+            if excellent_score is None
+            else excellent_score
+        )
+        if excellent >= 1 or not rerank_count or fallback_used:
+            excellent = None
+        base_limit = limit
+        if excellent is not None:
+            limit = max(
+                limit, sum(1 for item in ranked if item["final_score"] >= excellent)
+            )
         beyond_limit = 0
         parent_characters = 0
         injection_redacted = 0
@@ -294,8 +310,13 @@ class DocumentSearchTool:
             "fallback_min_score": config["rerank_fallback_min_score"]
             if rerank_count
             else None,
-            "return_limit": limit,
+            "return_limit": base_limit,
             "beyond_limit": beyond_limit,
+            # 优秀阈值（没启用是 None）和返回的资料里有几条不低于它；Agent 据此不受自己要的 top_k 限制。
+            "excellent_score": excellent,
+            "excellent": sum(1 for source in sources if source["score"] >= excellent)
+            if excellent is not None
+            else 0,
         }
         reranked = rerank_count > 0
         # 诊断里记实际生效的返回上限和是否做了父块扩展（调用方可能传了和设置页不同的值）。
@@ -307,7 +328,12 @@ class DocumentSearchTool:
             pool_size,
             fusion,
             methods,
-            {**config, "return_limit": limit, "parent_context": use_parent},
+            {
+                **config,
+                "return_limit": base_limit,
+                "parent_context": use_parent,
+                "excellent_score": excellent,
+            },
         )
         if scope:
             diagnostics["scope"] = self.scope_summary(scope["documents"])
@@ -599,6 +625,7 @@ class DocumentSearchTool:
             "parent_context": settings["parent_context"],
             "parent_max_chars": settings["parent_max_chars"],
             "parent_radius": settings["parent_radius"],
+            "excellent_score": settings.get("excellent_score"),
             "min_score": stats["min_score"],
             "rerank_query": stats["rerank_query"],
             "rerank_model": stats["rerank_model"],

@@ -164,3 +164,63 @@ def test_agent_top_k_limit_follows_setting(setup, runtime):
         runtime_config.check_overrides(
             {"agent_return_limit": 20, "rerank_candidates": 12}
         )
+
+
+# 优秀阈值：不低于它的资料全部返回，不受返回段数限制；1 表示不启用。固定流程和 Agent 分开设。
+def test_fixed_excellent_score_bypasses_return_limit(runtime):
+    from app.tools.search import DocumentSearchTool
+
+    def run():
+        return DocumentSearchTool().execute(
+            KnowledgeStore(),
+            ScoredRerank(),
+            "alice",
+            ["退货需要什么条件？"],
+            "退货需要什么条件？",
+            methods=("dense",),
+        )
+
+    runtime(
+        parent_context=False,
+        rerank_min_score=0.25,
+        return_limit=1,
+        rerank_excellent_score=1.0,
+    )
+    off = run()
+    assert len(off["sources"]) == 1 and off["stats"]["beyond_limit"] == 1
+    assert off["stats"]["excellent_score"] is None
+    runtime(rerank_excellent_score=0.3)
+    both = run()
+    assert len(both["sources"]) == 2 and both["stats"]["beyond_limit"] == 0
+    assert both["stats"]["excellent"] == 2 and both["stats"]["return_limit"] == 1
+    assert both["diagnostics"]["config"]["excellent_score"] == 0.3
+    # 只有一条不低于优秀阈值：它照常返回，中间那档仍按段数截断。
+    runtime(rerank_excellent_score=0.45)
+    one = run()
+    assert len(one["sources"]) == 1 and one["stats"]["beyond_limit"] == 1
+    with pytest.raises(ValueError, match="优秀阈值不能低于"):
+        runtime_config.check_overrides(
+            {"rerank_excellent_score": 0.5, "rerank_min_score": 0.8}
+        )
+
+
+def test_agent_excellent_score_bypasses_top_k_and_limit(runtime):
+    runtime(
+        parent_context=False,
+        agent_parent_context=False,
+        agent_rerank_min_score=0.25,
+        agent_return_limit=1,
+        agent_excellent_score=0.3,
+        rerank_excellent_score=1.0,
+    )
+    found = search(top_k=1)
+    assert found["trace"]["evidence_ids"] == ["S1", "S2"]
+    assert found["trace"]["given"] == 2 and found["trace"]["hidden"] == 0
+    assert found["content"].startswith(
+        "你要了 1 条，相关性 0.30 以上的资料有 2 条，都给你了。"
+    )
+    # 只有一条不低于优秀阈值、模型要 1 条：和以前一样，提示没给全。
+    runtime(agent_return_limit=6, agent_excellent_score=0.45)
+    fewer = search(top_k=1)
+    assert fewer["trace"]["evidence_ids"] == ["S1"] and fewer["trace"]["hidden"] == 1
+    assert fewer["content"].startswith("没有给全：按你要的 1 条返回")
