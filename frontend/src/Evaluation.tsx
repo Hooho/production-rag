@@ -104,6 +104,26 @@ type EvalKind = "retrieval" | "generation" | "memory" | "special";
 type LaunchKind = "retrieval" | "generation";
 // 一次评测最多保存几组配置一起跑（后端 app/evaluation/batch.py 的 MAX_ARMS）。
 const MAX_SAVED_CONFIGS = 4;
+// 一组配置的比较用指纹：勾选顺序不同、参数项先后不同都算同一组配置。
+function configKey(body: EvalLaunchBody) {
+  const normalize = (value: unknown): unknown => {
+    if (Array.isArray(value))
+      return value
+        .map(normalize)
+        .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    if (value && typeof value === "object")
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+          .filter(([, item]) => item !== undefined)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, item]) => [key, normalize(item)]),
+      );
+    return value;
+  };
+  const { label: _label, ...rest } = body;
+  return JSON.stringify(normalize(rest));
+}
+
 // 保存配置时记下的发起表单状态，「载入到表单」时原样放回去。
 type LaunchForm = {
   launchMode: "tuning" | "special";
@@ -962,6 +982,14 @@ function Evaluation({
   function saveConfig() {
     if (savedConfigs.length >= MAX_SAVED_CONFIGS) return;
     const body = currentBody();
+    // 和已保存的某一组完全一样（题目、模式、语料、参数都相同）就不再存一份，跑两遍一样的配置没有意义。
+    const same = savedConfigs.find(
+      (item) => configKey(item.body) === configKey(body),
+    );
+    if (same) {
+      onToast("error", `和「${same.label}」的配置完全一样，没有保存。`);
+      return;
+    }
     setSavedConfigs((items) => [
       ...items,
       {
