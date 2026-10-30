@@ -150,3 +150,22 @@
   color: var(--ev-muted);
   font-size: 12px;
 }
+
+/* 「保存为一组配置」和「开始评测」并排：和主按钮同样的尺寸、圆角、字重，只是描边样式，两个按钮一样高。 */
+.evb-launch-actions .secondary-button {
+  border: 1px solid var(--t-2563eb);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--t-2563eb);
+  padding: 10px 14px;
+  font-weight: 800;
+}
+
+.evb-launch-actions .secondary-button:hover:not(:disabled) {
+  background: rgb(var(--t-2563eb-rgb) / 0.08);
+}
+
+.evb-launch-actions .secondary-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
