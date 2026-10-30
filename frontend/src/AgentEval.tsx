@@ -1169,6 +1169,19 @@ function modeRows(
         .filter(Boolean)
         .join("；") || undefined,
   });
+  // 优秀阈值：不低于它的全部返回，不受返回上限限制；1 表示不启用，旧记录没有这一项也是不启用。
+  const excellentCell = (
+    value: number | boolean | undefined,
+    extra?: string,
+  ): ModeCell =>
+    rerankOff || value === undefined || Number(value) >= 1
+      ? { value: "不启用" }
+      : {
+          value: String(value),
+          note: ["高于它的全部返回，不受返回上限限制", extra ?? ""]
+            .filter(Boolean)
+            .join("；"),
+        };
   const candidates = settings.rerank_candidates ?? config?.pool_size;
   const agentLegacy = agentConfig?.rerank_min_score === undefined;
   models.push(
@@ -1208,6 +1221,14 @@ function modeRows(
       },
     },
     {
+      label: "优秀阈值",
+      fixed: excellentCell(settings.rerank_excellent_score),
+      agent: excellentCell(
+        agentConfig?.excellent_score ?? settings.agent_excellent_score,
+        "也不受 Agent 自己要的条数限制",
+      ),
+    },
+    {
       label: "父块扩展",
       fixed: parentCell(settings.parent_context, false),
       agent: parentCell(
@@ -1245,6 +1266,7 @@ function modeRows(
       ["agent_rerank_min_score", "rerank_fallback_min_score"],
     ],
     返回上限: [["return_limit"], ["agent_return_limit"]],
+    优秀阈值: [["rerank_excellent_score"], ["agent_excellent_score"]],
     父块扩展: [
       ["parent_context", "parent_radius", "parent_max_chars"],
       ["agent_parent_context", "parent_radius", "parent_max_chars"],
