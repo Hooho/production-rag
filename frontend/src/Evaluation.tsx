@@ -25,6 +25,7 @@ import {
   startSpecialRun,
   getEvalParamOptions,
   startEvalBatch,
+  rerunEvalRun,
   type EvalLaunchBody,
   type EvalCorpusEntry,
   type EvalParamGroup,
@@ -1027,6 +1028,19 @@ function Evaluation({
   }
 
   // 删除后刷新历史列表，并清理可能仍指向该记录的详情状态，避免页面继续显示已删除内容。
+  // 历史列表「选项 → 重跑」：照这条记录的配置重新发起，打开新记录看进度。
+  async function rerunRun(runId: string) {
+    try {
+      const started = await rerunEvalRun(runId);
+      onNavigate(`/eval/runs/${encodeURIComponent(started.id)}`);
+      setDetailTab("overview");
+      await refreshRuns();
+      onToast("success", "已按这条记录的配置重新开始评测。");
+    } catch (reason) {
+      onToast("error", (reason as Error).message);
+    }
+  }
+
   async function removeRun(runId: string) {
     try {
       await deleteEvalRun(runId);
@@ -1780,6 +1794,8 @@ function Evaluation({
             setRun((item) => (item?.id === id ? { ...item, note } : item));
           }}
           onDelete={removeRun}
+          running={Boolean(running)}
+          onRerun={(id) => void rerunRun(id)}
         />
       )}
     </section>
@@ -4173,12 +4189,16 @@ function RunHistory({
   onOpenBatch,
   onDelete,
   onNote,
+  running,
+  onRerun,
 }: {
   runs: EvalRunBrief[];
   onOpen: (id: string) => void;
   onOpenBatch: (id: string) => void;
   onDelete: (id: string) => Promise<void>;
   onNote: (id: string, note: string) => void;
+  running: boolean;
+  onRerun: (id: string) => void;
 }) {
   const [noteTarget, setNoteTarget] = useState<EvalRunBrief | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
@@ -4449,19 +4469,42 @@ function RunHistory({
                           onClick={(event) => event.stopPropagation()}
                         >
                           <summary className="ev-link">选项</summary>
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.currentTarget
-                                .closest("details")
-                                ?.removeAttribute("open");
-                              setNoteTarget(item);
-                              setNoteDraft(item.note || "");
-                              setNoteError("");
-                            }}
-                          >
-                            {item.note ? "编辑备注" : "添加备注"}
-                          </button>
+                          <div className="ev-note-menu">
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.currentTarget
+                                  .closest("details")
+                                  ?.removeAttribute("open");
+                                setNoteTarget(item);
+                                setNoteDraft(item.note || "");
+                                setNoteError("");
+                              }}
+                            >
+                              {item.note ? "编辑备注" : "添加备注"}
+                            </button>
+                            {["retrieval", "generation", "special"].includes(
+                              item.kind,
+                            ) && (
+                              <button
+                                type="button"
+                                disabled={running}
+                                title={
+                                  running
+                                    ? "已有评测在运行，跑完再重跑"
+                                    : "按这条记录的题目、模式、语料和参数重新跑一次，生成一条新记录"
+                                }
+                                onClick={(event) => {
+                                  event.currentTarget
+                                    .closest("details")
+                                    ?.removeAttribute("open");
+                                  onRerun(item.id);
+                                }}
+                              >
+                                重跑
+                              </button>
+                            )}
+                          </div>
                         </details>
                         <button
                           className="ev-link ev-expand-link"

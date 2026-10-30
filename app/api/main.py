@@ -2909,6 +2909,29 @@ def create_app(store=None, models=None, jwt_secret=None):
         Thread(target=work, daemon=True).start()
         return {"id": run["id"], "status": "running"}
 
+    # 按某条记录的配置重新跑一次（历史列表「选项」里的重跑），生成一条新记录，原记录不动。
+    @app.post(
+        "/eval/runs/{run_id}/rerun",
+        status_code=202,
+        dependencies=[Depends(require_admin)],
+    )
+    def rerun_eval_run(run_id: str, owner=Depends(identity)):
+        try:
+            source = load_run(run_id)
+        except ValueError:
+            raise HTTPException(404, "评测不存在")
+        if source is None:
+            raise HTTPException(404, "评测不存在")
+        try:
+            body = EvalRunInput(
+                **eval_batch.rerun_body(
+                    source, eval_corpus.list_entries(app.state.store.engine)
+                )
+            )
+        except ValueError as error:
+            raise HTTPException(422, str(error))
+        return create_eval_run(body, owner)
+
     # 一次跑多组配置（最多 4 组）：先把每组都校验一遍，有一组不合法就整批不跑；
     # 校验通过后每组先建一条「排队中」的评测记录，后台按顺序一组跑完再跑下一组（重排在本机 CPU 上，并发会互相拖慢）。
     # 某一组失败不影响后面的组。

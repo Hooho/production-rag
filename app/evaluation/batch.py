@@ -90,6 +90,42 @@ def config_diff(runs):
     return rows
 
 
+# 重跑一条记录：把记录上保存的配置还原成发起表单的内容（题目范围、运行模式、语料、这次单独指定的参数），
+# 照这份内容重新发起一次。批次里的一组重跑成单独一条记录；提示词版本按记录上指定的版本。
+# 语料：跑完后记录上只留了标题和导入情况（没有语料库编号），按标题对回评测语料库里现在的语料（entries），
+# 用的是现在的内容；已经不在语料库里的直接拒绝。以前没记语料的旧记录按全部语料跑（和当时一样）。
+def rerun_body(run, entries):
+    kind = run.get("kind")
+    if kind not in ("retrieval", "generation", "special"):
+        raise ValueError("这条记录不能重跑")
+    config = run.get("config") or {}
+    by_id = {entry["id"]: entry["id"] for entry in entries}
+    by_title = {entry["title"]: entry["id"] for entry in entries}
+    corpus_ids, missing = [], []
+    for item in config.get("corpus") or []:
+        entry_id = by_id.get(item.get("id")) or by_title.get(item.get("title"))
+        if entry_id:
+            corpus_ids.append(entry_id)
+        else:
+            missing.append(item.get("title") or item.get("id") or "")
+    if missing:
+        raise ValueError(f"这些语料已经不在评测语料库里：{'、'.join(missing)}")
+    body = {
+        "kind": kind,
+        "modes": list(config.get("modes") or ["fixed"]),
+        "corpus_ids": corpus_ids,
+        "params": run.get("params") or {},
+    }
+    if kind == "special":
+        special = config.get("special") or {}
+        body["suite_ids"] = [item["id"] for item in special.get("suites") or []]
+        body["compare_memory"] = bool(special.get("compare_memory"))
+    else:
+        body["split"] = config.get("split") or "dev"
+        body["suites"] = list(config.get("suites") or [])
+    return body
+
+
 # 批次报告：runs 是这个批次的完整评测记录（按组的顺序）。每组的完整结果原样带上（还没跑完的组是 None），
 # 前端用和单次评测同一套报告组件，一组配置的一个模式一列。
 def report(batch_id, runs):

@@ -1558,6 +1558,14 @@ export function startEvalBatch(name: string, configs: EvalLaunchBody[]) {
   });
 }
 
+// 按某条记录保存的配置重新跑一次，返回新记录的编号。
+export function rerunEvalRun(runId: string) {
+  return request<{ id: string; status: string }>(
+    `/eval/runs/${encodeURIComponent(runId)}/rerun`,
+    { method: "POST" },
+  );
+}
+
 export function getEvalBatch(batchId: string) {
   return request<EvalBatchReport>(
     `/eval/batches/${encodeURIComponent(batchId)}`,

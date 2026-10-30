@@ -21,18 +21,40 @@
   white-space: nowrap;
 }
 
-.ev-note-options > button {
+.ev-note-menu {
   position: absolute;
   z-index: 5;
   right: 0;
   top: 100%;
-  padding: 10px 14px;
-  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--t-ffffff, white);
-  color: var(--t-173b5b);
   border: 1px solid var(--t-cedfec);
   border-radius: 6px;
   box-shadow: 0 4px 12px #173b5b1a;
+}
+
+.ev-note-menu > button {
+  padding: 10px 14px;
+  white-space: nowrap;
+  text-align: left;
+  background: transparent;
+  color: var(--t-173b5b);
+  border: 0;
+}
+
+.ev-note-menu > button + button {
+  border-top: 1px solid var(--t-cedfec);
+}
+
+.ev-note-menu > button:hover:not(:disabled) {
+  background: var(--t-eef5fb);
+}
+
+.ev-note-menu > button:disabled {
+  color: var(--ev-muted, #8aa0b4);
+  cursor: not-allowed;
 }
 
 .ev-run-note-form {
