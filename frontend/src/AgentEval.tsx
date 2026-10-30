@@ -1116,6 +1116,99 @@ function modeRows(
       },
     },
   ];
+  // 检索参数：两边共用同一个检索入口，阈值、返回上限、父块扩展各用各的设置（Agent 是 agent_ 开头的那几项）。
+  // 旧记录没有单独记 Agent 的这几项，当时和固定流程共用一套。
+  const settings = (config?.settings ?? {}) as Record<
+    string,
+    number | boolean | undefined
+  >;
+  const rerankOff =
+    settings.rerank_enabled === false || config?.rerank_mode === "off";
+  const fallback = settings.rerank_fallback_min_score;
+  const shared = "旧记录：当时和固定流程共用";
+  const thresholdCell = (
+    value: number | boolean | undefined,
+    legacy: boolean,
+  ): ModeCell =>
+    rerankOff
+      ? { value: "不过滤", note: "重排未启用" }
+      : {
+          value: value === undefined ? "未记录" : String(value),
+          note:
+            [
+              fallback !== undefined
+                ? `都没过时，最高一条高于 ${fallback} 仍返回，标为相关性低`
+                : "",
+              legacy ? shared : "",
+            ]
+              .filter(Boolean)
+              .join("；") || undefined,
+        };
+  const parentCell = (
+    value: number | boolean | undefined,
+    legacy: boolean,
+    extra?: string,
+  ): ModeCell => ({
+    value: value === undefined ? "未记录" : value ? "开" : "关",
+    note:
+      [
+        value
+          ? `同一节内前后各 ${settings.parent_radius ?? "?"} 段，最多 ${settings.parent_max_chars ?? "?"} 字`
+          : "",
+        extra ?? "",
+        legacy ? shared : "",
+      ]
+        .filter(Boolean)
+        .join("；") || undefined,
+  });
+  const candidates = settings.rerank_candidates ?? config?.pool_size;
+  const agentLegacy = agentConfig?.rerank_min_score === undefined;
+  models.push(
+    {
+      label: "重排候选",
+      fixed: {
+        value: candidates === undefined ? "未记录" : `${candidates} 条`,
+      },
+      agent: {
+        value: candidates === undefined ? "未记录" : `${candidates} 条`,
+      },
+    },
+    {
+      label: "重排阈值",
+      fixed: thresholdCell(
+        settings.rerank_min_score ?? config?.min_score ?? undefined,
+        false,
+      ),
+      agent: thresholdCell(
+        agentConfig?.rerank_min_score ?? settings.rerank_min_score,
+        agentLegacy,
+      ),
+    },
+    {
+      label: "返回上限",
+      fixed: {
+        value: `${settings.return_limit ?? config?.return_limit ?? "未记录"} 条`,
+      },
+      agent: {
+        value: `${agentConfig?.return_limit ?? settings.return_limit ?? "未记录"} 条`,
+        note: [
+          "每次检索由 Agent 自己定要几条，不超过这个数",
+          agentLegacy ? shared : "",
+        ]
+          .filter(Boolean)
+          .join("；"),
+      },
+    },
+    {
+      label: "父块扩展",
+      fixed: parentCell(settings.parent_context, false),
+      agent: parentCell(
+        agentConfig?.parent_context ?? settings.parent_context,
+        agentLegacy,
+        "也可以用 read_context 自己读上下文",
+      ),
+    },
+  );
   if (agentConfig) {
     models.push(
       {

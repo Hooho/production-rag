@@ -1265,6 +1265,10 @@ export type EvalConfig = {
     prompt_version: string;
     prompt_identity?: string;
     model: string | null;
+    // Agent 单独的检索参数（旧记录没有，当时和固定流程共用）。
+    rerank_min_score?: number;
+    return_limit?: number;
+    parent_context?: boolean;
   };
   // 固定流程怎么跑的：name=full 是完整检索（改写 + 判断，旧记录没有，是规则检索词、只检索）。
   flow?: {
