@@ -57,3 +57,14 @@
 .ag-evidence-status > ul > li.is-missed {
   font-size: 10px;
 }
+
+/* 汇总卡片默认只显示结果；资料量、检索、耗时等过程指标和模型配置收起，点卡片下面的按钮展开。 */
+.ag-mode-cards.is-collapsed .ag-mode-row.is-process,
+.ag-mode-cards.is-collapsed .ag-mode-row.is-config {
+  display: none;
+}
+
+.ag-mode-toggle {
+  align-self: flex-start;
+  margin-top: 8px;
+}

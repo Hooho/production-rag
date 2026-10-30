@@ -1151,6 +1151,8 @@ function ModeCards({
   hasAgent: boolean;
 }) {
   const rows = modeRows(questions, config, hasFixed, hasAgent);
+  // 资料量、检索、耗时这些过程指标和模型配置默认收起，先看结果；两张卡片一起展开，行还能对齐。
+  const [detailOpen, setDetailOpen] = useState(false);
   const card = (side: "fixed" | "agent", title: string) => (
     <section className="ag-mode-card">
       <h4>{title}</h4>
@@ -1195,10 +1197,13 @@ function ModeCards({
             : ""}
         </p>
       )}
-      <div className={`ag-mode-cards${hasFixed && hasAgent ? " is-two" : ""}`}>
+      <div
+        className={`ag-mode-cards${hasFixed && hasAgent ? " is-two" : ""}${detailOpen ? "" : " is-collapsed"}`}
+      >
         {hasFixed && card("fixed", "固定流程")}
         {hasAgent && card("agent", "Agent")}
       </div>
+      <ModeDetailToggle open={detailOpen} onToggle={setDetailOpen} />
     </>
   );
 }
@@ -3982,6 +3987,7 @@ function leadingNumber(text: string) {
 
 // 汇总卡片：和单次报告的「固定流程 / Agent」卡片一样，一列一张。
 export function BatchModeCards({ columns }: { columns: BatchColumn[] }) {
+  const [detailOpen, setDetailOpen] = useState(false);
   const cards = columns.map((column) => {
     const questions = [...column.questions.values()];
     const rows = modeRows(
@@ -4011,7 +4017,7 @@ export function BatchModeCards({ columns }: { columns: BatchColumn[] }) {
       </p>
       <div className="ag-batch-scroll">
         <div
-          className="ag-mode-cards ag-batch-cards"
+          className={`ag-mode-cards ag-batch-cards${detailOpen ? "" : " is-collapsed"}`}
           style={{
             gridTemplateColumns: `repeat(${cards.length}, minmax(300px, 1fr))`,
           }}
@@ -4054,7 +4060,28 @@ export function BatchModeCards({ columns }: { columns: BatchColumn[] }) {
           ))}
         </div>
       </div>
+      <ModeDetailToggle open={detailOpen} onToggle={setDetailOpen} />
     </>
+  );
+}
+
+// 汇总卡片下面的展开 / 收起：控制资料量、检索、轮数、耗时、输入 token 和模型配置这几行。
+function ModeDetailToggle({
+  open,
+  onToggle,
+}: {
+  open: boolean;
+  onToggle: (open: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="ev-link ag-mode-toggle"
+      aria-expanded={open}
+      onClick={() => onToggle(!open)}
+    >
+      {open ? "收起资料量、耗时和模型配置" : "展开资料量、耗时和模型配置"}
+    </button>
   );
 }
 
