@@ -7,6 +7,7 @@ import {
   type EvalConfig,
   type EvalMaterial,
   type EvalMode,
+  type EvalParams,
   type EvalRetry,
   type EvalQuestion,
   type EvalRun,
@@ -214,7 +215,13 @@ function Card({
 
 // 两种模式的大卡片：左边固定流程、右边 Agent，每张卡片放这个模式的全部指标，同一行左右对齐好比较。
 // 分三块：结果（通过、计分项命中、扩展命中）、过程（检索次数、耗时……）、配置。数字都从逐题结果现算，调参评测和专项共用。
-type ModeCell = { value: string; note?: string; best?: boolean };
+// custom：这一项是这次评测单独指定的（发起时「参数配置」里改过），不是跟随系统设置。
+type ModeCell = {
+  value: string;
+  note?: string;
+  best?: boolean;
+  custom?: boolean;
+};
 type ModeRow = {
   group: "result" | "process" | "config";
   label: string;
@@ -678,6 +685,7 @@ function modeRows(
   config: EvalConfig | undefined,
   hasFixed: boolean,
   hasAgent: boolean,
+  params?: EvalParams,
 ): ModeRow[] {
   const answerable = questions.filter((question) => question.answerable);
   const unanswerable = questions.filter((question) => !question.answerable);
@@ -1222,28 +1230,67 @@ function modeRows(
       },
     );
   }
+  // 这次评测单独指定过的项标上「自定义」：每行两边各看哪几个参数（params 的结构见 app/evaluation/params.py）。
+  const changed = new Set(Object.keys(params?.settings ?? {}));
+  if (params?.llm) changed.add("llm");
+  for (const id of Object.keys(params?.prompts ?? {}))
+    changed.add(`prompt:${id}`);
+  const CUSTOM_KEYS: Record<string, [string[], string[]]> = {
+    聊天大模型: [["llm", "prompt:answer"], ["llm"]],
+    充分性判断模型: [["llm", "prompt:sufficiency"], []],
+    问题改写模型: [["llm", "prompt:intent"], []],
+    重排候选: [["rerank_candidates"], ["rerank_candidates"]],
+    重排阈值: [
+      ["rerank_min_score", "rerank_fallback_min_score"],
+      ["agent_rerank_min_score", "rerank_fallback_min_score"],
+    ],
+    返回上限: [["return_limit"], ["agent_return_limit"]],
+    父块扩展: [
+      ["parent_context", "parent_radius", "parent_max_chars"],
+      ["agent_parent_context", "parent_radius", "parent_max_chars"],
+    ],
+    工具调用预算: [[], ["agent_tool_budget"]],
+    执行超时: [[], ["agent_timeout"]],
+    提示词版本: [[], ["prompt:agent"]],
+  };
+  const mark = (cell: ModeCell | undefined, keys: string[] | undefined) =>
+    cell && keys?.some((key) => changed.has(key))
+      ? { ...cell, custom: true }
+      : cell;
   for (const model of models) {
+    const [fixedKeys, agentKeys] = CUSTOM_KEYS[model.label] ?? [[], []];
     rows.push({
       group: "config",
       label: model.label,
-      ...pick(model.fixed, model.agent),
+      ...pick(mark(model.fixed, fixedKeys), mark(model.agent, agentKeys)),
     });
   }
   return rows;
 }
 
+// 「自定义」标记：这一项是这次评测单独指定的，不是跟随系统设置。
+function CustomTag({ cell }: { cell: ModeCell }) {
+  return cell.custom ? (
+    <Tag tone="accent" size="sm" title="这次评测单独指定的，不是系统设置">
+      自定义
+    </Tag>
+  ) : null;
+}
+
 function ModeCards({
   questions,
   config,
+  params,
   hasFixed,
   hasAgent,
 }: {
   questions: EvalQuestion[];
   config?: EvalConfig;
+  params?: EvalParams;
   hasFixed: boolean;
   hasAgent: boolean;
 }) {
-  const rows = modeRows(questions, config, hasFixed, hasAgent);
+  const rows = modeRows(questions, config, hasFixed, hasAgent, params);
   // 资料量、检索、耗时这些过程指标和模型配置默认收起，先看结果；两张卡片一起展开，行还能对齐。
   const [detailOpen, setDetailOpen] = useState(false);
   const card = (side: "fixed" | "agent", title: string) => (
@@ -1260,6 +1307,7 @@ function ModeCards({
               <span className="ag-mode-label">{row.label}</span>
               <span className="ag-mode-value">
                 <b>{cell.value}</b>
+                <CustomTag cell={cell} />
                 {cell.best && (
                   <Tag tone="success" size="sm">
                     {row.label === "得分" ? "✓ 更高" : "✓ 更多"}
@@ -1334,6 +1382,7 @@ export function ComparePanel({ run }: { run: EvalRun }) {
       <ModeCards
         questions={run.questions ?? []}
         config={run.config}
+        params={run.params}
         hasFixed
         hasAgent
       />
@@ -3985,6 +4034,8 @@ export type BatchColumn = {
   title: string;
   mode: EvalMode;
   config?: EvalConfig;
+  // 这组配置单独指定的参数，卡片上标「自定义」。
+  params?: EvalParams;
   // 题目按「专项编号:题目编号」（调参题就是题目编号）对齐，几组跑的题不完全一样时也能逐题对上。
   questions: Map<string, EvalQuestion>;
 };
@@ -4035,6 +4086,7 @@ export function batchColumns(
           title: `${arm.label} · ${MODE_NAMES[mode]}`,
           mode,
           config,
+          params: run.params,
           questions,
         });
       }
@@ -4054,6 +4106,7 @@ export function batchColumns(
           title: `${arm.label} · ${MODE_NAMES[mode]}`,
           mode,
           config: run.config,
+          params: run.params,
           questions,
         });
       }
@@ -4088,6 +4141,7 @@ export function BatchModeCards({ columns }: { columns: BatchColumn[] }) {
       column.config,
       column.mode === "fixed",
       column.mode === "agent",
+      column.params,
     );
     return { column, questions, rows };
   });
@@ -4132,6 +4186,7 @@ export function BatchModeCards({ columns }: { columns: BatchColumn[] }) {
                       <span className="ag-mode-label">{row.label}</span>
                       <span className="ag-mode-value">
                         <b>{cell.value}</b>
+                        <CustomTag cell={cell} />
                         {isBest && (
                           <Tag tone="success" size="sm">
                             {row.label === "得分" ? "✓ 最高" : "✓ 最多"}
