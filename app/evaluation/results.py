@@ -359,6 +359,7 @@ def run_brief(run):
         "progress",
         "error",
         "params",
+        "batch",
     ):
         brief[key] = run.get(key)
     # 历史页的指标解释依赖实际证据数量，和列表内容一起返回，避免展开每行时补请求完整结果。

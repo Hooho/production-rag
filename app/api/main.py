@@ -94,12 +94,14 @@ from ..evaluation.results import (
     list_runs,
     load_run,
     previous_run,
+    save_run,
     start_run,
     save_run_note,
 )
 from ..evaluation.retrieval import SUITES, VARIANTS, import_corpus
 from ..evaluation import corpus as eval_corpus, regression, suites as special_suites
 from ..evaluation import params as eval_params
+from ..evaluation import batch as eval_batch
 from ..evaluation.retrieval import EVAL_OWNER
 from ..tools.search import limit_titles
 from ..evaluation.evidence import locate_evidence, load_chunk
@@ -187,6 +189,15 @@ class EvalRunInput(BaseModel):
     # 只对这一次评测生效的参数：模型、评审模型、运行参数、提示词版本，不写的项跟随系统设置
     # （结构和校验见 app/evaluation/params.py）。
     params: dict | None = None
+    # 一次跑多组配置时这一组的名字（只在批次里用，不写就叫配置 A、B…）。
+    label: str | None = Field(None, max_length=40)
+
+
+# 一次评测跑多组配置：每组就是一份完整的发起表单，按顺序各跑一遍，放进同一份批次报告（app/evaluation/batch.py）。
+class EvalBatchInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field("", max_length=60)
+    configs: list[EvalRunInput] = Field(..., min_length=1, max_length=4)
 
 
 class EvalTargetInput(BaseModel):
@@ -675,6 +686,8 @@ def create_app(store=None, models=None, jwt_secret=None):
         # 题目写入和 AI 起草必须串行，避免两个请求同时读取旧编号后生成重复 ID。
         app.state.eval_dataset_lock = Lock()
         app.state.eval_running = None
+        # 正在跑的批次编号：批次里排队中的记录据此判断是还在排队，还是进程中途退出过。
+        app.state.eval_batch = None
         # 评测语料库里正在导入的那份（编号）和导入失败的原因 {编号: 原因}：导入和评测共用 eval_lock，同一时间只做一件。
         app.state.corpus_importing = None
         app.state.corpus_import_errors = {}
@@ -2794,8 +2807,7 @@ def create_app(store=None, models=None, jwt_secret=None):
     def eval_runs(owner=Depends(identity)):
         runs = list_runs()
         for run in runs:
-            if run["status"] == "running" and run["id"] != app.state.eval_running:
-                run["status"] = "interrupted"
+            run["status"] = current_status(run)
         suites = []
         for key, label in SUITES.items():
             variants = []
@@ -2814,8 +2826,7 @@ def create_app(store=None, models=None, jwt_secret=None):
             raise HTTPException(404, "评测不存在")
         if run is None:
             raise HTTPException(404, "评测不存在")
-        if run["status"] == "running" and run["id"] != app.state.eval_running:
-            run["status"] = "interrupted"
+        run["status"] = current_status(run)
         from ..evaluation.presentation import normalize_report
 
         runs = list_runs()
@@ -2844,6 +2855,13 @@ def create_app(store=None, models=None, jwt_secret=None):
     def remove_eval_run(run_id: str, owner=Depends(identity)):
         if app.state.eval_running == run_id:
             raise HTTPException(409, "评测正在运行，不能删除")
+        # 批次里还在排队的组：后台轮到它时会继续写这条记录，删了会被重新写回来。
+        try:
+            queued = load_run(run_id)
+        except ValueError:
+            raise HTTPException(404, "评测不存在")
+        if queued and current_status(queued) == "queued":
+            raise HTTPException(409, "评测正在排队，不能删除")
         try:
             deleted = delete_run(run_id)
         except ValueError:
@@ -2872,6 +2890,98 @@ def create_app(store=None, models=None, jwt_secret=None):
     # 界面上发起一次评测，在后台线程执行并立即返回编号，前端轮询进度。
     @app.post("/eval/runs", status_code=202, dependencies=[Depends(require_admin)])
     def create_eval_run(body: EvalRunInput, owner=Depends(identity)):
+        launch = prepare_launch(body)
+        acquire_eval_lock()
+        try:
+            run = create_launch_run(launch)
+        except Exception:
+            app.state.eval_lock.release()
+            raise
+        app.state.eval_running = run["id"]
+
+        def work():
+            try:
+                execute_launch(launch, run)
+            finally:
+                app.state.eval_running = None
+                app.state.eval_lock.release()
+
+        Thread(target=work, daemon=True).start()
+        return {"id": run["id"], "status": "running"}
+
+    # 一次跑多组配置（最多 4 组）：先把每组都校验一遍，有一组不合法就整批不跑；
+    # 校验通过后每组先建一条「排队中」的评测记录，后台按顺序一组跑完再跑下一组（重排在本机 CPU 上，并发会互相拖慢）。
+    # 某一组失败不影响后面的组。
+    @app.post("/eval/batches", status_code=202, dependencies=[Depends(require_admin)])
+    def create_eval_batch(body: EvalBatchInput, owner=Depends(identity)):
+        launches = []
+        for index, config in enumerate(body.configs):
+            try:
+                launches.append(prepare_launch(config))
+            except HTTPException as error:
+                label = eval_batch.arm_label(config.label, index)
+                raise HTTPException(error.status_code, f"{label}：{error.detail}")
+        acquire_eval_lock()
+        batch_id = eval_batch.new_batch_id()
+        runs = []
+        try:
+            for index, launch in enumerate(launches):
+                runs.append(
+                    create_launch_run(
+                        launch,
+                        {
+                            "id": batch_id,
+                            "name": body.name.strip(),
+                            "index": index,
+                            "size": len(launches),
+                            "label": eval_batch.arm_label(
+                                body.configs[index].label, index
+                            ),
+                        },
+                    )
+                )
+        except Exception:
+            app.state.eval_lock.release()
+            raise
+        app.state.eval_batch = batch_id
+
+        def work():
+            try:
+                for launch, run in zip(launches, runs):
+                    app.state.eval_running = run["id"]
+                    run["status"] = "running"
+                    save_run(run)
+                    execute_launch(launch, run)
+            finally:
+                app.state.eval_running = None
+                app.state.eval_batch = None
+                app.state.eval_lock.release()
+
+        Thread(target=work, daemon=True).start()
+        return {"id": batch_id, "runs": [run["id"] for run in runs]}
+
+    # 批次报告：几组配置的整体指标、配置差异和逐题对比（压缩过的数据，详情点进每组自己的评测记录看）。
+    @app.get("/eval/batches/{batch_id}", dependencies=[Depends(require_admin)])
+    def eval_batch_report(batch_id: str, owner=Depends(identity)):
+        try:
+            eval_batch.check_batch_id(batch_id)
+        except ValueError:
+            raise HTTPException(404, "批次不存在")
+        briefs = [
+            run for run in list_runs() if (run.get("batch") or {}).get("id") == batch_id
+        ]
+        if not briefs:
+            raise HTTPException(404, "批次不存在")
+        briefs.sort(key=lambda run: (run.get("batch") or {}).get("index", 0))
+        runs = []
+        for brief in briefs:
+            run = load_run(brief["id"]) or brief
+            run["status"] = current_status(run)
+            runs.append(run)
+        return eval_batch.report(batch_id, runs)
+
+    # 发起前的全部检查：题目、模式、模型、语料、参数都不对时直接拒绝，不留下失败的记录。返回开跑需要的全部内容。
+    def prepare_launch(body):
         for suite in body.suites:
             if suite not in SUITES:
                 raise HTTPException(422, f"未知实验组：{suite}")
@@ -2947,58 +3057,86 @@ def create_app(store=None, models=None, jwt_secret=None):
             )
         except ValueError as error:
             raise HTTPException(422, str(error))
+        return {
+            "body": body,
+            "special": special,
+            "needs_responder": needs_responder,
+            "corpus": corpus,
+            "params": run_params,
+            "prepared": prepared,
+        }
+
+    def acquire_eval_lock():
         if app.state.corpus_importing:
             raise HTTPException(409, "正在导入评测语料，等导入完再发起评测")
         if not app.state.eval_lock.acquire(blocking=False):
             raise HTTPException(409, "已有评测正在运行，请等待完成")
+
+    # 建评测记录：单独发起的直接是运行中；批次里的先是排队中，轮到它时才改成运行中。
+    def create_launch_run(launch, batch=None):
+        body = launch["body"]
+        run = start_run(
+            body.kind,
+            None if launch["special"] else body.split,
+            body.suites,
+            launch["special"],
+            body.modes if body.kind in ("retrieval", "special") else ("fixed",),
+            launch["corpus"],
+            launch["params"],
+        )
+        if batch is not None:
+            run["batch"] = batch
+            run["status"] = "queued"
+            save_run(run)
+        return run
+
+    # 在当前（后台）线程里跑一组配置；出错只记在这条记录上，不往外抛，批次里的下一组照常跑。
+    def execute_launch(launch, run):
+        body = launch["body"]
+        corpus = launch["corpus"]
+        responder = None
         try:
-            run = start_run(
-                body.kind,
-                None if special else body.split,
-                body.suites,
-                special,
-                body.modes if body.kind in ("retrieval", "special") else ("fixed",),
-                corpus,
-                run_params,
-            )
-        except Exception:
-            app.state.eval_lock.release()
-            raise
-        app.state.eval_running = run["id"]
+            # 评测线程里套上这次的参数：覆盖的运行参数、提示词版本只在这个线程生效，模型用复制出来的一份，线上不受影响。
+            with eval_params.applied(app.state.models, launch["prepared"]) as (
+                run_models,
+                judge_models,
+            ):
+                run["effective"] = eval_params.effective(run_models, judge_models)
+                if launch["needs_responder"]:
+                    # 生成评测只验证回答质量，不应把评测题写进线上会话的持久化记忆，回答 Agent 用进程内记忆。
+                    responder = ResponseAgent(run_models, use_postgres=False)
+                # 评测账号这次只检索勾选的语料：导入、固定流程、补充检索、Agent、完整问答都经过同一个检索入口。
+                with limit_titles(EVAL_OWNER, [item["title"] for item in corpus]):
+                    execute_run(
+                        app.state.store,
+                        run_models,
+                        [] if launch["special"] else load_dataset(),
+                        run,
+                        generate=body.kind == "generation",
+                        responder=responder,
+                        agent_mode=app.state.agent_mode,
+                    )
+        except Exception as error:
+            logger.exception("eval_run_failed run_id=%s", run["id"])
+            # execute_run 自己会记失败；它之前（套参数、建回答模块）出错时这里补记，免得一直显示运行中。
+            if run.get("status") in ("running", "queued"):
+                run["status"] = "failed"
+                run["error"] = f"{type(error).__name__}: {error}"[:500]
+                save_run(run)
+        finally:
+            if responder is not None:
+                responder.close()
 
-        def work():
-            responder = None
-            try:
-                # 评测线程里套上这次的参数：覆盖的运行参数、提示词版本只在这个线程生效，模型用复制出来的一份，线上不受影响。
-                with eval_params.applied(app.state.models, prepared) as (
-                    run_models,
-                    judge_models,
-                ):
-                    run["effective"] = eval_params.effective(run_models, judge_models)
-                    if needs_responder:
-                        # 生成评测只验证回答质量，不应把评测题写进线上会话的持久化记忆，回答 Agent 用进程内记忆。
-                        responder = ResponseAgent(run_models, use_postgres=False)
-                    # 评测账号这次只检索勾选的语料：导入、固定流程、补充检索、Agent、完整问答都经过同一个检索入口。
-                    with limit_titles(EVAL_OWNER, [item["title"] for item in corpus]):
-                        execute_run(
-                            app.state.store,
-                            run_models,
-                            [] if special else load_dataset(),
-                            run,
-                            generate=body.kind == "generation",
-                            responder=responder,
-                            agent_mode=app.state.agent_mode,
-                        )
-            except Exception:
-                logger.exception("eval_run_failed run_id=%s", run["id"])
-            finally:
-                if responder is not None:
-                    responder.close()
-                app.state.eval_running = None
-                app.state.eval_lock.release()
-
-        Thread(target=work, daemon=True).start()
-        return {"id": run["id"], "status": "running"}
+    # 记录上写着运行中、排队中，但进程里已经不在跑这一条（进程中途退出过），显示成已中断。
+    def current_status(run):
+        if run.get("status") == "running" and run["id"] != app.state.eval_running:
+            return "interrupted"
+        if (
+            run.get("status") == "queued"
+            and (run.get("batch") or {}).get("id") != app.state.eval_batch
+        ):
+            return "interrupted"
+        return run.get("status")
 
     # 这次评测用哪几份语料：不传就是语料库里的全部；记进评测配置（编号、标题、内容指纹），对比两次评测时能看出语料变了。
     def pick_corpus(corpus_ids):

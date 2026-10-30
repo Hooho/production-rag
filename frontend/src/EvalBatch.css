@@ -1,0 +1,266 @@
+/* 批次报告（EvalBatch.tsx）和发起页里「保存为一组配置」的配置卡片。 */
+.evb-root {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.evb-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.evb-head h3 {
+  margin: 0;
+  color: var(--ev-ink);
+  font-size: 18px;
+}
+
+.evb-head span,
+.evb-arm p {
+  color: var(--ev-muted);
+  font-size: 12px;
+}
+
+.evb-error {
+  color: var(--ev-bad);
+  font-size: 12px;
+}
+
+.evb-arms {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.evb-arm {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  border: 1px solid var(--ev-line);
+  background: var(--t-f7fbff);
+  padding: 10px 12px;
+}
+
+.evb-arm p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.evb-arm-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ev-ink);
+}
+
+.evb-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.evb-block h4 {
+  margin: 0;
+  color: var(--ev-ink);
+  font-size: 14px;
+}
+
+.evb-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.evb-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--t-536d86);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.evb-toggle input {
+  width: auto;
+}
+
+.evb-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.evb-table th,
+.evb-table td {
+  border-bottom: 1px solid var(--ev-line);
+  padding: 7px 10px;
+  color: var(--ev-ink);
+  text-align: left;
+  vertical-align: top;
+}
+
+.evb-table thead th {
+  color: var(--ev-muted);
+  font-weight: 600;
+}
+
+.evb-table tbody th {
+  font-weight: 400;
+}
+
+.evb-table td.is-best {
+  color: var(--t-2563eb);
+  font-weight: 700;
+}
+
+.evb-questions tbody th {
+  max-width: 520px;
+}
+
+.evb-question-row {
+  cursor: pointer;
+}
+
+.evb-question-row:hover,
+.evb-question-row.is-open {
+  background: var(--t-f7fbff);
+}
+
+.evb-question-row em {
+  margin-right: 6px;
+  color: var(--ev-muted);
+  font-style: normal;
+}
+
+.evb-caret {
+  display: inline-block;
+  width: 14px;
+  color: var(--ev-muted);
+}
+
+.evb-group-row th {
+  background: var(--t-eef5fb);
+  font-weight: 600;
+}
+
+.evb-cells {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.evb-cell {
+  border: 1px solid var(--ev-line);
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+.evb-cell.is-full {
+  border-color: rgb(79 158 121 / 0.5);
+  color: var(--ev-good);
+}
+
+.evb-cell.is-partial {
+  border-color: rgb(177 123 30 / 0.5);
+  color: var(--ev-warn);
+}
+
+.evb-cell.is-none {
+  border-color: rgb(201 76 89 / 0.5);
+  color: var(--ev-bad);
+}
+
+.evb-detail {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  padding: 4px 0 4px 14px;
+}
+
+.evb-detail ul {
+  margin: 4px 0 0;
+  padding-left: 16px;
+}
+
+.evb-detail li {
+  margin: 2px 0;
+  line-height: 1.6;
+}
+
+.evb-detail li span {
+  margin-left: 6px;
+  color: var(--ev-muted);
+}
+
+.evb-mode {
+  display: inline-block;
+  margin-top: 4px;
+  color: var(--ev-muted);
+  font-size: 11px;
+}
+
+/* 发起页：已保存的几组配置。 */
+.evb-saved {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.evb-saved-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid rgb(var(--t-2563eb-rgb) / 0.45);
+  background: var(--t-f7fbff);
+  padding: 10px 12px;
+  font-size: 12px;
+}
+
+.evb-saved-card input {
+  width: 100%;
+  border: 1px solid var(--t-abc4dc);
+  background: var(--t-eef5fb);
+  padding: 4px 8px;
+  color: var(--ev-ink);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.evb-saved-card ul {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--t-536d86);
+  line-height: 1.6;
+}
+
+.evb-saved-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.evb-launch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.evb-launch-actions small {
+  margin-right: auto;
+  color: var(--ev-muted);
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .evb-table th,
+  .evb-table td {
+    padding: 6px;
+  }
+}

@@ -1292,7 +1292,8 @@ export type EvalRunBrief = {
   id: string;
   // memory 是以前单独的多轮对话评测（现在并入专项评测集），旧记录仍然能打开。
   kind: "retrieval" | "generation" | "memory" | "special";
-  status: "running" | "completed" | "failed" | "interrupted";
+  // queued：一次跑多组配置时，还没轮到的组。
+  status: "queued" | "running" | "completed" | "failed" | "interrupted";
   created: string;
   finished: string | null;
   commit: string;
@@ -1306,6 +1307,15 @@ export type EvalRunBrief = {
   params?: EvalParams;
   // 这次评测实际生效的模型、运行参数和提示词版本（开跑时记下，不含密钥）。
   effective?: EvalEffective;
+  // 一次跑多组配置时属于哪个批次、第几组、组名。
+  batch?: EvalBatchRef;
+};
+export type EvalBatchRef = {
+  id: string;
+  name: string;
+  index: number;
+  size: number;
+  label: string;
 };
 export type EvalRun = EvalRunBrief & {
   by_type?: Record<string, EvalSummary>;
@@ -1509,6 +1519,83 @@ export type EvalParamOptions = {
     versions: { version: number; label: string; note: string }[];
   }[];
 };
+
+// 一次评测跑多组配置（app/evaluation/batch.py）：每组就是一份完整的发起表单，按顺序各跑一遍，放进同一份批次报告。
+export type EvalLaunchBody = {
+  kind: "retrieval" | "generation" | "special";
+  split?: string;
+  suites?: string[];
+  suite_ids?: string[];
+  compare_memory?: boolean;
+  modes: EvalMode[];
+  corpus_ids: string[];
+  params: EvalParams;
+  label?: string;
+};
+export type EvalBatchCell = {
+  found: number | null;
+  total: number;
+  score: number | null;
+  missing: { label: string; reason: string }[];
+  status?: string;
+  searches?: number;
+  prompt_tokens?: number;
+  latency_ms?: number;
+};
+export type EvalBatchModeSummary = {
+  score: number | null;
+  passed: number;
+  found: number;
+  total: number;
+  prompt_tokens?: number | null;
+  latency_ms?: number | null;
+  searches?: number | null;
+  failed?: number;
+};
+export type EvalBatchReport = {
+  id: string;
+  name: string;
+  created: string;
+  arms: {
+    id: string;
+    label: string;
+    status: EvalRunBrief["status"];
+    progress: { done: number; total: number } | null;
+    error: string | null;
+    params: EvalParams;
+    summary: {
+      questions: number;
+      fixed: EvalBatchModeSummary | null;
+      agent: EvalBatchModeSummary | null;
+    } | null;
+  }[];
+  config_diff: { key: string; values: (RuntimeSettingValue | null)[] }[];
+  questions: {
+    key: string;
+    group: string;
+    id: string;
+    question: string;
+    type: string | null;
+    cells: ({
+      fixed: EvalBatchCell | null;
+      agent: EvalBatchCell | null;
+    } | null)[];
+  }[];
+};
+
+export function startEvalBatch(name: string, configs: EvalLaunchBody[]) {
+  return request<{ id: string; runs: string[] }>("/eval/batches", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, configs }),
+  });
+}
+
+export function getEvalBatch(batchId: string) {
+  return request<EvalBatchReport>(
+    `/eval/batches/${encodeURIComponent(batchId)}`,
+  );
+}
 
 export function getEvalParamOptions() {
   return request<EvalParamOptions>("/eval/params");

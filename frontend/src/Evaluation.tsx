@@ -24,6 +24,8 @@ import {
   listEvalSuites,
   startSpecialRun,
   getEvalParamOptions,
+  startEvalBatch,
+  type EvalLaunchBody,
   type EvalCorpusEntry,
   type EvalParamGroup,
   type EvalParamOptions,
@@ -59,6 +61,7 @@ import Corpus from "./Corpus";
 import Regression from "./Regression";
 import Special, { SpecialSection } from "./Special";
 import "./Special.css";
+import BatchReport from "./EvalBatch";
 import EvalParamsPanel, {
   paramsSummary,
   visibleParams,
@@ -99,6 +102,27 @@ const MODE_TAB_LABELS: Record<ModeTab, string> = {
 // memory 是以前单独的多轮对话评测，现在并入专项评测集，只用来显示旧记录。
 type EvalKind = "retrieval" | "generation" | "memory" | "special";
 type LaunchKind = "retrieval" | "generation";
+// 一次评测最多保存几组配置一起跑（后端 app/evaluation/batch.py 的 MAX_ARMS）。
+const MAX_SAVED_CONFIGS = 4;
+// 保存配置时记下的发起表单状态，「载入到表单」时原样放回去。
+type LaunchForm = {
+  launchMode: "tuning" | "special";
+  launchKind: LaunchKind;
+  launchSplit: string;
+  launchSuites: string[];
+  launchModes: EvalMode[];
+  specialModes: EvalMode[];
+  pickedSuites: string[];
+  compareMemory: boolean;
+  pickedCorpus: string[];
+  launchParams: EvalParams;
+};
+type SavedConfig = {
+  label: string;
+  body: EvalLaunchBody;
+  form: LaunchForm;
+  summary: string[];
+};
 const KIND_LABELS: Record<EvalKind, string> = {
   retrieval: "检索",
   generation: "生成",
@@ -113,6 +137,8 @@ type Props = {
   Diagnostics: ComponentType<{ data: RetrievalDiagnosticsData }>;
   section: EvaluationSection;
   runId?: string;
+  // 一次跑多组配置的批次报告，来自地址 /eval/batches/<编号>。
+  batchId?: string;
   // 巡检复测集页签里打开的评测集，来自地址 /eval/regression/<编号>。
   setId?: string;
   // 专项评测集页签里打开的专项，来自地址 /eval/special/<编号>。
@@ -655,6 +681,7 @@ function Evaluation({
   Diagnostics,
   section,
   runId,
+  batchId,
   setId,
   suiteId,
   onNavigate,
@@ -694,6 +721,8 @@ function Evaluation({
     null,
   );
   const [launchParams, setLaunchParams] = useState<EvalParams>({});
+  // 保存的几组配置（最多 4 组，只在这次发起时用）：每组是保存那一刻发起表单的全部内容，点开始评测时按顺序都跑。
+  const [savedConfigs, setSavedConfigs] = useState<SavedConfig[]>([]);
   const [launching, setLaunching] = useState(false);
 
   // 刷新评测列表时不再自动打开某条记录，让页面首次进入先展示历史表格。
@@ -811,6 +840,17 @@ function Evaluation({
     setLaunching(true);
     setError("");
     try {
+      if (savedConfigs.length) {
+        const started = await startEvalBatch(
+          "",
+          savedConfigs.map((item) => ({ ...item.body, label: item.label })),
+        );
+        setSavedConfigs([]);
+        onNavigate(`/eval/batches/${encodeURIComponent(started.id)}`);
+        await refreshRuns();
+        onToast("success", `${started.runs.length} 组配置已开始，按顺序跑。`);
+        return;
+      }
       if (launchMode === "special") {
         const started = await startSpecialRun(
           pickedSuites,
@@ -858,6 +898,104 @@ function Evaluation({
     } finally {
       setLaunching(false);
     }
+  }
+
+  // 发起表单现在的全部内容，转成接口要的一组配置（和单独发起时提交的内容一样）。
+  function currentBody(): EvalLaunchBody {
+    if (launchMode === "special") {
+      return {
+        kind: "special",
+        suite_ids: pickedSuites,
+        compare_memory: compareMemory,
+        modes: specialModes,
+        corpus_ids: pickedCorpus,
+        params: visibleParams(
+          launchParams,
+          paramOptions,
+          specialParamGroups,
+          specialJudge,
+        ),
+      };
+    }
+    const modes: EvalMode[] =
+      launchKind === "retrieval" ? launchModes : ["fixed"];
+    return {
+      kind: launchKind,
+      split: launchSplit,
+      suites:
+        launchKind !== "retrieval" || !modes.includes("fixed")
+          ? []
+          : launchSuites,
+      modes,
+      corpus_ids: pickedCorpus,
+      params: visibleParams(
+        launchParams,
+        paramOptions,
+        tuningParamGroups,
+        launchKind === "generation",
+      ),
+    };
+  }
+
+  // 一组配置的几行说明：题目、运行模式、语料、改了哪些参数。
+  function configSummary(body: EvalLaunchBody): string[] {
+    const scope =
+      body.kind === "special"
+        ? `专项：${(specialSuites ?? [])
+            .filter((suite) => body.suite_ids?.includes(suite.id))
+            .map((suite) => suite.name)
+            .join("、")}`
+        : `${KIND_LABELS[body.kind]}评测 · ${SPLIT_LABELS[body.split ?? ""] ?? body.split}${body.suites?.length ? ` · 实验组 ${body.suites.length} 个` : ""}`;
+    const corpus = (corpusEntries ?? [])
+      .filter((entry) => body.corpus_ids.includes(entry.id))
+      .map((entry) => `《${entry.title}》`)
+      .join("、");
+    const params = paramsSummary(body.params);
+    return [
+      scope,
+      `运行模式：${body.modes.map((mode) => (mode === "agent" ? "Agent" : "固定流程")).join(" + ")}`,
+      `语料：${corpus || "—"}`,
+      ...(params.length ? params : ["参数全部跟随系统设置"]),
+    ];
+  }
+
+  function saveConfig() {
+    if (savedConfigs.length >= MAX_SAVED_CONFIGS) return;
+    const body = currentBody();
+    setSavedConfigs((items) => [
+      ...items,
+      {
+        label: `配置 ${"ABCD"[items.length]}`,
+        body,
+        summary: configSummary(body),
+        form: {
+          launchMode,
+          launchKind,
+          launchSplit,
+          launchSuites,
+          launchModes,
+          specialModes,
+          pickedSuites,
+          compareMemory,
+          pickedCorpus,
+          launchParams,
+        },
+      },
+    ]);
+  }
+
+  // 把保存的一组配置放回上面的表单，接着改了可以再保存成新的一组。
+  function loadConfig(form: LaunchForm) {
+    setLaunchMode(form.launchMode);
+    setLaunchKind(form.launchKind);
+    setLaunchSplit(form.launchSplit);
+    setLaunchSuites(form.launchSuites);
+    setLaunchModes(form.launchModes);
+    setSpecialModes(form.specialModes);
+    setPickedSuites(form.pickedSuites);
+    setCompareMemory(form.compareMemory);
+    setPickedCorpus(form.pickedCorpus);
+    setLaunchParams(form.launchParams);
   }
 
   // 删除后刷新历史列表，并清理可能仍指向该记录的详情状态，避免页面继续显示已删除内容。
@@ -919,6 +1057,14 @@ function Evaluation({
     sweep: run?.sweep?.length ? "" : "",
     variants: run?.variants?.length || "",
   };
+  // 表单还没填完整（没勾语料、没选专项、没勾模式）时不能开始，也不能保存成一组配置。
+  const formInvalid =
+    pickedCorpus.length === 0 ||
+    (launchMode === "special" &&
+      (pickedSuites.length === 0 || specialModes.length === 0)) ||
+    (launchMode === "tuning" &&
+      launchKind === "retrieval" &&
+      launchModes.length === 0);
   const agentLaunch =
     launchMode === "tuning" &&
     launchKind === "retrieval" &&
@@ -987,7 +1133,7 @@ function Evaluation({
           </button>
         ))}
       </div>
-      {section === "history" && !selectedId && (
+      {section === "history" && !selectedId && !batchId && (
         <>
           {/* 操作区只属于历史记录，评测集 Tab 保持为题目管理入口。 */}
           <div className="ev-launch">
@@ -1427,24 +1573,88 @@ function Evaluation({
                 />
               </div>
             </div>
-            <div className="ev-launch-actions">
+            <div className="ev-launch-actions evb-launch-actions">
+              <small>
+                {savedConfigs.length
+                  ? `将按顺序跑已保存的 ${savedConfigs.length} 组配置，放进同一份批次报告；表单上没保存的修改不会跑。`
+                  : "想一次对比几组配置：调好一组点「保存为一组配置」，最多 4 组。"}
+              </small>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={
+                  formInvalid || savedConfigs.length >= MAX_SAVED_CONFIGS
+                }
+                onClick={saveConfig}
+              >
+                保存为一组配置
+                {savedConfigs.length ? `（${savedConfigs.length}/4）` : ""}
+              </button>
               <button
                 className="primary-button"
                 disabled={
                   launching ||
                   Boolean(running) ||
-                  pickedCorpus.length === 0 ||
-                  (launchMode === "special" &&
-                    (pickedSuites.length === 0 || specialModes.length === 0)) ||
-                  (launchMode === "tuning" &&
-                    launchKind === "retrieval" &&
-                    launchModes.length === 0)
+                  (!savedConfigs.length && formInvalid)
                 }
                 onClick={() => void launch()}
               >
-                {running ? "评测进行中…" : launching ? "正在启动…" : "开始评测"}
+                {running
+                  ? "评测进行中…"
+                  : launching
+                    ? "正在启动…"
+                    : savedConfigs.length
+                      ? `开始评测（${savedConfigs.length} 组）`
+                      : "开始评测"}
               </button>
             </div>
+            {savedConfigs.length > 0 && (
+              <div className="evb-saved">
+                {savedConfigs.map((item, index) => (
+                  <article key={index} className="evb-saved-card">
+                    <input
+                      value={item.label}
+                      maxLength={40}
+                      aria-label="配置名称"
+                      onChange={(event) =>
+                        setSavedConfigs((items) =>
+                          items.map((entry, position) =>
+                            position === index
+                              ? { ...entry, label: event.target.value }
+                              : entry,
+                          ),
+                        )
+                      }
+                    />
+                    <ul>
+                      {item.summary.map((line, lineIndex) => (
+                        <li key={lineIndex}>{line}</li>
+                      ))}
+                    </ul>
+                    <div className="evb-saved-actions">
+                      <button
+                        type="button"
+                        className="ev-link"
+                        onClick={() => loadConfig(item.form)}
+                      >
+                        载入到表单
+                      </button>
+                      <button
+                        type="button"
+                        className="ev-link"
+                        onClick={() =>
+                          setSavedConfigs((items) =>
+                            items.filter((_, position) => position !== index),
+                          )
+                        }
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
             {runningRun && (
               <div className="ev-progress" aria-live="polite">
                 <div className="ev-progress-track">
@@ -1497,6 +1707,13 @@ function Evaluation({
             }}
           />
         )
+      ) : batchId ? (
+        <BatchReport
+          key={batchId}
+          batchId={batchId}
+          onBack={() => onNavigate("/eval/runs")}
+          onOpenRun={(id) => onNavigate(`/eval/runs/${encodeURIComponent(id)}`)}
+        />
       ) : selectedId && error && !run ? (
         <button
           className="ev-back-button"
@@ -1521,6 +1738,9 @@ function Evaluation({
       ) : (
         <RunHistory
           runs={runs}
+          onOpenBatch={(id) =>
+            onNavigate(`/eval/batches/${encodeURIComponent(id)}`)
+          }
           onOpen={(id) => {
             onNavigate(`/eval/runs/${encodeURIComponent(id)}`);
             setDetailTab("overview");
@@ -3922,11 +4142,13 @@ function settingsChanges(item: EvalRunBrief, runs: EvalRunBrief[]) {
 function RunHistory({
   runs,
   onOpen,
+  onOpenBatch,
   onDelete,
   onNote,
 }: {
   runs: EvalRunBrief[];
   onOpen: (id: string) => void;
+  onOpenBatch: (id: string) => void;
   onDelete: (id: string) => Promise<void>;
   onNote: (id: string, note: string) => void;
 }) {
@@ -4150,6 +4372,17 @@ function RunHistory({
                             title={`这次评测单独指定的参数：\n${paramsSummary(item.params).join("\n")}`}
                           >
                             自定义参数
+                          </Tag>
+                        )}
+                        {item.batch && (
+                          <Tag
+                            size="sm"
+                            tone="accent"
+                            title={`一次跑了 ${item.batch.size} 组配置，点开看批次报告`}
+                            onClick={() => onOpenBatch(item.batch!.id)}
+                          >
+                            批次 · {item.batch.label}（{item.batch.index + 1}/
+                            {item.batch.size}）
                           </Tag>
                         )}
                       </span>

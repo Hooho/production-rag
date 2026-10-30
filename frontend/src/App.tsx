@@ -88,6 +88,7 @@ type Route =
       page: "eval";
       section: EvaluationSection;
       runId?: string;
+      batchId?: string;
       setId?: string;
       suiteId?: string;
     }
@@ -206,6 +207,13 @@ function readRoute(pathname = window.location.pathname): Route {
   if (path === "/data") return { page: "data" };
   if (path === "/eval" || path === "/eval/runs")
     return { page: "eval", section: "history" };
+  const evalBatch = path.match(/^\/eval\/batches\/([^/]+)$/);
+  if (evalBatch)
+    return {
+      page: "eval",
+      section: "history",
+      batchId: decodeURIComponent(evalBatch[1]),
+    };
   const evalRun = path.match(/^\/eval\/runs\/([^/]+)$/);
   if (evalRun)
     return {
@@ -669,6 +677,7 @@ function App() {
           ) : route.page === "eval" && user.is_admin ? (
             <Evaluation
               runId={route.runId}
+              batchId={route.batchId}
               section={route.section}
               setId={route.setId}
               suiteId={route.suiteId}
