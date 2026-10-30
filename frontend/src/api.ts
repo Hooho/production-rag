@@ -1532,26 +1532,8 @@ export type EvalLaunchBody = {
   params: EvalParams;
   label?: string;
 };
-export type EvalBatchCell = {
-  found: number | null;
-  total: number;
-  score: number | null;
-  missing: { label: string; reason: string }[];
-  status?: string;
-  searches?: number;
-  prompt_tokens?: number;
-  latency_ms?: number;
-};
-export type EvalBatchModeSummary = {
-  score: number | null;
-  passed: number;
-  found: number;
-  total: number;
-  prompt_tokens?: number | null;
-  latency_ms?: number | null;
-  searches?: number | null;
-  failed?: number;
-};
+// 批次报告：各组的状态和改了哪些参数、各组配置不同的项，以及每组的完整结果（还没跑完的组是 null）。
+// 前端用单次评测同一套报告组件，一组配置的一个模式一列。
 export type EvalBatchReport = {
   id: string;
   name: string;
@@ -1563,24 +1545,9 @@ export type EvalBatchReport = {
     progress: { done: number; total: number } | null;
     error: string | null;
     params: EvalParams;
-    summary: {
-      questions: number;
-      fixed: EvalBatchModeSummary | null;
-      agent: EvalBatchModeSummary | null;
-    } | null;
   }[];
   config_diff: { key: string; values: (RuntimeSettingValue | null)[] }[];
-  questions: {
-    key: string;
-    group: string;
-    id: string;
-    question: string;
-    type: string | null;
-    cells: ({
-      fixed: EvalBatchCell | null;
-      agent: EvalBatchCell | null;
-    } | null)[];
-  }[];
+  runs: (EvalRun | null)[];
 };
 
 export function startEvalBatch(name: string, configs: EvalLaunchBody[]) {

@@ -2960,7 +2960,7 @@ def create_app(store=None, models=None, jwt_secret=None):
         Thread(target=work, daemon=True).start()
         return {"id": batch_id, "runs": [run["id"] for run in runs]}
 
-    # 批次报告：几组配置的整体指标、配置差异和逐题对比（压缩过的数据，详情点进每组自己的评测记录看）。
+    # 批次报告：各组的状态、配置差异和完整结果，前端用单次评测同一套报告组件一列一列并排。
     @app.get("/eval/batches/{batch_id}", dependencies=[Depends(require_admin)])
     def eval_batch_report(batch_id: str, owner=Depends(identity)):
         try:
@@ -2973,11 +2973,13 @@ def create_app(store=None, models=None, jwt_secret=None):
         if not briefs:
             raise HTTPException(404, "批次不存在")
         briefs.sort(key=lambda run: (run.get("batch") or {}).get("index", 0))
+        from ..evaluation.presentation import normalize_report
+
         runs = []
         for brief in briefs:
             run = load_run(brief["id"]) or brief
             run["status"] = current_status(run)
-            runs.append(run)
+            runs.append(normalize_report(run) if run["status"] == "completed" else run)
         return eval_batch.report(batch_id, runs)
 
     # 发起前的全部检查：题目、模式、模型、语料、参数都不对时直接拒绝，不留下失败的记录。返回开跑需要的全部内容。

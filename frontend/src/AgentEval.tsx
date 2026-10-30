@@ -3877,3 +3877,607 @@ export function SpecialAgentResults({
     </div>
   );
 }
+
+// ---------- 批次报告：一次跑的几组配置一列一列并排（后端 app/evaluation/batch.py） ----------
+// 和单次评测同一套报告：汇总卡片、按类型、逐题（展开看检索日志），只是两列（固定流程 | Agent）变成多列，
+// 一列 = 一组配置里的一个模式，例如「配置 A · Agent」「配置 B · Agent」。每列的数字和单次报告里那一边算法完全一样。
+
+export type BatchColumn = {
+  key: string;
+  title: string;
+  mode: EvalMode;
+  config?: EvalConfig;
+  // 题目按「专项编号:题目编号」（调参题就是题目编号）对齐，几组跑的题不完全一样时也能逐题对上。
+  questions: Map<string, EvalQuestion>;
+};
+
+const MODE_NAMES: Record<EvalMode, string> = {
+  fixed: "固定流程",
+  agent: "Agent",
+};
+
+// 每组的完整结果拆成列：一组跑了几个模式就几列；还没跑完的组没有列。
+// 专项里回答、多轮对话方式的结果不是检索对比，不放进来，点进那组的详情看。
+export function batchColumns(
+  arms: { id: string; label: string; run: EvalRun | null }[],
+): BatchColumn[] {
+  const columns: BatchColumn[] = [];
+  for (const arm of arms) {
+    const run = arm.run;
+    if (!run) continue;
+    if (run.kind === "special") {
+      const sections = (run.special ?? []).filter(
+        (section) => section.method === "retrieval",
+      );
+      const modes = Array.from(
+        new Set<EvalMode>(
+          sections.flatMap((section) => section.modes ?? ["fixed"]),
+        ),
+      );
+      for (const mode of modes) {
+        const questions = new Map<string, EvalQuestion>();
+        let config: EvalConfig | undefined;
+        for (const section of sections) {
+          const sectionModes: EvalMode[] = section.modes ?? ["fixed"];
+          if (!sectionModes.includes(mode)) continue;
+          config ??= {
+            ...section.run_config,
+            agent: section.agent ?? section.run_config?.agent,
+            search_label: section.search_mode_label,
+          } as EvalConfig;
+          section.questions.forEach((question, index) =>
+            questions.set(
+              `${section.suite_id}:${question.id}`,
+              fromSpecial(question, sectionModes.includes("fixed"), index + 1),
+            ),
+          );
+        }
+        columns.push({
+          key: `${arm.id}:${mode}`,
+          title: `${arm.label} · ${MODE_NAMES[mode]}`,
+          mode,
+          config,
+          questions,
+        });
+      }
+    } else {
+      for (const mode of runModes(run)) {
+        const questions = new Map<string, EvalQuestion>();
+        // 只跑 Agent 的调参评测，逐题没有固定流程的证据去向（evidence），补成空列表，和两边都跑时同一种格式。
+        (run.questions ?? []).forEach((question, index) =>
+          questions.set(question.id, {
+            ...question,
+            seq: question.seq ?? index + 1,
+            evidence: question.evidence ?? [],
+          }),
+        );
+        columns.push({
+          key: `${arm.id}:${mode}`,
+          title: `${arm.label} · ${MODE_NAMES[mode]}`,
+          mode,
+          config: run.config,
+          questions,
+        });
+      }
+    }
+  }
+  return columns;
+}
+
+// 这一列这道题跑了没有：固定流程看有没有阶段记录，Agent 看有没有 agent。
+function columnQuestion(column: BatchColumn, key: string) {
+  const question = column.questions.get(key);
+  if (!question) return undefined;
+  if (column.mode === "fixed" ? !question.stages : !question.agent)
+    return undefined;
+  return question;
+}
+
+// 「得分」「通过」「计分项命中」这类数字越大越好：取格子里开头的数字比，几列不一样时最大的那列标 ✓。
+const BEST_LABELS = ["得分", "通过", "计分项命中", "检索命中"];
+function leadingNumber(text: string) {
+  const match = text.match(/-?\d+(\.\d+)?/);
+  return match ? Number(match[0]) : null;
+}
+
+// 汇总卡片：和单次报告的「固定流程 / Agent」卡片一样，一列一张。
+export function BatchModeCards({ columns }: { columns: BatchColumn[] }) {
+  const cards = columns.map((column) => {
+    const questions = [...column.questions.values()];
+    const rows = modeRows(
+      questions,
+      column.config,
+      column.mode === "fixed",
+      column.mode === "agent",
+    );
+    return { column, questions, rows };
+  });
+  const best = new Map<string, number>();
+  for (const label of BEST_LABELS) {
+    const values = cards
+      .map(
+        ({ column, rows }) =>
+          rows.find((row) => row.label === label)?.[column.mode]?.value,
+      )
+      .map((value) => (value ? leadingNumber(value) : null))
+      .filter((value): value is number => value !== null);
+    if (new Set(values).size > 1) best.set(label, Math.max(...values));
+  }
+  return (
+    <>
+      <p className="ev-muted-note">
+        得分：{SCORE_RULE}；无法回答的题拿到资料扣
+        20。每列是一组配置的一个模式。
+      </p>
+      <div className="ag-batch-scroll">
+        <div
+          className="ag-mode-cards ag-batch-cards"
+          style={{
+            gridTemplateColumns: `repeat(${cards.length}, minmax(300px, 1fr))`,
+          }}
+        >
+          {cards.map(({ column, questions, rows }) => (
+            <section className="ag-mode-card" key={column.key}>
+              <h4>{column.title}</h4>
+              {rows.map((row, index) => {
+                const cell = row[column.mode];
+                if (!cell) return null;
+                const isBest =
+                  best.has(row.label) &&
+                  leadingNumber(cell.value) === best.get(row.label);
+                return (
+                  <Fragment key={row.label}>
+                    <div
+                      className={`ag-mode-row is-${row.group}${index > 0 && rows[index - 1].group !== row.group ? " is-break" : ""}`}
+                    >
+                      <span className="ag-mode-label">{row.label}</span>
+                      <span className="ag-mode-value">
+                        <b>{cell.value}</b>
+                        {isBest && (
+                          <Tag tone="success" size="sm">
+                            {row.label === "得分" ? "✓ 最高" : "✓ 最多"}
+                          </Tag>
+                        )}
+                        {cell.note && <small>{cell.note}</small>}
+                      </span>
+                    </div>
+                    {row.label === "扩展命中" && (
+                      <EvidenceFilterSummary
+                        questions={questions}
+                        mode={column.mode}
+                      />
+                    )}
+                  </Fragment>
+                );
+              })}
+            </section>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
+type ColumnTypeStat = {
+  count: number;
+  passed: number;
+  hits: number;
+  total: number;
+  direct: number;
+  extension: number;
+  scores: number[];
+  materials: EvalMaterial[];
+};
+
+// 一列里某一类题的统计，和单次报告「按类型」同一套算法（通过 = 计分项全拿到，得分规则见 score.ts）。
+function columnTypeStats(column: BatchColumn, keys: string[]) {
+  const stat: ColumnTypeStat = {
+    count: 0,
+    passed: 0,
+    hits: 0,
+    total: 0,
+    direct: 0,
+    extension: 0,
+    scores: [],
+    materials: [],
+  };
+  for (const key of keys) {
+    const question = columnQuestion(column, key);
+    if (!question) continue;
+    stat.count += 1;
+    if (column.mode === "fixed") {
+      const hits = question.answerable ? fixedHits(question) : 0;
+      const extension = question.answerable ? fixedExtHits(question) : 0;
+      stat.hits += hits;
+      stat.total += question.answerable ? question.evidence_count : 0;
+      stat.extension += extension;
+      stat.direct += hits - extension;
+      if (
+        question.answerable &&
+        question.evidence_count > 0 &&
+        hits >= question.evidence_count
+      )
+        stat.passed += 1;
+      const score = questionScore(
+        question.answerable,
+        hits,
+        question.evidence_count,
+        question.cleared ? 0 : question.returned,
+      );
+      if (score !== null) stat.scores.push(score);
+      const material = fixedMaterial(question);
+      if (material) stat.materials.push(material);
+    } else {
+      const agent = question.agent!;
+      const found = agent.evidence.filter((item) => item.found);
+      const total = agent.evidence.length || question.evidence_count;
+      if (question.answerable) {
+        stat.hits += found.length;
+        stat.total += total;
+        stat.extension += found.filter(
+          (item) => item.via === "extension",
+        ).length;
+        stat.direct += found.filter((item) => item.via === "direct").length;
+        if (agent.status === "completed" && total > 0 && found.length >= total)
+          stat.passed += 1;
+      }
+      if (agent.status === "completed") {
+        const score = questionScore(
+          question.answerable,
+          found.length,
+          total,
+          agent.returned,
+        );
+        if (score !== null) stat.scores.push(score);
+      }
+      const material = agentMaterial(question);
+      if (material) stat.materials.push(material);
+    }
+  }
+  return stat;
+}
+
+// 「按类型」表：和单次报告同样的两层表头，上层是列名，下层是得分、通过、证据命中率、纯检索命中率、交给模型的资料。
+export function BatchTypeStats({
+  columns,
+  order,
+}: {
+  columns: BatchColumn[];
+  order: string[];
+}) {
+  const types: string[] = [];
+  const byType = new Map<string, string[]>();
+  for (const key of order) {
+    const question = columns
+      .map((column) => column.questions.get(key))
+      .find(Boolean);
+    const type = question?.type || "未分类";
+    if (!byType.has(type)) {
+      byType.set(type, []);
+      types.push(type);
+    }
+    byType.get(type)!.push(key);
+  }
+  const hues = typeHues(types);
+  const cell = (passed: number, count: number) => {
+    const state =
+      count > 0 && passed >= count ? "is-all" : passed === 0 ? "is-none" : "";
+    return (
+      <span className={`type-stat ${state}`}>
+        {state === "is-all" && <b aria-label="全部通过">✓</b>}
+        {passed} / {count}
+      </span>
+    );
+  };
+  const evidence = (hits: number, total: number) =>
+    total ? (
+      <span
+        className={`type-stat ${hits >= total ? "is-all" : hits === 0 ? "is-none" : ""}`}
+      >
+        {Math.round((hits / total) * 100)}%
+        <small>
+          {hits} / {total}
+        </small>
+      </span>
+    ) : (
+      "—"
+    );
+  const score = (values: number[]) => {
+    if (!values.length) return "—";
+    const value = values.reduce((sum, item) => sum + item, 0) / values.length;
+    return (
+      <span
+        className={`type-stat ${value >= 100 ? "is-all" : value <= 0 ? "is-none" : ""}`}
+      >
+        {Math.round(value * 10) / 10}
+      </span>
+    );
+  };
+  const material = (items: EvalMaterial[]) =>
+    items.length ? (
+      <span className="type-stat">
+        {number(avg(items.map((item) => item.count)))} 段
+        <small>
+          约{" "}
+          {Math.round(
+            avg(items.map((item) => item.tokens)) ?? 0,
+          ).toLocaleString()}{" "}
+          token
+        </small>
+      </span>
+    ) : (
+      "—"
+    );
+  const row = (
+    rowKey: string,
+    label: ReactNode,
+    keys: string[],
+    isTotal = false,
+  ) => (
+    <tr key={rowKey} className={isTotal ? "is-total" : ""}>
+      <td>{label}</td>
+      <td className="num">{keys.length}</td>
+      {columns.map((column) => {
+        const stat = columnTypeStats(column, keys);
+        const side = column.mode === "fixed" ? "is-fixed" : "is-agent";
+        return (
+          <Fragment key={column.key}>
+            <td className={`num ${side} is-col-start`}>{score(stat.scores)}</td>
+            <td className={`num ${side}`}>{cell(stat.passed, stat.count)}</td>
+            <td className={`num ${side}`}>{evidence(stat.hits, stat.total)}</td>
+            <td className={`num ${side}`}>
+              <div className="type-direct-stat">
+                {evidence(stat.direct, stat.total)}
+                <small>扩展命中 {stat.extension} 条证据</small>
+              </div>
+            </td>
+            <td className={`num ${side}`}>{material(stat.materials)}</td>
+          </Fragment>
+        );
+      })}
+    </tr>
+  );
+  return (
+    <div className="diag-table-wrap type-stats-wrap ag-batch-scroll">
+      <table className="diag-table ev-table type-stats">
+        <thead>
+          <tr>
+            <th rowSpan={2}>类型</th>
+            <th className="num" rowSpan={2}>
+              题数
+            </th>
+            {columns.map((column) => (
+              <th
+                key={column.key}
+                colSpan={5}
+                className={`${column.mode === "fixed" ? "is-fixed" : "is-agent"} is-group is-col-start`}
+              >
+                {column.title}
+              </th>
+            ))}
+          </tr>
+          <tr>
+            {columns.map((column) => {
+              const side = column.mode === "fixed" ? "is-fixed" : "is-agent";
+              return (
+                <Fragment key={column.key}>
+                  <th className={`num ${side} is-col-start`}>得分</th>
+                  <th className={`num ${side}`}>通过</th>
+                  <th className={`num ${side}`}>证据命中率</th>
+                  <th
+                    className={`num ${side}`}
+                    title="直接检索命中的证据数 / 全部证据数，不计扩展和读前后文"
+                  >
+                    纯检索命中率
+                  </th>
+                  <th className={`num ${side}`}>交给模型的资料</th>
+                </Fragment>
+              );
+            })}
+          </tr>
+        </thead>
+        <tbody>
+          {types.map((type) =>
+            row(type, <TypeTag type={type} hues={hues} />, byType.get(type)!),
+          )}
+          {types.length > 1 && row("合计", "合计", order, true)}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// 逐题：和单次报告同一个列表，每列一个结论，展开后每列并排一份检索日志。
+export function BatchQuestionList({
+  columns,
+  order,
+}: {
+  columns: BatchColumn[];
+  order: string[];
+}) {
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [resultFilter, setResultFilter] = useState("all");
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const first = (key: string) =>
+    columns.map((column) => column.questions.get(key)).find(Boolean)!;
+  const types: string[] = [];
+  for (const key of order) {
+    const type = first(key).type;
+    if (!types.includes(type)) types.push(type);
+  }
+  const hues = typeHues(types);
+  const verdictOf = (column: BatchColumn, key: string) => {
+    const question = columnQuestion(column, key);
+    if (!question) return null;
+    return column.mode === "fixed"
+      ? fixedVerdict(question)
+      : agentVerdict(question);
+  };
+  const visible = order.filter((key) => {
+    if (typeFilter !== "all" && first(key).type !== typeFilter) return false;
+    const verdicts = columns.map((column) => verdictOf(column, key)?.label);
+    if (resultFilter === "diff") return new Set(verdicts).size > 1;
+    if (resultFilter === "problem")
+      return columns.some((column) => {
+        const verdict = verdictOf(column, key);
+        return verdict && verdict.key !== "good";
+      });
+    return true;
+  });
+  const grid = {
+    gridTemplateColumns: `56px minmax(240px, 2fr) repeat(${columns.length}, minmax(120px, 1fr)) 32px`,
+  };
+  return (
+    <div>
+      <div className="ev-filters">
+        <Chips
+          value={typeFilter}
+          options={[
+            ["all", "全部题型"],
+            ...types.map((type): [string, string] => [type, type]),
+          ]}
+          onChange={setTypeFilter}
+        />
+        <Chips
+          value={resultFilter}
+          options={[
+            ["all", "全部"],
+            ["diff", "各列结论不同"],
+            ["problem", "有一列没拿全"],
+          ]}
+          onChange={setResultFilter}
+        />
+        <span className="ev-filter-count">
+          {visible.length} / {order.length} 题
+        </span>
+      </div>
+      <div className="ag-batch-scroll">
+        <div className="ag-q-columns" style={grid} aria-hidden="true">
+          <span>编号</span>
+          <span>问题</span>
+          {columns.map((column) => (
+            <span key={column.key}>{column.title}</span>
+          ))}
+          <span />
+        </div>
+        <div className="ev-question-list">
+          {visible.map((key, index) => {
+            const open = expanded.has(key);
+            const question = first(key);
+            const texts = question.agent?.evidence?.length
+              ? question.agent.evidence
+              : question.evidence;
+            return (
+              <article
+                className={`ev-question ${open ? "is-open" : ""}`}
+                key={key}
+              >
+                <button
+                  className="ag-q-head"
+                  style={grid}
+                  aria-expanded={open}
+                  onClick={() =>
+                    setExpanded((current) => {
+                      const next = new Set(current);
+                      if (open) next.delete(key);
+                      else next.add(key);
+                      return next;
+                    })
+                  }
+                >
+                  <span className="ev-qid" title={question.id}>
+                    {question.seq ?? index + 1}
+                  </span>
+                  <span className="ev-question-text">
+                    {question.question}
+                    <small>
+                      <TypeTag type={question.type} hues={hues} />
+                      {question.evidence_count > 1
+                        ? ` ${question.evidence_count} 个计分项`
+                        : ""}
+                    </small>
+                  </span>
+                  {columns.map((column) => {
+                    const verdict = verdictOf(column, key);
+                    return (
+                      <span className="ag-verdict-cell" key={column.key}>
+                        {verdict ? (
+                          <Verdict verdict={verdict} />
+                        ) : (
+                          <span className="ev-muted-note">没跑</span>
+                        )}
+                      </span>
+                    );
+                  })}
+                  <span className="collapse-icon">{open ? "−" : "＋"}</span>
+                </button>
+                {open && (
+                  <div className="ev-question-body">
+                    {question.answerable ? (
+                      <ScoringItems items={texts} />
+                    ) : (
+                      <p className="ev-muted-note">
+                        没有答案的题，拿到的资料越少越好。
+                      </p>
+                    )}
+                    <div
+                      className="ag-columns"
+                      style={{
+                        gridTemplateColumns: `repeat(${columns.length}, minmax(360px, 1fr))`,
+                      }}
+                    >
+                      {columns.map((column) => {
+                        const item = columnQuestion(column, key);
+                        return (
+                          <div className="ag-batch-column" key={column.key}>
+                            <div className="ag-batch-column-title">
+                              {column.title}
+                            </div>
+                            {!item ? (
+                              <p className="ev-muted-note">这一列没跑这题。</p>
+                            ) : column.mode === "fixed" ? (
+                              <FixedLog
+                                question={item}
+                                params={
+                                  column.config
+                                    ? fixedParams(column.config)
+                                    : []
+                                }
+                                config={
+                                  (column.config ?? {}) as EvalRun["config"]
+                                }
+                              />
+                            ) : (
+                              <>
+                                {item.agent?.error && (
+                                  <AgentError
+                                    title="Agent 运行失败"
+                                    message={item.agent.error}
+                                  />
+                                )}
+                                <AgentLog question={item} />
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 几列题目的并集，按第一次出现的顺序：先按第一列的顺序，后面几列多出来的题接在后面。
+export function batchOrder(columns: BatchColumn[]) {
+  const order: string[] = [];
+  for (const column of columns)
+    for (const key of column.questions.keys())
+      if (!order.includes(key)) order.push(key);
+  return order;
+}

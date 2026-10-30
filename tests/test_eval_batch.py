@@ -68,25 +68,15 @@ def test_batch_runs_each_config_and_reports(setup, eval_dir, monkeypatch, runtim
     assert [arm["label"] for arm in report["arms"]] == ["配置 A", "只返回 1 段"]
     assert [arm["status"] for arm in report["arms"]] == ["completed", "completed"]
     assert report["arms"][1]["params"] == {"settings": {"return_limit": 1}}
-    assert (
-        report["arms"][0]["summary"]["questions"] == 4
-        and report["arms"][1]["summary"]["questions"] == 3
-    )
-    assert (
-        report["arms"][0]["summary"]["fixed"]["total"] >= 1
-        and report["arms"][0]["summary"]["agent"] is None
-    )
+    # 每组的完整结果原样带上，前端用单次评测同一套报告组件一列一列并排。
+    assert len(report["runs"][0]["questions"]) == 4
+    assert len(report["runs"][1]["questions"]) == 3
+    assert report["runs"][1]["config"]["return_limit"] == 1
     diff = {row["key"]: row["values"] for row in report["config_diff"]}
     assert (
         diff["setting:return_limit"] == [6, 1]
         and "题目" in diff
         and "运行模式" not in diff
-    )
-    # 逐题按题目编号对齐：只在开发集里没有的题，第二组那一格是空的。
-    by_id = {row["id"]: row for row in report["questions"]}
-    assert (
-        by_id["a3"]["cells"][1] is None
-        and by_id["a1"]["cells"][1]["fixed"]["total"] == 1
     )
     # 每组也是一条普通评测记录，带着批次信息。
     runs = client.get("/eval/runs", headers=headers()).json()["runs"]
@@ -117,35 +107,3 @@ def test_queued_run_of_dead_batch_is_interrupted(setup, eval_dir):
     assert (
         client.delete(f"/eval/runs/{run['id']}", headers=headers()).status_code == 200
     )
-
-
-# 没拿到的证据写丢在哪一步：Agent 每次检索的候选里，取走得最远的一次。
-def test_agent_miss_reason():
-    def call(*candidates):
-        return {"retrieval_diagnostics": {"candidates": list(candidates)}}
-
-    agent = {
-        "calls": [
-            call({"hits": [0], "status": "not_in_pool", "rrf_rank": 17}),
-            call(
-                {
-                    "hits": [0],
-                    "status": "filtered_low_score",
-                    "rerank_probability": 0.51,
-                    "rrf_rank": 7,
-                },
-                {
-                    "hits": [1],
-                    "status": "beyond_limit",
-                    "rerank_probability": 0.85,
-                    "rrf_rank": 7,
-                },
-            ),
-        ]
-    }
-    assert eval_batch.agent_miss_reason(agent, 0) == "被相关度阈值过滤（最高重排 0.51）"
-    assert (
-        eval_batch.agent_miss_reason(agent, 1)
-        == "过了阈值，但超出返回上限（重排 0.85）"
-    )
-    assert eval_batch.agent_miss_reason(agent, 2) == "没召回"
