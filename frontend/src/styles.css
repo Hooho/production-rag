@@ -8889,17 +8889,17 @@ input:focus {
 
 
 /* Agent 检索详情 · 总览：每轮一个模块，轮内调用一行两列；卡片只留三行，字号和间距都收紧。 */
-.ag-round-overview { display: grid; gap: 10px; }
-.ag-overview-round { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--ev-line); border-radius: 8px; background: rgba(255, 255, 255, .6); min-width: 0; }
+.ag-round-overview { display: grid; gap: 8px; margin-top: -6px; }
+.ag-overview-round { display: grid; gap: 6px; padding: 8px 10px; border: 1px solid var(--ev-line); border-radius: 8px; background: rgba(255, 255, 255, .6); min-width: 0; }
 .ag-overview-round-head { display: flex; align-items: center; gap: 8px; padding: 0; border: 0; background: transparent; color: var(--ev-ink, #234c31); font: inherit; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; }
 .ag-overview-round-head > span { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: #234c31; color: #fff; font-size: 11px; font-weight: 600; }
 .ag-overview-round-head > small { color: var(--ev-muted); font-size: 11px; font-weight: 400; }
 .ag-overview-round-head:hover { text-decoration: underline; }
 .ag-overview-round-head:focus-visible { outline: 2px solid #718675; outline-offset: 2px; border-radius: 4px; }
-.ag-overview-calls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.ag-overview-calls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 @media (max-width: 640px) { .ag-overview-calls { grid-template-columns: minmax(0, 1fr); } }
 .ev-root .ag-call.is-compact,
-.ag-call.is-compact { padding: 7px 10px; gap: 3px; border-radius: 6px; cursor: pointer; transition: border-color .15s ease, background .15s ease; }
+.ag-call.is-compact { padding: 6px 8px; gap: 2px; border-radius: 6px; cursor: pointer; transition: border-color .15s ease, background .15s ease; }
 .ag-call.is-compact:hover { background: rgba(35, 76, 49, .04); }
 .ag-call.is-compact:focus-visible { outline: 2px solid #718675; outline-offset: 2px; }
 .ag-call.is-compact .ag-call-head { gap: 4px 6px; font-size: 11px; }

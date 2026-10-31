@@ -3103,7 +3103,7 @@ function AgentLog({ question }: { question: EvalQuestion }) {
               {activeStep === 0 && (
                 <div className="ag-round-overview">
                   {rounds.map(({ round, calls, kind, error }, index) => (
-                    <section
+                    <div
                       key={`${round}-${index}`}
                       className="ag-overview-round"
                     >
@@ -3137,7 +3137,7 @@ function AgentLog({ question }: { question: EvalQuestion }) {
                           ))}
                         </div>
                       )}
-                    </section>
+                    </div>
                   ))}
                 </div>
               )}
