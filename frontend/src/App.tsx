@@ -31,7 +31,15 @@ import {
   formatShortTime,
   isDurationField,
 } from "./format";
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
 import {
   type AgentRound,
   type ChatMode,
@@ -44,6 +52,7 @@ import {
   LOGOUT_EVENT,
   listDataTypes,
   createSession,
+  deleteSession,
   deleteDocument,
   retryDocument,
   retryDocumentContexts,
@@ -449,6 +458,14 @@ function App() {
     setSavedMessages(sessionMessages);
   }
 
+  // 会话删除后从历史列表里去掉；删的是当前会话时换成一个新会话，不再停留在已经不存在的会话上。
+  function removeHistory(session: string) {
+    setHistoryRuns((items) =>
+      items.filter((item) => item.session_id !== session),
+    );
+    if (session === sessionId) void startNewChat();
+  }
+
   // 用明确的切换函数同步 React 状态和本地偏好，避免导航切换时丢失布局选择。
   function toggleSidebar() {
     const nextCollapsed = !sidebarCollapsed;
@@ -713,6 +730,7 @@ function App() {
                 historyRuns={historyRuns}
                 onNewChat={() => void startNewChat()}
                 onOpenHistory={openHistory}
+                onSessionDeleted={removeHistory}
                 onMessageSaved={recordHistory}
                 onFeedbackSaved={recordFeedback}
               />
@@ -888,6 +906,7 @@ function Chat({
   historyRuns,
   onNewChat,
   onOpenHistory,
+  onSessionDeleted,
   onMessageSaved,
   onFeedbackSaved,
 }: {
@@ -896,6 +915,7 @@ function Chat({
   historyRuns: HistoryRun[];
   onNewChat: () => void;
   onOpenHistory: (sessionId: string) => void;
+  onSessionDeleted: (sessionId: string) => void;
   onMessageSaved: (run: HistoryRun) => void;
   onFeedbackSaved: (value: FeedbackRecord) => void;
 }) {
@@ -980,6 +1000,17 @@ function Chat({
   useEffect(() => {
     setLocalHistory(historyRuns);
   }, [historyRuns]);
+
+  // 历史对话右键菜单里确认删除后调用：删除成功后通知上层更新列表；正在回答的会话后端会返回 409。
+  async function removeSession(session: string) {
+    try {
+      await deleteSession(session);
+      setError("");
+      onSessionDeleted(session);
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }
 
   function chooseMode(value: ChatMode) {
     setMode(value);
@@ -1174,6 +1205,7 @@ function Chat({
         activeSessionId={sessionId}
         onSelect={selectHistory}
         onNewChat={onNewChat}
+        onDelete={(session) => void removeSession(session)}
         busy={busy}
       />
       <div className="chat-column">
@@ -1642,14 +1674,59 @@ function HistoryRail({
   activeSessionId,
   onSelect,
   onNewChat,
+  onDelete,
   busy,
 }: {
   runs: HistoryRun[];
   activeSessionId: string;
   onSelect: (sessionId: string) => void;
   onNewChat: () => void;
+  onDelete: (sessionId: string) => void;
   busy: boolean;
 }) {
+  // 右键菜单：在鼠标位置弹出，点别处、按 Esc、滚动或窗口变化时关闭。
+  // confirming：点了「删除对话」后，菜单原地变成一个小的确认框，不再弹浏览器自带的确认窗口。
+  const [menu, setMenu] = useState<{
+    sessionId: string;
+    x: number;
+    y: number;
+    confirming?: boolean;
+  } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onPointer = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) close();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    window.addEventListener("blur", close);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("blur", close);
+    };
+  }, [menu]);
+  function openMenu(event: ReactMouseEvent, sessionId: string) {
+    event.preventDefault();
+    // 靠近窗口右边或下边时往里收；按确认框的大小算，菜单变成确认框后也不超出可视区域。
+    const width = 220;
+    const height = 104;
+    setMenu({
+      sessionId,
+      x: Math.min(event.clientX, window.innerWidth - width - 8),
+      y: Math.min(event.clientY, window.innerHeight - height - 8),
+    });
+  }
+
   const groups: Array<{ sessionId: string; runs: HistoryRun[] }> = [];
   const grouped = new Map<string, HistoryRun[]>();
   for (const run of [...runs].reverse()) {
@@ -1694,6 +1771,7 @@ function HistoryRail({
               <div
                 className={`history-session ${group.sessionId === activeSessionId ? "active" : ""}`}
                 key={group.sessionId}
+                onContextMenu={(event) => openMenu(event, group.sessionId)}
               >
                 <div className="history-session-heading">
                   <span>{formatHistoryDate(latest.created)}</span>
@@ -1714,6 +1792,51 @@ function HistoryRail({
           })
         )}
       </div>
+      {/* 挂到 body 上：侧栏是 position: sticky，自成层叠上下文，菜单放在里面 z-index 再高也会被右边的输入框盖住。 */}
+      {menu &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="history-context-menu"
+            role="menu"
+            style={{ left: menu.x, top: menu.y }}
+          >
+            {menu.confirming ? (
+              <div className="history-delete-confirm" role="alertdialog">
+                <p>删除这个对话？问答记录和会话记忆会一起删除，无法恢复。</p>
+                <div className="history-delete-actions">
+                  <button onClick={() => setMenu(null)}>取消</button>
+                  <button
+                    className="danger-solid"
+                    autoFocus
+                    onClick={() => {
+                      const target = menu.sessionId;
+                      setMenu(null);
+                      onDelete(target);
+                    }}
+                  >
+                    删除
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                role="menuitem"
+                className="danger"
+                disabled={busy && menu.sessionId === activeSessionId}
+                title={
+                  busy && menu.sessionId === activeSessionId
+                    ? "正在回答，回答完成后才能删除"
+                    : undefined
+                }
+                onClick={() => setMenu({ ...menu, confirming: true })}
+              >
+                删除对话
+              </button>
+            )}
+          </div>,
+          document.body,
+        )}
     </aside>
   );
 }

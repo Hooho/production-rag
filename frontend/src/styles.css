@@ -1750,6 +1750,82 @@ input::placeholder {
    color: var(--t-2563eb);
 }
 
+/* 历史对话的右键菜单：position: fixed 跟着鼠标位置，不受侧栏 overflow 裁切。 */
+.history-context-menu {
+   position: fixed;
+   z-index: 1000;
+   min-width: 140px;
+   padding: 4px;
+   border: 1px solid var(--t-cedfec);
+   border-radius: 6px;
+   background: #ffffff;
+   box-shadow: 0 12px 30px rgb(var(--t-224260-rgb) / .16);
+}
+
+.history-context-menu button {
+   width: 100%;
+   padding: 8px 10px;
+   border: 0;
+   border-radius: 4px;
+   background: transparent;
+   font-size: 12px;
+   text-align: left;
+   cursor: pointer;
+}
+
+.history-context-menu button.danger {
+   color: var(--tone-danger-text);
+}
+
+.history-context-menu button:hover:not(:disabled) {
+   background: rgb(201 58 75 / .08);
+}
+
+.history-delete-confirm {
+   width: 212px;
+   padding: 6px 6px 2px;
+}
+
+.history-delete-confirm p {
+   margin: 0 0 10px;
+   color: var(--t-536d86);
+   font-size: 12px;
+   line-height: 1.5;
+}
+
+.history-delete-actions {
+   display: flex;
+   justify-content: flex-end;
+   gap: 6px;
+}
+
+.history-context-menu .history-delete-actions button {
+   width: auto;
+   padding: 5px 12px;
+   border: 1px solid var(--t-cedfec);
+   color: var(--t-536d86);
+   text-align: center;
+}
+
+.history-context-menu .history-delete-actions button:hover:not(:disabled) {
+   background: var(--t-e7f1fa);
+}
+
+.history-context-menu .history-delete-actions button.danger-solid {
+   border-color: var(--tone-danger-text);
+   background: var(--tone-danger-text);
+   color: #ffffff;
+}
+
+.history-context-menu .history-delete-actions button.danger-solid:hover {
+   background: #b23242;
+}
+
+.history-context-menu button:disabled {
+   opacity: .5;
+   cursor: not-allowed;
+}
+
 .history-item {
    width: 100%;
    display: grid;

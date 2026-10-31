@@ -620,6 +620,13 @@ export function getSessionHistory(sessionId: string) {
   return request<{ messages: HistoryRun[] }>(`/sessions/${sessionId}`, {});
 }
 
+// 删除自己的一个会话：问答记录、反馈、会话记忆一起删掉；正在回答的会话返回 409。
+export function deleteSession(sessionId: string) {
+  return request<{ session_id: string }>(`/sessions/${sessionId}`, {
+    method: "DELETE",
+  });
+}
+
 // 读取当前用户最近保存的问答记录，刷新页面后恢复对话列表。
 export function listHistory() {
   return request<{ messages: HistoryRun[] }>("/history");

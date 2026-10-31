@@ -121,3 +121,40 @@ def test_memory_token_counter_counts_chinese():
     assert memory_token_counter([HumanMessage("段永平是谁？")]) == 6 + 3
     assert memory_token_counter([AIMessage("abcdefgh")]) == 2 + 3
     assert memory_token_counter([AIMessage([{"type": "text", "text": "你好abcd"}])]) == 3 + 3
+
+
+# 删除会话：问答记录、反馈、Agent 记录一起删掉；别人的会话删不了；正在回答的会话返回 409。
+def test_delete_session(setup):
+    from app.mysql.tables import agent_rounds, agent_runs, feedback
+    client, store = setup
+    other = "22222222-2222-4333-8444-555555555555"
+    with store.engine.begin() as connection:
+        connection.execute(sessions.insert().values(id=SESSION, owner="alice"))
+        connection.execute(sessions.insert().values(id=other, owner="alice"))
+        add(connection, "r1", SESSION, "alice", "退货政策是什么", "2026-10-05T01:00:00+00:00",
+            response("退货政策是什么", "退货政策是什么"))
+        add(connection, "r2", other, "alice", "保留的会话", "2026-10-05T01:01:00+00:00",
+            response("保留的会话", "保留的会话"))
+        connection.execute(feedback.insert().values(run_id="r1", owner="alice", session_id=SESSION, rating=1,
+            created="2026-10-05T01:00:00+00:00", updated="2026-10-05T01:00:00+00:00"))
+        connection.execute(agent_runs.insert().values(id="r1", session_id=SESSION, owner="alice",
+            status="completed", rounds=1, tool_calls=0, tool_budget=6, citation_retried=False,
+            prompt_tokens=0, completion_tokens=0, cached_tokens=0, created="2026-10-05T01:00:00+00:00"))
+        connection.execute(agent_rounds.insert().values(run_id="r1", round=1, kind="answer", record={}))
+
+    assert client.delete(f"/sessions/{SESSION}", headers=headers("bob")).status_code == 404
+
+    lock = store.cache.lock(f"chat:alice:{SESSION}", timeout=10)
+    assert lock.acquire(blocking=False)
+    assert client.delete(f"/sessions/{SESSION}", headers=headers("alice")).status_code == 409
+    lock.release()
+
+    assert client.delete(f"/sessions/{SESSION}", headers=headers("alice")).status_code == 200
+    with store.engine.connect() as connection:
+        for table in (runs, feedback, agent_runs):
+            assert connection.execute(table.select().where(table.c.session_id == SESSION)).first() is None
+        assert connection.execute(agent_rounds.select()).first() is None
+        assert connection.execute(sessions.select().where(sessions.c.id == SESSION)).first() is None
+        assert connection.execute(runs.select().where(runs.c.session_id == other)).first() is not None
+    assert client.get(f"/sessions/{SESSION}", headers=headers("alice")).status_code == 404
+    assert client.delete(f"/sessions/{SESSION}", headers=headers("alice")).status_code == 404

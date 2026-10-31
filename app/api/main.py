@@ -27,7 +27,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from ..agent.service import Agent
@@ -129,6 +129,8 @@ from ..models import Models
 from ..memory.service import Memory
 from ..memory.view import list_sessions as list_memory, session_detail as memory_detail
 from ..mysql.store import (
+    agent_rounds,
+    agent_runs,
     data_permissions,
     document_heads,
     document_reviews,
@@ -136,6 +138,7 @@ from ..mysql.store import (
     document_steps,
     documents,
     feedback,
+    memory_outbox,
     run_errors,
     runs,
     sessions,
@@ -1155,6 +1158,48 @@ def create_app(store=None, models=None, jwt_secret=None):
         value = str(session_id)
         check_session(app.state.store, value, owner)
         return {"messages": app.state.memory.history(app.state.store, value, owner)}
+
+    # 删除自己的一个会话：问答记录（runs）、失败记录、反馈、Agent 执行记录、会话记忆外箱，以及 PostgreSQL 里的
+    # Checkpointer 线程（会话记忆）全部删掉，不做软删除——对话内容是个人数据，用户删了就不该再留着。
+    # 长期记忆是跨会话的，不跟着某个会话删，要删在「会话记忆 › 长期记忆」里删。
+    # 正在回答的会话不能删：拿和问答相同的锁，拿不到返回 409，避免删完又被正在跑的问答写回去。
+    @app.delete("/sessions/{session_id}")
+    def delete_session(session_id: UUID, owner=Depends(identity)):
+        value = str(session_id)
+        store = app.state.store
+        check_session(store, value, owner)
+        lock = store.cache.lock(f"chat:{owner}:{value}", timeout=60, blocking_timeout=0)
+        if not lock.acquire(blocking=False):
+            raise HTTPException(409, "该会话正在回答，请稍后再删除")
+        try:
+            with store.engine.begin() as connection:
+                run_ids = select(agent_runs.c.id).where(
+                    agent_runs.c.session_id == value, agent_runs.c.owner == owner
+                )
+                connection.execute(
+                    delete(agent_rounds).where(agent_rounds.c.run_id.in_(run_ids))
+                )
+                for table in (agent_runs, feedback, run_errors, memory_outbox, runs):
+                    connection.execute(
+                        delete(table).where(
+                            table.c.session_id == value, table.c.owner == owner
+                        )
+                    )
+                connection.execute(
+                    delete(sessions).where(
+                        sessions.c.id == value, sessions.c.owner == owner
+                    )
+                )
+            # 会话记忆在另一个库里，放不进同一个事务；MySQL 已经删掉，会话本身已经访问不到，这里失败只记日志。
+            framework = app.state.agent.response_agent.memory
+            try:
+                framework.checkpointer.delete_thread(framework.thread_id(owner, value))
+            except Exception:
+                logger.exception("delete_session_checkpoint_failed session=%s", value)
+        finally:
+            if lock.owned():
+                lock.release()
+        return {"session_id": value}
 
     # 会话记忆：只能看自己的会话（对话内容是个人数据，管理员也看不到别人的）。
     @app.get("/memory/sessions")
