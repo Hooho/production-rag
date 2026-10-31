@@ -36,20 +36,6 @@
 
 用真实数据演示产品功能，非真实可操作系统
 
-## 提交时自动格式化
-
-首次开发时，在项目根目录安装并启用 Git hook（需要 Python 3.9+ 和 Node.js 18+）：
-
-> python3 -m pip install -r requirements-dev.txt
->
-> pre-commit install
-
-之后每次 `git commit` 会自动格式化暂存的文件：Python 使用 Ruff，前端代码及 JSON、YAML、Markdown、HTML 使用 Prettier。首次运行会下载工具环境，需要联网。
-
-如果格式化修改了文件，本次提交会暂停；检查修改后，用 `git add <文件路径>` 重新暂存，再次提交。部分暂存文件的未暂存改动由 pre-commit 临时保存并恢复；如果恢复发生冲突，格式化会回滚，请先整理该文件的改动再提交。
-
-这项配置仅影响本地开发，无需更新 Docker 服务。
-
 ## 启动项目
 
 ### 环境要求
