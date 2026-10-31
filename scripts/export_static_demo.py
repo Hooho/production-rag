@@ -7,6 +7,7 @@ token tables, upload paths and full customer phone numbers.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import json
 import os
 import sys
@@ -51,6 +52,7 @@ from app.mysql.store import (
 
 
 SNAPSHOT_USER = "admin"
+TOKYO = ZoneInfo("Asia/Tokyo")
 RUN_IDS = [
     "dab3a654-5be1-41aa-9464-3a2253c39efe",  # 现在有什么订单
     "07a3248a-1dd0-4fee-be55-1172bf99060e",  # A1003
@@ -233,6 +235,10 @@ EVAL_BATCH_LIMIT = int(os.getenv("DEMO_EVAL_BATCHES", "2"))
 # 专项评测（尤其 Agent 区分题）单次结果有几 MB，每个评测集只录最近这么多次的详情，更早的只在列表里显示。
 SPECIAL_RUN_LIMIT = int(os.getenv("DEMO_SPECIAL_RUNS", "1"))
 AGENT_RUN_LIMIT = int(os.getenv("DEMO_AGENT_RUNS", "4"))
+# 整段保留到演示会话历史里的对话：(第一个问题, 最后更新的日期，东京时间)。Agent 模式的回答会一起录下每一轮。
+KEEP_SESSIONS = [
+    ("段永平厉害吗", "2026-10-21"),
+]
 # 除了每个评测集最近几次，另外指定要保留详情的专项评测。
 EXTRA_SPECIAL_RUN_IDS = [
     "20261029-143746_unknown",  # Agent 区分题 2026/10/29 23:37:46（固定流程 3/12 · Agent 7/12，参数改过）
@@ -277,7 +283,7 @@ def collect_evidence(value, found):
             collect_evidence(nested, found)
 
 
-def capture_live(engine, dataset, eval_runs, agent_responses):
+def capture_live(engine, dataset, eval_runs, agent_responses, history):
     token = create_access_token(SNAPSHOT_USER, os.environ["JWT_SECRET"])
     get = lambda path: api_get(token, path)
     live = {"ui": get("/settings/ui"), "runtime": get("/settings/runtime")}
@@ -460,6 +466,10 @@ def capture_live(engine, dataset, eval_runs, agent_responses):
             )
     for item in agent_responses.values():
         record(f"/agent/runs/{item['run_id']}")
+    # 会话历史里的 Agent 回答：点开每一轮的详情时读 /agent/runs/<请求编号>。
+    for item in history:
+        if (item.get("response") or {}).get("mode") == "agent":
+            record(f"/agent/runs/{item['id']}")
     live["get"] = recorded
     for path, value in recorded.items():
         print(
@@ -484,6 +494,26 @@ def capture_live(engine, dataset, eval_runs, agent_responses):
         for original, item in zip(texts[start : start + 20], result["items"]):
             live["evidence"]["items"][original] = item["chunks"]
     return live
+
+
+def keep_detailed_runs(snapshot):
+    """评测列表只留快照里录了详情的记录：其余记录点「查看」也打不开，留在列表里只会让人困惑。"""
+    live = snapshot["live"]
+    detailed = set(live.get("special_runs") or {})
+    detailed |= {
+        path.split("/")[-1]
+        for path in live.get("get") or {}
+        if path.startswith("/eval/runs/")
+    }
+    detailed = {urllib.parse.unquote(run_id) for run_id in detailed}
+    snapshot["eval_runs"]["runs"] = [
+        run for run in snapshot["eval_runs"]["runs"] if run["id"] in detailed
+    ]
+    for detail in (live.get("suite_details") or {}).values():
+        detail["runs"] = [
+            run for run in detail.get("runs") or [] if run["id"] in detailed
+        ]
+    return snapshot
 
 
 def main():
@@ -733,6 +763,66 @@ def main():
                 }
             )
 
+        # 指定保留的整段对话：按第一个问题找快照用户的会话，同名有多段时取最后更新日期对得上的那段。
+        for title, day in KEEP_SESSIONS:
+            session_ids = set(
+                connection.execute(
+                    select(runs.c.session_id).where(
+                        runs.c.owner == SNAPSHOT_USER,
+                        runs.c.question == title,
+                    )
+                ).scalars()
+            )
+            chosen = None
+            for session_id in session_ids:
+                rows = (
+                    connection.execute(
+                        select(runs)
+                        .where(
+                            runs.c.owner == SNAPSHOT_USER,
+                            runs.c.session_id == session_id,
+                        )
+                        .order_by(runs.c.created)
+                    )
+                    .mappings()
+                    .all()
+                )
+                last = datetime.fromisoformat(
+                    str(rows[-1]["created"]).replace("Z", "+00:00")
+                )
+                if last.tzinfo is None:
+                    last = last.replace(tzinfo=timezone.utc)
+                if (
+                    rows
+                    and rows[0]["question"] == title
+                    and last.astimezone(TOKYO).date().isoformat() == day
+                ):
+                    chosen = rows
+            if not chosen:
+                print(f"没有找到要保留的对话：{title}（{day}）", file=sys.stderr)
+                continue
+            for row in chosen:
+                if any(item["id"] == row["id"] for item in history):
+                    continue
+                feedback_row = (
+                    connection.execute(
+                        select(feedback).where(feedback.c.run_id == row["id"])
+                    )
+                    .mappings()
+                    .first()
+                )
+                history.append(
+                    {
+                        "id": row["id"],
+                        "session_id": row["session_id"],
+                        "question": row["question"],
+                        "response": compact_response(row["response"] or {}),
+                        "created": row["created"],
+                        "feedback": plain(feedback_row) if feedback_row else None,
+                    }
+                )
+            print(f"保留对话：{title}，{len(chosen)} 条问答", file=sys.stderr)
+
         # Agent 模式的固定问题：快照用户最近几次成功的 Agent 回答（问题不重复），演示页切到 Agent 模式问这些问题时回放。
         agent_responses = {}
         candidates = connection.execute(
@@ -842,8 +932,11 @@ def main():
         "eval_run_details": {},
         "llm_settings": llm_settings,
         # 新页面（专项、复测集、知识巡检、RAG / 系统配置、证据分片）的只读接口响应。
-        "live": capture_live(engine, eval_dataset["items"], eval_runs, agent_responses),
+        "live": capture_live(
+            engine, eval_dataset["items"], eval_runs, agent_responses, history
+        ),
     }
+    snapshot = keep_detailed_runs(snapshot)
     # 快照会公开部署：文档原文、分片里的 Cookie、Token、签名等凭证换成 ***（规则见 scripts/demo_scrub.py）。
     try:
         from scripts.demo_scrub import scrub
