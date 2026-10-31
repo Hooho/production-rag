@@ -1063,6 +1063,21 @@ function RequestInput({
       last.items.push(item);
     else reused.push({ first: item, items: [item] });
   }
+  // 之前轮次里的长期记忆是从「本轮问题」开头的 <memory> 拆出来的虚拟分组，没有对应的消息下标，
+  // 按消息合并 reused 时会丢掉；这里重新拆一次，排在记忆组（没有时是本轮问题）前面补一行。
+  const pastQuestion = before.find((item) => item.kind === "question");
+  const pastLongTerm = pastQuestion
+    ? splitMemory(messageText(pastQuestion.message)).sections.filter(
+        (section) => section.title === "用户偏好",
+      )
+    : [];
+  const pastLongTermText = pastLongTerm
+    .map((section) => section.text)
+    .filter(Boolean)
+    .join("\n");
+  const longTermAt = reused.findIndex(
+    ({ first }) => first.kind === "memory" || first.kind === "question",
+  );
   const groups = groupMessages(messages, round.round);
   const questionIndex = groups.find((group) => group.kind === "question")
     ?.items[0];
@@ -1262,23 +1277,37 @@ function RequestInput({
           {before.length > 0 && <small>新增 {messages.length}</small>}
         </div>
         <div className="agent-input-rows">
-          {reused.map(({ first, items }) => (
-            <InputRow
-              key={`reused-${first.index}`}
-              no={range(first.index + 1, items[items.length - 1].index + 1)}
-              kind={first.kind}
-              label={first.group}
-              size={`${items.length} 条`}
-            >
-              {items.map((item) => (
-                <div key={item.index}>
-                  <strong>
-                    #{item.index + 1} · {item.name}
-                  </strong>
-                  <MessageBody message={item.message} />
-                </div>
-              ))}
-            </InputRow>
+          {reused.map(({ first, items }, position) => (
+            <Fragment key={`reused-${first.index}`}>
+              {position === longTermAt &&
+                pastQuestion &&
+                pastLongTerm.length > 0 && (
+                  <InputRow
+                    no={`#${pastQuestion.index + 1}`}
+                    kind="memory"
+                    label="长期记忆"
+                    note={`写在 #${pastQuestion.index + 1} 开头的 <memory> 里`}
+                    size={`${pastLongTermText.length} 字`}
+                  >
+                    <Clamp className="agent-pre">{pastLongTermText}</Clamp>
+                  </InputRow>
+                )}
+              <InputRow
+                no={range(first.index + 1, items[items.length - 1].index + 1)}
+                kind={first.kind}
+                label={first.group}
+                size={`${items.length} 条`}
+              >
+                {items.map((item) => (
+                  <div key={item.index}>
+                    <strong>
+                      #{item.index + 1} · {item.name}
+                    </strong>
+                    <MessageBody message={item.message} />
+                  </div>
+                ))}
+              </InputRow>
+            </Fragment>
           ))}
           {before.length > 0 && messages.length > 0 && (
             <div className="agent-input-divider">以下为本轮新增</div>
