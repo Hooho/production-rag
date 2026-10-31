@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { ChunkOriginalDialog, type ChunkOriginal } from "./ChunkOriginalDialog";
 import { DetailDialog } from "./DetailDialog";
 import {
@@ -3017,7 +3017,8 @@ function AgentLog({ question }: { question: EvalQuestion }) {
       error: null,
     });
   }
-  const activeStep = Math.min(selectedStep, rounds.length);
+  // 第 0 步是总览，后面依次是各轮，最后是「结束」。
+  const activeStep = Math.min(selectedStep, rounds.length + 1);
   const fresh = freshness(question);
   const evidenceChunks = new Set<string>();
   for (const item of agent.evidence ?? [])
@@ -3068,31 +3069,81 @@ function AgentLog({ question }: { question: EvalQuestion }) {
                 <p className="ag-muted">没有调用任何工具，直接回答了。</p>
               )}
               <nav className="ag-round-steps" aria-label="Agent 检索步骤">
+                <button
+                  type="button"
+                  className={activeStep === 0 ? "is-active" : ""}
+                  aria-current={activeStep === 0 ? "step" : undefined}
+                  onClick={() => setSelectedStep(0)}
+                >
+                  <span>≡</span>总览
+                </button>
                 {rounds.map(({ round }, index) => (
                   <button
                     type="button"
                     key={`${round}-${index}`}
-                    className={activeStep === index ? "is-active" : ""}
-                    aria-current={activeStep === index ? "step" : undefined}
-                    onClick={() => setSelectedStep(index)}
+                    className={activeStep === index + 1 ? "is-active" : ""}
+                    aria-current={activeStep === index + 1 ? "step" : undefined}
+                    onClick={() => setSelectedStep(index + 1)}
                   >
                     <span>{index + 1}</span>第 {round ?? "—"} 轮
                   </button>
                 ))}
                 <button
                   type="button"
-                  className={activeStep === rounds.length ? "is-active" : ""}
+                  className={activeStep === rounds.length + 1 ? "is-active" : ""}
                   aria-current={
-                    activeStep === rounds.length ? "step" : undefined
+                    activeStep === rounds.length + 1 ? "step" : undefined
                   }
-                  onClick={() => setSelectedStep(rounds.length)}
+                  onClick={() => setSelectedStep(rounds.length + 1)}
                 >
                   <span>✓</span>结束
                 </button>
               </nav>
+              {/* 总览：每轮一个模块，轮内的工具调用一行两列，只显示标题、查询、参数三行；点卡片跳到那一轮。 */}
+              {activeStep === 0 && (
+                <div className="ag-round-overview">
+                  {rounds.map(({ round, calls, kind, error }, index) => (
+                    <section
+                      key={`${round}-${index}`}
+                      className="ag-overview-round"
+                    >
+                      <button
+                        type="button"
+                        className="ag-overview-round-head"
+                        onClick={() => setSelectedStep(index + 1)}
+                      >
+                        <span>{index + 1}</span>第 {round ?? "—"} 轮
+                        <small>
+                          {calls.length
+                            ? `${calls.length} 次工具调用`
+                            : kind === "forced"
+                              ? "不带工具直接回答"
+                              : "未调用工具"}
+                          {error ? " · 本轮出错" : ""}
+                        </small>
+                      </button>
+                      {calls.length > 0 && (
+                        <div className="ag-overview-calls">
+                          {calls.map((call) => (
+                            <AgentCall
+                              compact
+                              onOpen={() => setSelectedStep(index + 1)}
+                              question={question}
+                              key={call.call}
+                              call={call}
+                              fresh={fresh.perCall.get(call.call) ?? new Set()}
+                              evidenceChunks={evidenceChunks}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  ))}
+                </div>
+              )}
               {rounds.map(
                 ({ round, calls, kind, reasoning, content, error }, index) =>
-                  activeStep === index && (
+                  activeStep === index + 1 && (
                     <div key={`${round}-${index}`} className="ag-round-detail">
                       {reasoning ? (
                         <div className="ag-round-reasoning">
@@ -3152,7 +3203,7 @@ function AgentLog({ question }: { question: EvalQuestion }) {
                     </div>
                   ),
               )}
-              {activeStep === rounds.length && (
+              {activeStep === rounds.length + 1 && (
                 <MaterialLine material={agentMaterial(question)} />
               )}
             </>
@@ -3620,11 +3671,16 @@ function AgentCall({
   fresh,
   evidenceChunks,
   question,
+  compact = false,
+  onOpen,
 }: {
   question: EvalQuestion;
   call: EvalAgentCall;
   fresh: Set<string>;
   evidenceChunks: Set<string>;
+  // 总览里的紧凑卡片：只留三行，没有展开箭头，点整张卡片跳到所在轮次。
+  compact?: boolean;
+  onOpen?: () => void;
 }) {
   const query = call.query ?? call.arguments.query;
   const rawExplanation = call.arguments.query_explanation;
@@ -3639,6 +3695,8 @@ function AgentCall({
   const status = CALL_STATUS[call.status] ?? call.status;
   const hit = call.hits.length > 0;
   const executed = call.status === "ok" || call.status === "error";
+  // 默认只显示标题、查询和参数三行；查询说明、计分项命中和分片等细节点箭头展开。出错的调用默认展开，方便看原因。
+  const [open, setOpen] = useState(Boolean(call.error));
   const newCount = call.new_chunks ?? fresh.size;
   let items: ChunkItem[] = [];
   if (call.results)
@@ -3683,7 +3741,21 @@ function AgentCall({
     ];
   return (
     <div
-      className={`ag-call ${call.status !== "ok" ? "is-off" : ""} ${hit ? "is-hit" : ""}`}
+      className={`ag-call ${call.status !== "ok" ? "is-off" : ""} ${hit ? "is-hit" : ""} ${compact ? "is-compact" : ""}`}
+      {...(compact && onOpen
+        ? {
+            role: "button",
+            tabIndex: 0,
+            title: "查看这一轮的详情",
+            onClick: onOpen,
+            onKeyDown: (event: ReactKeyboardEvent) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onOpen();
+              }
+            },
+          }
+        : {})}
     >
       {/* 标题行放结果（耗时、命中、新增）；下面一行是检索的问题，再下一行是参数。 */}
       <div className="ag-call-head">
@@ -3714,6 +3786,27 @@ function AgentCall({
               无新增
             </Tag>
           ))}
+        {!compact && (
+          <button
+            type="button"
+            className={`ag-call-toggle ${open ? "is-open" : ""}`}
+            aria-expanded={open}
+            aria-label={open ? "收起这次调用的详情" : "展开这次调用的详情"}
+            title={open ? "收起详情" : "展开详情"}
+            onClick={() => setOpen(!open)}
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+              <path
+                d="M4 6l4 4 4-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        )}
       </div>
       {call.name === "search_knowledge" && typeof query === "string" ? (
         <>
@@ -3739,26 +3832,31 @@ function AgentCall({
           <code>{JSON.stringify(call.arguments)}</code>
         </div>
       )}
-      {(call.name === "search_knowledge" || call.name === "read_context") && (
-        <QueryExplanation call={call} question={question} />
-      )}
-      {call.error && (
-        <>
-          <AgentError title="工具调用出错" message={call.error} />
-          <RawArguments value={call.arguments} />
-        </>
-      )}
-      {status && <div className="ag-call-meta">{status}</div>}
-      {call.error?.includes("依据此前返回资料时") && (
-        <p className="ag-muted">
-          这是当次运行保存的校验错误。修复不会改写历史结果，需重新运行评测确认检索结果。
-        </p>
-      )}
-      {call.note && call.status !== "ok" && (
-        <div className="ag-call-meta">{call.note}</div>
-      )}
-      {(call.results || call.name === "read_context") && (
-        <AgentCallEvidence question={question} call={call} items={items} />
+      {open && !compact && (
+        <div className="ag-call-detail">
+          {(call.name === "search_knowledge" ||
+            call.name === "read_context") && (
+            <QueryExplanation call={call} question={question} />
+          )}
+          {call.error && (
+            <>
+              <AgentError title="工具调用出错" message={call.error} />
+              <RawArguments value={call.arguments} />
+            </>
+          )}
+          {status && <div className="ag-call-meta">{status}</div>}
+          {call.error?.includes("依据此前返回资料时") && (
+            <p className="ag-muted">
+              这是当次运行保存的校验错误。修复不会改写历史结果，需重新运行评测确认检索结果。
+            </p>
+          )}
+          {call.note && call.status !== "ok" && (
+            <div className="ag-call-meta">{call.note}</div>
+          )}
+          {(call.results || call.name === "read_context") && (
+            <AgentCallEvidence question={question} call={call} items={items} />
+          )}
+        </div>
       )}
     </div>
   );
