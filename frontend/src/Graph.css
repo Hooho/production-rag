@@ -399,3 +399,39 @@
 .graph-side .link-button {
   margin-right: 6px;
 }
+
+/* 上传弹窗里的图检索选项 */
+.upload-graph-field {
+  margin: 18px 0 0;
+  padding: 10px 12px;
+  border: 1px solid #e3e8ef;
+  border-radius: 8px;
+  background: #fafbfd;
+  font-size: 13px;
+}
+.upload-graph-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.upload-graph-toggle input {
+  margin: 0;
+  width: auto;
+}
+.upload-graph-field .graph-dialog-section {
+  margin-top: 10px;
+}
+.graph-actions .secondary-button,
+.graph-tasks-actions .secondary-button,
+.graph-tasks-actions .primary-button,
+.graph-table .secondary-button,
+.graph-pager .secondary-button {
+  font-size: 12px;
+  padding: 5px 10px;
+  min-height: 0;
+}
+.graph-table .link-button,
+.graph-side small .link-button {
+  margin-right: 6px;
+}

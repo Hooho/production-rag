@@ -7334,8 +7334,8 @@ function UploadGraphField({
     model: value?.model ?? previous?.model ?? null,
   };
   return (
-    <div className="upload-title-field">
-      <label>
+    <div className="upload-graph-field">
+      <label className="upload-graph-toggle">
         <input
           type="checkbox"
           checked={enabled}

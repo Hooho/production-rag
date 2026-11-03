@@ -1,10 +1,4 @@
-import {
-  useMemo,
-  useRef,
-  useState,
-  type PointerEvent,
-  type WheelEvent,
-} from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import type { GraphEdge, GraphNode } from "./api";
 import { labelHue } from "./hues";
 import "./Graph.css";
@@ -88,8 +82,25 @@ function layout(nodes: GraphNode[], edges: GraphEdge[]) {
   return positions;
 }
 
+// 默认清单里的实体类型用固定的颜色，文档页签和全局页面一致；其他类型按名字从分类色里取（避开红色）。
+const TYPE_HUES: Record<string, number> = {
+  人物: 28,
+  组织: 215,
+  产品: 145,
+  作品: 270,
+  地点: 185,
+  事件: 50,
+  概念: 300,
+};
+
 export function typeColor(type: string) {
-  const hue = labelHue(type);
+  if (type === "其他")
+    return {
+      fill: "hsl(215 15% 92%)",
+      stroke: "hsl(215 12% 50%)",
+      text: "hsl(215 15% 30%)",
+    };
+  const hue = TYPE_HUES[type] ?? labelHue(type);
   return {
     fill: `hsl(${hue} 75% 90%)`,
     stroke: `hsl(${hue} 45% 42%)`,
@@ -156,6 +167,22 @@ export function GraphView({
     }
     return value;
   }, [selected, edges]);
+  // 滚轮缩放：React 的 onWheel 是被动监听，不能阻止页面跟着滚动，所以直接加原生监听。
+  const hasNodes = nodes.length > 0;
+  useEffect(() => {
+    const element = svg.current;
+    if (!element) return;
+    function onWheel(event: globalThis.WheelEvent) {
+      event.preventDefault();
+      const factor = event.deltaY < 0 ? 1.15 : 1 / 1.15;
+      setView((value) => ({
+        ...value,
+        scale: Math.min(6, Math.max(0.4, value.scale * factor)),
+      }));
+    }
+    element.addEventListener("wheel", onWheel, { passive: false });
+    return () => element.removeEventListener("wheel", onWheel);
+  }, [hasNodes]);
   const types = useMemo(
     () => [...new Set(nodes.map((node) => node.type))],
     [nodes],
@@ -167,14 +194,6 @@ export function GraphView({
   };
   const viewBox = `${bounds.x + view.x + (bounds.width - box.width) / 2} ${bounds.y + view.y + (bounds.height - box.height) / 2} ${box.width} ${box.height}`;
 
-  function onWheel(event: WheelEvent<SVGSVGElement>) {
-    event.preventDefault();
-    const factor = event.deltaY < 0 ? 1.15 : 1 / 1.15;
-    setView((value) => ({
-      ...value,
-      scale: Math.min(6, Math.max(0.4, value.scale * factor)),
-    }));
-  }
   function onPointerDown(event: PointerEvent<SVGSVGElement>) {
     if ((event.target as Element).closest(".graph-node, .graph-edge")) return;
     drag.current = {
@@ -249,7 +268,6 @@ export function GraphView({
         ref={svg}
         className="graph-canvas"
         viewBox={viewBox}
-        onWheel={onWheel}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
