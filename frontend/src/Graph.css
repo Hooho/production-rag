@@ -598,3 +598,50 @@
   font-variant-numeric: tabular-nums;
   font-weight: 500;
 }
+
+.graph-extraction-tabs {
+  display: flex;
+  gap: 20px;
+  border-bottom: 1px solid #e3e8ef;
+}
+.graph-extraction-tabs button {
+  padding: 8px 2px 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--t-475569);
+  font: inherit;
+  cursor: pointer;
+}
+.graph-extraction-tabs button[aria-selected="true"] {
+  color: var(--t-1d4ed8);
+  border-bottom-color: currentColor;
+  font-weight: 600;
+}
+.graph-chunk-table-scroll {
+  overflow-x: auto;
+  border: 1px solid #e3e8ef;
+  border-radius: 8px;
+}
+.graph-chunk-table-scroll .graph-table {
+  table-layout: fixed;
+  min-width: 540px;
+}
+.graph-chunk-table-scroll .graph-chunk-relation-table {
+  min-width: 720px;
+}
+.graph-chunk-table-scroll th,
+.graph-chunk-table-scroll td {
+  padding: 10px 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.graph-chunk-entity-table th:nth-child(3) {
+  width: 80px;
+}
+.graph-chunk-entity-table th:last-child {
+  width: 42%;
+}
+.graph-chunk-relation-table th:nth-child(-n + 3) {
+  width: 90px;
+}

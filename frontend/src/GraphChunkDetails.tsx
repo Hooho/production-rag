@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import {
   listDocumentChunks,
+  type ChunkGraph,
   type ChunkGraphStatus,
   type DocumentChunkPage,
 } from "./api";
@@ -145,47 +146,7 @@ export function GraphChunkDetails({
                         失败原因：{graph.error || "未记录失败原因"}
                       </p>
                     ) : graph ? (
-                      <>
-                        <h4>实体（{graph.mentions.length}）</h4>
-                        {graph.mentions.length ? (
-                          <ul>
-                            {graph.mentions.map((item, index) => (
-                              <li key={index}>
-                                <strong>{item.name}</strong> · {item.type}
-                                {item.canonical && item.canonical !== item.name
-                                  ? ` → ${item.canonical}`
-                                  : ""}
-                                {item.description && (
-                                  <small>{item.description}</small>
-                                )}
-                              </li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <p className="graph-note">
-                            本片抽取成功，没有抽出实体。
-                          </p>
-                        )}
-                        <h4>关系（{graph.relations.length}）</h4>
-                        {graph.relations.length ? (
-                          <ul>
-                            {graph.relations.map((item, index) => (
-                              <li key={index}>
-                                <strong>
-                                  {item.source} → {item.target}
-                                </strong>{" "}
-                                · {item.category}
-                                <small>{item.description}</small>
-                                {item.evidence && (
-                                  <blockquote>{item.evidence}</blockquote>
-                                )}
-                              </li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <p className="graph-note">没有抽出关系。</p>
-                        )}
-                      </>
+                      <ExtractionTables graph={graph} />
                     ) : (
                       <p className="graph-note">
                         尚未返回结果，不能判断成功或失败。
@@ -313,5 +274,136 @@ export function GraphChunkDetails({
         </DetailDialog>
       )}
     </DetailDialog>
+  );
+}
+
+function ExtractionTables({ graph }: { graph: ChunkGraph }) {
+  const [tab, setTab] = useState<"entities" | "relations">("entities");
+  const id = useId();
+  return (
+    <>
+      <div
+        className="graph-extraction-tabs"
+        role="tablist"
+        aria-label="分片抽取内容"
+      >
+        {(["entities", "relations"] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            role="tab"
+            id={`${id}-${value}`}
+            aria-controls={`${id}-panel`}
+            aria-selected={tab === value}
+            tabIndex={tab === value ? 0 : -1}
+            onClick={() => setTab(value)}
+            onKeyDown={(event) => {
+              if (
+                ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)
+              ) {
+                event.preventDefault();
+                const next =
+                  event.key === "Home"
+                    ? "entities"
+                    : event.key === "End"
+                      ? "relations"
+                      : tab === "entities"
+                        ? "relations"
+                        : "entities";
+                setTab(next);
+                event.currentTarget.parentElement
+                  ?.querySelector<HTMLButtonElement>(`[id="${id}-${next}"]`)
+                  ?.focus();
+              }
+            }}
+          >
+            {value === "entities"
+              ? `实体（${graph.mentions.length}）`
+              : `关系（${graph.relations.length}）`}
+          </button>
+        ))}
+      </div>
+      <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${tab}`}>
+        {tab === "entities" ? (
+          graph.mentions.length ? (
+            <div
+              className="graph-chunk-table-scroll"
+              tabIndex={0}
+              role="region"
+              aria-label="实体表"
+            >
+              <table className="graph-table graph-chunk-entity-table">
+                <thead>
+                  <tr>
+                    <th scope="col">原文名字</th>
+                    <th scope="col">标准名</th>
+                    <th scope="col">类型</th>
+                    <th scope="col">说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {graph.mentions.map((item, index) => (
+                    <tr key={index}>
+                      <td>
+                        <strong>{item.name}</strong>
+                      </td>
+                      <td>{item.canonical || item.name}</td>
+                      <td>
+                        <Tag size="sm" plain hue>
+                          {item.type}
+                        </Tag>
+                      </td>
+                      <td>{item.description || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="graph-note">本片抽取成功，没有抽出实体。</p>
+          )
+        ) : graph.relations.length ? (
+          <div
+            className="graph-chunk-table-scroll"
+            tabIndex={0}
+            role="region"
+            aria-label="关系表"
+          >
+            <table className="graph-table graph-chunk-relation-table">
+              <thead>
+                <tr>
+                  <th scope="col">起点</th>
+                  <th scope="col">终点</th>
+                  <th scope="col">分类</th>
+                  <th scope="col">关系描述</th>
+                  <th scope="col">原文证据</th>
+                </tr>
+              </thead>
+              <tbody>
+                {graph.relations.map((item, index) => (
+                  <tr key={index}>
+                    <td>
+                      <strong>{item.source}</strong>
+                    </td>
+                    <td>
+                      <strong>{item.target}</strong>
+                    </td>
+                    <td>
+                      <Tag size="sm" plain hue>
+                        {item.category}
+                      </Tag>
+                    </td>
+                    <td>{item.description || "—"}</td>
+                    <td>{item.evidence || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="graph-note">没有抽出关系。</p>
+        )}
+      </div>
+    </>
   );
 }
