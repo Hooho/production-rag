@@ -846,3 +846,55 @@ def test_merge_records_distinguish_document_and_global_scope(setup):
         f"/documents/{second}/graph?view=merges", headers=headers()
     ).json()["merges"]["items"]
     assert {row["scope"] for row in old} == {"unknown"}
+
+
+def test_chunk_details_show_pending_and_results_before_merge(setup, monkeypatch):
+    client, store = setup
+    models = enable_model(client)
+    document_id = add_document(client, content=CONTENT * 12)
+    monkeypatch.setattr(graph_build, "BATCH_SIZE", 1)
+    started = build(client, document_id).json()
+    assert started["total"] > 1
+    path = f"/documents/{document_id}/chunks"
+    pending = client.get(path + "?graph_status=pending", headers=headers()).json()
+    assert pending["total"] == started["total"]
+    assert all(row["graph"] is None for row in pending["chunks"])
+    assert (
+        client.get(path + "?graph_status=pending", headers=headers("bob")).status_code
+        == 404
+    )
+    graph_build.run_job(store, models, json.loads(store.cache.lpop(graph_build.QUEUE)))
+    success = client.get(path + "?graph_status=extracted", headers=headers()).json()
+    assert success["total"] == 1
+    assert success["graph_counts"]["pending"] == started["total"] - 1
+    assert success["graph_counts"]["empty"] == 0
+    assert success["chunks"][0]["graph"]["mentions"]
+    assert success["chunks"][0]["graph"]["relations"]
+    assert graph_build.get_build(store.engine, started["id"])["status"] == "running"
+    models.chat_model.fail = {"步步高", "苹果"}
+    graph_build.run_job(store, models, json.loads(store.cache.lpop(graph_build.QUEUE)))
+    failed = client.get(path + "?graph_status=failed", headers=headers()).json()
+    assert failed["total"] == 1
+    assert "连接超时" in failed["chunks"][0]["graph"]["error"]
+    assert failed["chunks"][0]["graph"]["prompt"]
+
+
+def test_empty_result_filter_works_before_graph_is_merged(setup, monkeypatch):
+    client, store = setup
+    models = enable_model(client)
+    document_id = add_document(client, content=CONTENT * 12)
+    monkeypatch.setattr(graph_build, "BATCH_SIZE", 1)
+    started = build(client, document_id).json()
+    monkeypatch.setattr(
+        models.chat_model,
+        "invoke",
+        lambda messages: AIMessage(content='{"entities":[],"relations":[]}'),
+    )
+    graph_build.run_job(store, models, json.loads(store.cache.lpop(graph_build.QUEUE)))
+    empty = client.get(
+        f"/documents/{document_id}/chunks?graph_status=empty", headers=headers()
+    ).json()
+    assert empty["total"] == 1
+    assert empty["chunks"][0]["graph"]["empty"] is True
+    assert empty["graph_counts"]["extracted"] == 1
+    assert empty["graph_counts"]["pending"] == started["total"] - 1

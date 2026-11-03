@@ -1743,7 +1743,7 @@ def create_app(store=None, models=None, jwt_secret=None):
         source: str | None = Query(None, pattern="^(reused|computed)$"),
         # 知识图谱：按抽取状态筛选，extracted 新抽取、reused 复用、failed 失败、empty 没抽出实体。
         graph_status: str | None = Query(
-            None, pattern="^(extracted|reused|failed|empty)$"
+            None, pattern="^(extracted|reused|failed|empty|pending)$"
         ),
         owner=Depends(identity),
     ):

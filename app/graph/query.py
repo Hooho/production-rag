@@ -3,6 +3,7 @@ from sqlalchemy.orm import aliased
 
 from ..mysql.tables import (
     chunks,
+    document_chunks,
     document_heads,
     documents,
     graph_builds,
@@ -591,23 +592,28 @@ def chunk_status_filter(engine, document_id, status):
             select(
                 graph_chunk_extractions.c.chunk_id,
                 graph_chunk_extractions.c.status,
-                graph_chunk_extractions.c.id,
+                graph_chunk_extractions.c.result,
             ).where(graph_chunk_extractions.c.build_id == build["id"])
         ).all()
-        with_mentions = set(
+        all_ids = set(
             connection.execute(
-                select(graph_mentions.c.extraction_id).where(
-                    graph_mentions.c.build_id == build["id"]
+                select(document_chunks.c.chunk_id).where(
+                    document_chunks.c.document_id == document_id
                 )
-            )
-            .scalars()
-            .all()
+            ).scalars()
         )
-    groups = {"extracted": set(), "reused": set(), "failed": set(), "empty": set()}
-    for chunk_id, value, extraction_id in rows:
+    groups = {
+        "extracted": set(),
+        "reused": set(),
+        "failed": set(),
+        "empty": set(),
+        "pending": set(),
+    }
+    for chunk_id, value, result in rows:
         groups[value].add(chunk_id)
-        if value != "failed" and extraction_id not in with_mentions:
+        if value != "failed" and not (result or {}).get("entities"):
             groups["empty"].add(chunk_id)
+    groups["pending"] = all_ids - {row[0] for row in rows}
     counts = {key: len(value) for key, value in groups.items()}
     return (groups.get(status) if status else None), counts
 

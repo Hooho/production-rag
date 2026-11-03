@@ -1,3 +1,4 @@
+import { GraphChunkDetails } from "./GraphChunkDetails";
 import { GraphRelationPanel } from "./GraphRelationPanel";
 import type { GraphEdge } from "./api";
 import { useEffect, useState, type ReactNode } from "react";
@@ -77,6 +78,7 @@ export function DocumentGraph({
   const [data, setData] = useState<DocumentGraphData | null>(null);
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState(false);
+  const [chunkDetails, setChunkDetails] = useState(false);
   const [tick, setTick] = useState(0);
   const documentId = document.document_id;
   useEffect(() => {
@@ -240,23 +242,46 @@ export function DocumentGraph({
             </p>
           )}
         </div>
-        {data.can_build && (
-          <div className="graph-actions">
-            {!busy && build.failed > 0 && (
-              <button className="secondary-button" onClick={() => void retry()}>
-                补跑失败的 {build.failed} 个分片
+        <div className="graph-actions">
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => setChunkDetails(true)}
+          >
+            分片详情
+          </button>
+          {data.can_build && (
+            <>
+              {!busy && build.failed > 0 && (
+                <button
+                  className="secondary-button"
+                  onClick={() => void retry()}
+                >
+                  补跑失败的 {build.failed} 个分片
+                </button>
+              )}
+              <button
+                className="secondary-button"
+                disabled={!canStart}
+                onClick={() => setDialog(true)}
+              >
+                重新建图
               </button>
-            )}
-            <button
-              className="secondary-button"
-              disabled={!canStart}
-              onClick={() => setDialog(true)}
-            >
-              重新建图
-            </button>
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </div>
+      {chunkDetails && (
+        <GraphChunkDetails
+          key={build.id}
+          documentId={documentId}
+          buildId={build.id}
+          tick={tick}
+          busy={busy}
+          onClose={() => setChunkDetails(false)}
+          onOpenChunk={onOpenChunk}
+        />
+      )}
       {data.history.length > 1 && (
         <details className="graph-history">
           <summary>建图记录（{data.history.length} 次，只有一次生效）</summary>

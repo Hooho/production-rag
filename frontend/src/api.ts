@@ -3588,7 +3588,12 @@ export function getEvalChunkOriginal(chunkId: string) {
 }
 
 // 知识图谱（第 1 期）：字段和后端 app/graph、app/api/graph_routes.py 保持一致。
-export type ChunkGraphStatus = "extracted" | "reused" | "failed" | "empty";
+export type ChunkGraphStatus =
+  | "extracted"
+  | "reused"
+  | "failed"
+  | "empty"
+  | "pending";
 export type UploadGraphOption = {
   enabled: boolean;
   schema_id?: string | null;

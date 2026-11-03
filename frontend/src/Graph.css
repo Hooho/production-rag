@@ -487,3 +487,92 @@
     flex-basis: 100%;
   }
 }
+
+.graph-chunk-dialog {
+  width: min(800px, calc(100vw - 32px));
+}
+.graph-chunk-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 18px 0;
+}
+.graph-chunk-filters button {
+  padding: 6px 12px;
+  border: 1px solid #d5dce6;
+  border-radius: 16px;
+  background: #fff;
+  color: var(--t-475569);
+  cursor: pointer;
+}
+.graph-chunk-filters button.active {
+  color: var(--t-1d4ed8);
+  border-color: #93b4ff;
+  background: #edf3ff;
+}
+.graph-chunk-results {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 16px 0;
+}
+.graph-chunk-result {
+  border: 1px solid #e3e8ef;
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 13px;
+}
+.graph-chunk-result > summary {
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.graph-chunk-result > summary > span:last-child {
+  flex: 1 1 220px;
+  overflow-wrap: anywhere;
+  color: var(--t-475569);
+}
+.graph-chunk-result-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 16px;
+}
+.graph-chunk-result-body h4,
+.graph-chunk-result-body p,
+.graph-chunk-result-body ul {
+  margin: 0;
+}
+.graph-chunk-result-body ul {
+  padding-left: 20px;
+}
+.graph-chunk-result-body li + li {
+  margin-top: 10px;
+}
+.graph-chunk-result-body li small {
+  display: block;
+  color: var(--t-475569);
+  margin-top: 4px;
+  line-height: 1.7;
+}
+.graph-chunk-result-body > details > summary {
+  cursor: pointer;
+  color: var(--t-475569);
+}
+.graph-chunk-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+  padding-top: 10px;
+}
+
+.graph-chunk-result > summary::after {
+  content: "展开";
+  color: var(--t-475569);
+  font-size: 12px;
+}
+.graph-chunk-result[open] > summary::after {
+  content: "收起";
+}
