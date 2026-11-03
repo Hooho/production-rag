@@ -221,44 +221,82 @@
   color: var(--t-475569);
 }
 
-/* 建图对话框 */
-.graph-dialog {
-  max-width: 720px;
-  width: min(720px, calc(100vw - 32px));
+/* 建图对话框：每项一行，左边名字、右边控件；清单内容和「如何匹配」在抽屉弹窗里看 */
+.upload-modal.graph-dialog {
+  width: min(520px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
   overflow: auto;
+  padding: 22px 24px;
 }
-.graph-dialog-section {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 14px;
+.graph-dialog .upload-modal-heading {
+  margin-bottom: 14px;
 }
-.graph-dialog-section > label {
-  font-weight: 600;
+.graph-dialog .upload-modal-heading h2 {
+  font-size: 18px;
+}
+.graph-dialog .upload-modal-heading p {
+  margin: 4px 0 0;
+}
+.graph-dialog .upload-modal-actions {
+  margin-top: 16px;
+}
+.graph-options {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px 12px;
   font-size: 13px;
 }
-.graph-dialog-section select {
+.graph-options-label {
+  color: var(--t-475569);
+  font-weight: 600;
+}
+.graph-options-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.graph-options-control select {
+  flex: 1;
+  min-width: 0;
   border: 1px solid #d5dce6;
   border-radius: 6px;
   padding: 6px 8px;
   font-size: 13px;
+  background: #fff;
 }
-.graph-schema-list {
-  display: grid;
-  grid-template-columns: 70px 1fr;
-  gap: 4px 10px;
+.graph-options-links {
+  display: flex;
+  gap: 10px;
+  white-space: nowrap;
   font-size: 12px;
-  border: 1px solid #eef1f5;
-  border-radius: 8px;
-  padding: 8px 10px;
-  background: #fafbfd;
 }
-.graph-schema-list b {
-  font-weight: 600;
+.graph-options-full {
+  grid-column: 1 / -1;
+  margin: 0;
 }
-.graph-schema-list span small {
+.graph-dialog-estimate {
+  margin-top: 12px;
+}
+.graph-dialog-estimate p {
+  margin: 0;
+}
+.graph-drawer-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.graph-drawer-title small {
+  margin-left: 8px;
+  font-weight: 400;
   color: #7a8799;
+  font-size: 12px;
+}
+.graph-drawer-list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.7;
 }
 .graph-prompt {
   white-space: pre-wrap;
@@ -272,8 +310,8 @@
   margin: 4px 0 0;
 }
 .graph-estimate {
-  font-size: 13px;
-  padding: 8px 10px;
+  font-size: 12px;
+  padding: 7px 10px;
   border-radius: 8px;
   background: #f1f6ff;
   color: var(--t-1e4f8f);
@@ -364,7 +402,7 @@
   margin: 0;
   width: auto;
 }
-.upload-graph-field .graph-dialog-section {
+.upload-graph-field .graph-options {
   margin-top: 10px;
 }
 .graph-actions .secondary-button,
@@ -379,4 +417,7 @@
 .graph-table .link-button,
 .graph-side small .link-button {
   margin-right: 6px;
+}
+.ag-delivery-dialog .graph-prompt {
+  max-height: none;
 }

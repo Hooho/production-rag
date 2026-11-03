@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { DetailDialog } from "./DetailDialog";
 import {
   buildDocumentGraph,
   buildGraphBatch,
@@ -18,7 +19,7 @@ export type GraphChoice = {
 };
 
 // 清单和抽取模型的选择，建图对话框和上传弹窗共用。
-// 清单可以展开看内容和「如何匹配」（规范化规则、合并规则、实际发给模型的提示词）；模型列出已保存的模型配置，默认选当前启用的。
+// 每项一行：左边名字、右边下拉框；清单内容和「如何匹配」点开用抽屉弹窗（DetailDialog）看，不占对话框的地方。
 export function GraphOptions({
   value,
   onChange,
@@ -29,6 +30,7 @@ export function GraphOptions({
   const [schemas, setSchemas] = useState<GraphSchemas | null>(null);
   const [profiles, setProfiles] = useState<LLMProfile[]>([]);
   const [error, setError] = useState("");
+  const [drawer, setDrawer] = useState<"schema" | "matching" | null>(null);
   useEffect(() => {
     let cancelled = false;
     Promise.all([getGraphSchemas(), getLLMSettings().catch(() => null)])
@@ -55,9 +57,9 @@ export function GraphOptions({
   if (error) return <div className="field-error">{error}</div>;
   if (!schemas) return <p className="graph-note">正在读取清单和模型配置…</p>;
   return (
-    <>
-      <div className="graph-dialog-section">
-        <label>清单（抽哪些实体、关系分哪几类）</label>
+    <div className="graph-options">
+      <span className="graph-options-label">清单</span>
+      <div className="graph-options-control">
         <select
           value={value.schema_id ?? ""}
           onChange={(event) =>
@@ -71,60 +73,26 @@ export function GraphOptions({
             </option>
           ))}
         </select>
-        {schema && (
-          <details>
-            <summary className="graph-note">查看清单内容</summary>
-            <div className="graph-schema-list">
-              {schema.entity_types.map((item) => (
-                <FragmentRow
-                  key={`e-${item.name}`}
-                  name={item.name}
-                  text={item.description}
-                  examples={item.examples}
-                />
-              ))}
-            </div>
-            <p className="graph-note">
-              关系分类（关系本身用一句话描述，分类只用于筛选）：
-            </p>
-            <div className="graph-schema-list">
-              {schema.relation_categories.map((item) => (
-                <FragmentRow
-                  key={`r-${item.name}`}
-                  name={item.name}
-                  text={item.description}
-                />
-              ))}
-            </div>
-            {schema.note && <p className="graph-note">{schema.note}</p>}
-          </details>
-        )}
-        <details>
-          <summary className="graph-note">
-            如何匹配（规范化、合并规则和发给模型的提示词）
-          </summary>
-          <p className="graph-note">名字规范化：</p>
-          <ol className="graph-note">
-            {schemas.matching.normalize.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ol>
-          <p className="graph-note">合并规则：</p>
-          <ol className="graph-note">
-            {schemas.matching.merge.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ol>
-          <p className="graph-note">
-            系统提示词（{schemas.prompt.tag}，在「系统管理 → 提示词」里修改）：
-          </p>
-          <pre className="graph-prompt">{schemas.prompt.system}</pre>
-          <p className="graph-note">用户消息示例（清单在建图时填进来）：</p>
-          <pre className="graph-prompt">{schemas.prompt.example_user}</pre>
-        </details>
+        <div className="graph-options-links">
+          <button
+            type="button"
+            className="link-button"
+            disabled={!schema}
+            onClick={() => setDrawer("schema")}
+          >
+            清单内容
+          </button>
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => setDrawer("matching")}
+          >
+            如何匹配
+          </button>
+        </div>
       </div>
-      <div className="graph-dialog-section">
-        <label>抽取模型</label>
+      <span className="graph-options-label">抽取模型</span>
+      <div className="graph-options-control">
         {profiles.length > 0 ? (
           <select
             value={value.provider ?? ""}
@@ -147,41 +115,96 @@ export function GraphOptions({
             ))}
           </select>
         ) : (
-          <p className="graph-note">
+          <span className="graph-note">
             {value.model
-              ? `当前启用的模型：${value.provider} · ${value.model}`
+              ? `${value.provider} · ${value.model}（当前启用）`
               : "还没有配置聊天模型，请先在「系统管理 → 模型配置」里配置"}
-          </p>
-        )}
-        {schemas.model_mode !== "openai" && (
-          <p className="graph-estimate is-warn">
-            现在是演示模式（MODEL_MODE=demo），没有大模型，不能建图。
-          </p>
+          </span>
         )}
       </div>
-    </>
-  );
-}
-
-function FragmentRow({
-  name,
-  text,
-  examples,
-}: {
-  name: string;
-  text: string;
-  examples?: string[];
-}) {
-  return (
-    <>
-      <b>{name}</b>
-      <span>
-        {text}
-        {examples && examples.length > 0 && (
-          <small>，例如 {examples.join("、")}</small>
-        )}
-      </span>
-    </>
+      {schemas.model_mode !== "openai" && (
+        <p className="graph-estimate is-warn graph-options-full">
+          现在是演示模式（MODEL_MODE=demo），没有大模型，不能建图。
+        </p>
+      )}
+      {drawer === "schema" && schema && (
+        <DetailDialog
+          open
+          title={`清单内容 · ${schema.name} v${schema.version}`}
+          onClose={() => setDrawer(null)}
+        >
+          {schema.note && <p className="graph-note">{schema.note}</p>}
+          <section>
+            <h4 className="graph-drawer-title">实体类型</h4>
+            <table className="graph-table">
+              <thead>
+                <tr>
+                  <th>类型</th>
+                  <th>说明</th>
+                  <th>例子</th>
+                </tr>
+              </thead>
+              <tbody>
+                {schema.entity_types.map((item) => (
+                  <tr key={item.name}>
+                    <td>{item.name}</td>
+                    <td>{item.description}</td>
+                    <td>{(item.examples ?? []).join("、")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+          <section>
+            <h4 className="graph-drawer-title">关系分类</h4>
+            <p className="graph-note">关系本身用一句话描述，分类只用来筛选。</p>
+            <table className="graph-table">
+              <tbody>
+                {schema.relation_categories.map((item) => (
+                  <tr key={item.name}>
+                    <td>{item.name}</td>
+                    <td>{item.description}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        </DetailDialog>
+      )}
+      {drawer === "matching" && (
+        <DetailDialog open title="如何匹配" onClose={() => setDrawer(null)}>
+          <section>
+            <h4 className="graph-drawer-title">名字规范化</h4>
+            <ol className="graph-drawer-list">
+              {schemas.matching.normalize.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ol>
+          </section>
+          <section>
+            <h4 className="graph-drawer-title">合并规则</h4>
+            <ol className="graph-drawer-list">
+              {schemas.matching.merge.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ol>
+          </section>
+          <section>
+            <h4 className="graph-drawer-title">
+              系统提示词
+              <small>{schemas.prompt.tag}，在「系统管理 → 提示词」里修改</small>
+            </h4>
+            <pre className="graph-prompt">{schemas.prompt.system}</pre>
+          </section>
+          <section>
+            <h4 className="graph-drawer-title">
+              用户消息示例<small>清单在建图时填进来</small>
+            </h4>
+            <pre className="graph-prompt">{schemas.prompt.example_user}</pre>
+          </section>
+        </DetailDialog>
+      )}
+    </div>
   );
 }
 
@@ -283,7 +306,7 @@ export function GraphBuildDialog({
         </div>
         <GraphOptions value={choice} onChange={setChoice} />
         {single && (
-          <div className="graph-dialog-section">
+          <div className="graph-dialog-estimate">
             {estimateError ? (
               <p className="graph-estimate is-warn">{estimateError}</p>
             ) : estimate ? (
