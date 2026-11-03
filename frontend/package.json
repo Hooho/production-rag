@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
+    "cytoscape": "^3.34.3",
     "react": "latest",
     "react-dom": "latest",
     "typescript": "latest",

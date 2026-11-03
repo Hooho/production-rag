@@ -49,61 +49,6 @@
   border: 1px solid #e3e8ef;
   border-radius: 10px;
   background: #fbfcfe;
-  cursor: grab;
-  touch-action: none;
-  user-select: none;
-}
-.graph-canvas:active {
-  cursor: grabbing;
-}
-.graph-edge line {
-  stroke: #94a3b8;
-}
-.graph-edge .graph-edge-hit {
-  stroke: transparent;
-  stroke-width: 10;
-}
-.graph-edge.is-clickable {
-  cursor: pointer;
-}
-.graph-edge.is-dim {
-  opacity: 0.15;
-}
-.graph-arrow {
-  fill: #94a3b8;
-}
-.graph-edge-label {
-  font-size: 10px;
-  fill: var(--t-475569);
-  text-anchor: middle;
-  paint-order: stroke;
-  stroke: #fbfcfe;
-  stroke-width: 3px;
-}
-.graph-node {
-  cursor: pointer;
-}
-.graph-node.is-dim {
-  opacity: 0.25;
-}
-.graph-node-label {
-  font-size: 11px;
-  text-anchor: middle;
-  paint-order: stroke;
-  stroke: #fbfcfe;
-  stroke-width: 3px;
-}
-.graph-node.is-selected .graph-node-label {
-  font-weight: 700;
-}
-.graph-node-more circle {
-  fill: var(--t-1d4ed8);
-}
-.graph-node-more text {
-  fill: #fff;
-  font-size: 8px;
-  text-anchor: middle;
-  font-weight: 700;
 }
 .graph-hint,
 .graph-note {

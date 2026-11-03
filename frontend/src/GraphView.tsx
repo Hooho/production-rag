@@ -1,87 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import cytoscape, { type Core, type ElementDefinition } from "cytoscape";
 import type { GraphEdge, GraphNode } from "./api";
 import { labelHue } from "./hues";
 import "./Graph.css";
 
-// 知识图谱的图：自己用 SVG 画，不引入画图库。布局用 Fruchterman-Reingold 力导向算法，节点几十到一两百个时在浏览器里一次算完。
+// 知识图谱的图：用 Cytoscape.js 画。布局用它自带的 cose（力导向），节点可以拖动，滚轮缩放、拖动空白处平移。
 // 文档「实体关系」页签、全局「知识图谱」共用，第 2 期检索过程里的遍历图也会复用。
-const WIDTH = 900;
-const HEIGHT = 560;
-const ITERATIONS = 300;
 
-type Point = { x: number; y: number };
-
-// 同一组节点和边每次算出来的位置都一样：初始位置按顺序排在圆上，不用随机数。
-function layout(nodes: GraphNode[], edges: GraphEdge[]) {
-  const positions = new Map<string, Point>();
-  const count = nodes.length;
-  if (count === 0) return positions;
-  nodes.forEach((node, index) => {
-    const angle = (2 * Math.PI * index) / count;
-    const radius =
-      Math.min(WIDTH, HEIGHT) * 0.35 * (0.6 + (0.4 * ((index * 7) % 5)) / 4);
-    positions.set(node.id, {
-      x: WIDTH / 2 + radius * Math.cos(angle),
-      y: HEIGHT / 2 + radius * Math.sin(angle),
-    });
-  });
-  if (count === 1) return positions;
-  const k = Math.sqrt((WIDTH * HEIGHT) / count) * 0.75;
-  let temperature = WIDTH / 8;
-  const ids = nodes.map((node) => node.id);
-  for (let step = 0; step < ITERATIONS; step += 1) {
-    const moves = new Map<string, Point>(ids.map((id) => [id, { x: 0, y: 0 }]));
-    for (let i = 0; i < count; i += 1) {
-      const a = positions.get(ids[i])!;
-      for (let j = i + 1; j < count; j += 1) {
-        const b = positions.get(ids[j])!;
-        let dx = a.x - b.x;
-        let dy = a.y - b.y;
-        let distance = Math.hypot(dx, dy);
-        if (distance < 0.01) {
-          dx = 0.01 * (i - j);
-          dy = 0.01;
-          distance = Math.hypot(dx, dy);
-        }
-        const force = (k * k) / distance;
-        const ma = moves.get(ids[i])!;
-        const mb = moves.get(ids[j])!;
-        ma.x += (dx / distance) * force;
-        ma.y += (dy / distance) * force;
-        mb.x -= (dx / distance) * force;
-        mb.y -= (dy / distance) * force;
-      }
-    }
-    for (const edge of edges) {
-      const a = positions.get(edge.source);
-      const b = positions.get(edge.target);
-      if (!a || !b) continue;
-      const dx = a.x - b.x;
-      const dy = a.y - b.y;
-      const distance = Math.max(0.01, Math.hypot(dx, dy));
-      const force = (distance * distance) / k;
-      const ma = moves.get(edge.source)!;
-      const mb = moves.get(edge.target)!;
-      ma.x -= (dx / distance) * force;
-      ma.y -= (dy / distance) * force;
-      mb.x += (dx / distance) * force;
-      mb.y += (dy / distance) * force;
-    }
-    for (const id of ids) {
-      const point = positions.get(id)!;
-      const move = moves.get(id)!;
-      // 往中心拉一点，没有连线的点不会被推到很远。
-      move.x += (WIDTH / 2 - point.x) * 0.02 * k;
-      move.y += (HEIGHT / 2 - point.y) * 0.02 * k;
-      const length = Math.max(0.01, Math.hypot(move.x, move.y));
-      point.x += (move.x / length) * Math.min(length, temperature);
-      point.y += (move.y / length) * Math.min(length, temperature);
-    }
-    temperature *= 0.985;
-  }
-  return positions;
-}
-
+// 颜色写成逗号分隔的 hsl(h, s%, l%)：Cytoscape 不认空格分隔的新写法。
 // 默认清单里的实体类型用固定的颜色，文档页签和全局页面一致；其他类型按名字从分类色里取（避开红色）。
 const TYPE_HUES: Record<string, number> = {
   人物: 28,
@@ -96,21 +22,119 @@ const TYPE_HUES: Record<string, number> = {
 export function typeColor(type: string) {
   if (type === "其他")
     return {
-      fill: "hsl(215 15% 92%)",
-      stroke: "hsl(215 12% 50%)",
-      text: "hsl(215 15% 30%)",
+      fill: "hsl(215, 15%, 92%)",
+      stroke: "hsl(215, 12%, 50%)",
+      text: "hsl(215, 15%, 30%)",
     };
   const hue = TYPE_HUES[type] ?? labelHue(type);
   return {
-    fill: `hsl(${hue} 75% 90%)`,
-    stroke: `hsl(${hue} 45% 42%)`,
-    text: `hsl(${hue} 55% 26%)`,
+    fill: `hsl(${hue}, 75%, 90%)`,
+    stroke: `hsl(${hue}, 45%, 42%)`,
+    text: `hsl(${hue}, 55%, 26%)`,
   };
 }
 
-function radius(node: GraphNode) {
-  return 7 + Math.min(15, Math.sqrt(node.relation_count) * 3);
+function size(node: GraphNode) {
+  return 16 + Math.min(30, Math.sqrt(node.relation_count) * 6);
 }
+
+// 节点和边转成 Cytoscape 的元素。颜色、大小、标签都算好放进 data，样式表里直接取。
+// 初始位置按顺序排在圆上，再用 cose 布局（randomize: false），同一组数据每次画出来都一样。
+function elements(nodes: GraphNode[], edges: GraphEdge[]): ElementDefinition[] {
+  const count = Math.max(1, nodes.length);
+  const radius = 60 + count * 12;
+  const result: ElementDefinition[] = nodes.map((node, index) => {
+    const color = typeColor(node.type);
+    const name =
+      node.name.length > 12 ? `${node.name.slice(0, 12)}…` : node.name;
+    return {
+      group: "nodes",
+      data: {
+        id: node.id,
+        label:
+          node.hidden_neighbors > 0
+            ? `${name}  +${node.hidden_neighbors}`
+            : name,
+        title: `${node.name}（${node.type}）：${node.relation_count} 条关系，出现 ${node.mention_count} 次`,
+        fill: color.fill,
+        stroke: color.stroke,
+        text: color.text,
+        size: size(node),
+        focus: node.focus ? 1 : 0,
+      },
+      position: {
+        x: radius * Math.cos((2 * Math.PI * index) / count),
+        y: radius * Math.sin((2 * Math.PI * index) / count),
+      },
+    };
+  });
+  const ids = new Set(nodes.map((node) => node.id));
+  for (const edge of edges) {
+    if (!ids.has(edge.source) || !ids.has(edge.target)) continue;
+    result.push({
+      group: "edges",
+      data: {
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        label: `${edge.categories.join("、")}${edge.count > 1 ? ` ×${edge.count}` : ""}`,
+        title: `${edge.categories.join("、")}（${edge.count} 条）\n${edge.descriptions.join("\n")}`,
+        width: Math.min(5, 1 + Math.log2(edge.count + 1)),
+      },
+    });
+  }
+  return result;
+}
+
+const STYLE: cytoscape.StylesheetJson = [
+  {
+    selector: "node",
+    style: {
+      "background-color": "data(fill)",
+      "border-color": "data(stroke)",
+      "border-width": 1.5,
+      width: "data(size)",
+      height: "data(size)",
+      label: "data(label)",
+      color: "data(text)",
+      "font-size": 13,
+      "text-valign": "bottom",
+      "text-margin-y": 4,
+      "text-outline-color": "#fbfcfe",
+      "text-outline-width": 2,
+    },
+  },
+  { selector: "node[focus = 1]", style: { "border-width": 2.5 } },
+  {
+    selector: "node.is-selected",
+    style: { "border-width": 3, "font-weight": "bold" },
+  },
+  {
+    selector: "edge",
+    style: {
+      width: "data(width)",
+      "line-color": "#94a3b8",
+      "target-arrow-color": "#94a3b8",
+      "target-arrow-shape": "triangle",
+      "arrow-scale": 0.9,
+      "curve-style": "bezier",
+    },
+  },
+  {
+    selector: "edge.is-near",
+    style: {
+      label: "data(label)",
+      "font-size": 10,
+      color: "#475569",
+      "text-rotation": "autorotate",
+      "text-outline-color": "#fbfcfe",
+      "text-outline-width": 2,
+      "line-color": "#64748b",
+      "target-arrow-color": "#64748b",
+    },
+  },
+  { selector: ".is-dim", style: { opacity: 0.18 } },
+];
 
 export function GraphView({
   nodes,
@@ -129,93 +153,109 @@ export function GraphView({
   onSelectEdge?: (edge: GraphEdge) => void;
   emptyText?: string;
 }) {
-  const key =
-    nodes.map((node) => node.id).join(",") +
-    "|" +
-    edges.map((edge) => edge.id).join(",");
-  const positions = useMemo(() => layout(nodes, edges), [key]);
-  const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
-  const drag = useRef<{
-    x: number;
-    y: number;
-    startX: number;
-    startY: number;
-  } | null>(null);
-  const svg = useRef<SVGSVGElement>(null);
-  const bounds = useMemo(() => {
-    const points = [...positions.values()];
-    if (points.length === 0)
-      return { x: 0, y: 0, width: WIDTH, height: HEIGHT };
-    const xs = points.map((point) => point.x);
-    const ys = points.map((point) => point.y);
-    const padding = 60;
-    const minX = Math.min(...xs) - padding;
-    const minY = Math.min(...ys) - padding;
-    return {
-      x: minX,
-      y: minY,
-      width: Math.max(...xs) + padding - minX,
-      height: Math.max(...ys) + padding - minY,
-    };
-  }, [positions]);
-  const neighbors = useMemo(() => {
-    if (!selected) return null;
-    const value = new Set<string>([selected]);
-    for (const edge of edges) {
-      if (edge.source === selected) value.add(edge.target);
-      if (edge.target === selected) value.add(edge.source);
-    }
-    return value;
-  }, [selected, edges]);
-  // 滚轮缩放：React 的 onWheel 是被动监听，不能阻止页面跟着滚动，所以直接加原生监听。
+  const container = useRef<HTMLDivElement>(null);
+  const cy = useRef<Core | null>(null);
+  // 事件回调总是用最新的 props，不用每次重新绑定。
+  const handlers = useRef({ onSelect, onExpand, onSelectEdge, edges });
+  handlers.current = { onSelect, onExpand, onSelectEdge, edges };
   const hasNodes = nodes.length > 0;
-  useEffect(() => {
-    const element = svg.current;
-    if (!element) return;
-    function onWheel(event: globalThis.WheelEvent) {
-      event.preventDefault();
-      const factor = event.deltaY < 0 ? 1.15 : 1 / 1.15;
-      setView((value) => ({
-        ...value,
-        scale: Math.min(6, Math.max(0.4, value.scale * factor)),
-      }));
-    }
-    element.addEventListener("wheel", onWheel, { passive: false });
-    return () => element.removeEventListener("wheel", onWheel);
-  }, [hasNodes]);
+  const key =
+    nodes.map((node) => `${node.id}:${node.hidden_neighbors}`).join(",") +
+    "|" +
+    edges.map((edge) => `${edge.id}:${edge.count}`).join(",");
   const types = useMemo(
     () => [...new Set(nodes.map((node) => node.type))],
     [nodes],
   );
-  if (nodes.length === 0) return <div className="graph-empty">{emptyText}</div>;
-  const box = {
-    width: bounds.width / view.scale,
-    height: bounds.height / view.scale,
-  };
-  const viewBox = `${bounds.x + view.x + (bounds.width - box.width) / 2} ${bounds.y + view.y + (bounds.height - box.height) / 2} ${box.width} ${box.height}`;
 
-  function onPointerDown(event: PointerEvent<SVGSVGElement>) {
-    if ((event.target as Element).closest(".graph-node, .graph-edge")) return;
-    drag.current = {
-      x: view.x,
-      y: view.y,
-      startX: event.clientX,
-      startY: event.clientY,
+  // 创建和销毁 Cytoscape 实例。
+  useEffect(() => {
+    if (!container.current) return;
+    const instance = cytoscape({
+      container: container.current,
+      style: STYLE,
+      minZoom: 0.2,
+      maxZoom: 4,
+      wheelSensitivity: 0.3,
+    });
+    instance.on("tap", "node", (event) =>
+      handlers.current.onSelect?.(event.target.id()),
+    );
+    instance.on("dbltap", "node", (event) =>
+      handlers.current.onExpand?.(event.target.id()),
+    );
+    instance.on("tap", "edge", (event) => {
+      const edge = handlers.current.edges.find(
+        (item) => item.id === event.target.id(),
+      );
+      if (edge) handlers.current.onSelectEdge?.(edge);
+    });
+    // 鼠标停在节点、边上时用浏览器的提示框显示详情。
+    instance.on("mouseover", "node, edge", (event) => {
+      if (container.current)
+        container.current.title = event.target.data("title") ?? "";
+    });
+    instance.on("mouseout", "node, edge", () => {
+      if (container.current) container.current.title = "";
+    });
+    cy.current = instance;
+    return () => {
+      instance.destroy();
+      cy.current = null;
     };
-    (event.currentTarget as SVGSVGElement).setPointerCapture(event.pointerId);
-  }
-  function onPointerMove(event: PointerEvent<SVGSVGElement>) {
-    if (!drag.current || !svg.current) return;
-    const ratio = box.width / svg.current.clientWidth;
-    const start = drag.current;
-    setView((value) => ({
-      ...value,
-      x: start.x - (event.clientX - start.startX) * ratio,
-      y: start.y - (event.clientY - start.startY) * ratio,
-    }));
-  }
-  function onPointerUp() {
-    drag.current = null;
+  }, [hasNodes]);
+
+  // 数据变了重新放元素、重新布局。
+  useEffect(() => {
+    const instance = cy.current;
+    if (!instance) return;
+    instance.batch(() => {
+      instance.elements().remove();
+      instance.add(elements(nodes, edges));
+    });
+    instance
+      .layout({
+        name: "cose",
+        randomize: false,
+        animate: false,
+        fit: true,
+        padding: 30,
+        nodeRepulsion: () => 4500,
+        idealEdgeLength: () => 60,
+        nodeDimensionsIncludeLabels: true,
+      } as cytoscape.LayoutOptions)
+      .run();
+    // 只有几个节点时 fit 会放得很大，限制一下。
+    if (instance.zoom() > 1.6) {
+      instance.zoom(1.6);
+      instance.center();
+    }
+  }, [key, hasNodes]);
+
+  // 选中某个实体时，突出它和它的邻居，其他的淡化；相连的边显示关系分类。
+  useEffect(() => {
+    const instance = cy.current;
+    if (!instance) return;
+    instance.batch(() => {
+      instance.elements().removeClass("is-dim is-selected is-near");
+      if (!selected) return;
+      const node = instance.getElementById(selected);
+      if (node.empty()) return;
+      const near = node.closedNeighborhood();
+      node.addClass("is-selected");
+      node.connectedEdges().addClass("is-near");
+      instance.elements().not(near).addClass("is-dim");
+    });
+  }, [selected, key, hasNodes]);
+
+  if (!hasNodes) return <div className="graph-empty">{emptyText}</div>;
+  function zoom(factor: number) {
+    const instance = cy.current;
+    if (!instance) return;
+    instance.zoom({
+      level: instance.zoom() * factor,
+      renderedPosition: { x: instance.width() / 2, y: instance.height() / 2 },
+    });
   }
   return (
     <div className="graph-view">
@@ -234,163 +274,21 @@ export function GraphView({
           })}
         </div>
         <div className="graph-zoom">
-          <button
-            type="button"
-            onClick={() =>
-              setView((value) => ({
-                ...value,
-                scale: Math.min(6, value.scale * 1.25),
-              }))
-            }
-          >
+          <button type="button" onClick={() => zoom(1.25)}>
             ＋
           </button>
-          <button
-            type="button"
-            onClick={() =>
-              setView((value) => ({
-                ...value,
-                scale: Math.max(0.4, value.scale / 1.25),
-              }))
-            }
-          >
+          <button type="button" onClick={() => zoom(1 / 1.25)}>
             －
           </button>
-          <button
-            type="button"
-            onClick={() => setView({ scale: 1, x: 0, y: 0 })}
-          >
+          <button type="button" onClick={() => cy.current?.fit(undefined, 30)}>
             适应
           </button>
         </div>
       </div>
-      <svg
-        ref={svg}
-        className="graph-canvas"
-        viewBox={viewBox}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerLeave={onPointerUp}
-      >
-        <defs>
-          <marker
-            id="graph-arrow"
-            viewBox="0 0 10 10"
-            refX="10"
-            refY="5"
-            markerWidth="7"
-            markerHeight="7"
-            orient="auto-start-reverse"
-          >
-            <path d="M 0 0 L 10 5 L 0 10 z" className="graph-arrow" />
-          </marker>
-        </defs>
-        {edges.map((edge) => {
-          const a = positions.get(edge.source);
-          const b = positions.get(edge.target);
-          const target = nodes.find((node) => node.id === edge.target);
-          if (!a || !b || !target) return null;
-          const dx = b.x - a.x;
-          const dy = b.y - a.y;
-          const length = Math.max(1, Math.hypot(dx, dy));
-          const end = {
-            x: b.x - (dx / length) * (radius(target) + 3),
-            y: b.y - (dy / length) * (radius(target) + 3),
-          };
-          const dim =
-            neighbors &&
-            !(
-              neighbors.has(edge.source) &&
-              neighbors.has(edge.target) &&
-              (edge.source === selected || edge.target === selected)
-            );
-          return (
-            <g
-              key={edge.id}
-              className={`graph-edge ${dim ? "is-dim" : ""} ${onSelectEdge ? "is-clickable" : ""}`}
-              onClick={() => onSelectEdge?.(edge)}
-            >
-              <title>{`${edge.categories.join("、")}（${edge.count} 条）\n${edge.descriptions.join("\n")}`}</title>
-              <line
-                x1={a.x}
-                y1={a.y}
-                x2={end.x}
-                y2={end.y}
-                strokeWidth={Math.min(5, 1 + Math.log2(edge.count + 1))}
-                markerEnd="url(#graph-arrow)"
-              />
-              <line
-                className="graph-edge-hit"
-                x1={a.x}
-                y1={a.y}
-                x2={b.x}
-                y2={b.y}
-              />
-              {edge.source === selected || edge.target === selected ? (
-                <text
-                  x={(a.x + b.x) / 2}
-                  y={(a.y + b.y) / 2 - 4}
-                  className="graph-edge-label"
-                >
-                  {edge.categories.join("、")}
-                  {edge.count > 1 ? ` ×${edge.count}` : ""}
-                </text>
-              ) : null}
-            </g>
-          );
-        })}
-        {nodes.map((node) => {
-          const point = positions.get(node.id)!;
-          const color = typeColor(node.type);
-          const size = radius(node);
-          const dim = neighbors && !neighbors.has(node.id);
-          return (
-            <g
-              key={node.id}
-              className={`graph-node ${dim ? "is-dim" : ""} ${node.id === selected ? "is-selected" : ""}`}
-              transform={`translate(${point.x} ${point.y})`}
-              onClick={() => onSelect?.(node.id)}
-            >
-              <title>{`${node.name}（${node.type}）：${node.relation_count} 条关系，出现 ${node.mention_count} 次`}</title>
-              <circle
-                r={size}
-                fill={color.fill}
-                stroke={color.stroke}
-                strokeWidth={node.id === selected ? 3 : node.focus ? 2.5 : 1.5}
-              />
-              <text
-                y={size + 13}
-                className="graph-node-label"
-                fill={color.text}
-              >
-                {node.name.length > 12
-                  ? `${node.name.slice(0, 12)}…`
-                  : node.name}
-              </text>
-              {node.hidden_neighbors > 0 && onExpand ? (
-                <g
-                  className="graph-node-more"
-                  transform={`translate(${size * 0.75} ${-size * 0.75})`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onExpand(node.id);
-                  }}
-                >
-                  <title>{`还有 ${node.hidden_neighbors} 个相连的实体没显示，点击展开`}</title>
-                  <circle r={8} />
-                  <text y={3.5}>
-                    +{node.hidden_neighbors > 99 ? "99" : node.hidden_neighbors}
-                  </text>
-                </g>
-              ) : null}
-            </g>
-          );
-        })}
-      </svg>
+      <div ref={container} className="graph-canvas" />
       <small className="graph-hint">
-        滚轮缩放、拖动空白处平移；点击实体看详情，右上角的 +数字
-        表示还有没显示的相连实体，点击展开。
+        滚轮缩放、拖动空白处平移、拖动节点调整位置；点击实体看详情。名字后面的
+        +数字 表示还有几个相连的实体没显示，双击这个实体展开。
       </small>
     </div>
   );
