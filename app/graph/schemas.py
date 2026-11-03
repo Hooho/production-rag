@@ -21,37 +21,37 @@ DEFAULT_SCHEMA = {
         {
             "name": "人物",
             "description": "有名字的人，包括网名、昵称",
-            "examples": ["段永平", "巴菲特", "芒格"],
+            "examples": [],
         },
         {
             "name": "组织",
             "description": "公司、机构、部门、基金等",
-            "examples": ["苹果", "步步高", "伯克希尔"],
+            "examples": [],
         },
         {
             "name": "产品",
             "description": "具体的产品、品牌、服务",
-            "examples": ["iPhone", "OPPO 手机", "茅台酒"],
+            "examples": [],
         },
         {
             "name": "作品",
             "description": "书、文章、演讲、电影等",
-            "examples": ["《穷查理宝典》", "致股东的信"],
+            "examples": [],
         },
         {
             "name": "地点",
             "description": "国家、城市、地区、具体场所",
-            "examples": ["美国", "东莞", "奥马哈"],
+            "examples": [],
         },
         {
             "name": "事件",
             "description": "有名字或有明确时间的事件",
-            "examples": ["2008 年金融危机", "巴菲特午餐"],
+            "examples": [],
         },
         {
             "name": "概念",
             "description": "反复出现的观点、方法、术语",
-            "examples": ["本分", "护城河", "价值投资"],
+            "examples": [],
         },
     ],
     "relation_categories": [
@@ -74,10 +74,10 @@ MATCHING_RULES = {
         "去掉两边的书名号、引号",
     ],
     "merge": [
-        "抽取时模型同时给出原名和标准名（例如原名「阿段」、标准名「段永平」）",
-        "按「类型 + 规范化后的标准名」合并：两者都相同才是同一个实体",
-        "先查别名表（第 3 期才能维护），再按上面的规则找全局已有的实体，找不到就新建",
-        "类型不同不合并，例如组织「苹果」和产品「苹果」是两个实体",
+        "抽取时保留原名，并在资料明确支持时给出标准名",
+        "先查已确认的别名表；未命中时，按「类型 + 规范化后的标准名」匹配已有实体，未匹配则新建",
+        "模型给出的标准名仅用于本次归属判断，不自动写入别名表",
+        "类型不同的实体不自动合并",
     ],
 }
 
@@ -100,17 +100,27 @@ def row_view(row):
     }
 
 
-# 第一次用到时写入默认清单；以后改默认清单要换新的 id（default-v2），已有建图记录仍指向原来那份。
+# 默认清单 V1 原地修正：读取时同步内置内容，保留 id、版本和创建信息。
 def ensure_default(engine):
     with engine.begin() as connection:
-        exists = connection.execute(
-            select(graph_schemas.c.id).where(graph_schemas.c.id == DEFAULT_SCHEMA_ID)
-        ).first()
+        exists = (
+            connection.execute(
+                select(graph_schemas).where(graph_schemas.c.id == DEFAULT_SCHEMA_ID)
+            )
+            .mappings()
+            .first()
+        )
         if exists is None:
             connection.execute(
                 graph_schemas.insert().values(
                     **DEFAULT_SCHEMA, created_by="system", created=now()
                 )
+            )
+        elif any(exists[key] != value for key, value in DEFAULT_SCHEMA.items()):
+            connection.execute(
+                graph_schemas.update()
+                .where(graph_schemas.c.id == DEFAULT_SCHEMA_ID)
+                .values(**DEFAULT_SCHEMA)
             )
 
 

@@ -36,10 +36,10 @@ class RetryInput(BaseModel):
 
 
 EXAMPLE_CHUNK = {
-    "content": "2011 年，阿段买入了苹果公司的股票，他认为苹果有很强的护城河……",
-    "document_title": "段永平投资问答录",
-    "heading_path": ["投资", "苹果"],
-    "context": "这段讲段永平 2011 年开始买入苹果股票的经过。",
+    "content": "<待抽取的分片原文>",
+    "document_title": "<当前文档标题>",
+    "heading_path": ["<当前章节路径>"],
+    "context": "<当前分片的上下文说明>",
 }
 
 

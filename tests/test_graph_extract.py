@@ -4,7 +4,9 @@ from langchain_core.messages import AIMessage
 
 from app import prompts
 from app.graph import extract
-from app.graph.schemas import DEFAULT_SCHEMA
+from app.graph.schemas import DEFAULT_SCHEMA, get_schema, DEFAULT_SCHEMA_ID
+from app.mysql.tables import graph_schemas, metadata
+from sqlalchemy import create_engine, select
 
 
 # 假的聊天模型：按顺序返回准备好的回复，记下收到的消息。
@@ -194,3 +196,46 @@ def test_cache_key_changes_with_each_input():
         extract.cache_key("k1", DEFAULT_SCHEMA, "minimax", "M3", "p2"),
     }
     assert base not in others and len(others) == 5
+
+
+def test_in_place_schema_change_invalidates_cache():
+    changed = {
+        **DEFAULT_SCHEMA,
+        "entity_types": [{"name": "方法", "description": "流程", "examples": []}],
+    }
+    assert extract.cache_key("k", changed, "p", "m", "v") != extract.cache_key(
+        "k", DEFAULT_SCHEMA, "p", "m", "v"
+    )
+    changed = {
+        **DEFAULT_SCHEMA,
+        "relation_categories": [{"name": "依赖", "description": "依赖关系"}],
+    }
+    assert extract.cache_key("k", changed, "p", "m", "v") != extract.cache_key(
+        "k", DEFAULT_SCHEMA, "p", "m", "v"
+    )
+
+
+def test_default_v1_updates_existing_row():
+    db = create_engine("sqlite://")
+    metadata.create_all(db)
+    original = get_schema(db, DEFAULT_SCHEMA_ID)
+    with db.begin() as connection:
+        connection.execute(
+            graph_schemas.update()
+            .where(graph_schemas.c.id == DEFAULT_SCHEMA_ID)
+            .values(entity_types=[{"name": "人物", "examples": ["旧示例"]}])
+        )
+    updated = get_schema(db, DEFAULT_SCHEMA_ID)
+    assert updated["id"] == DEFAULT_SCHEMA_ID and updated["version"] == 1
+    assert updated["entity_types"] == DEFAULT_SCHEMA["entity_types"]
+    assert updated["created"] == original["created"]
+    assert get_schema(db, DEFAULT_SCHEMA_ID) == updated
+    with db.connect() as connection:
+        assert len(connection.execute(select(graph_schemas)).all()) == 1
+
+
+def test_graph_preview_matches_generic_template():
+    preview = prompts.boxes("graph_extract")
+    assert isinstance(preview[1]["parts"][0], dict)
+    assert "段永平" not in prompts.compose("graph_extract")
+    assert "苹果" not in str(preview)

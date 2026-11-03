@@ -20,8 +20,18 @@ OTHER_CATEGORY = "其他"
 # 复用抽取结果的键：分片文字、清单（id 和版本）、模型、提示词内容都相同才复用。任何一项变了都会重新抽取。
 def cache_key(chunk_key, schema, provider, model, prompt_identity):
     identity = json.dumps(
-        [chunk_key, schema["id"], schema["version"], provider, model, prompt_identity],
+        [
+            chunk_key,
+            schema["id"],
+            schema["version"],
+            schema["entity_types"],
+            schema["relation_categories"],
+            provider,
+            model,
+            prompt_identity,
+        ],
         ensure_ascii=False,
+        sort_keys=True,
     )
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
