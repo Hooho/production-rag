@@ -9,6 +9,7 @@ from ..mysql.tables import (
     graph_chunk_extractions,
     graph_entities,
     graph_mentions,
+    graph_merges,
     graph_relations,
     graph_schemas,
     users,
@@ -410,6 +411,7 @@ def merge_rows(connection, build_id):
         connection.execute(
             select(
                 graph_mentions.c.name,
+                graph_merges.c.detail.label("merge_detail"),
                 graph_mentions.c.canonical,
                 graph_mentions.c.type,
                 graph_mentions.c.resolve_method,
@@ -421,7 +423,11 @@ def merge_rows(connection, build_id):
             .select_from(
                 graph_mentions.join(
                     graph_entities, graph_entities.c.id == graph_mentions.c.entity_id
-                ).join(
+                )
+                .outerjoin(
+                    graph_merges, graph_merges.c.mention_id == graph_mentions.c.id
+                )
+                .join(
                     graph_chunk_extractions,
                     graph_chunk_extractions.c.id == graph_mentions.c.extraction_id,
                 )
@@ -434,10 +440,18 @@ def merge_rows(connection, build_id):
     )
     grouped = {}
     for row in rows:
-        key = (row["name"], row["entity_id"], row["resolve_method"])
+        scope = (row["merge_detail"] or {}).get("scope", "unknown")
+        key = (row["name"], row["entity_id"], row["resolve_method"], scope)
         item = grouped.setdefault(
             key,
             {
+                "scope": scope,
+                "scope_label": {
+                    "new": "新建实体",
+                    "document": "文档内合并",
+                    "global": "跨文档合并",
+                    "unknown": "历史未记录",
+                }.get(scope, "历史未记录"),
                 "name": row["name"],
                 "canonical": row["canonical"],
                 "type": row["type"],

@@ -512,7 +512,8 @@ export function DocumentGraph({
               onPage={setPage}
             >
               <p className="graph-note">
-                每个名字归到了哪个实体、用的什么方法。第 1
+                合并范围区分新建实体、文档内合并和跨文档合并。同一次建图中，首次关联其他文档的实体记为跨文档合并，后续重复归属记为文档内合并。历史记录未保存范围时显示「历史未记录」。第
+                1
                 期只按规则合并：名字相同、规范化后相同、模型给的标准名相同；没合上或合错的要等第
                 3 期手动处理。
               </p>
@@ -521,13 +522,16 @@ export function DocumentGraph({
                   <tr>
                     <th>原文里的名字</th>
                     <th>归到</th>
+                    <th>合并范围</th>
                     <th>方法</th>
                     <th>出现在</th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.merges.items.map((row) => (
-                    <tr key={`${row.name}-${row.entity_id}-${row.method}`}>
+                    <tr
+                      key={`${row.name}-${row.entity_id}-${row.method}-${row.scope}`}
+                    >
                       <td>
                         {row.name}
                         <small>
@@ -544,6 +548,15 @@ export function DocumentGraph({
                         >
                           {row.entity_name}
                         </button>
+                      </td>
+                      <td>
+                        <Tag
+                          size="sm"
+                          plain
+                          tone={row.scope === "global" ? "info" : "neutral"}
+                        >
+                          {row.scope_label}
+                        </Tag>
                       </td>
                       <td>
                         <Tag

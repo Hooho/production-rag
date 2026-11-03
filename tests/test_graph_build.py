@@ -787,3 +787,62 @@ def test_all_extractions_failed_does_not_report_graph_write_success(setup):
     assert steps["graph_merge"]["status"] == "pending"
     assert steps["graph_write"]["status"] == "pending"
     assert "未执行" in steps["graph_write"]["detail"]
+
+
+def test_merge_records_distinguish_document_and_global_scope(setup):
+    from app.mysql.tables import graph_merges
+
+    client, store = setup
+    models = enable_model(client)
+    first = add_document(client, content=CONTENT * 12)
+    assert build(client, first).status_code == 202
+    run_graph_jobs(store, models)
+    first_merges = client.get(
+        f"/documents/{first}/graph?view=merges", headers=headers()
+    ).json()["merges"]["items"]
+    assert "new" in {row["scope"] for row in first_merges}
+    assert "document" in {row["scope"] for row in first_merges}
+    assert "global" not in {row["scope"] for row in first_merges}
+    # 同一份文档重建，沿用自己的实体不算跨文档。
+    assert build(client, first).status_code == 202
+    run_graph_jobs(store, models)
+    rebuilt = client.get(
+        f"/documents/{first}/graph?view=merges", headers=headers()
+    ).json()["merges"]["items"]
+    assert {row["scope"] for row in rebuilt} == {"document"}
+    second = add_document(
+        client, content=CONTENT * 12 + "\n补充说明。", title="另一份资料"
+    )
+    second_build = build(client, second).json()
+    run_graph_jobs(store, models)
+    second_merges = client.get(
+        f"/documents/{second}/graph?view=merges", headers=headers()
+    ).json()["merges"]["items"]
+    assert {row["scope"] for row in second_merges} == {"document", "global"}
+    steps = client.get(f"/documents/{second}", headers=headers()).json()["steps"]
+    merge_step = next(row for row in steps if row["step_id"] == "graph_merge")
+    counts = merge_step["result"]["scope_counts"]
+    assert counts["global"] == 3 and counts["document"] > 0 and counts["new"] == 0
+    # 旧记录不根据当前图谱反推，以免后来新增的文档改变历史分类。
+    with store.engine.begin() as connection:
+        rows = (
+            connection.execute(
+                select(graph_merges).where(
+                    graph_merges.c.build_id == second_build["id"]
+                )
+            )
+            .mappings()
+            .all()
+        )
+        for row in rows:
+            detail = dict(row["detail"])
+            detail.pop("scope")
+            connection.execute(
+                graph_merges.update()
+                .where(graph_merges.c.id == row["id"])
+                .values(detail=detail)
+            )
+    old = client.get(
+        f"/documents/{second}/graph?view=merges", headers=headers()
+    ).json()["merges"]["items"]
+    assert {row["scope"] for row in old} == {"unknown"}

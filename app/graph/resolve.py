@@ -1,10 +1,12 @@
 import unicodedata
 import uuid
 
-from sqlalchemy import and_, delete, exists, select
+from sqlalchemy import and_, delete, exists, or_, select
 
 from ..mysql.tables import (
     graph_aliases,
+    documents,
+    graph_builds,
     graph_entities,
     graph_mentions,
     graph_merges,
@@ -149,6 +151,15 @@ def prepare_build(connection, space, build_id, extractions, created_by="system")
     mentions, merges, relations = [], [], []
     methods = {}
     entity_ids = set()
+    scopes = {"new": 0, "document": 0, "global": 0}
+    external_entities = {}
+    document_ids = {row["document_id"] for row in extractions}
+    doc_keys = set(
+        connection.execute(
+            select(documents.c.doc_key).where(documents.c.id.in_(document_ids))
+        ).scalars()
+    )
+    doc_keys.discard(None)
     created_count = 0
     relation_count = 0
     timestamp = now()
@@ -162,6 +173,41 @@ def prepare_build(connection, space, build_id, extractions, created_by="system")
             entity_id, method, created, key = resolve_mention(
                 connection, space, item, cache
             )
+            if created:
+                scope = "new"
+            elif entity_id in entity_ids:
+                scope = "document"
+            else:
+                if entity_id not in external_entities:
+                    external_entities[entity_id] = (
+                        connection.execute(
+                            select(graph_mentions.c.id)
+                            .select_from(
+                                graph_mentions.join(
+                                    documents,
+                                    documents.c.id == graph_mentions.c.document_id,
+                                ).join(
+                                    graph_builds,
+                                    graph_builds.c.id == graph_mentions.c.build_id,
+                                )
+                            )
+                            .where(
+                                graph_mentions.c.entity_id == entity_id,
+                                graph_builds.c.active.is_(True),
+                                ~graph_mentions.c.document_id.in_(document_ids),
+                                or_(
+                                    documents.c.doc_key.is_(None),
+                                    documents.c.doc_key.not_in(doc_keys),
+                                )
+                                if doc_keys
+                                else True,
+                            )
+                            .limit(1)
+                        ).first()
+                        is not None
+                    )
+                scope = "global" if external_entities[entity_id] else "document"
+            scopes[scope] += 1
             by_name[item["name"]] = mention_id
             entity_ids.add(entity_id)
             created_count += 1 if created else 0
@@ -196,6 +242,7 @@ def prepare_build(connection, space, build_id, extractions, created_by="system")
                         "type": item["type"],
                         "merge_key": key,
                         "entity_created": created,
+                        "scope": scope,
                     },
                     "status": "applied",
                     "created_by": created_by,
@@ -239,6 +286,7 @@ def prepare_build(connection, space, build_id, extractions, created_by="system")
             "mention_count": len(mentions),
             "relation_count": relation_count,
             "methods": methods,
+            "scope_counts": scopes,
         },
     }
 

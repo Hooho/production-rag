@@ -625,7 +625,8 @@ def finalize(store, build):
                 build["document_id"],
                 step_id,
                 "completed",
-                f"归到 {summary['entity_count']} 个实体（新建 {summary['created_count']} 个）；{methods}",
+                f"归到 {summary['entity_count']} 个实体（新建 {summary['created_count']} 个）；"
+                f"名字归属：新建 {summary['scope_counts']['new']}，文档内合并 {summary['scope_counts']['document']}，跨文档合并 {summary['scope_counts']['global']}；{methods}",
                 {"build_id": build["id"], **summary},
                 round((time.monotonic() - started) * 1000),
             )

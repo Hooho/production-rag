@@ -3734,6 +3734,8 @@ export type GraphRelationRow = {
   document_title?: string | null;
 };
 export type GraphMergeRow = {
+  scope: "new" | "document" | "global" | "unknown";
+  scope_label: string;
   name: string;
   canonical: string;
   type: string;
