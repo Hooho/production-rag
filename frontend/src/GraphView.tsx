@@ -140,6 +140,7 @@ export function GraphView({
   nodes,
   edges,
   selected,
+  selectedEdge,
   onSelect,
   onExpand,
   onSelectEdge,
@@ -148,6 +149,7 @@ export function GraphView({
   nodes: GraphNode[];
   edges: GraphEdge[];
   selected?: string | null;
+  selectedEdge?: string | null;
   onSelect?: (id: string) => void;
   onExpand?: (id: string) => void;
   onSelectEdge?: (edge: GraphEdge) => void;
@@ -238,6 +240,16 @@ export function GraphView({
     if (!instance) return;
     instance.batch(() => {
       instance.elements().removeClass("is-dim is-selected is-near");
+      if (selectedEdge) {
+        const edge = instance.getElementById(selectedEdge);
+        if (edge.empty()) return;
+        edge.addClass("is-near");
+        instance
+          .elements()
+          .not(edge.union(edge.connectedNodes()))
+          .addClass("is-dim");
+        return;
+      }
       if (!selected) return;
       const node = instance.getElementById(selected);
       if (node.empty()) return;
@@ -246,7 +258,7 @@ export function GraphView({
       node.connectedEdges().addClass("is-near");
       instance.elements().not(near).addClass("is-dim");
     });
-  }, [selected, key, hasNodes]);
+  }, [selected, selectedEdge, key, hasNodes]);
 
   if (!hasNodes) return <div className="graph-empty">{emptyText}</div>;
   function zoom(factor: number) {
@@ -287,7 +299,7 @@ export function GraphView({
       </div>
       <div ref={container} className="graph-canvas" />
       <small className="graph-hint">
-        滚轮缩放、拖动空白处平移、拖动节点调整位置；点击实体看详情。名字后面的
+        滚轮缩放、拖动空白处平移、拖动节点调整位置；点击实体看详情，点击关系线看出处。名字后面的
         +数字 表示还有几个相连的实体没显示，双击这个实体展开。
       </small>
     </div>

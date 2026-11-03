@@ -248,6 +248,30 @@ def build_router(current_user, identity, require_admin):
             raise HTTPException(404, "实体不存在")
         return result
 
+    @router.get("/graph/relations")
+    def edge_relations(
+        request: Request,
+        source_id: str = Query(..., min_length=1, max_length=36),
+        target_id: str = Query(..., min_length=1, max_length=36),
+        document_id: UUID | None = Query(None),
+        category: str | None = Query(None, max_length=32),
+        user=Depends(current_user),
+    ):
+        state = request.app.state
+        if document_id:
+            readable(state, user["username"], document_id)
+        elif not user["is_admin"]:
+            raise HTTPException(403, "需要管理员权限")
+        return {
+            "items": graph_query.edge_relations(
+                state.store.engine,
+                source_id,
+                target_id,
+                str(document_id) if document_id else None,
+                category,
+            )
+        }
+
     @router.get("/graph/overview")
     def overview(
         request: Request,

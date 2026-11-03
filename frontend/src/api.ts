@@ -3934,6 +3934,19 @@ export function getGraphEntity(entityId: string, documentId?: string | null) {
   );
 }
 
+export type GraphRelationDetail = GraphRelationRow & { chunk_content: string };
+
+export function getGraphRelations(
+  sourceId: string,
+  targetId: string,
+  documentId?: string | null,
+  category?: string | null,
+) {
+  return request<{ items: GraphRelationDetail[] }>(
+    `/graph/relations${query({ source_id: sourceId, target_id: targetId, document_id: documentId, category })}`,
+  );
+}
+
 export function getGraphOverview(params: {
   document_id?: string | null;
   type?: string | null;

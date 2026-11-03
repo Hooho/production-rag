@@ -2,6 +2,7 @@ from sqlalchemy import false, func, select
 from sqlalchemy.orm import aliased
 
 from ..mysql.tables import (
+    chunks,
     document_heads,
     documents,
     graph_builds,
@@ -880,3 +881,44 @@ def tasks(engine, space=ONLINE_SPACE):
             }
         )
     return result
+
+
+def edge_relations(engine, source_id, target_id, document_id=None, category=None):
+    with engine.connect() as connection:
+        if document_id:
+            build = latest_build(connection, document_id)
+            build_ids = [build["id"]] if build else []
+        else:
+            build_ids = [row["id"] for row in visible_builds(connection)]
+        rows = [
+            row
+            for row in relation_rows(connection, build_ids, entity_id=source_id)
+            if row["source_id"] == source_id
+            and row["target_id"] == target_id
+            and (not category or row["category"] == category)
+        ]
+        if not rows:
+            return []
+        texts = {
+            row["id"]: row["content"] or row["text"] or ""
+            for row in connection.execute(
+                select(chunks.c.id, chunks.c.content, chunks.c.text).where(
+                    chunks.c.id.in_({row["chunk_id"] for row in rows})
+                )
+            ).mappings()
+        }
+        titles = dict(
+            connection.execute(
+                select(documents.c.id, documents.c.title).where(
+                    documents.c.id.in_({row["document_id"] for row in rows})
+                )
+            ).all()
+        )
+    return [
+        {
+            **row,
+            "chunk_content": texts.get(row["chunk_id"], ""),
+            "document_title": titles.get(row["document_id"]),
+        }
+        for row in rows
+    ]

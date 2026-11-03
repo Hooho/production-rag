@@ -1,3 +1,5 @@
+import { GraphRelationPanel } from "./GraphRelationPanel";
+import type { GraphEdge } from "./api";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   getDocumentGraph,
@@ -71,6 +73,7 @@ export function DocumentGraph({
   const [category, setCategory] = useState<string | null>(null);
   const [focus, setFocus] = useState<string[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null);
   const [data, setData] = useState<DocumentGraphData | null>(null);
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState(false);
@@ -367,7 +370,7 @@ export function DocumentGraph({
           </button>
         )}
       </div>
-      <div className={selected ? "graph-body" : ""}>
+      <div className={selected || selectedEdge ? "graph-body" : ""}>
         <div>
           {view === "network" && data.network && (
             <>
@@ -375,7 +378,15 @@ export function DocumentGraph({
                 nodes={data.network.nodes}
                 edges={data.network.edges}
                 selected={selected}
-                onSelect={setSelected}
+                selectedEdge={selectedEdge?.id}
+                onSelect={(id) => {
+                  setSelected(id);
+                  setSelectedEdge(null);
+                }}
+                onSelectEdge={(edge) => {
+                  setSelectedEdge(edge);
+                  setSelected(null);
+                }}
                 onExpand={(id) =>
                   setFocus((items) =>
                     items.includes(id) ? items : [...items, id],
@@ -566,6 +577,15 @@ export function DocumentGraph({
             </Paged>
           )}
         </div>
+        {selectedEdge && (
+          <GraphRelationPanel
+            edge={selectedEdge}
+            documentId={documentId}
+            category={category}
+            onClose={() => setSelectedEdge(null)}
+            onOpenChunk={(chunkId, position) => onOpenChunk(chunkId, position)}
+          />
+        )}
         {selected && (
           <GraphEntityPanel
             entityId={selected}

@@ -588,7 +588,6 @@ def test_build_freezes_prompt_and_schema_across_batches_and_retry(setup, monkeyp
     from app import prompts
     from app.graph.extract import cache_key
     from app.graph.schemas import get_schema, DEFAULT_SCHEMA_ID
-    from app.mysql.tables import graph_schemas
 
     client, store = setup
     models = enable_model(client)
@@ -654,3 +653,56 @@ def test_build_freezes_prompt_and_schema_across_batches_and_retry(setup, monkeyp
         == "graph_extract@v41"
     )
     assert graph_build.get_build(store.engine, started["id"])["status"] == "completed"
+
+
+def test_edge_details_are_scoped_and_include_source_text(setup):
+    client, store = setup
+    models = enable_model(client)
+    private = add_document(client)
+    public = add_document(client, owner="bob", title="公开来源")
+    for document_id, owner in ((private, "alice"), (public, "bob")):
+        assert build(client, document_id, owner=owner).status_code == 202
+    run_graph_jobs(store, models)
+    network = client.get(f"/documents/{public}/graph", headers=headers("bob")).json()[
+        "network"
+    ]
+    edge = network["edges"][0]
+    params = {
+        "source_id": edge["source"],
+        "target_id": edge["target"],
+        "document_id": public,
+    }
+    result = client.get("/graph/relations", params=params, headers=headers("bob"))
+    assert result.status_code == 200
+    items = result.json()["items"]
+    assert items and {row["document_id"] for row in items} == {public}
+    assert all(row["evidence"] in row["chunk_content"] for row in items)
+    assert all(
+        row["document_title"] == "公开来源" and row["origin"] == "extracted"
+        for row in items
+    )
+    assert (
+        client.get(
+            "/graph/relations",
+            params={**params, "document_id": private},
+            headers=headers("bob"),
+        ).status_code
+        == 404
+    )
+    assert (
+        client.get(
+            "/graph/relations",
+            params={**params, "category": "不匹配"},
+            headers=headers("bob"),
+        ).json()["items"]
+        == []
+    )
+    pair = {"source_id": edge["source"], "target_id": edge["target"]}
+    assert (
+        client.get("/graph/relations", params=pair, headers=headers("bob")).status_code
+        == 403
+    )
+    global_items = client.get(
+        "/graph/relations", params=pair, headers=headers("admin")
+    ).json()["items"]
+    assert {row["document_id"] for row in global_items} == {private, public}

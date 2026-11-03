@@ -432,3 +432,17 @@
 .ag-delivery-dialog .graph-prompt {
   max-height: none;
 }
+
+.graph-evidence {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 8px;
+  background: #f7f9fc;
+  border-radius: 6px;
+  max-height: 260px;
+  overflow: auto;
+}
+.graph-evidence mark {
+  background: #fff2b8;
+  color: inherit;
+}

@@ -1,3 +1,5 @@
+import { GraphRelationPanel } from "./GraphRelationPanel";
+import type { GraphEdge } from "./api";
 import { useEffect, useState } from "react";
 import {
   getGraphOverview,
@@ -72,6 +74,7 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
   const [focus, setFocus] = useState<string[]>([]);
   const [limit, setLimit] = useState(50);
   const [selected, setSelected] = useState<string | null>(null);
+  const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null);
   const [data, setData] = useState<GraphOverview | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -180,13 +183,21 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
           ))}
         </p>
       )}
-      <div className={selected ? "graph-body" : ""}>
+      <div className={selected || selectedEdge ? "graph-body" : ""}>
         <div>
           <GraphView
             nodes={data.network.nodes}
             edges={data.network.edges}
             selected={selected}
-            onSelect={setSelected}
+            selectedEdge={selectedEdge?.id}
+            onSelect={(id) => {
+              setSelected(id);
+              setSelectedEdge(null);
+            }}
+            onSelectEdge={(edge) => {
+              setSelectedEdge(edge);
+              setSelected(null);
+            }}
             onExpand={(id) =>
               setFocus((items) => (items.includes(id) ? items : [...items, id]))
             }
@@ -197,6 +208,17 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
             {data.network.total_relations} 条关系）。
           </p>
         </div>
+        {selectedEdge && (
+          <GraphRelationPanel
+            edge={selectedEdge}
+            documentId={documentId}
+            category={category}
+            onClose={() => setSelectedEdge(null)}
+            onOpenChunk={(_chunkId, _position, id) =>
+              onNavigate(`/knowledge/${id}`)
+            }
+          />
+        )}
         {selected && (
           <GraphEntityPanel
             entityId={selected}
