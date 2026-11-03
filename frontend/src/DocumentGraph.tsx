@@ -167,7 +167,7 @@ export function DocumentGraph({
     <div className="graph-panel">
       <div className="graph-summary">
         <div className="graph-summary-main">
-          <div>
+          <div className="graph-summary-heading">
             <Tag tone={status.tone} dot>
               {status.label}
             </Tag>{" "}

@@ -67,24 +67,36 @@
 .graph-panel {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 20px;
+  padding: 20px 0 24px;
 }
 .graph-summary {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
+  gap: 16px 24px;
+  padding: 18px 20px;
   border: 1px solid #e3e8ef;
   border-radius: 10px;
   background: #fff;
 }
 .graph-summary-main {
+  flex: 1 1 480px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
   min-width: 0;
+}
+.graph-summary-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  line-height: 1.7;
+}
+.graph-summary-heading .graph-note {
+  overflow-wrap: anywhere;
 }
 .graph-summary-main p {
   margin: 0;
@@ -111,7 +123,7 @@
   border-radius: 3px;
   background: #e8edf3;
   overflow: hidden;
-  max-width: 360px;
+  width: min(100%, 480px);
 }
 .graph-progress span {
   display: block;
@@ -122,14 +134,27 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 12px 16px;
+  padding: 0 2px;
+}
+.graph-filters .chunk-source-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.graph-panel .graph-view + .graph-note,
+.graph-panel .graph-empty + .graph-note {
+  margin: 12px 0 0;
+  line-height: 1.7;
 }
 .graph-filters select,
 .graph-filters input {
   border: 1px solid #d5dce6;
   border-radius: 6px;
-  padding: 5px 8px;
+  min-height: 34px;
+  padding: 6px 10px;
   font-size: 13px;
+  color: var(--t-475569);
   background: #fff;
 }
 .graph-filters input {
@@ -445,4 +470,20 @@
 .graph-evidence mark {
   background: #fff2b8;
   color: inherit;
+}
+
+@media (max-width: 640px) {
+  .graph-panel {
+    padding: 16px 0;
+    gap: 16px;
+  }
+  .graph-summary {
+    padding: 16px;
+  }
+  .graph-summary-main {
+    flex-basis: 100%;
+  }
+  .graph-filters .chunk-source-filter {
+    flex-basis: 100%;
+  }
 }
