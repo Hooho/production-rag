@@ -1,3 +1,4 @@
+import { GraphBuildTimer } from "./GraphBuildTimer";
 import { GraphChunkDetails } from "./GraphChunkDetails";
 import { GraphRelationPanel } from "./GraphRelationPanel";
 import type { GraphEdge } from "./api";
@@ -45,17 +46,6 @@ const VIEWS: [GraphViewName, string][] = [
 
 export function isBuildBusy(build: GraphBuild | null | undefined) {
   return build?.status === "queued" || build?.status === "running";
-}
-
-function duration(build: GraphBuild) {
-  if (!build.finished) return "";
-  const ms =
-    new Date(build.finished).getTime() - new Date(build.created).getTime();
-  if (!Number.isFinite(ms) || ms < 0) return "";
-  const seconds = Math.round(ms / 1000);
-  return seconds < 60
-    ? `${seconds} 秒`
-    : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
 }
 
 // 文档详情的「实体关系」页签：这个版本最近一次建图的概览、图、实体表、关系表、合并记录（第 1 期只能查看）。
@@ -195,7 +185,13 @@ export function DocumentGraph({
               {build.prompt_tag} ·{" "}
               {TRIGGER_LABELS[build.trigger] ?? build.trigger} ·{" "}
               {formatShortTime(build.created)}
-              {duration(build) ? ` · 用时 ${duration(build)}` : ""}
+              {" · "}
+              <GraphBuildTimer
+                key={build.id}
+                started={build.created}
+                finished={build.finished}
+                running={busy}
+              />
             </span>
           </div>
           {busy ? (

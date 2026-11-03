@@ -586,3 +586,15 @@
 .graph-chunk-source-actions .link-button {
   text-align: left;
 }
+
+.graph-build-timer {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+.graph-build-timer strong {
+  color: var(--t-475569);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
