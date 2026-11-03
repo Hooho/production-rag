@@ -346,6 +346,17 @@
 }
 .chunk-graph-mark.is-clickable {
   cursor: pointer;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+}
+.chunk-graph-mark.is-clickable:hover {
+  background: #ffe58a;
+}
+.chunk-graph-mark.is-clickable:focus-visible {
+  outline: 2px solid #1d4ed8;
+  outline-offset: 2px;
 }
 .chunk-graph-raw {
   margin-top: 6px;

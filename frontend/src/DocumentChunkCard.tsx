@@ -1,4 +1,6 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { DetailDialog } from "./DetailDialog";
+import { GraphEntityPanel } from "./GraphEntityPanel";
 import type { ChunkGraph, DocumentChunk } from "./api";
 import { Tag } from "./Tag";
 
@@ -34,6 +36,7 @@ const CONTEXT_SOURCE_LABELS: Record<string, string> = {
 // 展示单个分块：展开后先看"位置 / 上下文说明 / 内容"，排查用的技术信息默认折叠。
 // 以前 11 个字段一行一个平铺，位置、正文和排查信息混在一起；作者识别不到时每个分片都重复同一句。
 export function DocumentChunkCard({ chunk, expanded, onToggle, onRetryGraph }: { chunk: DocumentChunk; expanded: boolean; onToggle: () => void; onRetryGraph?: (chunkId: string) => void }) {
+  const [entityId, setEntityId] = useState<string | null>(null);
   const heading = chunk.heading_path.length > 0 ? chunk.heading_path.join(" / ") : "根文档";
   // 表格（Excel、CSV）的分片记的是行号，没有页码。
   const pages = chunk.row_start != null ? (chunk.row_start === chunk.row_end ? `第 ${chunk.row_start} 行` : `第 ${chunk.row_start}–${chunk.row_end} 行`)
@@ -62,9 +65,9 @@ export function DocumentChunkCard({ chunk, expanded, onToggle, onRetryGraph }: {
       </section>
       <section className="chunk-group">
         <h4>内容<small>{chunk.char_count} 字{chunk.graph && chunk.graph.mentions.length > 0 ? " · 黄色是抽出的实体名字" : ""}</small></h4>
-        <p className="chunk-content">{chunk.graph ? highlight(chunk.content, chunk.graph) : chunk.content}</p>
+        <p className="chunk-content">{chunk.graph ? highlight(chunk.content, chunk.graph, setEntityId) : chunk.content}</p>
       </section>
-      {chunk.graph && <ChunkGraphSection chunkId={chunk.chunk_id} graph={chunk.graph} onRetry={onRetryGraph} />}
+      {chunk.graph && <ChunkGraphSection chunkId={chunk.chunk_id} graph={chunk.graph} onRetry={onRetryGraph} onSelectEntity={setEntityId} />}
       <details className="chunk-group chunk-tech">
         <summary>技术信息<small>排查切分和解析问题时看</small></summary>
         {/* 每项先写结果，下面一行小字说明这项是什么意思；以前只有 NarrativeText、heading_paragraph_sentence 这类原始值。 */}
@@ -80,6 +83,7 @@ export function DocumentChunkCard({ chunk, expanded, onToggle, onRetryGraph }: {
         </div>
       </details>
     </div>}
+    {entityId && <DetailDialog open title="实体详情" onClose={() => setEntityId(null)}><GraphEntityPanel entityId={entityId} documentId={chunk.document_id} onClose={() => setEntityId(null)} /></DetailDialog>}
   </article>;
 }
 
@@ -94,7 +98,7 @@ function GraphBadge({ graph }: { graph: ChunkGraph }) {
 }
 
 // 原文里高亮抽出的名字（长的先匹配，「苹果公司」不会被拆成「苹果」）。
-function highlight(content: string, graph: ChunkGraph) {
+function highlight(content: string, graph: ChunkGraph, onSelectEntity: (id: string) => void) {
   const names = [...new Set(graph.mentions.map((item) => item.name).filter((name) => name.length > 0))].sort((a, b) => b.length - a.length);
   if (names.length === 0) return content;
   const pattern = new RegExp(`(${names.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "g");
@@ -102,12 +106,13 @@ function highlight(content: string, graph: ChunkGraph) {
   return content.split(pattern).map((part, index) => {
     const mention = byName.get(part);
     if (!mention || index % 2 === 0) return part;
+    if (mention.entity_id) return <button key={index} type="button" className="chunk-graph-mark is-clickable" onClick={() => onSelectEntity(mention.entity_id!)} title={`查看「${mention.entity_name ?? part}」的实体详情`}>{part}</button>;
     return <mark key={index} className="chunk-graph-mark" title={`${mention.type} → 归到「${mention.entity_name ?? mention.canonical ?? part}」（${mention.method_label ?? ""}）`}>{part}</mark>;
   });
 }
 
 // 这一片的抽取结果：名字 → 归到哪个实体、关系、丢掉的项；发给模型的完整提示词和原始输出默认折叠。
-function ChunkGraphSection({ chunkId, graph, onRetry }: { chunkId: string; graph: ChunkGraph; onRetry?: (chunkId: string) => void }) {
+function ChunkGraphSection({ chunkId, graph, onRetry, onSelectEntity }: { chunkId: string; graph: ChunkGraph; onRetry?: (chunkId: string) => void; onSelectEntity: (id: string) => void }) {
   const tokens = graph.input_tokens != null ? ` · token 输入 ${graph.input_tokens}，输出 ${graph.output_tokens ?? 0}` : "";
   const seconds = graph.duration_ms != null ? ` · ${(graph.duration_ms / 1000).toFixed(1)} 秒` : "";
   return (
@@ -127,7 +132,7 @@ function ChunkGraphSection({ chunkId, graph, onRetry }: { chunkId: string; graph
               <li key={item.name}>
                 <strong>{item.name}</strong>（{item.type}{item.type_fixed_from ? `，模型写的是「${item.type_fixed_from}」，不在清单里` : ""}）
                 <span className="chunk-graph-arrow">→</span>
-                {item.entity_name ?? item.canonical}
+                {item.entity_id ? <button type="button" className="link-button" onClick={() => onSelectEntity(item.entity_id!)}>{item.entity_name ?? item.canonical}</button> : item.entity_name ?? item.canonical}
                 {item.method_label && <small>{item.method_label}{item.canonical && item.canonical !== item.name ? `：模型给的标准名「${item.canonical}」` : ""}</small>}
               </li>
             ))}
