@@ -1,4 +1,4 @@
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import json
 import logging
@@ -489,39 +489,43 @@ def run_batch(store, models, build):
         }
         reusable = reusable_extractions(store.engine, list(keys.values()))
         to_call = [item for item in batch if keys[item["chunk_id"]] not in reusable]
-        results = {}
-        if to_call:
-            run_models = models_for(store, models, build)
-            with ThreadPoolExecutor(max_workers=WORKERS) as executor:
-                for item, result in zip(
-                    to_call,
-                    executor.map(
-                        lambda item: extract_chunk(
-                            run_models, schema, item, inputs["system_prompt"]
-                        ),
-                        to_call,
-                    ),
-                ):
-                    results[item["chunk_id"]] = result
-        timestamp = now()
-        rows = []
-        for item in batch:
-            key = keys[item["chunk_id"]]
-            base = {
+
+        def persist(item, result):
+            row = {
                 "id": str(uuid.uuid4()),
                 "build_id": build["id"],
                 "document_id": build["document_id"],
                 "chunk_id": item["chunk_id"],
                 "chunk_key": item["chunk_key"],
                 "position": item["position"],
-                "cache_key": key,
-                "created": timestamp,
+                "cache_key": keys[item["chunk_id"]],
+                "created": now(),
+                **result,
             }
-            if key in reusable:
-                source = reusable[key]
-                rows.append(
+            with store.engine.begin() as connection:
+                connection.execute(graph_chunk_extractions.insert().values(**row))
+                value = counts(connection, build["id"])
+                connection.execute(
+                    graph_builds.update()
+                    .where(graph_builds.c.id == build["id"])
+                    .values(**value, updated=now())
+                )
+            processed = value["extracted"] + value["reused"] + value["failed"]
+            write_step(
+                store,
+                build["document_id"],
+                "graph_extract",
+                "running",
+                f"已处理 {processed} / {build['total']} 个分片：新抽取 {value['extracted']}，复用 {value['reused']}，失败 {value['failed']}",
+                {"build_id": build["id"], "total": build["total"], **value},
+            )
+
+        for item in batch:
+            source = reusable.get(keys[item["chunk_id"]])
+            if source is not None:
+                persist(
+                    item,
                     {
-                        **base,
                         "status": "reused",
                         "reused_from": source["id"],
                         "prompt": source["prompt"],
@@ -531,28 +535,19 @@ def run_batch(store, models, build):
                         "input_tokens": None,
                         "output_tokens": None,
                         "duration_ms": None,
-                    }
+                    },
                 )
-            else:
-                result = results[item["chunk_id"]]
-                rows.append({**base, "reused_from": None, **result})
-        with store.engine.begin() as connection:
-            connection.execute(graph_chunk_extractions.insert(), rows)
-            value = counts(connection, build["id"])
-            connection.execute(
-                graph_builds.update()
-                .where(graph_builds.c.id == build["id"])
-                .values(**value, updated=now())
-            )
-        processed = value["extracted"] + value["reused"] + value["failed"]
-        write_step(
-            store,
-            build["document_id"],
-            "graph_extract",
-            "running",
-            f"已处理 {processed} / {build['total']} 个分片：新抽取 {value['extracted']}，复用 {value['reused']}，失败 {value['failed']}",
-            {"build_id": build["id"], "total": build["total"], **value},
-        )
+        if to_call:
+            run_models = models_for(store, models, build)
+            with ThreadPoolExecutor(max_workers=WORKERS) as executor:
+                futures = {
+                    executor.submit(
+                        extract_chunk, run_models, schema, item, inputs["system_prompt"]
+                    ): item
+                    for item in to_call
+                }
+                for future in as_completed(futures):
+                    persist(futures[future], {"reused_from": None, **future.result()})
     if len(items) > len(batch):
         enqueue(store, build["id"])
         return

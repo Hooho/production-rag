@@ -898,3 +898,47 @@ def test_empty_result_filter_works_before_graph_is_merged(setup, monkeypatch):
     assert empty["chunks"][0]["graph"]["empty"] is True
     assert empty["graph_counts"]["extracted"] == 1
     assert empty["graph_counts"]["pending"] == started["total"] - 1
+
+
+def test_fast_chunk_is_saved_before_slow_first_chunk_finishes(setup, monkeypatch):
+    from threading import Event
+
+    client, store = setup
+    models = enable_model(client)
+    document_id = add_document(client, content=CONTENT * 12)
+    started = build(client, document_id).json()
+    assert started["total"] > 1
+    saved = Event()
+    progress = []
+    original_step = graph_build.write_step
+
+    def write_step(*args, **kwargs):
+        original_step(*args, **kwargs)
+        if (
+            args[2] == "graph_extract"
+            and args[3] == "running"
+            and args[5].get("extracted", 0) > 0
+        ):
+            progress.append(args[5]["extracted"])
+            saved.set()
+
+    def extract(models, schema, item, system_prompt):
+        if item["position"] == 0:
+            assert saved.wait(5), "后面的快分片应该在第一片返回前保存"
+        return {
+            "status": "extracted",
+            "result": {"entities": [], "relations": []},
+            "prompt": [],
+            "raw_output": "{}",
+            "error": None,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "duration_ms": 1,
+        }
+
+    monkeypatch.setattr(graph_build, "write_step", write_step)
+    monkeypatch.setattr(graph_build, "extract_chunk", extract)
+    run_graph_jobs(store, models)
+    assert progress[0] == 1
+    assert progress[-1] == started["total"]
+    assert graph_build.get_build(store.engine, started["id"])["status"] == "completed"

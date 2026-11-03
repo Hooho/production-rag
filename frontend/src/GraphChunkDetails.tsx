@@ -94,7 +94,7 @@ export function GraphChunkDetails({
       </div>
       {busy && (
         <p className="graph-note">
-          建图中，结果自动刷新；待返回包括尚未开始和正在抽取的分片。每批完成后更新结果。
+          建图中，结果自动刷新；待返回包括尚未开始和正在抽取的分片。每片返回后更新结果。
         </p>
       )}
       {error ? (
