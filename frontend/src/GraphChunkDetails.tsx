@@ -36,6 +36,11 @@ export function GraphChunkDetails({
   const [data, setData] = useState<DocumentChunkPage | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [sourceDetail, setSourceDetail] = useState<{
+    title: string;
+    text: string;
+    original: boolean;
+  } | null>(null);
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -196,29 +201,56 @@ export function GraphChunkDetails({
                           : ""}
                       </p>
                     )}
-                    <details>
-                      <summary>分片原文</summary>
-                      <p className="graph-chunk-text">{chunk.content}</p>
-                    </details>
-                    {graph?.prompt && (
-                      <details>
-                        <summary>发给模型的完整提示词</summary>
-                        <pre className="graph-prompt">
-                          {graph.prompt
-                            .map(
-                              (message) =>
-                                `【${message.role}】\n${message.content}`,
-                            )
-                            .join("\n\n")}
-                        </pre>
-                      </details>
-                    )}
-                    {graph?.raw_output != null && (
-                      <details>
-                        <summary>模型原始输出</summary>
-                        <pre className="graph-prompt">{graph.raw_output}</pre>
-                      </details>
-                    )}
+                    <div className="graph-chunk-source-actions">
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={() =>
+                          setSourceDetail({
+                            title: `第 ${chunk.position + 1} 片 · 分片原文`,
+                            text: chunk.content,
+                            original: true,
+                          })
+                        }
+                      >
+                        分片原文
+                      </button>
+                      {graph?.prompt && (
+                        <button
+                          type="button"
+                          className="link-button"
+                          onClick={() =>
+                            setSourceDetail({
+                              title: `第 ${chunk.position + 1} 片 · 完整提示词`,
+                              text: graph
+                                .prompt!.map(
+                                  (message) =>
+                                    `【${message.role}】\n${message.content}`,
+                                )
+                                .join("\n\n"),
+                              original: false,
+                            })
+                          }
+                        >
+                          发给模型的完整提示词
+                        </button>
+                      )}
+                      {graph?.raw_output != null && (
+                        <button
+                          type="button"
+                          className="link-button"
+                          onClick={() =>
+                            setSourceDetail({
+                              title: `第 ${chunk.position + 1} 片 · 模型原始输出`,
+                              text: graph.raw_output!,
+                              original: false,
+                            })
+                          }
+                        >
+                          模型原始输出
+                        </button>
+                      )}
+                    </div>
                     <button
                       type="button"
                       className="link-button"
@@ -266,6 +298,19 @@ export function GraphChunkDetails({
             </button>
           </div>
         </>
+      )}
+      {sourceDetail && (
+        <DetailDialog
+          open
+          title={sourceDetail.title}
+          onClose={() => setSourceDetail(null)}
+        >
+          {sourceDetail.original ? (
+            <p className="graph-chunk-text">{sourceDetail.text}</p>
+          ) : (
+            <pre className="graph-prompt">{sourceDetail.text}</pre>
+          )}
+        </DetailDialog>
       )}
     </DetailDialog>
   );

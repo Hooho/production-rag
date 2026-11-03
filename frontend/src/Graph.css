@@ -576,3 +576,13 @@
 .graph-chunk-result[open] > summary::after {
   content: "收起";
 }
+
+.graph-chunk-source-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+.graph-chunk-source-actions .link-button {
+  text-align: left;
+}
