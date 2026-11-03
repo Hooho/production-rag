@@ -44,7 +44,7 @@ def latest_build(connection, document_id, space=ONLINE_SPACE):
     if not rows:
         return None
     newest = rows[0]
-    if newest["status"] in ("queued", "running"):
+    if newest["status"] in ("queued", "running", "stopped"):
         return dict(newest)
     for row in rows:
         if row["active"]:

@@ -1,4 +1,5 @@
 import os
+from contextlib import nullcontext
 from datetime import datetime, timezone
 
 from sqlalchemy import create_engine, select
@@ -59,12 +60,12 @@ class MySQLStore:
 
     # 写入文档流水线的一个阶段，重复更新同一阶段保持幂等。
     def update_document_step(self, document_id, step_id, step_order, stage, title, status, detail,
-        result=None, duration_ms=None):
+        result=None, duration_ms=None, connection=None):
         now = datetime.now(timezone.utc).isoformat()
         values = {"document_id": document_id, "step_id": step_id, "step_order": step_order,
             "stage": stage, "title": title, "status": status, "detail": detail,
             "result": result, "duration_ms": duration_ms, "updated": now}
-        with self.engine.begin() as connection:
+        with (nullcontext(connection) if connection is not None else self.engine.begin()) as connection:
             existing = connection.execute(select(document_steps.c.document_id).where(
                 document_steps.c.document_id == document_id, document_steps.c.step_id == step_id)).first()
             if existing:

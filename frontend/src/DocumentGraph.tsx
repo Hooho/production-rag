@@ -5,6 +5,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import {
   getDocumentGraph,
   retryDocumentGraph,
+  stopDocumentGraph,
   type DocumentGraphData,
   type DocumentStatus,
   type GraphBuild,
@@ -20,6 +21,7 @@ import type { Tone } from "./tags";
 type ShowToast = (kind: "success" | "error", message: string) => void;
 
 export const BUILD_STATUS: Record<string, { label: string; tone: Tone }> = {
+  stopped: { label: "已停止", tone: "neutral" },
   queued: { label: "排队中", tone: "info" },
   running: { label: "建图中", tone: "info" },
   completed: { label: "完成", tone: "success" },
@@ -80,6 +82,7 @@ export function DocumentGraph({
   const [dialog, setDialog] = useState(false);
   const [chunkDetails, setChunkDetails] = useState(false);
   const [tick, setTick] = useState(0);
+  const [stopping, setStopping] = useState(false);
   const documentId = document.document_id;
   useEffect(() => {
     let cancelled = false;
@@ -117,6 +120,20 @@ export function DocumentGraph({
       setTick((value) => value + 1);
     } catch (reason) {
       onToast("error", (reason as Error).message);
+    }
+  }
+
+  async function stop() {
+    if (!data?.build || stopping) return;
+    setStopping(true);
+    try {
+      await stopDocumentGraph(documentId, data.build.id);
+      onToast("success", "建图已停止，已保存的抽取结果保留，可以重新建图。");
+    } catch (reason) {
+      onToast("error", (reason as Error).message);
+    } finally {
+      setStopping(false);
+      setTick((value) => value + 1);
     }
   }
 
@@ -236,11 +253,14 @@ export function DocumentGraph({
           )}
           {build.note && <p className="graph-note">{build.note}</p>}
           {build.error && <p className="field-error">{build.error}</p>}
-          {!build.active && !busy && build.status !== "failed" && (
-            <p className="graph-note">
-              这次建图没有生效（同一份文档后来又建过图）。
-            </p>
-          )}
+          {!build.active &&
+            !busy &&
+            build.status !== "failed" &&
+            build.status !== "stopped" && (
+              <p className="graph-note">
+                这次建图没有生效（同一份文档后来又建过图）。
+              </p>
+            )}
         </div>
         <div className="graph-actions">
           <button
@@ -252,7 +272,17 @@ export function DocumentGraph({
           </button>
           {data.can_build && (
             <>
-              {!busy && build.failed > 0 && (
+              {busy && (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={stopping}
+                  onClick={() => void stop()}
+                >
+                  {stopping ? "正在停止…" : "停止建图"}
+                </button>
+              )}
+              {!busy && build.status !== "stopped" && build.failed > 0 && (
                 <button
                   className="secondary-button"
                   onClick={() => void retry()}

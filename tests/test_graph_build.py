@@ -942,3 +942,104 @@ def test_fast_chunk_is_saved_before_slow_first_chunk_finishes(setup, monkeypatch
     assert progress[0] == 1
     assert progress[-1] == started["total"]
     assert graph_build.get_build(store.engine, started["id"])["status"] == "completed"
+
+
+def test_stop_queued_build_permissions_and_restart(setup):
+    client, store = setup
+    models = enable_model(client)
+    document_id = add_document(client)
+    publish(client, document_id)
+    started = build(client, document_id).json()
+    path = f"/documents/{document_id}/graph/stop"
+    assert (
+        client.post(
+            path, headers=headers("bob"), json={"build_id": started["id"]}
+        ).status_code
+        == 403
+    )
+    stopped = client.post(path, headers=headers(), json={"build_id": started["id"]})
+    assert stopped.status_code == 200 and stopped.json()["status"] == "stopped"
+    assert stopped.json()["finished"]
+    assert (
+        client.post(
+            path, headers=headers(), json={"build_id": started["id"]}
+        ).status_code
+        == 200
+    )
+    assert graph_build.recover(store) == 0
+    before = models.chat_model.calls
+    run_graph_jobs(store, models)
+    assert models.chat_model.calls == before
+    assert (
+        client.get(f"/documents/{document_id}/graph", headers=headers()).json()[
+            "build"
+        ]["status"]
+        == "stopped"
+    )
+    assert build(client, document_id).status_code == 202
+    run_graph_jobs(store, models)
+    assert (
+        client.get(f"/documents/{document_id}/graph", headers=headers()).json()[
+            "build"
+        ]["status"]
+        == "completed"
+    )
+
+
+def test_stop_running_build_discards_late_results_and_protects_restart(
+    setup, monkeypatch
+):
+    from threading import Event
+
+    client, store = setup
+    models = enable_model(client)
+    document_id = add_document(client, content=CONTENT * 12)
+    old = build(client, document_id).json()
+    assert old["total"] > 2
+    stopped = Event()
+    original_extract = graph_build.extract_chunk
+    original_step = graph_build.write_step
+    new_builds = []
+
+    def extract(models, schema, item, prompt):
+        if item["position"] != 0:
+            assert stopped.wait(5)
+        return original_extract(models, schema, item, prompt)
+
+    def step(*args, **kwargs):
+        original_step(*args, **kwargs)
+        result = args[5] if len(args) > 5 else {}
+        if (
+            args[2] == "graph_extract"
+            and result.get("build_id") == old["id"]
+            and result.get("extracted") == 1
+        ):
+            graph_build.stop(store, document_id, old["id"])
+            stopped.set()
+            new_builds.append(graph_build.start_build(store, models, document_id))
+
+    monkeypatch.setattr(graph_build, "WORKERS", 2)
+    monkeypatch.setattr(graph_build, "extract_chunk", extract)
+    monkeypatch.setattr(graph_build, "write_step", step)
+    graph_build.run_job(store, models, json.loads(store.cache.lpop(graph_build.QUEUE)))
+    assert graph_build.get_build(store.engine, old["id"])["status"] == "stopped"
+    assert graph_build.get_build(store.engine, old["id"])["extracted"] == 1
+    assert (
+        graph_build.get_build(store.engine, new_builds[0]["id"])["status"] == "queued"
+    )
+    graph_build.mark_failed(store, old, "迟到的旧任务错误")
+    assert graph_build.get_build(store.engine, old["id"])["status"] == "stopped"
+    steps = client.get(f"/documents/{document_id}", headers=headers()).json()["steps"]
+    assert (
+        next(row for row in steps if row["step_id"] == "graph_extract")["result"][
+            "build_id"
+        ]
+        == new_builds[0]["id"]
+    )
+    monkeypatch.setattr(graph_build, "write_step", original_step)
+    monkeypatch.setattr(graph_build, "extract_chunk", original_extract)
+    run_graph_jobs(store, models)
+    assert (
+        graph_build.get_build(store.engine, new_builds[0]["id"])["status"]
+        == "completed"
+    )

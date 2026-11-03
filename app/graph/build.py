@@ -1,4 +1,4 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 import hashlib
 import json
 import logging
@@ -12,6 +12,7 @@ from ..mysql.tables import (
     chunks,
     document_chunks,
     document_heads,
+    document_steps,
     documents,
     graph_builds,
     graph_build_inputs,
@@ -55,6 +56,61 @@ class BuildStageError(BuildError):
         self.duration_ms = duration_ms
 
 
+class BuildStopped(Exception):
+    pass
+
+
+def require_running(connection, build_id):
+    status = connection.execute(
+        select(graph_builds.c.status)
+        .where(graph_builds.c.id == build_id)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if status not in BUSY:
+        raise BuildStopped()
+
+
+def stop(store, document_id, build_id):
+    with store.engine.begin() as connection:
+        row = (
+            connection.execute(
+                select(graph_builds)
+                .where(
+                    graph_builds.c.id == build_id,
+                    graph_builds.c.document_id == document_id,
+                )
+                .with_for_update()
+            )
+            .mappings()
+            .first()
+        )
+        if row is None:
+            raise BuildError("建图记录不存在")
+        if row["status"] == "stopped":
+            return build_view(row)
+        if row["status"] not in BUSY:
+            raise BuildError("建图已结束，无需停止")
+        connection.execute(
+            graph_builds.update()
+            .where(graph_builds.c.id == build_id)
+            .values(status="stopped", updated=now(), finished=now())
+        )
+        connection.execute(
+            document_steps.update()
+            .where(
+                document_steps.c.document_id == document_id,
+                document_steps.c.step_id.in_(STEPS),
+                document_steps.c.status.in_(("running", "pending")),
+            )
+            .values(
+                status="stopped",
+                detail="建图已停止，已保存的抽取结果保留，可重新建图",
+                updated=now(),
+            )
+        )
+    return get_build(store.engine, build_id)
+
+
 def is_processed(status):
     return any((status or "").startswith(prefix) for prefix in PROCESSED_PREFIXES)
 
@@ -63,9 +119,28 @@ def write_step(
     store, document_id, step_id, status, detail, result=None, duration_ms=None
 ):
     order, title = STEPS[step_id]
-    store.mysql.update_document_step(
-        document_id, step_id, order, step_id, title, status, detail, result, duration_ms
-    )
+    with store.engine.begin() as connection:
+        build_id = (result or {}).get("build_id")
+        if build_id:
+            current = connection.execute(
+                select(graph_builds.c.status)
+                .where(graph_builds.c.id == build_id)
+                .with_for_update()
+            ).scalar_one_or_none()
+            if current == "stopped" or current is None:
+                raise BuildStopped()
+        store.mysql.update_document_step(
+            document_id,
+            step_id,
+            order,
+            step_id,
+            title,
+            status,
+            detail,
+            result,
+            duration_ms,
+            connection=connection,
+        )
 
 
 # 文档版本的全部分片，带上抽取时要用的标题、章节路径和上下文说明。
@@ -413,6 +488,10 @@ def counts(connection, build_id):
 
 def mark_failed(store, build, message, step_id="graph_extract", duration_ms=None):
     with store.engine.begin() as connection:
+        try:
+            require_running(connection, build["id"])
+        except BuildStopped:
+            return
         connection.execute(
             graph_builds.update()
             .where(graph_builds.c.id == build["id"])
@@ -439,6 +518,8 @@ def run_job(store, models, payload):
         return
     try:
         run_batch(store, models, build)
+    except BuildStopped:
+        logger.info("graph_job_stopped id=%s", build["id"])
     except Exception as error:
         logger.exception("graph_job_failed id=%s", build["id"])
         mark_failed(
@@ -454,6 +535,7 @@ def run_batch(store, models, build):
     inputs = build_inputs(store.engine, build["id"])
     schema = inputs["schema_snapshot"]
     with store.engine.begin() as connection:
+        require_running(connection, build["id"])
         connection.execute(
             graph_builds.update()
             .where(graph_builds.c.id == build["id"])
@@ -503,6 +585,7 @@ def run_batch(store, models, build):
                 **result,
             }
             with store.engine.begin() as connection:
+                require_running(connection, build["id"])
                 connection.execute(graph_chunk_extractions.insert().values(**row))
                 value = counts(connection, build["id"])
                 connection.execute(
@@ -539,15 +622,44 @@ def run_batch(store, models, build):
                 )
         if to_call:
             run_models = models_for(store, models, build)
-            with ThreadPoolExecutor(max_workers=WORKERS) as executor:
-                futures = {
-                    executor.submit(
-                        extract_chunk, run_models, schema, item, inputs["system_prompt"]
-                    ): item
-                    for item in to_call
-                }
-                for future in as_completed(futures):
-                    persist(futures[future], {"reused_from": None, **future.result()})
+            executor = ThreadPoolExecutor(max_workers=WORKERS)
+            remaining = iter(to_call)
+            futures = {}
+
+            def submit_next():
+                with store.engine.connect() as connection:
+                    require_running(connection, build["id"])
+                item = next(remaining, None)
+                if item is not None:
+                    futures[
+                        executor.submit(
+                            extract_chunk,
+                            run_models,
+                            schema,
+                            item,
+                            inputs["system_prompt"],
+                        )
+                    ] = item
+
+            try:
+                for _ in range(WORKERS):
+                    submit_next()
+                while futures:
+                    with store.engine.connect() as connection:
+                        require_running(connection, build["id"])
+                    completed, _ = wait(
+                        futures, timeout=0.5, return_when=FIRST_COMPLETED
+                    )
+                    for future in completed:
+                        persist(
+                            futures.pop(future),
+                            {"reused_from": None, **future.result()},
+                        )
+                        submit_next()
+            finally:
+                executor.shutdown(wait=False, cancel_futures=True)
+    with store.engine.connect() as connection:
+        require_running(connection, build["id"])
     if len(items) > len(batch):
         enqueue(store, build["id"])
         return
@@ -639,6 +751,7 @@ def finalize(store, build):
             ("completed" if not value["failed"] else "partial") if rows else "failed"
         )
         with store.engine.begin() as connection:
+            require_running(connection, build["id"])
             if rows:
                 resolve.write_build(connection, build["space"], build["id"], plan)
                 connection.execute(
@@ -684,6 +797,8 @@ def finalize(store, build):
                     "未执行：全部分片都抽取失败",
                     {"build_id": build["id"]},
                 )
+    except BuildStopped:
+        raise
     except Exception as error:
         raise BuildStageError(
             str(error), step_id, round((time.monotonic() - started) * 1000)
@@ -696,6 +811,8 @@ def retry(store, build_id, chunk_id=None):
     build = get_build(store.engine, build_id)
     if build is None:
         raise BuildError("建图记录不存在")
+    if build["status"] == "stopped":
+        raise BuildError("建图已停止，请重新建图")
     if build["status"] in BUSY:
         raise BuildError("正在建图，完成后再试")
     build_inputs(store.engine, build_id)

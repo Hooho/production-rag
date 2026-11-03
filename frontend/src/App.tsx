@@ -7262,7 +7262,7 @@ function DocumentTrace({
               ? "✓"
               : step.status === "running"
                 ? "·"
-                : step.status === "pending"
+                : step.status === "pending" || step.status === "stopped"
                   ? "○"
                   : "!"}
           </span>

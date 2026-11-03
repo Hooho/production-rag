@@ -331,7 +331,13 @@ export type DocumentStep = {
   stage: string;
   title: string;
   // warning：步骤跑完了但结果有问题（安全扫描发现疑似注入）。
-  status: "pending" | "running" | "completed" | "failed" | "warning";
+  status:
+    | "pending"
+    | "running"
+    | "completed"
+    | "failed"
+    | "warning"
+    | "stopped";
   detail: string;
   result?: Record<string, unknown> | null;
   duration_ms?: number | null;
@@ -3601,6 +3607,7 @@ export type UploadGraphOption = {
   model?: string | null;
 };
 export type GraphBuildStatus =
+  | "stopped"
   | "queued"
   | "running"
   | "completed"
@@ -3898,6 +3905,14 @@ export function buildGraphBatch(documentIds: string[], body: GraphBuildBody) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...body, document_ids: documentIds }),
+  });
+}
+
+export function stopDocumentGraph(documentId: string, buildId: string) {
+  return request<GraphBuild>(`/documents/${documentId}/graph/stop`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ build_id: buildId }),
   });
 }
 

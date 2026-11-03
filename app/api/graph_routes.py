@@ -35,6 +35,10 @@ class RetryInput(BaseModel):
     chunk_id: str | None = Field(None, max_length=64)
 
 
+class StopInput(BaseModel):
+    build_id: UUID
+
+
 EXAMPLE_CHUNK = {
     "content": "<待抽取的分片原文>",
     "document_title": "<当前文档标题>",
@@ -174,6 +178,18 @@ def build_router(current_user, identity, require_admin):
                     }
                 )
         return {"started": started, "skipped": skipped}
+
+    @router.post("/documents/{document_id}/graph/stop")
+    def stop(
+        request: Request, document_id: UUID, body: StopInput, user=Depends(current_user)
+    ):
+        state = request.app.state
+        row = readable(state, user["username"], document_id)
+        check_can_build(user, row)
+        try:
+            return graph_build.stop(state.store, str(document_id), str(body.build_id))
+        except graph_build.BuildError as error:
+            raise HTTPException(409, str(error)) from None
 
     @router.post("/documents/{document_id}/graph/retry", status_code=202)
     def retry(
