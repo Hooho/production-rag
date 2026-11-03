@@ -133,7 +133,7 @@ def entity_rows(connection, build_ids):
                 graph_entities.c.id,
                 graph_entities.c.name,
                 graph_entities.c.type,
-                graph_entities.c.description,
+                func.max(graph_mentions.c.description).label("description"),
                 func.count(graph_mentions.c.id).label("mention_count"),
                 func.count(func.distinct(graph_mentions.c.name)).label("name_count"),
                 func.count(func.distinct(graph_mentions.c.chunk_id)).label(
@@ -153,7 +153,6 @@ def entity_rows(connection, build_ids):
                 graph_entities.c.id,
                 graph_entities.c.name,
                 graph_entities.c.type,
-                graph_entities.c.description,
             )
         )
         .mappings()
@@ -717,6 +716,13 @@ def entity_detail(engine, entity_id, document_id=None):
             )
             .mappings()
             .all()
+        )
+        if not mention_rows:
+            return None
+        # 全局实体描述可能来自私有文档；详情只采用当前可见出处的描述。
+        entity = dict(entity)
+        entity["description"] = next(
+            (row["description"] for row in mention_rows if row["description"]), None
         )
         relations = relation_rows(connection, build_ids, entity_id=entity_id)
     names = {}

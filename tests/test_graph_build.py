@@ -530,3 +530,55 @@ def test_chunk_list_shows_extraction(setup):
         ).status_code
         == 422
     )
+
+
+def test_entity_detail_requires_visible_mention(setup):
+    client, store = setup
+    models = enable_model(client)
+    private = add_document(client)
+    assert build(client, private).status_code == 202
+    run_graph_jobs(store, models)
+    private_entity = client.get(
+        f"/documents/{private}/graph", headers=headers()
+    ).json()["network"]["nodes"][0]["id"]
+    public = add_document(client, title="公开资料", content="普通介绍，没有相关实体。")
+    publish(client, public)
+    assert (
+        client.get(
+            f"/graph/entities/{private_entity}?document_id={public}",
+            headers=headers("bob"),
+        ).status_code
+        == 404
+    )
+    assert (
+        client.get(
+            f"/graph/entities/{private_entity}?document_id={private}",
+            headers=headers("bob"),
+        ).status_code
+        == 404
+    )
+    # 同名实体跨文档共用，但描述只能来自当前有权查看的出处。
+    from app.mysql.tables import graph_entities
+
+    with store.engine.begin() as connection:
+        connection.execute(
+            graph_entities.update()
+            .where(graph_entities.c.id == private_entity)
+            .values(description="私有描述不可泄露")
+        )
+    shared = add_document(client)
+    publish(client, shared)
+    assert build(client, shared).status_code == 202
+    run_graph_jobs(store, models)
+    response = client.get(
+        f"/graph/entities/{private_entity}?document_id={shared}", headers=headers("bob")
+    )
+    assert response.status_code == 200
+    assert "私有描述不可泄露" not in response.text
+    assert {row["document_id"] for row in response.json()["documents"]} == {shared}
+    assert (
+        "私有描述不可泄露"
+        not in client.get(
+            f"/documents/{shared}/graph?view=entities", headers=headers("bob")
+        ).text
+    )
