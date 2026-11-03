@@ -38,7 +38,7 @@ def cache_key(chunk_key, schema, provider, model, prompt_identity):
 
 # 发给模型的完整内容，原样存进抽取结果，页面上「发给模型的完整提示词」显示的就是它。
 # 清单填在用户消息里：改清单不用改提示词，改提示词也不用改清单。
-def build_messages(schema, chunk):
+def build_messages(schema, chunk, system_prompt=None):
     heading = " / ".join(chunk.get("heading_path") or []) or "根文档"
     user = (
         f"<schema>\n{render(schema)}\n</schema>\n"
@@ -48,7 +48,12 @@ def build_messages(schema, chunk):
         f"<chunk>\n{chunk['content']}\n</chunk>"
     )
     return [
-        {"role": "system", "content": prompts.compose(PROMPT_ID)},
+        {
+            "role": "system",
+            "content": system_prompt
+            if system_prompt is not None
+            else prompts.compose(PROMPT_ID),
+        },
         {"role": "user", "content": user},
     ]
 
@@ -168,8 +173,8 @@ def call_model(models, messages):
 
 
 # 抽取一个分片。不抛异常：失败时返回 status=failed 和原因，这一片可以单独重试，其他分片照常继续。
-def extract_chunk(models, schema, chunk):
-    messages = build_messages(schema, chunk)
+def extract_chunk(models, schema, chunk, system_prompt=None):
+    messages = build_messages(schema, chunk, system_prompt)
     started = time.monotonic()
     raw = None
     input_tokens = output_tokens = None

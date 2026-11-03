@@ -13,6 +13,7 @@ from ..mysql.tables import (
     document_heads,
     documents,
     graph_builds,
+    graph_build_inputs,
     graph_chunk_extractions,
     graph_merges,
     graph_mentions,
@@ -155,6 +156,32 @@ def schema_for(engine, schema_id):
     return schema
 
 
+def prompt_snapshot():
+    version, instructions = prompts.current(PROMPT_ID)
+    text = instructions + "\n" + prompts.BY_ID[PROMPT_ID]["locked"]
+    return {
+        "system_prompt": text,
+        "prompt_tag": f"{PROMPT_ID}@{prompts.version_label(version)}",
+        "prompt_identity": hashlib.sha256(text.encode("utf-8")).hexdigest()[:16],
+    }
+
+
+def build_inputs(engine, build_id):
+    with engine.connect() as connection:
+        row = (
+            connection.execute(
+                select(graph_build_inputs).where(
+                    graph_build_inputs.c.build_id == build_id
+                )
+            )
+            .mappings()
+            .first()
+        )
+    if row is None:
+        raise BuildError("旧建图任务没有配置快照，请重新建图，避免混用提示词或清单")
+    return dict(row)
+
+
 # 预估：这次建图有多少分片、多少能复用以前的抽取结果、要调用模型多少次。
 def estimate(store, models, document_id, schema_id=None, choice=None):
     row = document_row(store.engine, document_id)
@@ -162,7 +189,8 @@ def estimate(store, models, document_id, schema_id=None, choice=None):
         raise BuildError("文档不存在")
     schema = schema_for(store.engine, schema_id)
     llm, _ = resolve_llm(store, models, choice)
-    identity = prompts.identity(PROMPT_ID)
+    snapshot = prompt_snapshot()
+    identity = snapshot["prompt_identity"]
     items = chunk_rows(store.engine, document_id)
     keys = [
         cache_key(item["chunk_key"], schema, llm["provider"], llm["model"], identity)
@@ -174,7 +202,7 @@ def estimate(store, models, document_id, schema_id=None, choice=None):
         "schema_id": schema["id"],
         "provider": llm["provider"],
         "model": llm["model"],
-        "prompt_tag": prompts.tag(PROMPT_ID),
+        "prompt_tag": snapshot["prompt_tag"],
         "total": len(items),
         "reusable": sum(1 for key in keys if key in reusable),
         "to_extract": sum(1 for key in keys if key not in reusable),
@@ -258,6 +286,7 @@ def start_build(
         raise BuildError("这个版本没有分片，不能建图")
     timestamp = now()
     build_id = str(uuid.uuid4())
+    snapshot = prompt_snapshot()
     with store.engine.begin() as connection:
         busy = connection.execute(
             select(graph_builds.c.id).where(
@@ -277,8 +306,8 @@ def start_build(
                 schema_id=schema["id"],
                 provider=llm["provider"] or "",
                 model=llm["model"] or "",
-                prompt_tag=prompts.tag(PROMPT_ID),
-                prompt_identity=str(prompts.identity(PROMPT_ID)),
+                prompt_tag=snapshot["prompt_tag"],
+                prompt_identity=snapshot["prompt_identity"],
                 status="queued",
                 active=False,
                 trigger_kind=trigger,
@@ -294,6 +323,13 @@ def start_build(
                 created_by=user,
                 created=timestamp,
                 updated=timestamp,
+            )
+        )
+        connection.execute(
+            graph_build_inputs.insert().values(
+                build_id=build_id,
+                system_prompt=snapshot["system_prompt"],
+                schema_snapshot=schema,
             )
         )
     write_step(
@@ -390,7 +426,8 @@ def run_job(store, models, payload):
 
 
 def run_batch(store, models, build):
-    schema = schema_for(store.engine, build["schema_id"])
+    inputs = build_inputs(store.engine, build["id"])
+    schema = inputs["schema_snapshot"]
     with store.engine.begin() as connection:
         connection.execute(
             graph_builds.update()
@@ -434,7 +471,10 @@ def run_batch(store, models, build):
                 for item, result in zip(
                     to_call,
                     executor.map(
-                        lambda item: extract_chunk(run_models, schema, item), to_call
+                        lambda item: extract_chunk(
+                            run_models, schema, item, inputs["system_prompt"]
+                        ),
+                        to_call,
                     ),
                 ):
                     results[item["chunk_id"]] = result
@@ -595,6 +635,7 @@ def retry(store, build_id, chunk_id=None):
         raise BuildError("建图记录不存在")
     if build["status"] in BUSY:
         raise BuildError("正在建图，完成后再试")
+    build_inputs(store.engine, build_id)
     with store.engine.begin() as connection:
         condition = and_(
             graph_chunk_extractions.c.build_id == build_id,
@@ -658,6 +699,11 @@ def remove_documents(connection, document_ids):
     if build_ids:
         for table in (graph_relations, graph_mentions, graph_merges):
             connection.execute(delete(table).where(table.c.build_id.in_(build_ids)))
+        connection.execute(
+            delete(graph_build_inputs).where(
+                graph_build_inputs.c.build_id.in_(build_ids)
+            )
+        )
         connection.execute(delete(graph_builds).where(graph_builds.c.id.in_(build_ids)))
     connection.execute(
         delete(graph_chunk_extractions).where(

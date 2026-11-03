@@ -718,3 +718,10 @@ graph_aliases = Table("graph_aliases", metadata,
     Column("created", String(40), nullable=False),
     UniqueConstraint("space", "alias_key", name="uq_graph_aliases_space_key"),
 )
+
+# 建图开始时固定输入配置，后续批次和重试均读取同一份快照。
+graph_build_inputs = Table("graph_build_inputs", metadata,
+    Column("build_id", String(36), primary_key=True),
+    Column("system_prompt", Text, nullable=False),
+    Column("schema_snapshot", JSON, nullable=False),
+)

@@ -582,3 +582,75 @@ def test_entity_detail_requires_visible_mention(setup):
             f"/documents/{shared}/graph?view=entities", headers=headers("bob")
         ).text
     )
+
+
+def test_build_freezes_prompt_and_schema_across_batches_and_retry(setup, monkeypatch):
+    from app import prompts
+    from app.graph.extract import cache_key
+    from app.graph.schemas import get_schema, DEFAULT_SCHEMA_ID
+    from app.mysql.tables import graph_schemas
+
+    client, store = setup
+    models = enable_model(client)
+    document_id = add_document(client, content=CONTENT * 30)
+    original_current = prompts.current
+    monkeypatch.setattr(
+        prompts,
+        "current",
+        lambda key: (41, "固定规则 A")
+        if key == "graph_extract"
+        else original_current(key),
+    )
+    monkeypatch.setattr(graph_build, "BATCH_SIZE", 1)
+    started = build(client, document_id).json()
+    assert started["total"] > 1
+    snapshot = graph_build.build_inputs(store.engine, started["id"])
+    models.chat_model.fail = {"苹果"}
+    first = json.loads(store.cache.lpop(graph_build.QUEUE))
+    graph_build.run_job(store, models, first)
+    # 改动当前提示词及清单后，剩余批次仍使用原快照。
+    monkeypatch.setattr(
+        prompts,
+        "current",
+        lambda key: (42, "新规则 B")
+        if key == "graph_extract"
+        else original_current(key),
+    )
+    schema = get_schema(store.engine, DEFAULT_SCHEMA_ID)
+    monkeypatch.setattr(
+        graph_build, "schema_for", lambda *args: {**schema, "entity_types": []}
+    )
+    run_graph_jobs(store, models)
+    models.chat_model.fail.clear()
+    assert (
+        client.post(
+            f"/documents/{document_id}/graph/retry", headers=headers(), json={}
+        ).status_code
+        == 202
+    )
+    run_graph_jobs(store, models)
+    with store.engine.connect() as connection:
+        rows = (
+            connection.execute(
+                select(graph_chunk_extractions).where(
+                    graph_chunk_extractions.c.build_id == started["id"]
+                )
+            )
+            .mappings()
+            .all()
+        )
+    assert len(rows) == started["total"]
+    for row in rows:
+        assert row["prompt"][0]["content"] == snapshot["system_prompt"]
+        assert row["cache_key"] == cache_key(
+            row["chunk_key"],
+            snapshot["schema_snapshot"],
+            started["provider"],
+            started["model"],
+            started["prompt_identity"],
+        )
+    assert (
+        graph_build.get_build(store.engine, started["id"])["prompt_tag"]
+        == "graph_extract@v41"
+    )
+    assert graph_build.get_build(store.engine, started["id"])["status"] == "completed"
