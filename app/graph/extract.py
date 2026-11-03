@@ -20,6 +20,13 @@ TEXT_LENGTH = 500
 OTHER_CATEGORY = "其他"
 
 
+# 只为官方支持关闭思考的型号传参，避免不兼容型号返回 400。
+def model_options(model):
+    if (model or "").lower().split("/")[-1] == "minimax-m3":
+        return {"extra_body": {"thinking": {"type": "disabled"}}}
+    return {}
+
+
 # 复用抽取结果的键：分片文字、清单（id 和版本）、模型、提示词内容都相同才复用。任何一项变了都会重新抽取。
 def cache_key(chunk_key, schema, provider, model, prompt_identity):
     identity = json.dumps(
@@ -32,7 +39,8 @@ def cache_key(chunk_key, schema, provider, model, prompt_identity):
             provider,
             model,
             prompt_identity,
-        ],
+        ]
+        + ([model_options(model)] if model_options(model) else []),
         ensure_ascii=False,
         sort_keys=True,
     )
@@ -154,7 +162,11 @@ def call_model(models, messages):
         raise RuntimeError(
             "真实聊天模型未启用（MODEL_MODE 不是 openai），无法抽取实体关系"
         )
-    response = chat_model.bind(max_tokens=MAX_TOKENS, timeout=REQUEST_TIMEOUT).invoke(
+    response = chat_model.bind(
+        max_tokens=MAX_TOKENS,
+        timeout=REQUEST_TIMEOUT,
+        **model_options(getattr(models, "llm_model", None)),
+    ).invoke(
         [
             SystemMessage(content=messages[0]["content"]),
             HumanMessage(content=messages[1]["content"]),

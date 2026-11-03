@@ -319,3 +319,65 @@ def test_truncated_output_preserves_raw_text_and_token_usage():
         assert result["input_tokens"] == 120 and result["output_tokens"] == 30
         assert models.chat_model.bound["max_tokens"] == 16384
         assert result["result"] is None
+
+
+def test_graph_disables_thinking_only_for_supported_minimax_m3():
+    models = FakeModels(reply(GOOD))
+    models.llm_model = "MiniMax-M3"
+    assert extract.extract_chunk(models, DEFAULT_SCHEMA, CHUNK)["status"] == "extracted"
+    assert models.chat_model.bound["extra_body"] == {"thinking": {"type": "disabled"}}
+    for model in ("MiniMax-M3.1-Flash", "MiniMax-M2.7", "other-model"):
+        assert extract.model_options(model) == {}
+    # 开关参数进入缓存标识，不复用先前开启思考的结果。
+    key = extract.cache_key("k", DEFAULT_SCHEMA, "minimax", "MiniMax-M3", "p")
+    from unittest.mock import patch
+
+    with patch.object(extract, "model_options", return_value={}):
+        assert (
+            extract.cache_key("k", DEFAULT_SCHEMA, "minimax", "MiniMax-M3", "p") != key
+        )
+
+
+def test_minimax_thinking_flag_reaches_http_body():
+    import httpx
+    from types import SimpleNamespace
+    from langchain_openai import ChatOpenAI
+
+    requests = []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "id": "test",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "MiniMax-M3",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": json.dumps(GOOD)},
+                        "finish_reason": "stop",
+                    }
+                ],
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        chat = ChatOpenAI(
+            model="MiniMax-M3",
+            api_key="test-key",
+            base_url="https://example.test/v1",
+            http_client=client,
+        )
+        assert (
+            extract.extract_chunk(
+                SimpleNamespace(chat_model=chat, llm_model="MiniMax-M3"),
+                DEFAULT_SCHEMA,
+                CHUNK,
+            )["status"]
+            == "extracted"
+        )
+        assert requests[0]["thinking"] == {"type": "disabled"}
+        assert chat.extra_body is None
