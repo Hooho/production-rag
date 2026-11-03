@@ -106,6 +106,7 @@ from ..evaluation.retrieval import EVAL_OWNER
 from ..tools.search import limit_titles
 from ..evaluation.evidence import locate_evidence, load_chunk
 from .. import prompts, runtime_config
+from . import graph_routes
 from ..ingestion.parser import ALLOWED_EXTENSIONS, UNSUPPORTED_MESSAGE
 from ..inspection.diagnosis import CATEGORIES as DIAGNOSIS_CATEGORIES
 from ..inspection.schedule import load_schedule, save_schedule, schedule_view
@@ -1623,6 +1624,11 @@ def create_app(store=None, models=None, jwt_secret=None):
         version_note: str | None = Form(None),
         visibility: Literal["private", "shared", "public"] = Form("private"),
         groups: str = Form("", max_length=700),
+        # 图检索：on 开启（处理完自动建图），off 关闭；新版本不传时沿用上一版的设置。
+        graph: Literal["on", "off"] | None = Form(None),
+        graph_schema_id: str | None = Form(None, max_length=36),
+        graph_provider: str | None = Form(None, max_length=32),
+        graph_model: str | None = Form(None, max_length=128),
         owner=Depends(identity),
     ):
         filename = Path(file.filename or "document").name
@@ -1656,6 +1662,16 @@ def create_app(store=None, models=None, jwt_secret=None):
                 "status": "duplicate",
                 "filename": filename,
             }
+        # 先检查图检索的清单和模型，不对就直接拒绝，不写文件。
+        graph_settings = graph_routes.upload_settings(
+            app.state.store,
+            app.state.models,
+            graph,
+            graph_schema_id,
+            graph_provider,
+            graph_model,
+            doc_key,
+        )
         document_id = str(uuid4())
         upload_dir = Path(os.getenv("UPLOAD_DIR", "./uploads"))
         upload_dir.mkdir(parents=True, exist_ok=True)
@@ -1669,6 +1685,8 @@ def create_app(store=None, models=None, jwt_secret=None):
             "file_size_bytes": len(content),
             "sha256": content_sha256,
         }
+        if graph_settings:
+            document_metadata["graph"] = graph_settings
         try:
             create_version(
                 document_id,
@@ -4029,6 +4047,9 @@ def create_app(store=None, models=None, jwt_secret=None):
         app.state.inspection_thread = thread
         thread.start()
         return {"id": run_id, "status": "running"}
+
+    # 知识图谱的接口（app/api/graph_routes.py）。
+    app.include_router(graph_routes.build_router(current_user, identity, require_admin))
 
     return app
 

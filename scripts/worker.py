@@ -6,6 +6,7 @@ import time
 from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import or_, select
 
+from app.graph import build as graph_build
 from app.inspection.schedule import ScheduleRunner
 from app.models import Models
 from app.document_reviews import ReviewError, finish_version, list_version, scan_version
@@ -42,6 +43,9 @@ def main():
         recovered = recover_jobs(store)
         if recovered:
             logger.warning("jobs_recovered count=%s", recovered)
+        graph_recovered = graph_build.recover(store)
+        if graph_recovered:
+            logger.warning("graph_jobs_recovered count=%s", graph_recovered)
         # 定时巡检由 worker 负责：只有一个 worker，不会重复执行；到点后在后台线程跑，不耽误文档导入。
         inspection_schedule = ScheduleRunner(store, models)
         while True:
@@ -50,7 +54,8 @@ def main():
             except Exception:
                 logger.exception("inspection_schedule_check_failed")
             try:
-                item = store.cache.blpop(QUEUE, timeout=2)
+                # 先取文档导入，再取建图：blpop 按列出的顺序检查队列，建图一批只抽 20 片，不会长时间占住 worker。
+                item = store.cache.blpop([QUEUE, graph_build.QUEUE], timeout=2)
             except RedisTimeoutError:
                 # Redis 客户端 socket 超时小于阻塞读取时，空队列会正常返回下一轮。
                 continue
@@ -59,7 +64,9 @@ def main():
             sync_llm_settings(store, models)
             payload = json.loads(item[1])
             # 补全上下文是对已完成版本的局部修补，和整份文档的导入分开处理。
-            if payload.get("type") == "contexts":
+            if payload.get("type") == "graph":
+                graph_build.run_job(store, models, payload)
+            elif payload.get("type") == "contexts":
                 handle_context_job(store, models, payload)
             else:
                 handle_job(store, models, payload)
@@ -229,7 +236,8 @@ def copy_from_source(store, models, payload, update_stage):
         store.remove_version_data(document_id)
         return None
     # 解析结果（解析器、页数、表格识别等）和处理设置一起带过来；文件大小、哈希用这次上传自己的。
-    skipped = {"mime_type", "file_size_bytes", "sha256", "injection_scan", "processing_duration_ms"}
+    # 图检索的设置（graph）是这次上传自己选的，不跟着来源走。
+    skipped = {"mime_type", "file_size_bytes", "sha256", "injection_scan", "processing_duration_ms", "graph"}
     metadata = {key: value for key, value in (source[1] or {}).items() if key not in skipped}
     metadata.update({"copied_from": source_id, "reused_vectors": chunks, "embedded_vectors": 0})
     store.mysql.update_document_metadata(document_id, metadata)
@@ -341,6 +349,13 @@ def process_document(store, models, payload, stage):
         "collection": store.collection, "listing": {"staged": "待上架", "listed": "已上架", "review": "待管理员审核",
             "flagged": "有问题，不能上架", "superseded": "已被更新的版本取代", "current": "当前版本"}[status]})
     logger.info("document_processed id=%s chunks=%s status=%s", document_id, chunks, status)
+    # 上传时开启了图检索（新版本沿用上一版的设置）：处理完自动建图。建图失败不影响文档本身。
+    try:
+        graph_build.auto_build(store, models, document_id)
+    except graph_build.BuildError as error:
+        logger.warning("graph_auto_build_skipped id=%s reason=%s", document_id, error)
+    except Exception:
+        logger.exception("graph_auto_build_failed id=%s", document_id)
 
 
 if __name__ == "__main__":

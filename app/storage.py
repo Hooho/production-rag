@@ -30,6 +30,7 @@ from .mysql.store import (
     users,
 )
 from .redis.store import RedisStore
+from .graph.build import remove_documents as remove_document_graph
 from . import prompts
 from .ingestion.chunking import chunk_document_records, chunk_settings
 from .ingestion.parser import OCR_LANGUAGES
@@ -1429,6 +1430,10 @@ class Storage:
             )
             connection.execute(
                 delete(document_reviews).where(document_reviews.c.doc_key == doc_key)
+            )
+            # 知识图谱：这份文档所有版本的建图记录、抽取结果、名字和关系一起删掉，没人用的实体也清理掉。
+            remove_document_graph(
+                connection, [version_id for version_id, _ in versions]
             )
             for version_id, _ in versions:
                 connection.execute(
