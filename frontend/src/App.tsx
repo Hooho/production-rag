@@ -3,6 +3,9 @@ import Evaluation, { type EvaluationSection } from "./Evaluation";
 import { DocumentChunkCard } from "./DocumentChunkCard";
 import AnswerFeedback from "./Feedback";
 import Inspection from "./Inspection";
+import KnowledgeGraph, { type KnowledgeGraphTab } from "./KnowledgeGraph";
+import { DocumentGraph } from "./DocumentGraph";
+import { GraphOptions, type GraphChoice } from "./GraphBuildDialog";
 import Overview from "./Overview";
 import Maintenance, {
   MAINTENANCE_TABS,
@@ -56,6 +59,9 @@ import {
   deleteDocument,
   retryDocument,
   retryDocumentContexts,
+  retryDocumentGraph,
+  type ChunkGraphStatus,
+  type UploadGraphOption,
   listGroups,
   login,
   logout,
@@ -102,6 +108,7 @@ type Route =
       suiteId?: string;
     }
   | { page: "inspection" }
+  | { page: "graph"; tab: KnowledgeGraphTab }
   | { page: "overview" }
   | { page: "memory"; sessionId?: string; tab?: "long" }
   | {
@@ -120,6 +127,7 @@ type NavIconName =
   | "table"
   | "target"
   | "pulse"
+  | "graph"
   | "chart"
   | "memory"
   | "prompt"
@@ -154,6 +162,14 @@ function NavIcon({ name }: { name: NavIconName }) {
     pulse: (
       <>
         <path d="M2 10h3.5l2-5 3 10 2-6 1.5 1H18" />
+      </>
+    ),
+    graph: (
+      <>
+        <circle cx="5" cy="5" r="2.2" />
+        <circle cx="15" cy="6" r="2.2" />
+        <circle cx="9" cy="15" r="2.2" />
+        <path d="M7.1 5.3 12.8 5.8M6 6.9l2.1 6.1M13.9 8l-3.6 5.3" />
       </>
     ),
     chart: (
@@ -248,6 +264,9 @@ function readRoute(pathname = window.location.pathname): Route {
       setId: decodeURIComponent(path.slice("/eval/regression/".length)),
     };
   if (path === "/inspection") return { page: "inspection" };
+  // 知识图谱（只对管理员显示）：/graph 总图，/graph/tasks 建图任务。
+  if (path === "/graph") return { page: "graph", tab: "overview" };
+  if (path === "/graph/tasks") return { page: "graph", tab: "tasks" };
   if (path === "/overview") return { page: "overview" };
   if (path === "/memory") return { page: "memory" };
   if (path === "/memory/long") return { page: "memory", tab: "long" };
@@ -631,6 +650,20 @@ function App() {
           {user.is_admin && (
             <button
               className={
+                route.page === "graph" ? "nav-item active" : "nav-item"
+              }
+              onClick={() => navigate("/graph")}
+              title="知识图谱：所有文档的实体和关系、建图任务"
+            >
+              <span className="nav-icon">
+                <NavIcon name="graph" />
+              </span>
+              <span className="nav-label">知识图谱</span>
+            </button>
+          )}
+          {user.is_admin && (
+            <button
+              className={
                 route.page === "overview" ? "nav-item active" : "nav-item"
               }
               onClick={() => navigate("/overview")}
@@ -704,6 +737,12 @@ function App() {
             />
           ) : route.page === "inspection" && user.is_admin ? (
             <Inspection onToast={showToast} />
+          ) : route.page === "graph" && user.is_admin ? (
+            <KnowledgeGraph
+              tab={route.tab}
+              onNavigate={navigate}
+              onToast={showToast}
+            />
           ) : route.page === "overview" && user.is_admin ? (
             <Overview />
           ) : route.page === "maintenance" && user.is_admin ? (
@@ -5220,6 +5259,10 @@ function Knowledge({
   const [shareGroups, setShareGroups] = useState<string[]>([]);
   const [allGroups, setAllGroups] = useState<Group[]>([]);
   const [versionNote, setVersionNote] = useState("");
+  // 上传时的图检索选项：null 表示不传（新版本沿用上一版的设置）。
+  const [uploadGraph, setUploadGraph] = useState<UploadGraphOption | null>(
+    null,
+  );
   const [file, setFile] = useState<File | null>(null);
   // 选好文件后在浏览器里算 sha256，查自己和自己能看到的文档里有没有内容完全相同的，在上传弹窗里提示。
   const [contentMatches, setContentMatches] = useState<
@@ -5249,6 +5292,9 @@ function Knowledge({
   const [chunkData, setChunkData] = useState<DocumentChunkPage | null>(null);
   // 分块列表按向量来源筛选：全部 / 复用上一版本 / 新计算。
   const [chunkSource, setChunkSource] = useState<ChunkSource | null>(null);
+  // 分块列表按图谱的抽取状态筛选：全部 / 新抽取 / 复用 / 失败 / 没抽出实体。
+  const [chunkGraphStatus, setChunkGraphStatus] =
+    useState<ChunkGraphStatus | null>(null);
   const [chunkLoading, setChunkLoading] = useState(false);
   const [expandedChunks, setExpandedChunks] = useState<Record<string, boolean>>(
     {},
@@ -5357,7 +5403,7 @@ function Knowledge({
     }
     let cancelled = false;
     setChunkLoading(true);
-    listDocumentChunks(selectedId, chunkPage, 10, chunkSource)
+    listDocumentChunks(selectedId, chunkPage, 10, chunkSource, chunkGraphStatus)
       .then((result) => {
         if (!cancelled) setChunkData(result);
       })
@@ -5370,7 +5416,7 @@ function Knowledge({
     return () => {
       cancelled = true;
     };
-  }, [selectedId, chunkPage, selectedStatus, chunkSource]);
+  }, [selectedId, chunkPage, selectedStatus, chunkSource, chunkGraphStatus]);
 
   function selectDocument(documentId: string) {
     setDetailTab("chunks");
@@ -5389,6 +5435,7 @@ function Knowledge({
     setVersionNote("");
     setVisibility("private");
     setShareGroups([]);
+    setUploadGraph(null);
     setUploadMode(replaceTarget ? "version" : null);
     setError("");
     setUpload({ replaceTarget });
@@ -5410,6 +5457,7 @@ function Knowledge({
         versionNote,
         visibility,
         shareGroups,
+        uploadGraph,
       );
       const refreshed = await listDocuments();
       setDocuments(refreshed.documents);
@@ -5514,6 +5562,35 @@ function Knowledge({
               setChunkPage(1);
               setExpandedChunks({});
             }}
+            chunkGraphStatus={chunkGraphStatus}
+            onGraphStatusChange={(status) => {
+              setChunkGraphStatus(status);
+              setChunkPage(1);
+              setExpandedChunks({});
+            }}
+            onRetryChunkGraph={(chunkId) => {
+              retryDocumentGraph(selected.document_id, chunkId)
+                .then(() =>
+                  onToast(
+                    "success",
+                    "已开始重试这一片，完成后在「实体关系」页签或刷新分块即可看到。",
+                  ),
+                )
+                .catch((reason: Error) => onToast("error", reason.message));
+            }}
+            graphPanel={
+              <DocumentGraph
+                document={selected}
+                onToast={onToast}
+                onOpenChunk={(chunkId, position) => {
+                  setChunkSource(null);
+                  setChunkGraphStatus(null);
+                  setChunkPage(Math.floor(position / 10) + 1);
+                  setExpandedChunks({ [chunkId]: true });
+                  setDetailTab("chunks");
+                }}
+              />
+            }
             onToggleChunk={(chunkId) =>
               setExpandedChunks((items) => ({
                 ...items,
@@ -5581,6 +5658,8 @@ function Knowledge({
           onVersionNoteChange={setVersionNote}
           onClose={() => setUpload(null)}
           onSubmit={() => void submitUpload()}
+          graph={uploadGraph}
+          onGraphChange={setUploadGraph}
           matches={contentMatches}
           onOpenExisting={(documentId) => {
             setUpload(null);
@@ -5607,7 +5686,7 @@ function Knowledge({
   );
 }
 
-type DetailTab = "chunks" | "trace" | "versions";
+type DetailTab = "chunks" | "trace" | "versions" | "graph";
 // 后端 STAGE_ORDER 固定为接收、解析、切分、上下文、向量、索引、完成 7 个阶段；不能用当前已返回的步骤条数当分母。
 // 上传、解析、切分、上下文、向量、索引、写入校验、安全扫描、完成，共 9 步。
 const DOCUMENT_PROCESS_STEP_TOTAL = 9;
@@ -5620,10 +5699,12 @@ function documentProcessLabel(document: {
   steps: DocumentStep[];
 }) {
   const total = DOCUMENT_PROCESS_STEP_TOTAL;
-  const failed = document.steps.find((step) => step.status === "failed");
+  // 知识图谱的两步（抽取实体关系、合并实体）排在「完成」之后，不算进文档处理进度，进度在「实体关系」页签里看。
+  const steps = document.steps.filter((step) => step.step_order <= total);
+  const failed = steps.find((step) => step.status === "failed");
   if (document.status === "failed")
     return failed ? `第 ${failed.step_order} 步失败` : "处理失败";
-  const running = document.steps.find((step) => step.status === "running");
+  const running = steps.find((step) => step.status === "running");
   // 只显示"当前步骤 / 总步数"，步骤名在下方列表里已经能看到，标签页上再写一遍太长。
   if (running) return `${running.step_order} / ${total}`;
   // worker 遇到暂时性错误会先把当前步骤记为失败、等几秒再重试，这时文档本身还在处理中，不能显示成失败。
@@ -5638,9 +5719,7 @@ function documentProcessLabel(document: {
   )
     return `${total} / ${total}`;
   if (document.status === "queued") return "排队中";
-  const completed = document.steps.filter(
-    (step) => step.status === "completed",
-  ).length;
+  const completed = steps.filter((step) => step.status === "completed").length;
   return `${completed} / ${total}`;
 }
 
@@ -6300,9 +6379,17 @@ function DocumentDetail({
   permission,
   chunkSource,
   onSourceChange,
+  chunkGraphStatus,
+  onGraphStatusChange,
+  onRetryChunkGraph,
+  graphPanel,
 }: {
   chunkSource: ChunkSource | null;
   onSourceChange: (source: ChunkSource | null) => void;
+  chunkGraphStatus: ChunkGraphStatus | null;
+  onGraphStatusChange: (status: ChunkGraphStatus | null) => void;
+  onRetryChunkGraph: (chunkId: string) => void;
+  graphPanel: ReactNode;
   permission: ReactNode;
   onRetry: () => void;
   onRetryContexts: () => void;
@@ -6328,8 +6415,12 @@ function DocumentDetail({
   const totalChunks = chunkData
     ? chunkData.source && counts
       ? counts.reused + counts.computed
-      : chunkData.total
+      : chunkData.graph_status
+        ? documentChunkCount(document)
+        : chunkData.total
     : documentChunkCount(document);
+  // 建过图的版本才显示按抽取状态筛选。
+  const graphCounts = chunkData?.graph ? chunkData.graph_counts : null;
   // 这个版本记录了每个分片的来源（复用或新计算）才显示筛选；第一版全部是新计算，也不显示。
   const showSourceFilter = Boolean(counts && counts.reused > 0);
   const averageLength = chunkData?.average_length ?? 0;
@@ -6412,6 +6503,12 @@ function DocumentDetail({
           >
             版本历史 <span>{versions.length}</span>
           </button>
+          <button
+            className={tab === "graph" ? "active" : ""}
+            onClick={() => onTabChange("graph")}
+          >
+            实体关系
+          </button>
         </div>
         {tab === "chunks" ? (
           <div className="document-chunks-panel">
@@ -6432,6 +6529,27 @@ function DocumentDetail({
                       onClick={() => onSourceChange(value)}
                     >
                       {label} <span>{count}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {graphCounts && (
+                <div className="chunk-source-filter">
+                  {(
+                    [
+                      [null, "全部抽取状态", null],
+                      ["extracted", "新抽取", graphCounts.extracted],
+                      ["reused", "复用", graphCounts.reused],
+                      ["failed", "抽取失败", graphCounts.failed],
+                      ["empty", "没抽出实体", graphCounts.empty],
+                    ] as Array<[ChunkGraphStatus | null, string, number | null]>
+                  ).map(([value, label, count]) => (
+                    <button
+                      key={label}
+                      className={chunkGraphStatus === value ? "active" : ""}
+                      onClick={() => onGraphStatusChange(value)}
+                    >
+                      {label} {count !== null && <span>{count}</span>}
                     </button>
                   ))}
                 </div>
@@ -6463,6 +6581,11 @@ function DocumentDetail({
                       chunk={chunk}
                       expanded={Boolean(expandedChunks[chunk.chunk_id])}
                       onToggle={() => onToggleChunk(chunk.chunk_id)}
+                      onRetryGraph={
+                        document.can_edit !== false
+                          ? onRetryChunkGraph
+                          : undefined
+                      }
                     />
                   ))}
                 </div>
@@ -6509,6 +6632,8 @@ function DocumentDetail({
               </div>
             )}
           </div>
+        ) : tab === "graph" ? (
+          <div className="document-chunks-panel">{graphPanel}</div>
         ) : tab === "versions" ? (
           <div className="document-chunks-panel">
             <div className="document-panel-heading">
@@ -6559,7 +6684,11 @@ function UploadModal({
   permission,
   matches,
   onOpenExisting,
+  graph,
+  onGraphChange,
 }: {
+  graph: UploadGraphOption | null;
+  onGraphChange: (value: UploadGraphOption | null) => void;
   permission: ReactNode;
   file: File | null;
   title: string;
@@ -6714,6 +6843,14 @@ function UploadModal({
               placeholder="例如：退货期限改为 15 天"
             />
           </label>
+        )}
+        {!ownSame && (
+          <UploadGraphField
+            value={graph}
+            onChange={onGraphChange}
+            previous={replaceTarget?.document_metadata?.graph ?? null}
+            asVersion={asVersion}
+          />
         )}
         <div className="upload-modal-actions">
           <button className="secondary-button" onClick={onClose}>
@@ -7174,3 +7311,52 @@ function DocumentTrace({
 }
 
 export default App;
+
+// 上传弹窗里的图检索选项：开启后处理完自动建图（可以选清单和模型）。
+// 上传新版本时不改就沿用上一版的设置；从列表上传、作为同名文档的新版本时上一版的设置由服务端沿用。
+function UploadGraphField({
+  value,
+  onChange,
+  previous,
+  asVersion,
+}: {
+  value: UploadGraphOption | null;
+  onChange: (value: UploadGraphOption | null) => void;
+  previous: UploadGraphOption | null;
+  asVersion: boolean;
+}) {
+  const enabled = value
+    ? value.enabled
+    : Boolean(asVersion && previous?.enabled);
+  const choice: GraphChoice = {
+    schema_id: value?.schema_id ?? previous?.schema_id ?? null,
+    provider: value?.provider ?? previous?.provider ?? null,
+    model: value?.model ?? previous?.model ?? null,
+  };
+  return (
+    <div className="upload-title-field">
+      <label>
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(event) =>
+            onChange({ ...choice, enabled: event.target.checked })
+          }
+        />{" "}
+        图检索：处理完自动建图（抽取实体和关系，只影响「实体关系」和「知识图谱」页面）
+      </label>
+      {asVersion && value === null && (
+        <small className="graph-note">
+          不改就沿用上一版的设置
+          {previous ? `（${previous.enabled ? "开启" : "关闭"}）` : ""}
+        </small>
+      )}
+      {enabled && (
+        <GraphOptions
+          value={choice}
+          onChange={(next) => onChange({ ...next, enabled: true })}
+        />
+      )}
+    </div>
+  );
+}
