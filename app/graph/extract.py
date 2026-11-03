@@ -12,7 +12,7 @@ from .schemas import OTHER_TYPE, category_names, render, type_names
 
 PROMPT_ID = "graph_extract"
 # 推理模型先写思考过程再写 JSON，额度给少了会在写完 JSON 之前被截断。
-MAX_TOKENS = 4096
+MAX_TOKENS = 16384
 # 图谱抽取输出较长，使用独立请求超时，不修改问答模型的默认配置。
 REQUEST_TIMEOUT = 120
 NAME_LENGTH = 200
@@ -167,12 +167,14 @@ def call_model(models, messages):
     finish_reason = (getattr(response, "response_metadata", None) or {}).get(
         "finish_reason"
     )
-    if finish_reason == "length" and not text.strip():
-        raise TruncatedOutput(
-            f"输出被截断：思考过程用完了 {MAX_TOKENS} 个 token 的额度，没写出结果"
-        )
     usage = getattr(response, "usage_metadata", None) or {}
-    return content, text, usage.get("input_tokens"), usage.get("output_tokens")
+    return (
+        content,
+        text,
+        usage.get("input_tokens"),
+        usage.get("output_tokens"),
+        finish_reason,
+    )
 
 
 # 抽取一个分片。不抛异常：失败时返回 status=failed 和原因，这一片可以单独重试，其他分片照常继续。
@@ -182,7 +184,18 @@ def extract_chunk(models, schema, chunk, system_prompt=None):
     raw = None
     input_tokens = output_tokens = None
     try:
-        raw, text, input_tokens, output_tokens = call_model(models, messages)
+        raw, text, input_tokens, output_tokens, finish_reason = call_model(
+            models, messages
+        )
+        if finish_reason == "length":
+            detail = (
+                "思考过程用完额度，没写出结果"
+                if not text.strip()
+                else "抽取结果未完整返回"
+            )
+            raise TruncatedOutput(
+                f"输出被截断：达到 {MAX_TOKENS} token 的输出上限，{detail}"
+            )
         result = parse_output(text, schema)
         status, error = "extracted", None
     except (APITimeoutError, TimeoutError) as error_value:

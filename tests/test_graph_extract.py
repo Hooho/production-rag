@@ -303,3 +303,19 @@ def test_timeout_override_reaches_http_request_without_changing_chat_default():
         assert result["status"] == "extracted"
         assert requests[0].extensions["timeout"]["read"] == 120
         assert chat.request_timeout == 20
+
+
+def test_truncated_output_preserves_raw_text_and_token_usage():
+    for text in (
+        "<think>仍在思考",
+        '{"entities": [{"name": "未完成"}',
+        json.dumps(GOOD),
+    ):
+        models = FakeModels(reply(text, finish_reason="length"))
+        result = extract.extract_chunk(models, DEFAULT_SCHEMA, CHUNK)
+        assert result["status"] == "failed" and "输出被截断" in result["error"]
+        assert "16384" in result["error"]
+        assert result["raw_output"] == text
+        assert result["input_tokens"] == 120 and result["output_tokens"] == 30
+        assert models.chat_model.bound["max_tokens"] == 16384
+        assert result["result"] is None
