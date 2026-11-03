@@ -107,6 +107,7 @@ from ..tools.search import limit_titles
 from ..evaluation.evidence import locate_evidence, load_chunk
 from .. import prompts, runtime_config
 from . import graph_routes
+from ..graph import query as graph_query
 from ..ingestion.parser import ALLOWED_EXTENSIONS, UNSUPPORTED_MESSAGE
 from ..inspection.diagnosis import CATEGORIES as DIAGNOSIS_CATEGORIES
 from ..inspection.schedule import load_schedule, save_schedule, schedule_view
@@ -1740,17 +1741,39 @@ def create_app(store=None, models=None, jwt_secret=None):
         page: int = Query(1, ge=1),
         page_size: int = Query(10, ge=1, le=100),
         source: str | None = Query(None, pattern="^(reused|computed)$"),
+        # 知识图谱：按抽取状态筛选，extracted 新抽取、reused 复用、failed 失败、empty 没抽出实体。
+        graph_status: str | None = Query(
+            None, pattern="^(extracted|reused|failed|empty)$"
+        ),
         owner=Depends(identity),
     ):
         # 先按读权限找到文档，再以上传者身份读取分块：共享给自己的文档也能查看分块。
         row = app.state.store.readable_document(owner, str(document_id))
         if row is None:
             raise HTTPException(404, "文档不存在")
+        engine = app.state.store.engine
+        chunk_ids, graph_counts = graph_query.chunk_status_filter(
+            engine, str(document_id), graph_status
+        )
         result = app.state.store.list_document_chunks(
-            row["owner"], str(document_id), page, page_size, source
+            row["owner"],
+            str(document_id),
+            page,
+            page_size,
+            source,
+            chunk_ids=(chunk_ids or set()) if graph_status else None,
         )
         if result is None:
             raise HTTPException(404, "文档不存在")
+        # 每个分片的抽取情况（这个版本最近一次建图）；没建过图时为空。
+        graph_build_info, per_chunk = graph_query.chunk_graph(
+            engine, str(document_id), [chunk["chunk_id"] for chunk in result["chunks"]]
+        )
+        result["graph"] = graph_build_info
+        result["graph_counts"] = graph_counts
+        result["graph_status"] = graph_status
+        for chunk in result["chunks"]:
+            chunk["graph"] = per_chunk.get(chunk["chunk_id"])
         return result
 
     # 返回当前用户可读的文档版本状态，并附带同一文档的全部版本历史和可见范围。

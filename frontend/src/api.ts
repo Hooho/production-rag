@@ -322,6 +322,8 @@ export type DocumentMetadata = {
   overlap?: number | null;
   embedding_model?: string | null;
   embedding_dimension?: number | null;
+  // 上传时的图检索设置：开启时处理完自动建图。
+  graph?: UploadGraphOption | null;
 };
 export type DocumentStep = {
   step_id: string;
@@ -370,6 +372,8 @@ export type DocumentChunk = {
   parser: string | null;
   parser_version: string | null;
   parse_strategy: string | null;
+  // 知识图谱：这个版本最近一次建图里这一片的抽取情况；没建过图时为空。
+  graph?: ChunkGraph | null;
 };
 export type DocumentChunkPage = {
   document_id: string;
@@ -390,6 +394,10 @@ export type DocumentChunkPage = {
   source?: ChunkSource | null;
   source_counts?: { reused: number; computed: number };
   chunks: DocumentChunk[];
+  // 知识图谱：最近一次建图的配置、各抽取状态的分片数、当前的筛选。
+  graph?: ChunkGraphBuild | null;
+  graph_counts?: Record<ChunkGraphStatus, number> | null;
+  graph_status?: ChunkGraphStatus | null;
 };
 export type ChunkSource = "reused" | "computed";
 
@@ -783,9 +791,19 @@ export function uploadDocument(
   versionNote?: string,
   visibility: DocumentVisibility = "private",
   groups: string[] = [],
+  graph?: UploadGraphOption | null,
 ) {
   const form = new FormData();
   form.append("file", file);
+  // 图检索：on 时处理完自动建图；新版本不传时沿用上一版的设置。
+  if (graph) {
+    form.append("graph", graph.enabled ? "on" : "off");
+    if (graph.enabled) {
+      if (graph.schema_id) form.append("graph_schema_id", graph.schema_id);
+      if (graph.provider) form.append("graph_provider", graph.provider);
+      if (graph.model) form.append("graph_model", graph.model);
+    }
+  }
   form.append("visibility", visibility);
   if (groups.length > 0) form.append("groups", groups.join(","));
   if (title.trim()) form.append("title", title.trim());
@@ -848,9 +866,10 @@ export function listDocumentChunks(
   page: number,
   pageSize = 10,
   source?: ChunkSource | null,
+  graphStatus?: ChunkGraphStatus | null,
 ) {
   return request<DocumentChunkPage>(
-    `/documents/${documentId}/chunks?page=${page}&page_size=${pageSize}${source ? `&source=${source}` : ""}`,
+    `/documents/${documentId}/chunks?page=${page}&page_size=${pageSize}${source ? `&source=${source}` : ""}${graphStatus ? `&graph_status=${graphStatus}` : ""}`,
     {},
   );
 }
@@ -3566,4 +3585,368 @@ export function getEvalChunkOriginal(chunkId: string) {
   return request<EvalChunkOriginal>(
     `/eval/chunks/${encodeURIComponent(chunkId)}`,
   );
+}
+
+// 知识图谱（第 1 期）：字段和后端 app/graph、app/api/graph_routes.py 保持一致。
+export type ChunkGraphStatus = "extracted" | "reused" | "failed" | "empty";
+export type UploadGraphOption = {
+  enabled: boolean;
+  schema_id?: string | null;
+  provider?: string | null;
+  model?: string | null;
+};
+export type GraphBuildStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "partial"
+  | "failed";
+export type GraphBuild = {
+  id: string;
+  space: string;
+  document_id: string;
+  doc_key: string;
+  schema_id: string;
+  schema_name?: string;
+  provider: string;
+  model: string;
+  prompt_tag: string;
+  status: GraphBuildStatus;
+  active: boolean;
+  trigger: "upload" | "manual" | "batch" | "version";
+  total: number;
+  extracted: number;
+  reused: number;
+  failed: number;
+  entity_count: number;
+  relation_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  note: string | null;
+  error: string | null;
+  created_by: string;
+  created: string;
+  updated: string;
+  finished: string | null;
+};
+export type ChunkGraphBuild = {
+  build_id: string;
+  status: GraphBuildStatus;
+  schema_name: string;
+  provider: string;
+  model: string;
+  prompt_tag: string;
+};
+export type GraphMethod =
+  | "new"
+  | "exact"
+  | "normalized"
+  | "canonical"
+  | "alias";
+export type ChunkGraphMention = {
+  name: string;
+  canonical: string | null;
+  type: string;
+  type_fixed_from?: string | null;
+  description?: string | null;
+  entity_id?: string;
+  entity_name?: string;
+  resolve_method?: GraphMethod;
+  method_label?: string;
+};
+export type ChunkGraphRelation = {
+  source: string;
+  target: string;
+  category: string;
+  description: string;
+  evidence: string;
+  source_entity?: string | null;
+  target_entity?: string | null;
+};
+export type ChunkGraph = {
+  status: "extracted" | "reused" | "failed";
+  empty: boolean;
+  error: string | null;
+  reused_from: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  duration_ms: number | null;
+  prompt: { role: string; content: string }[] | null;
+  raw_output: string | null;
+  mentions: ChunkGraphMention[];
+  relations: ChunkGraphRelation[];
+  dropped: { kind: string; item: unknown; reason: string }[];
+};
+export type GraphNode = {
+  id: string;
+  name: string;
+  type: string;
+  relation_count: number;
+  mention_count: number;
+  focus: boolean;
+  hidden_neighbors: number;
+};
+export type GraphEdge = {
+  id: string;
+  source: string;
+  target: string;
+  count: number;
+  categories: string[];
+  descriptions: string[];
+};
+export type GraphNetwork = {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  total_entities: number;
+  total_relations: number;
+  limit: number;
+};
+export type GraphEntityRow = {
+  id: string;
+  name: string;
+  type: string;
+  description: string | null;
+  mention_count: number;
+  name_count: number;
+  chunk_count: number;
+  document_count: number;
+  relation_count: number;
+};
+export type GraphRelationRow = {
+  id: string;
+  build_id: string;
+  document_id: string;
+  chunk_id: string;
+  category: string;
+  description: string | null;
+  evidence: string | null;
+  origin: string;
+  source_name: string;
+  target_name: string;
+  source_id: string;
+  source_entity: string;
+  source_type: string;
+  target_id: string;
+  target_entity: string;
+  target_type: string;
+  position: number;
+  direction?: "out" | "in";
+  document_title?: string | null;
+};
+export type GraphMergeRow = {
+  name: string;
+  canonical: string;
+  type: string;
+  entity_id: string;
+  entity_name: string;
+  method: GraphMethod;
+  method_label: string;
+  positions: number[];
+  chunk_ids: string[];
+};
+export type GraphPage<T> = {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+export type GraphView = "network" | "entities" | "relations" | "merges";
+export type DocumentGraphData = {
+  build: GraphBuild | null;
+  history: GraphBuild[];
+  can_build: boolean;
+  processed: boolean;
+  settings: UploadGraphOption | null;
+  stats?: {
+    entity_count: number;
+    relation_count: number;
+    type_counts: Record<string, number>;
+    category_counts: Record<string, number>;
+    status_counts: Record<
+      "extracted" | "reused" | "failed" | "empty" | "pending",
+      number
+    >;
+  };
+  network?: GraphNetwork;
+  entities?: GraphPage<GraphEntityRow>;
+  relations?: GraphPage<GraphRelationRow>;
+  merges?: GraphPage<GraphMergeRow>;
+};
+export type GraphSchema = {
+  id: string;
+  name: string;
+  source: "default" | "recommended" | "custom";
+  version: number;
+  entity_types: { name: string; description: string; examples?: string[] }[];
+  relation_categories: { name: string; description: string }[];
+  note: string;
+  created_by: string;
+  created: string;
+};
+export type GraphSchemas = {
+  schemas: GraphSchema[];
+  default_id: string;
+  matching: { normalize: string[]; merge: string[] };
+  prompt: { id: string; tag: string; system: string; example_user: string };
+  model_mode: string;
+};
+export type GraphEstimate = {
+  document_id: string;
+  schema_id: string;
+  provider: string;
+  model: string;
+  prompt_tag: string;
+  total: number;
+  reusable: number;
+  to_extract: number;
+};
+export type GraphEntityDetail = {
+  entity: {
+    id: string;
+    name: string;
+    type: string;
+    description: string | null;
+    origin: string;
+    created: string;
+  };
+  names: {
+    name: string;
+    method: GraphMethod;
+    method_label: string;
+    count: number;
+    positions: number[];
+    chunk_ids: string[];
+    descriptions: string[];
+  }[];
+  documents: {
+    document_id: string;
+    title: string | null;
+    mention_count: number;
+    relation_count: number;
+  }[];
+  relations: GraphRelationRow[];
+};
+export type GraphTaskState = "none" | "outdated" | GraphBuildStatus;
+export type GraphTask = {
+  doc_key: string;
+  document_id: string;
+  title: string;
+  owner: string;
+  version: number;
+  listed: boolean;
+  processed: boolean;
+  auto: boolean;
+  state: GraphTaskState;
+  build: GraphBuild | null;
+};
+export type GraphOverview = {
+  documents: { document_id: string; title: string }[];
+  network: GraphNetwork;
+  type_counts: Record<string, number>;
+  category_counts: Record<string, number>;
+  matches: { id: string; name: string; type: string }[];
+};
+export type GraphBuildBody = {
+  schema_id?: string | null;
+  llm?: { provider: string; model?: string | null } | null;
+};
+
+function query(params: Record<string, string | number | null | undefined>) {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params))
+    if (value !== null && value !== undefined && value !== "")
+      search.set(key, String(value));
+  const text = search.toString();
+  return text ? `?${text}` : "";
+}
+
+export function getGraphSchemas() {
+  return request<GraphSchemas>("/graph/schemas");
+}
+
+export function estimateDocumentGraph(
+  documentId: string,
+  schemaId?: string | null,
+  provider?: string | null,
+  model?: string | null,
+) {
+  return request<GraphEstimate>(
+    `/documents/${documentId}/graph/estimate${query({ schema_id: schemaId, provider, model })}`,
+  );
+}
+
+export function buildDocumentGraph(documentId: string, body: GraphBuildBody) {
+  return request<GraphBuild>(`/documents/${documentId}/graph`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export function buildGraphBatch(documentIds: string[], body: GraphBuildBody) {
+  return request<{
+    started: GraphBuild[];
+    skipped: { document_id: string; title: string | null; reason: string }[];
+  }>("/graph/builds", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...body, document_ids: documentIds }),
+  });
+}
+
+export function retryDocumentGraph(
+  documentId: string,
+  chunkId?: string | null,
+) {
+  return request<GraphBuild>(`/documents/${documentId}/graph/retry`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chunk_id: chunkId ?? null }),
+  });
+}
+
+export function getDocumentGraph(
+  documentId: string,
+  params: {
+    view: GraphView;
+    page?: number;
+    q?: string;
+    type?: string | null;
+    category?: string | null;
+    focus?: string[];
+  },
+) {
+  return request<DocumentGraphData>(
+    `/documents/${documentId}/graph${query({
+      view: params.view,
+      page: params.page,
+      q: params.q,
+      type: params.type,
+      category: params.category,
+      focus: params.focus?.join(","),
+    })}`,
+  );
+}
+
+export function getGraphEntity(entityId: string, documentId?: string | null) {
+  return request<GraphEntityDetail>(
+    `/graph/entities/${entityId}${query({ document_id: documentId })}`,
+  );
+}
+
+export function getGraphOverview(params: {
+  document_id?: string | null;
+  type?: string | null;
+  category?: string | null;
+  q?: string;
+  focus?: string[];
+  limit?: number;
+}) {
+  return request<GraphOverview>(
+    `/graph/overview${query({ ...params, focus: params.focus?.join(",") })}`,
+  );
+}
+
+export function getGraphTasks() {
+  return request<{ items: GraphTask[] }>("/graph/tasks");
 }

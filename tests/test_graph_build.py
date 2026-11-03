@@ -470,3 +470,63 @@ def test_recover_requeues_unfinished_builds(setup):
         ]["status"]
         == "completed"
     )
+
+
+# 分块列表：每个分片带上抽取情况（名字归到了哪个实体、关系、提示词、原始输出），可以按抽取状态筛选。
+def test_chunk_list_shows_extraction(setup):
+    client, store = setup
+    models = enable_model(client)
+    document_id = add_document(client)
+    page = client.get(f"/documents/{document_id}/chunks", headers=headers()).json()
+    assert page["graph"] is None and all(
+        chunk["graph"] is None for chunk in page["chunks"]
+    )
+    models.chat_model.fail = {"苹果"}
+    build(client, document_id)
+    run_graph_jobs(store, models)
+    page = client.get(f"/documents/{document_id}/chunks", headers=headers()).json()
+    assert (
+        page["graph"]["schema_name"] == "默认清单 v1"
+        and page["graph"]["prompt_tag"] == "graph_extract@内置"
+    )
+    counts = page["graph_counts"]
+    assert counts["failed"] == 1
+    failed = client.get(
+        f"/documents/{document_id}/chunks?graph_status=failed", headers=headers()
+    ).json()
+    assert failed["total"] == 1
+    item = failed["chunks"][0]["graph"]
+    assert (
+        item["status"] == "failed"
+        and "连接超时" in item["error"]
+        and item["prompt"][1]["role"] == "user"
+    )
+    models.chat_model.fail = set()
+    client.post(
+        f"/documents/{document_id}/graph/retry",
+        headers=headers(),
+        json={"chunk_id": failed["chunks"][0]["chunk_id"]},
+    )
+    run_graph_jobs(store, models)
+    page = client.get(f"/documents/{document_id}/chunks", headers=headers()).json()
+    apple = next(chunk for chunk in page["chunks"] if "苹果" in chunk["content"])[
+        "graph"
+    ]
+    assert apple["status"] == "extracted" and apple["input_tokens"] == 100
+    assert [
+        (item["name"], item["entity_name"], item["method_label"])
+        for item in apple["mentions"]
+    ][0] == ("阿段", "段永平", "模型标准名")
+    assert apple["relations"][0]["source_entity"] == "段永平"
+    assert (
+        client.get(
+            f"/documents/{document_id}/chunks?graph_status=failed", headers=headers()
+        ).json()["total"]
+        == 0
+    )
+    assert (
+        client.get(
+            f"/documents/{document_id}/chunks?graph_status=bad", headers=headers()
+        ).status_code
+        == 422
+    )

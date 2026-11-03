@@ -1238,7 +1238,10 @@ class Storage:
 
     # 返回当前用户某个文档的分块页面，解析标题路径和作者等可展示字段。
     # source 为 reused / computed 时只列出复用或新计算向量的分片；counts 返回两类各有多少，供筛选按钮显示。
-    def list_document_chunks(self, owner, document_id, page, page_size, source=None):
+    # chunk_ids 不为 None 时只列出这些分片（知识图谱按抽取状态筛选时用）。
+    def list_document_chunks(
+        self, owner, document_id, page, page_size, source=None, chunk_ids=None
+    ):
         joined = document_chunks.join(
             chunks, document_chunks.c.chunk_id == chunks.c.id
         ).join(documents, document_chunks.c.document_id == documents.c.id)
@@ -1251,6 +1254,8 @@ class Storage:
             if source in ("reused", "computed")
             else base
         )
+        if chunk_ids is not None:
+            condition = and_(condition, chunks.c.id.in_(list(chunk_ids)))
         with self.engine.connect() as connection:
             document = (
                 connection.execute(

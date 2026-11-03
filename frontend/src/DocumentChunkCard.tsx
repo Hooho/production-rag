@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { DocumentChunk } from "./api";
+import type { ChunkGraph, DocumentChunk } from "./api";
 import { Tag } from "./Tag";
 
 // 分片卡片：知识库文档详情的「全部分块」和评测语料库共用，从 App.tsx 挪出来。
@@ -33,7 +33,7 @@ const CONTEXT_SOURCE_LABELS: Record<string, string> = {
 
 // 展示单个分块：展开后先看"位置 / 上下文说明 / 内容"，排查用的技术信息默认折叠。
 // 以前 11 个字段一行一个平铺，位置、正文和排查信息混在一起；作者识别不到时每个分片都重复同一句。
-export function DocumentChunkCard({ chunk, expanded, onToggle }: { chunk: DocumentChunk; expanded: boolean; onToggle: () => void }) {
+export function DocumentChunkCard({ chunk, expanded, onToggle, onRetryGraph }: { chunk: DocumentChunk; expanded: boolean; onToggle: () => void; onRetryGraph?: (chunkId: string) => void }) {
   const heading = chunk.heading_path.length > 0 ? chunk.heading_path.join(" / ") : "根文档";
   // 表格（Excel、CSV）的分片记的是行号，没有页码。
   const pages = chunk.row_start != null ? (chunk.row_start === chunk.row_end ? `第 ${chunk.row_start} 行` : `第 ${chunk.row_start}–${chunk.row_end} 行`)
@@ -41,7 +41,7 @@ export function DocumentChunkCard({ chunk, expanded, onToggle }: { chunk: Docume
   // 文件名去掉扩展名后和标题一样时只写一次。
   const sameName = chunk.source.replace(/\.[^.]+$/, "") === chunk.document_title;
   return <article className={`document-chunk-card ${expanded ? "expanded" : ""}`}>
-    <div className="document-chunk-summary"><div className="document-chunk-copy"><strong>第 {String(chunk.position).padStart(3, "0")} 段 · {chunk.char_count} 字 · {pages}{chunk.context && !chunk.context.includes("<think") ? "" : " · 无上下文说明"}{chunk.vector_source && <Tag size="sm" plain className="is-after" tone={chunk.vector_source === "reused" ? "neutral" : "info"}>{chunk.vector_source === "reused" ? "复用" : "新计算"}</Tag>}</strong><small>{heading}</small></div><button className="chunk-toggle-button" onClick={onToggle}>{expanded ? "收起" : "展开"}</button></div>
+    <div className="document-chunk-summary"><div className="document-chunk-copy"><strong>第 {String(chunk.position).padStart(3, "0")} 段 · {chunk.char_count} 字 · {pages}{chunk.context && !chunk.context.includes("<think") ? "" : " · 无上下文说明"}{chunk.vector_source && <Tag size="sm" plain className="is-after" tone={chunk.vector_source === "reused" ? "neutral" : "info"}>{chunk.vector_source === "reused" ? "复用" : "新计算"}</Tag>}{chunk.graph && <GraphBadge graph={chunk.graph} />}</strong><small>{heading}</small></div><button className="chunk-toggle-button" onClick={onToggle}>{expanded ? "收起" : "展开"}</button></div>
     {expanded && <div className="document-chunk-body">
       <section className="chunk-group">
         <h4>位置</h4>
@@ -61,9 +61,10 @@ export function DocumentChunkCard({ chunk, expanded, onToggle }: { chunk: Docume
             : <small className="chunk-note is-warn">未生成：上下文生成失败或未启用，可在「处理流程」里重试生成上下文</small>}
       </section>
       <section className="chunk-group">
-        <h4>内容<small>{chunk.char_count} 字</small></h4>
-        <p className="chunk-content">{chunk.content}</p>
+        <h4>内容<small>{chunk.char_count} 字{chunk.graph && chunk.graph.mentions.length > 0 ? " · 黄色是抽出的实体名字" : ""}</small></h4>
+        <p className="chunk-content">{chunk.graph ? highlight(chunk.content, chunk.graph) : chunk.content}</p>
       </section>
+      {chunk.graph && <ChunkGraphSection chunkId={chunk.chunk_id} graph={chunk.graph} onRetry={onRetryGraph} />}
       <details className="chunk-group chunk-tech">
         <summary>技术信息<small>排查切分和解析问题时看</small></summary>
         {/* 每项先写结果，下面一行小字说明这项是什么意思；以前只有 NarrativeText、heading_paragraph_sentence 这类原始值。 */}
@@ -82,3 +83,93 @@ export function DocumentChunkCard({ chunk, expanded, onToggle }: { chunk: Docume
   </article>;
 }
 
+
+const GRAPH_STATUS_LABELS: Record<string, string> = { extracted: "新抽取", reused: "复用", failed: "抽取失败" };
+
+// 分片标题行上的抽取状态：失败标红，没抽出实体单独说明。
+function GraphBadge({ graph }: { graph: ChunkGraph }) {
+  if (graph.status === "failed") return <Tag size="sm" plain className="is-after" tone="danger">图谱：抽取失败</Tag>;
+  if (graph.empty) return <Tag size="sm" plain className="is-after" tone="neutral">图谱：没抽出实体</Tag>;
+  return <Tag size="sm" plain className="is-after" tone="info">图谱：{graph.mentions.length} 个名字 · {graph.relations.length} 条关系</Tag>;
+}
+
+// 原文里高亮抽出的名字（长的先匹配，「苹果公司」不会被拆成「苹果」）。
+function highlight(content: string, graph: ChunkGraph) {
+  const names = [...new Set(graph.mentions.map((item) => item.name).filter((name) => name.length > 0))].sort((a, b) => b.length - a.length);
+  if (names.length === 0) return content;
+  const pattern = new RegExp(`(${names.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "g");
+  const byName = new Map(graph.mentions.map((item) => [item.name, item]));
+  return content.split(pattern).map((part, index) => {
+    const mention = byName.get(part);
+    if (!mention || index % 2 === 0) return part;
+    return <mark key={index} className="chunk-graph-mark" title={`${mention.type} → 归到「${mention.entity_name ?? mention.canonical ?? part}」（${mention.method_label ?? ""}）`}>{part}</mark>;
+  });
+}
+
+// 这一片的抽取结果：名字 → 归到哪个实体、关系、丢掉的项；发给模型的完整提示词和原始输出默认折叠。
+function ChunkGraphSection({ chunkId, graph, onRetry }: { chunkId: string; graph: ChunkGraph; onRetry?: (chunkId: string) => void }) {
+  const tokens = graph.input_tokens != null ? ` · token 输入 ${graph.input_tokens}，输出 ${graph.output_tokens ?? 0}` : "";
+  const seconds = graph.duration_ms != null ? ` · ${(graph.duration_ms / 1000).toFixed(1)} 秒` : "";
+  return (
+    <section className="chunk-group">
+      <h4>实体关系<small>{GRAPH_STATUS_LABELS[graph.status] ?? graph.status}{graph.status === "reused" ? "（分片、清单、模型、提示词都和以前一样，沿用当时的结果）" : ""}{tokens}{seconds}</small></h4>
+      {graph.status === "failed" ? (
+        <p className="chunk-note is-warn">
+          抽取失败：{graph.error}
+          {onRetry && <> <button type="button" className="link-button" onClick={() => onRetry(chunkId)}>重试这一片</button></>}
+        </p>
+      ) : graph.mentions.length === 0 ? (
+        <small className="chunk-note">这一片没有抽出实体</small>
+      ) : (
+        <>
+          <ul className="chunk-graph-list">
+            {graph.mentions.map((item) => (
+              <li key={item.name}>
+                <strong>{item.name}</strong>（{item.type}{item.type_fixed_from ? `，模型写的是「${item.type_fixed_from}」，不在清单里` : ""}）
+                <span className="chunk-graph-arrow">→</span>
+                {item.entity_name ?? item.canonical}
+                {item.method_label && <small>{item.method_label}{item.canonical && item.canonical !== item.name ? `：模型给的标准名「${item.canonical}」` : ""}</small>}
+              </li>
+            ))}
+          </ul>
+          {graph.relations.length > 0 && (
+            <ul className="chunk-graph-list">
+              {graph.relations.map((item, index) => (
+                <li key={index}>
+                  {item.source}<span className="chunk-graph-arrow">─{item.category}→</span>{item.target}
+                  <small>{item.description}</small>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+      {graph.dropped.length > 0 && (
+        <details className="chunk-graph-raw">
+          <summary>丢掉了 {graph.dropped.length} 项（格式不对、重复、关系的起点终点对不上）</summary>
+          <ul className="chunk-graph-list">
+            {graph.dropped.map((item, index) => (
+              <li key={index}>
+                {item.reason}<small>{JSON.stringify(item.item)}</small>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {graph.prompt && (
+        <details className="chunk-graph-raw">
+          <summary>发给模型的完整提示词</summary>
+          {graph.prompt.map((message, index) => (
+            <pre key={index} className="graph-prompt">{`【${message.role === "system" ? "系统提示词" : "用户消息"}】\n${message.content}`}</pre>
+          ))}
+        </details>
+      )}
+      {graph.raw_output != null && (
+        <details className="chunk-graph-raw">
+          <summary>模型原始输出</summary>
+          <pre className="graph-prompt">{graph.raw_output}</pre>
+        </details>
+      )}
+    </section>
+  );
+}
