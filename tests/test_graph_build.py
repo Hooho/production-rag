@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from langchain_core.messages import AIMessage
 from sqlalchemy import func, select
 
@@ -202,6 +204,11 @@ def test_build_document_graph(setup, monkeypatch):
         and steps["graph_merge"]["status"] == "completed"
     )
     assert "模型标准名 1" in steps["graph_merge"]["detail"]
+    assert steps["graph_write"]["status"] == "completed"
+    assert steps["graph_write"]["title"] == "写入图谱"
+    assert steps["graph_write"]["result"]["relation_count"] == 2
+    assert steps["graph_write"]["duration_ms"] >= 0
+    assert steps["graph_merge"]["duration_ms"] >= 0
     # 实体详情（文档内）：名字、出处、关系。
     entity_id = next(
         node["id"] for node in graph["network"]["nodes"] if node["name"] == "段永平"
@@ -706,3 +713,77 @@ def test_edge_details_are_scoped_and_include_source_text(setup):
         "/graph/relations", params=pair, headers=headers("admin")
     ).json()["items"]
     assert {row["document_id"] for row in global_items} == {private, public}
+
+
+@pytest.mark.parametrize("phase", ["graph_merge", "graph_write"])
+def test_finalize_failure_tracks_actual_step_and_preserves_previous_graph(
+    setup, monkeypatch, phase
+):
+    client, store = setup
+    models = enable_model(client)
+    document_id = add_document(client)
+    first = build(client, document_id).json()
+    run_graph_jobs(store, models)
+    second = build(client, document_id).json()
+    function = "prepare_build" if phase == "graph_merge" else "write_build"
+    original = getattr(graph_build.resolve, function)
+
+    def fail(*args, **kwargs):
+        original(*args, **kwargs)
+        raise RuntimeError("模拟该阶段失败")
+
+    monkeypatch.setattr(graph_build.resolve, function, fail)
+    run_graph_jobs(store, models)
+    assert graph_build.get_build(store.engine, second["id"])["status"] == "failed"
+    assert graph_build.get_build(store.engine, first["id"])["active"] is True
+    steps = {
+        row["step_id"]: row
+        for row in client.get(f"/documents/{document_id}", headers=headers()).json()[
+            "steps"
+        ]
+    }
+    assert steps["graph_extract"]["status"] == "completed"
+    assert steps[phase]["status"] == "failed"
+    assert steps[phase]["duration_ms"] >= 0
+    assert "模拟该阶段失败" in steps[phase]["detail"]
+    assert steps["graph_write"]["status"] == (
+        "failed" if phase == "graph_write" else "pending"
+    )
+    with store.engine.connect() as connection:
+        assert (
+            connection.execute(
+                select(func.count())
+                .select_from(graph_mentions)
+                .where(graph_mentions.c.build_id == second["id"])
+            ).scalar_one()
+            == 0
+        )
+    monkeypatch.setattr(graph_build.resolve, function, original)
+    assert build(client, document_id).status_code == 202
+    run_graph_jobs(store, models)
+    steps = {
+        row["step_id"]: row
+        for row in client.get(f"/documents/{document_id}", headers=headers()).json()[
+            "steps"
+        ]
+    }
+    assert steps["graph_write"]["status"] == "completed"
+
+
+def test_all_extractions_failed_does_not_report_graph_write_success(setup):
+    client, store = setup
+    models = enable_model(client)
+    models.chat_model.fail = {"步步高", "苹果"}
+    document_id = add_document(client)
+    assert build(client, document_id).status_code == 202
+    run_graph_jobs(store, models)
+    steps = {
+        row["step_id"]: row
+        for row in client.get(f"/documents/{document_id}", headers=headers()).json()[
+            "steps"
+        ]
+    }
+    assert steps["graph_extract"]["status"] == "failed"
+    assert steps["graph_merge"]["status"] == "pending"
+    assert steps["graph_write"]["status"] == "pending"
+    assert "未执行" in steps["graph_write"]["detail"]

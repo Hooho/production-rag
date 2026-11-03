@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import logging
+import time
 import uuid
 
 from sqlalchemy import and_, delete, func, select
@@ -31,10 +32,11 @@ QUEUE = "graph:jobs"
 BATCH_SIZE = 20
 # 一批里同时调用模型的数量，和上下文说明（CONTEXT_WORKERS）一样。
 WORKERS = 4
-# 处理流程里的两步，排在「完成」（9）之后。
+# 处理流程里的三步，排在「完成」（9）之后。
 STEPS = {
     "graph_extract": (10, "抽取实体关系"),
     "graph_merge": (11, "合并实体"),
+    "graph_write": (12, "写入图谱"),
 }
 # 处理完成、有分片的版本才能建图。
 PROCESSED_PREFIXES = ("ready:", "staged:", "review:", "flagged:")
@@ -44,6 +46,13 @@ TRIGGERS = ("upload", "manual", "batch", "version")
 
 class BuildError(ValueError):
     pass
+
+
+class BuildStageError(BuildError):
+    def __init__(self, message, step_id, duration_ms):
+        super().__init__(message)
+        self.step_id = step_id
+        self.duration_ms = duration_ms
 
 
 def is_processed(status):
@@ -346,6 +355,15 @@ def start_build(
         },
     )
     store.mysql.clear_document_steps(document_id, STEPS["graph_merge"][0])
+    for step_id in ("graph_merge", "graph_write"):
+        write_step(
+            store,
+            document_id,
+            step_id,
+            "pending",
+            "等待抽取完成",
+            {"build_id": build_id},
+        )
     enqueue(store, build_id)
     return get_build(store.engine, build_id)
 
@@ -393,7 +411,7 @@ def counts(connection, build_id):
     return value
 
 
-def mark_failed(store, build, message):
+def mark_failed(store, build, message, step_id="graph_extract", duration_ms=None):
     with store.engine.begin() as connection:
         connection.execute(
             graph_builds.update()
@@ -405,10 +423,11 @@ def mark_failed(store, build, message):
     write_step(
         store,
         build["document_id"],
-        "graph_extract",
+        step_id,
         "failed",
         f"建图失败：{message[:300]}",
         {"build_id": build["id"], "error": message[:300]},
+        duration_ms,
     )
 
 
@@ -422,7 +441,13 @@ def run_job(store, models, payload):
         run_batch(store, models, build)
     except Exception as error:
         logger.exception("graph_job_failed id=%s", build["id"])
-        mark_failed(store, build, str(error))
+        mark_failed(
+            store,
+            build,
+            str(error),
+            getattr(error, "step_id", "graph_extract"),
+            getattr(error, "duration_ms", None),
+        )
 
 
 def run_batch(store, models, build):
@@ -536,16 +561,11 @@ def run_batch(store, models, build):
 
 # 全部分片抽完：按分片顺序合并实体、写入名字和关系；这份文档在空间里只保留这一次建图为 active。
 def finalize(store, build):
-    with store.engine.begin() as connection:
+    with store.engine.connect() as connection:
         value = counts(connection, build["id"])
         rows = (
             connection.execute(
-                select(
-                    graph_chunk_extractions.c.id,
-                    graph_chunk_extractions.c.chunk_id,
-                    graph_chunk_extractions.c.document_id,
-                    graph_chunk_extractions.c.result,
-                )
+                select(graph_chunk_extractions)
                 .where(
                     graph_chunk_extractions.c.build_id == build["id"],
                     graph_chunk_extractions.c.status.in_(("extracted", "reused")),
@@ -555,76 +575,123 @@ def finalize(store, build):
             .mappings()
             .all()
         )
-        succeeded = value["extracted"] + value["reused"]
-        if succeeded == 0:
-            status, summary = "failed", None
-        else:
-            summary = resolve.resolve_build(
-                connection,
-                build["space"],
-                build["id"],
-                [dict(row) for row in rows],
-                build["created_by"],
-            )
-            status = "completed" if value["failed"] == 0 else "partial"
-            connection.execute(
-                graph_builds.update()
-                .where(
-                    graph_builds.c.space == build["space"],
-                    graph_builds.c.doc_key == build["doc_key"],
-                    graph_builds.c.id != build["id"],
-                )
-                .values(active=False)
-            )
-        timestamp = now()
-        connection.execute(
-            graph_builds.update()
-            .where(graph_builds.c.id == build["id"])
-            .values(
-                **value,
-                status=status,
-                active=summary is not None,
-                entity_count=summary["entity_count"] if summary else 0,
-                relation_count=summary["relation_count"] if summary else 0,
-                error="全部分片都抽取失败" if summary is None else None,
-                updated=timestamp,
-                finished=timestamp,
-            )
-        )
-    extract_detail = (
-        f"共 {build['total']} 个分片：新抽取 {value['extracted']}，复用 {value['reused']}，失败 {value['failed']}；"
-        f"token 输入 {value['input_tokens']}，输出 {value['output_tokens']}"
+    extract_status = (
+        "completed" if not value["failed"] else ("warning" if rows else "failed")
     )
     write_step(
         store,
         build["document_id"],
         "graph_extract",
-        "failed"
-        if summary is None
-        else ("warning" if value["failed"] else "completed"),
-        ("全部分片都抽取失败。" if summary is None else "") + extract_detail,
+        extract_status,
+        f"共 {build['total']} 个分片：新抽取 {value['extracted']}，复用 {value['reused']}，失败 {value['failed']}；"
+        f"token 输入 {value['input_tokens']}，输出 {value['output_tokens']}",
         {"build_id": build["id"], "total": build["total"], **value},
     )
-    if summary is not None:
-        labels = {
-            "new": "新建",
-            "exact": "名字相同",
-            "normalized": "规范化后相同",
-            "canonical": "模型标准名",
-            "alias": "别名表",
-        }
-        methods = "，".join(
-            f"{labels.get(key, key)} {count}"
-            for key, count in summary["methods"].items()
+    summary = None
+    step_id = "graph_merge"
+    started = time.monotonic()
+    try:
+        if rows:
+            write_step(
+                store,
+                build["document_id"],
+                step_id,
+                "running",
+                "正在计算名字归属",
+                {"build_id": build["id"]},
+            )
+            with store.engine.connect() as connection:
+                plan = resolve.prepare_build(
+                    connection,
+                    build["space"],
+                    build["id"],
+                    [dict(row) for row in rows],
+                    build["created_by"],
+                )
+            summary = plan["summary"]
+            labels = {
+                "new": "新建",
+                "exact": "名字相同",
+                "normalized": "规范化后相同",
+                "canonical": "模型标准名",
+                "alias": "别名表",
+            }
+            methods = "，".join(
+                f"{labels.get(key, key)} {count}"
+                for key, count in summary["methods"].items()
+            )
+            write_step(
+                store,
+                build["document_id"],
+                step_id,
+                "completed",
+                f"归到 {summary['entity_count']} 个实体（新建 {summary['created_count']} 个）；{methods}",
+                {"build_id": build["id"], **summary},
+                round((time.monotonic() - started) * 1000),
+            )
+            step_id = "graph_write"
+            started = time.monotonic()
+            write_step(
+                store,
+                build["document_id"],
+                step_id,
+                "running",
+                "正在保存实体、名字出处和关系",
+                {"build_id": build["id"]},
+            )
+        status = (
+            ("completed" if not value["failed"] else "partial") if rows else "failed"
         )
-        write_step(
-            store,
-            build["document_id"],
-            "graph_merge",
-            "completed",
-            f"归到 {summary['entity_count']} 个实体（新建 {summary['created_count']} 个），{summary['relation_count']} 条关系；{methods}",
-            {"build_id": build["id"], **summary},
-        )
+        with store.engine.begin() as connection:
+            if rows:
+                resolve.write_build(connection, build["space"], build["id"], plan)
+                connection.execute(
+                    graph_builds.update()
+                    .where(
+                        graph_builds.c.space == build["space"],
+                        graph_builds.c.doc_key == build["doc_key"],
+                        graph_builds.c.id != build["id"],
+                    )
+                    .values(active=False)
+                )
+            connection.execute(
+                graph_builds.update()
+                .where(graph_builds.c.id == build["id"])
+                .values(
+                    **value,
+                    status=status,
+                    active=summary is not None,
+                    entity_count=summary["entity_count"] if summary else 0,
+                    relation_count=summary["relation_count"] if summary else 0,
+                    error=None if rows else "全部分片都抽取失败",
+                    updated=now(),
+                    finished=now(),
+                )
+            )
+        if summary is not None:
+            write_step(
+                store,
+                build["document_id"],
+                "graph_write",
+                "completed",
+                f"已保存 {summary['entity_count']} 个实体的归属、{summary['mention_count']} 条名字出处、{summary['relation_count']} 条关系，建图已生效",
+                {"build_id": build["id"], **summary},
+                round((time.monotonic() - started) * 1000),
+            )
+        else:
+            for pending in ("graph_merge", "graph_write"):
+                write_step(
+                    store,
+                    build["document_id"],
+                    pending,
+                    "pending",
+                    "未执行：全部分片都抽取失败",
+                    {"build_id": build["id"]},
+                )
+    except Exception as error:
+        raise BuildStageError(
+            str(error), step_id, round((time.monotonic() - started) * 1000)
+        ) from error
     logger.info("graph_build_done id=%s status=%s", build["id"], status)
 
 
@@ -661,6 +728,15 @@ def retry(store, build_id, chunk_id=None):
         f"排队中：补跑 {removed} 个失败的分片",
         {"build_id": build_id},
     )
+    for step_id in ("graph_merge", "graph_write"):
+        write_step(
+            store,
+            build["document_id"],
+            step_id,
+            "pending",
+            "等待补跑完成",
+            {"build_id": build_id},
+        )
     enqueue(store, build_id)
     return get_build(store.engine, build_id)
 

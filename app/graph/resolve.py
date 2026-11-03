@@ -88,18 +88,18 @@ def resolve_mention(connection, space, mention, cache):
             "id": str(uuid.uuid4()),
             "name": mention["canonical"] or mention["name"],
         }
-        connection.execute(
-            graph_entities.insert().values(
-                id=entity["id"],
-                space=space,
-                name=entity["name"][:200],
-                type=entity_type,
-                merge_key=key,
-                description=mention.get("description") or None,
-                origin="extracted",
-                created=timestamp,
-                updated=timestamp,
-            )
+        cache["new_entities"].append(
+            {
+                "id": entity["id"],
+                "space": space,
+                "name": entity["name"][:200],
+                "type": entity_type,
+                "merge_key": key,
+                "description": mention.get("description") or None,
+                "origin": "extracted",
+                "created": timestamp,
+                "updated": timestamp,
+            }
         )
         cache["entities"][key] = entity
         created = True
@@ -134,10 +134,9 @@ def remove_orphans(connection, space):
     )
 
 
-# 把一次建图的抽取结果写成名字、关系和合并记录，并归到全局实体。按分片顺序处理，结果是确定的。
+# 只计算归属和待写入数据，不修改数据库；写入步骤统一事务提交。
 # extractions：[{"id", "chunk_id", "document_id", "result"}]，只传成功（新抽取或复用）的。
-def resolve_build(connection, space, build_id, extractions, created_by="system"):
-    clear_build(connection, build_id)
+def prepare_build(connection, space, build_id, extractions, created_by="system"):
     aliases = {
         row[0]: row[1]
         for row in connection.execute(
@@ -146,7 +145,8 @@ def resolve_build(connection, space, build_id, extractions, created_by="system")
             )
         ).all()
     }
-    cache = {"aliases": aliases, "entities": {}}
+    cache = {"aliases": aliases, "entities": {}, "new_entities": []}
+    mentions, merges, relations = [], [], []
     methods = {}
     entity_ids = set()
     created_count = 0
@@ -202,9 +202,8 @@ def resolve_build(connection, space, build_id, extractions, created_by="system")
                     "created": timestamp,
                 }
             )
-        if mention_rows:
-            connection.execute(graph_mentions.insert(), mention_rows)
-            connection.execute(graph_merges.insert(), merge_rows)
+        mentions.extend(mention_rows)
+        merges.extend(merge_rows)
         relation_rows = []
         for item in result.get("relations") or []:
             source = by_name.get(item["source"])
@@ -227,13 +226,37 @@ def resolve_build(connection, space, build_id, extractions, created_by="system")
                     "status": "active",
                 }
             )
-        if relation_rows:
-            connection.execute(graph_relations.insert(), relation_rows)
-            relation_count += len(relation_rows)
-    remove_orphans(connection, space)
+        relations.extend(relation_rows)
+        relation_count += len(relation_rows)
     return {
-        "entity_count": len(entity_ids),
-        "created_count": created_count,
-        "relation_count": relation_count,
-        "methods": methods,
+        "entities": cache["new_entities"],
+        "mentions": mentions,
+        "merges": merges,
+        "relations": relations,
+        "summary": {
+            "entity_count": len(entity_ids),
+            "created_count": created_count,
+            "mention_count": len(mentions),
+            "relation_count": relation_count,
+            "methods": methods,
+        },
     }
+
+
+def write_build(connection, space, build_id, plan):
+    clear_build(connection, build_id)
+    for table, key in (
+        (graph_entities, "entities"),
+        (graph_mentions, "mentions"),
+        (graph_merges, "merges"),
+        (graph_relations, "relations"),
+    ):
+        for start in range(0, len(plan[key]), 500):
+            connection.execute(table.insert(), plan[key][start : start + 500])
+    remove_orphans(connection, space)
+    return plan["summary"]
+
+
+def resolve_build(connection, space, build_id, extractions, created_by="system"):
+    plan = prepare_build(connection, space, build_id, extractions, created_by)
+    return write_build(connection, space, build_id, plan)

@@ -331,7 +331,7 @@ export type DocumentStep = {
   stage: string;
   title: string;
   // warning：步骤跑完了但结果有问题（安全扫描发现疑似注入）。
-  status: "running" | "completed" | "failed" | "warning";
+  status: "pending" | "running" | "completed" | "failed" | "warning";
   detail: string;
   result?: Record<string, unknown> | null;
   duration_ms?: number | null;

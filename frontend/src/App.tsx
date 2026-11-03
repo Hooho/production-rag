@@ -5073,6 +5073,11 @@ function formatResultValue(value: unknown): string {
 
 function formatResultLabel(key: string) {
   const labels: Record<string, string> = {
+    build_id: "建图记录",
+    entity_count: "实体数",
+    created_count: "新建实体数",
+    mention_count: "名字出处数",
+    relation_count: "关系数",
     // Agent 模式「写入会话记忆」这一步的字段。
     compressed: "是否压缩",
     message_count_before: "写入前的消息数",
@@ -7257,7 +7262,9 @@ function DocumentTrace({
               ? "✓"
               : step.status === "running"
                 ? "·"
-                : "!"}
+                : step.status === "pending"
+                  ? "○"
+                  : "!"}
           </span>
           {/* warning：步骤跑完了但结果有问题（安全扫描发现疑似注入），整行标红。 */}
           <div className="document-step-copy">
