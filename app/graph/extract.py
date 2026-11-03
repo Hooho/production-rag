@@ -4,6 +4,7 @@ import re
 import time
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from openai import APITimeoutError
 
 from .. import prompts
 from ..models import TruncatedOutput, strip_think
@@ -12,6 +13,8 @@ from .schemas import OTHER_TYPE, category_names, render, type_names
 PROMPT_ID = "graph_extract"
 # 推理模型先写思考过程再写 JSON，额度给少了会在写完 JSON 之前被截断。
 MAX_TOKENS = 4096
+# 图谱抽取输出较长，使用独立请求超时，不修改问答模型的默认配置。
+REQUEST_TIMEOUT = 120
 NAME_LENGTH = 200
 TEXT_LENGTH = 500
 OTHER_CATEGORY = "其他"
@@ -151,7 +154,7 @@ def call_model(models, messages):
         raise RuntimeError(
             "真实聊天模型未启用（MODEL_MODE 不是 openai），无法抽取实体关系"
         )
-    response = chat_model.bind(max_tokens=MAX_TOKENS).invoke(
+    response = chat_model.bind(max_tokens=MAX_TOKENS, timeout=REQUEST_TIMEOUT).invoke(
         [
             SystemMessage(content=messages[0]["content"]),
             HumanMessage(content=messages[1]["content"]),
@@ -182,6 +185,11 @@ def extract_chunk(models, schema, chunk, system_prompt=None):
         raw, text, input_tokens, output_tokens = call_model(models, messages)
         result = parse_output(text, schema)
         status, error = "extracted", None
+    except (APITimeoutError, TimeoutError) as error_value:
+        result, status = None, "failed"
+        error = f"抽取请求超时（单次超时上限 {REQUEST_TIMEOUT} 秒；总耗时可能包含自动重试）；{error_value}"[
+            :500
+        ]
     except Exception as error_value:
         result, status, error = None, "failed", str(error_value)[:500]
     return {

@@ -16,6 +16,7 @@ class FakeChatModel:
         self.calls = []
 
     def bind(self, **kwargs):
+        self.bound = kwargs
         return self
 
     def invoke(self, messages):
@@ -239,3 +240,66 @@ def test_graph_preview_matches_generic_template():
     assert isinstance(preview[1]["parts"][0], dict)
     assert "段永平" not in prompts.compose("graph_extract")
     assert "苹果" not in str(preview)
+
+
+def test_graph_request_has_own_timeout_and_preserves_shared_model():
+    models = FakeModels(reply(GOOD))
+    result = extract.extract_chunk(models, DEFAULT_SCHEMA, CHUNK)
+    assert result["status"] == "extracted"
+    assert models.chat_model.bound["timeout"] == 120
+    assert not hasattr(models.chat_model, "request_timeout")
+
+
+def test_graph_timeout_is_explained():
+    import httpx
+    from openai import APITimeoutError
+
+    models = FakeModels(
+        APITimeoutError(request=httpx.Request("POST", "https://example.test"))
+    )
+    result = extract.extract_chunk(models, DEFAULT_SCHEMA, CHUNK)
+    assert result["status"] == "failed"
+    assert "120 秒" in result["error"] and "超时" in result["error"]
+
+
+def test_timeout_override_reaches_http_request_without_changing_chat_default():
+    import httpx
+    from types import SimpleNamespace
+    from langchain_openai import ChatOpenAI
+
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "id": "test",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "test",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": json.dumps(GOOD)},
+                        "finish_reason": "stop",
+                    }
+                ],
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        chat = ChatOpenAI(
+            model="test",
+            api_key="test-key",
+            base_url="https://example.test/v1",
+            timeout=20,
+            max_retries=0,
+            http_client=client,
+        )
+        result = extract.extract_chunk(
+            SimpleNamespace(chat_model=chat), DEFAULT_SCHEMA, CHUNK
+        )
+        assert result["status"] == "extracted"
+        assert requests[0].extensions["timeout"]["read"] == 120
+        assert chat.request_timeout == 20
