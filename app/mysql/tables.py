@@ -557,3 +557,164 @@ memory_outbox = Table("memory_outbox", metadata,
     Column("applied", String(32)),
     Index("ix_memory_outbox_session_status", "owner", "session_id", "status"),
 )
+
+# 知识图谱（见 app/graph）：从分片里抽实体和关系，跨文档合并成一张图。默认关闭，不影响检索和评测。
+# 抽取和归属分开存：graph_chunk_extractions、graph_mentions 的原名、graph_relations 只在建图时写入；
+# 「这个名字归到哪个实体」只记在 graph_mentions.entity_id，合并、拆分只改这一列，关系表不动、也不用重新调用模型。
+# 清单：抽哪些实体类型、关系分为哪几类。内置的默认清单由代码写入（app/graph/schemas.py）。
+graph_schemas = Table("graph_schemas", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("name", String(100), nullable=False),
+    # default：内置；recommended：模型推荐；custom：自定义（后两种第 4 期才有）
+    Column("source", String(16), nullable=False),
+    Column("version", Integer, nullable=False),
+    # [{"name", "description", "examples"}]
+    Column("entity_types", JSON, nullable=False),
+    Column("relation_categories", JSON, nullable=False),
+    Column("note", String(500), nullable=False, default=""),
+    Column("created_by", String(32), nullable=False),
+    Column("created", String(40), nullable=False),
+)
+# 一次建图：给某个文档版本按某份清单、某个模型、某个提示词版本抽一遍。同一份文档在同一个图谱空间里只有一次是 active，
+# 查询只用 active 的；旧的建图记录和结果保留，方便对比。space 是图谱空间：线上是 online，评测以后各用各的。
+graph_builds = Table("graph_builds", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("space", String(64), nullable=False),
+    Column("document_id", String(36), nullable=False),
+    Column("doc_key", String(36), nullable=False),
+    Column("schema_id", String(36), nullable=False),
+    Column("provider", String(32), nullable=False),
+    Column("model", String(128), nullable=False),
+    # graph_extract@v2：页面显示用；prompt_identity 是内容指纹，复用抽取结果时按它判断提示词是否相同
+    Column("prompt_tag", String(64), nullable=False),
+    Column("prompt_identity", String(32), nullable=False),
+    # queued / running / completed / partial（有分片失败）/ failed
+    Column("status", String(16), nullable=False),
+    Column("active", Boolean, nullable=False, default=False),
+    # upload：上传时开启；manual：手动；batch：批量；version：新版本自动重建
+    Column("trigger_kind", String(16), nullable=False),
+    Column("total", Integer, nullable=False, default=0),
+    Column("extracted", Integer, nullable=False, default=0),
+    Column("reused", Integer, nullable=False, default=0),
+    Column("failed", Integer, nullable=False, default=0),
+    Column("entity_count", Integer, nullable=False, default=0),
+    Column("relation_count", Integer, nullable=False, default=0),
+    Column("input_tokens", Integer, nullable=False, default=0),
+    Column("output_tokens", Integer, nullable=False, default=0),
+    Column("note", String(500)),
+    Column("error", Text),
+    Column("created_by", String(32), nullable=False),
+    Column("created", String(40), nullable=False),
+    Column("updated", String(40), nullable=False),
+    Column("finished", String(40)),
+    Index("ix_graph_builds_document", "document_id"),
+    Index("ix_graph_builds_doc_key", "space", "doc_key"),
+)
+# 每个分片的抽取结果：发给模型的完整内容、原始输出、解析后的实体和关系。cache_key 相同（分片文字、清单、模型、提示词都一样）时直接复用。
+graph_chunk_extractions = Table("graph_chunk_extractions", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("build_id", String(36), nullable=False),
+    Column("document_id", String(36), nullable=False),
+    Column("chunk_id", String(64), nullable=False),
+    Column("chunk_key", String(64)),
+    Column("position", Integer, nullable=False),
+    Column("cache_key", String(64), nullable=False),
+    # extracted：新抽取；reused：复用；failed：失败
+    Column("status", String(16), nullable=False),
+    Column("reused_from", String(36)),
+    Column("prompt", JSON),
+    Column("raw_output", Text),
+    # {"entities": [...], "relations": [...], "dropped": [...]}
+    Column("result", JSON),
+    Column("error", String(500)),
+    Column("input_tokens", Integer),
+    Column("output_tokens", Integer),
+    Column("duration_ms", Integer),
+    Column("created", String(40), nullable=False),
+    Index("ix_graph_extractions_build", "build_id", "position"),
+    Index("ix_graph_extractions_chunk", "chunk_id"),
+    Index("ix_graph_extractions_cache", "cache_key"),
+)
+# 合并后的实体。merge_key = 类型|规范化后的标准名，同一个空间里唯一。
+graph_entities = Table("graph_entities", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("space", String(64), nullable=False),
+    Column("name", String(200), nullable=False),
+    Column("type", String(32), nullable=False),
+    Column("merge_key", String(255), nullable=False),
+    Column("description", Text),
+    # extracted：建图时生成；manual：手动建的（第 3 期）
+    Column("origin", String(16), nullable=False),
+    Column("created", String(40), nullable=False),
+    Column("updated", String(40), nullable=False),
+    UniqueConstraint("space", "merge_key", name="uq_graph_entities_space_key"),
+)
+# 名字的每一次出现：原文里的写法、模型给的标准名、类型、描述，以及归到哪个实体（entity_id，可以重新计算）。
+graph_mentions = Table("graph_mentions", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("build_id", String(36), nullable=False),
+    Column("extraction_id", String(36), nullable=False),
+    Column("document_id", String(36), nullable=False),
+    Column("chunk_id", String(64), nullable=False),
+    Column("name", String(200), nullable=False),
+    Column("canonical", String(200), nullable=False),
+    Column("type", String(32), nullable=False),
+    Column("description", Text),
+    Column("entity_id", String(36), nullable=False),
+    # exact：名字完全相同；normalized：规范化后相同；canonical：模型给的标准名；alias：别名表
+    Column("resolve_method", String(16), nullable=False),
+    Column("origin", String(16), nullable=False),
+    Index("ix_graph_mentions_build", "build_id"),
+    Index("ix_graph_mentions_entity", "entity_id"),
+    Index("ix_graph_mentions_chunk", "chunk_id"),
+)
+# 关系：起点、终点都指向名字（graph_mentions），不直接指向实体。
+graph_relations = Table("graph_relations", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("build_id", String(36), nullable=False),
+    Column("extraction_id", String(36), nullable=False),
+    Column("document_id", String(36), nullable=False),
+    Column("chunk_id", String(64), nullable=False),
+    Column("source_mention_id", String(36), nullable=False),
+    Column("target_mention_id", String(36), nullable=False),
+    Column("category", String(32), nullable=False),
+    Column("description", Text),
+    Column("evidence", Text),
+    Column("origin", String(16), nullable=False),
+    # active / deleted（手动删除，第 3 期）
+    Column("status", String(16), nullable=False),
+    Index("ix_graph_relations_build", "build_id"),
+    Index("ix_graph_relations_source", "source_mention_id"),
+    Index("ix_graph_relations_target", "target_mention_id"),
+)
+# 合并记录：每个名字归到了哪个实体、用的什么方法、是新建还是并入已有实体。
+graph_merges = Table("graph_merges", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("space", String(64), nullable=False),
+    Column("build_id", String(36)),
+    Column("mention_id", String(36)),
+    Column("entity_id", String(36), nullable=False),
+    Column("method", String(16), nullable=False),
+    # {"name", "canonical", "type", "merge_key", "entity_created"}
+    Column("detail", JSON),
+    # applied / pending / rejected / undone（后三种第 3 期才有）
+    Column("status", String(16), nullable=False),
+    Column("created_by", String(32), nullable=False),
+    Column("created", String(40), nullable=False),
+    Index("ix_graph_merges_build", "build_id"),
+    Index("ix_graph_merges_entity", "entity_id"),
+)
+# 别名表：确认过的规则（别名 → 实体）。第 1 期只建表，维护界面在第 3 期。
+graph_aliases = Table("graph_aliases", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("space", String(64), nullable=False),
+    Column("alias", String(200), nullable=False),
+    # 类型|规范化后的别名
+    Column("alias_key", String(255), nullable=False),
+    Column("entity_id", String(36), nullable=False),
+    # manual / confirmed / merged / renamed
+    Column("source", String(16), nullable=False),
+    Column("created_by", String(32), nullable=False),
+    Column("created", String(40), nullable=False),
+    UniqueConstraint("space", "alias_key", name="uq_graph_aliases_space_key"),
+)
