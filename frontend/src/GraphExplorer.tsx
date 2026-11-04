@@ -215,18 +215,6 @@ export function GraphExplorerControls({
               收起此实体的展开
             </button>
           )}
-          {node.id !== center && (
-            <button
-              type="button"
-              className="link-button"
-              onClick={() => {
-                explorer.choose(node.id);
-                onClearSelection();
-              }}
-            >
-              以它为中心
-            </button>
-          )}
         </div>
       )}
       {[...new Set(explorer.focus.map((item) => item.split("|")[0]))]
