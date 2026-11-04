@@ -1,3 +1,5 @@
+from urllib.parse import unquote
+
 from sqlalchemy import false, func, select
 from sqlalchemy.orm import aliased
 
@@ -222,24 +224,30 @@ def network(
     chosen = {center} if center in allowed else set()
     if not center:
         chosen = {item["id"] for item in ranked[:limit]}
-    # Repeated focus IDs request additional pages of 15 unique neighbors.
-    budgets = {}
-    if center in allowed:
-        budgets[center] = 15
-    for item_id in focus or []:
-        budgets[item_id] = min(300, budgets.get(item_id, 0) + 15)
-    for item_id, budget in budgets.items():
+    # Replay each expansion in order, adding at most 15 unseen direct neighbors.
+    expansions = ([center] if center in allowed else []) + list(focus or [])
+    for expansion in expansions:
+        item_id, _, encoded_category = expansion.partition("|")
+        expansion_category = unquote(encoded_category) if encoded_category else None
         if item_id not in allowed or (center and item_id not in chosen):
             continue
         if item_id not in chosen and len(chosen) >= 300:
             continue
         chosen.add(item_id)
+        candidates = adjacency[item_id]
+        if expansion_category:
+            candidates = {
+                row["target_id"] if row["source_id"] == item_id else row["source_id"]
+                for row in relations
+                if row["category"] == expansion_category
+                and item_id in (row["source_id"], row["target_id"])
+            }
         neighbors = [
             item["id"]
             for item in ranked
-            if item["id"] in adjacency[item_id] and item["id"] not in chosen
+            if item["id"] in candidates and item["id"] not in chosen
         ]
-        chosen.update(neighbors[: min(budget, max(0, 300 - len(chosen)))])
+        chosen.update(neighbors[: min(15, max(0, 300 - len(chosen)))])
     edges = {}
     for row in relations:
         if row["source_id"] not in chosen or row["target_id"] not in chosen:
@@ -268,7 +276,8 @@ def network(
             "type": item["type"],
             "relation_count": count.get(item["id"], 0),
             "mention_count": item["mention_count"],
-            "focus": item["id"] == center or item["id"] in (focus or []),
+            "focus": item["id"] == center
+            or item["id"] in {value.split("|", 1)[0] for value in (focus or [])},
             "hidden_neighbors": 0,
         }
         for item in ranked

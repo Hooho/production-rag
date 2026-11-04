@@ -4,7 +4,9 @@ import { GraphFocusButton } from "./GraphWorkspace";
 
 type Match = { id: string; name: string; type: string };
 
-export function useGraphExplorer() {
+export function useGraphExplorer(
+  expansionCategory?: { entityId: string; category: string | null } | null,
+) {
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   const [center, setCenter] = useState<string | null>(null);
@@ -39,9 +41,18 @@ export function useGraphExplorer() {
     choose,
     reset,
     expand: (id: string) =>
-      setFocus((items) => (items.length < 300 ? [...items, id] : items)),
+      setFocus((items) =>
+        items.length < 300
+          ? [
+              ...items,
+              expansionCategory?.entityId === id && expansionCategory.category
+                ? `${id}|${encodeURIComponent(expansionCategory.category)}`
+                : id,
+            ]
+          : items,
+      ),
     collapse: (id: string) =>
-      setFocus((items) => items.filter((item) => item !== id)),
+      setFocus((items) => items.filter((item) => item.split("|")[0] !== id)),
   };
 }
 
@@ -165,7 +176,7 @@ export function GraphExplorerControls({
               展开关系（再显示最多 15 个邻居）
             </button>
           )}
-          {explorer.focus.includes(node.id) && (
+          {explorer.focus.some((item) => item.split("|")[0] === node.id) && (
             <button
               type="button"
               className="link-button"
@@ -188,7 +199,7 @@ export function GraphExplorerControls({
           )}
         </div>
       )}
-      {[...new Set(explorer.focus)]
+      {[...new Set(explorer.focus.map((item) => item.split("|")[0]))]
         .filter((id) => id !== center && id !== node?.id)
         .map((id) => (
           <div key={id} className="graph-explorer-row">

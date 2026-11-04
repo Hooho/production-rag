@@ -75,13 +75,13 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [entityType, setEntityType] = useState<string | null>(null);
   const [category, setCategory] = useState<string | null>(null);
-  const explorer = useGraphExplorer();
-  const { search, focus, limit, center } = explorer;
-  const [selected, setSelected] = useState<string | null>(null);
   const [highlightedCategory, setHighlightedCategory] = useState<{
     entityId: string;
     category: string | null;
   } | null>(null);
+  const explorer = useGraphExplorer(highlightedCategory);
+  const { search, focus, limit, center } = explorer;
+  const [selected, setSelected] = useState<string | null>(null);
   const [highlightedRelation, setHighlightedRelation] =
     useState<GraphRelationRow | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null);

@@ -63,3 +63,35 @@ def test_invalid_center_filters_and_cap():
     many = [{**entities[0], "id": str(i)} for i in range(500)]
     edges = [{**relations[0], "target_id": str(i)} for i in range(1, 500)]
     assert len(network(many, edges, center="0", focus=["0"] * 100)["nodes"]) <= 300
+
+
+def test_category_expansion_adds_only_matching_unseen_neighbors():
+    entities, relations = graph()
+    relations = [
+        {**row, "category": "投资" if int(row["target_id"]) % 2 else "评价"}
+        for row in relations
+    ]
+    first = network(entities, relations, limit=1)
+    investment = network(entities, relations, limit=1, focus=["0|%E6%8A%95%E8%B5%84"])
+    added = ids(investment) - ids(first)
+    assert len(added) == 15
+    assert all(int(item) % 2 for item in added)
+    twice = network(
+        entities,
+        relations,
+        limit=1,
+        focus=["0|%E6%8A%95%E8%B5%84", "0|%E6%8A%95%E8%B5%84"],
+    )
+    assert len(ids(twice) - ids(first)) == 18
+    assert ids(investment) <= ids(twice)
+    mixed = network(
+        entities,
+        relations,
+        limit=1,
+        focus=["0|%E6%8A%95%E8%B5%84", "0|%E8%AF%84%E4%BB%B7"],
+    )
+    assert len(ids(mixed) - ids(investment)) == 15
+    assert all(int(item) % 2 == 0 for item in ids(mixed) - ids(investment))
+    assert ids(network(entities, relations, limit=1, focus=["0|不存在"])) == ids(first)
+    all_categories = network(entities, relations, limit=1, focus=["0"])
+    assert len(ids(all_categories) - ids(first)) == 15

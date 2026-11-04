@@ -68,13 +68,13 @@ export function DocumentGraph({
   const [search, setSearch] = useState("");
   const [entityType, setEntityType] = useState<string | null>(null);
   const [category, setCategory] = useState<string | null>(null);
-  const explorer = useGraphExplorer();
-  const { focus, center, limit } = explorer;
-  const [selected, setSelected] = useState<string | null>(null);
   const [highlightedCategory, setHighlightedCategory] = useState<{
     entityId: string;
     category: string | null;
   } | null>(null);
+  const explorer = useGraphExplorer(highlightedCategory);
+  const { focus, center, limit } = explorer;
+  const [selected, setSelected] = useState<string | null>(null);
   const [highlightedRelation, setHighlightedRelation] =
     useState<GraphRelationRow | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null);
