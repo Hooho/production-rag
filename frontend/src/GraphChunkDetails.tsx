@@ -13,7 +13,7 @@ const FILTERS: [ChunkGraphStatus | null, string][] = [
   ["extracted", "成功"],
   ["reused", "复用"],
   ["failed", "失败"],
-  ["pending", "待返回"],
+  ["pending", "未处理"],
   ["empty", "无实体"],
 ];
 
@@ -94,14 +94,14 @@ export function GraphChunkDetails({
               setPage(1);
             }}
           >
-            {label}
+            {value === "pending" && busy ? "处理中" : label}
             {value && data?.graph_counts ? ` ${data.graph_counts[value]}` : ""}
           </button>
         ))}
       </div>
       {busy && (
         <p className="graph-note">
-          建图中，结果自动刷新；待返回包括尚未开始和正在抽取的分片。每片返回后更新结果。
+          建图中，结果自动刷新；处理中包括排队等待和正在抽取的分片。每片完成后更新结果。
         </p>
       )}
       {error ? (
@@ -116,8 +116,11 @@ export function GraphChunkDetails({
             {data.chunks.map((chunk) => {
               const graph = chunk.graph;
               const failed = graph?.status === "failed";
+              const processing = !graph && busy;
               const label = !graph
-                ? "待返回"
+                ? processing
+                  ? "处理中"
+                  : "未处理"
                 : failed
                   ? "失败"
                   : graph.status === "reused"
@@ -129,8 +132,22 @@ export function GraphChunkDetails({
                     <strong>第 {chunk.position + 1} 片</strong>
                     <Tag
                       size="sm"
-                      tone={failed ? "danger" : graph ? "success" : "neutral"}
+                      tone={
+                        failed
+                          ? "danger"
+                          : graph
+                            ? "success"
+                            : processing
+                              ? "info"
+                              : "neutral"
+                      }
                     >
+                      {processing && (
+                        <span
+                          className="graph-chunk-spinner"
+                          aria-hidden="true"
+                        />
+                      )}
                       {label}
                     </Tag>
                     <span>
@@ -138,7 +155,9 @@ export function GraphChunkDetails({
                         ? graph.error || "未记录失败原因"
                         : graph
                           ? `${graph.mentions.length} 个实体 · ${graph.relations.length} 条关系`
-                          : "尚未记录抽取结果"}
+                          : processing
+                            ? "正在抽取或排队等待…"
+                            : "尚未记录抽取结果"}
                     </span>
                   </summary>
                   <div className="graph-chunk-result-body">
@@ -159,8 +178,10 @@ export function GraphChunkDetails({
                         }
                       />
                     ) : (
-                      <p className="graph-note">
-                        尚未返回结果，不能判断成功或失败。
+                      <p className="graph-note" role="status">
+                        {processing
+                          ? "分片处理中，完成后自动显示抽取结果。"
+                          : "本片尚未完成抽取。"}
                       </p>
                     )}
                     {graph && (

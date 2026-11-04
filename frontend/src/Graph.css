@@ -1077,3 +1077,24 @@
 .graph-entity-panel .graph-relations-header {
   top: calc(var(--entity-header-height, 0px) - 12px);
 }
+
+.graph-chunk-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: graph-chunk-spin 0.8s linear infinite;
+}
+@keyframes graph-chunk-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .graph-chunk-spinner {
+    animation: none;
+  }
+}
