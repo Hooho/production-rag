@@ -335,7 +335,17 @@ export function GraphView({
           </button>
         </div>
       </div>
-      <div ref={container} className="graph-canvas" />
+      <div className="graph-canvas-wrap">
+        <div ref={container} className="graph-canvas" />
+        <div className="graph-interaction-hint">
+          <span>
+            <strong>单击实体</strong>：突出已显示的邻居、查看详情
+          </span>
+          <span>
+            <strong>双击实体</strong>：展开全部直接邻居
+          </span>
+        </div>
+      </div>
       <small className="graph-hint">
         滚轮缩放、拖动空白处平移、拖动节点调整位置；点击实体看详情，点击关系线看出处。名字后面的
         +数字 表示还有几个相连的实体没显示，双击这个实体展开。
