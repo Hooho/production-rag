@@ -1098,3 +1098,19 @@
     animation: none;
   }
 }
+
+/* Keep table context visible while the main page scrolls. */
+.graph-workspace:not(.is-focused) .graph-table > thead > tr > th {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  box-shadow: 0 1px 0 #dce5ef;
+}
+.graph-workspace:not(.is-focused)
+  .graph-workspace-body.graph-body
+  > .graph-side {
+  position: sticky;
+  top: 12px;
+  max-height: min(600px, calc(100dvh - 24px));
+  box-sizing: border-box;
+}
