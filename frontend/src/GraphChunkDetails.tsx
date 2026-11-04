@@ -79,6 +79,7 @@ export function GraphChunkDetails({
       <p className="graph-note">
         {data?.graph?.schema_name} · {data?.graph?.model} ·{" "}
         {data?.graph?.prompt_tag}
+        <span role="status">{loading && data ? " · 正在更新…" : ""}</span>
       </p>
       <div className="graph-chunk-filters" aria-label="抽取状态筛选">
         {FILTERS.map(([value, label]) => (
@@ -90,7 +91,6 @@ export function GraphChunkDetails({
             onClick={() => {
               setFilter(value);
               setPage(1);
-              setData(null);
             }}
           >
             {label}
@@ -232,8 +232,8 @@ export function GraphChunkDetails({
           )}
           <div className="graph-pager">
             <span>
-              共 {data.total} 片 · 第 {page} / {Math.max(1, data.total_pages)}{" "}
-              页
+              共 {data.total} 片 · 第 {data.page} /{" "}
+              {Math.max(1, data.total_pages)} 页
             </span>
             <button
               type="button"
@@ -241,7 +241,6 @@ export function GraphChunkDetails({
               disabled={loading || page <= 1}
               onClick={() => {
                 setPage(page - 1);
-                setData(null);
               }}
             >
               上一页
@@ -252,7 +251,6 @@ export function GraphChunkDetails({
               disabled={loading || page >= data.total_pages}
               onClick={() => {
                 setPage(page + 1);
-                setData(null);
               }}
             >
               下一页
