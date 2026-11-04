@@ -175,6 +175,17 @@ const STYLE: cytoscape.StylesheetJson = [
   { selector: ".is-dim", style: { opacity: 0.18 } },
 ];
 
+function focusRelation(instance: Core, edgeId: string) {
+  const edge = instance.getElementById(edgeId);
+  if (edge.empty()) return false;
+  const target = edge.union(edge.connectedNodes());
+  instance.fit(target, 72);
+  // Keep the pair readable without excessively magnifying short edges or loops.
+  if (instance.zoom() > 1.3) instance.zoom(1.3);
+  instance.center(target);
+  return true;
+}
+
 export function GraphView({
   nodes,
   edges,
@@ -199,6 +210,8 @@ export function GraphView({
   const container = useRef<HTMLDivElement>(null);
   const selectionHalo = useRef<HTMLDivElement>(null);
   const cy = useRef<Core | null>(null);
+  const activeRelation = useRef<string | null>(null);
+  activeRelation.current = selectedEdge || highlightedEdge || null;
   // 事件回调总是用最新的 props，不用每次重新绑定。
   const handlers = useRef({ onSelect, onExpand, onSelectEdge, edges });
   handlers.current = { onSelect, onExpand, onSelectEdge, edges };
@@ -254,6 +267,11 @@ export function GraphView({
       resizeFrame = requestAnimationFrame(() => {
         instance.resize();
         if (instance.nodes().empty()) return;
+        if (
+          activeRelation.current &&
+          focusRelation(instance, activeRelation.current)
+        )
+          return;
         instance.fit(undefined, 48);
         if (instance.zoom() > 1.2) {
           instance.zoom(1.2);
@@ -329,6 +347,8 @@ export function GraphView({
       node.connectedEdges().addClass("is-near");
       instance.elements().not(near).addClass("is-dim");
     });
+    const activeEdge = selectedEdge || highlightedEdge;
+    if (activeEdge) focusRelation(instance, activeEdge);
   }, [selected, selectedEdge, highlightedEdge, key, hasNodes]);
 
   // The pulse is a DOM overlay: animate only transform/opacity, never the graph layout.

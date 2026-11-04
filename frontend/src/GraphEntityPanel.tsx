@@ -290,7 +290,7 @@ function RelationItem({
           <button
             type="button"
             className="graph-relation-highlight-button"
-            title="高亮图中的对应连线和两端实体"
+            title="高亮并放大定位图中的对应关系"
             aria-pressed={highlighted}
             onClick={onHighlight}
           >

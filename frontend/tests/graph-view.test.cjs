@@ -11,9 +11,9 @@ const helpers = source
   )
   .replace("export function typeColor", "function typeColor");
 const compiled = stripTypeScriptTypes(helpers);
-const { size, elements, STYLE } = new Function(
+const { size, elements, STYLE, focusRelation } = new Function(
   "labelHue",
-  compiled + "\nreturn { size, elements, STYLE };",
+  compiled + "\nreturn { size, elements, STYLE, focusRelation };",
 )(() => 200);
 assert.deepEqual(
   [0, 2, 3, 5, 6, 10, 11, 20, 21, 1000].map(size),
@@ -56,3 +56,49 @@ assert.equal(
   "bezier",
 );
 console.log("Graph sizes, unique neighbors, curves and self-loops passed.");
+
+// Use Cytoscape's real camera calculations to check framing, rather than mocking fit().
+const cytoscape = require("cytoscape");
+const camera = cytoscape({
+  headless: true,
+  styleEnabled: true,
+  style: STYLE,
+  elements: elements(
+    [node("a"), node("b"), node("far")],
+    [edge("ab", "a", "b")],
+  ),
+  layout: { name: "preset" },
+});
+camera.width = () => 800;
+camera.height = () => 600;
+camera.getElementById("a").position({ x: 0, y: 0 });
+camera.getElementById("b").position({ x: 250, y: 100 });
+camera.getElementById("far").position({ x: 2000, y: 2000 });
+camera.fit();
+const overviewZoom = camera.zoom();
+assert.equal(focusRelation(camera, "ab"), true);
+assert.ok(camera.zoom() > overviewZoom);
+assert.ok(camera.zoom() <= 1.3);
+const bounds = camera
+  .getElementById("ab")
+  .union(camera.getElementById("ab").connectedNodes())
+  .boundingBox();
+const pan = camera.pan();
+assert.ok(
+  Math.abs(((bounds.x1 + bounds.x2) / 2) * camera.zoom() + pan.x - 400) < 1,
+);
+assert.ok(
+  Math.abs(((bounds.y1 + bounds.y2) / 2) * camera.zoom() + pan.y - 300) < 1,
+);
+for (const id of ["a", "b"]) {
+  const position = camera.getElementById(id).renderedPosition();
+  assert.ok(position.x > 50 && position.x < 750);
+  assert.ok(position.y > 50 && position.y < 550);
+}
+const zoomBeforeMissing = camera.zoom();
+assert.equal(focusRelation(camera, "missing"), false);
+assert.equal(camera.zoom(), zoomBeforeMissing);
+camera.destroy();
+console.log(
+  "Relation framing centers both endpoints, zooms in and respects the cap.",
+);
