@@ -43,6 +43,19 @@
   font-size: 12px;
   cursor: pointer;
 }
+.graph-zoom .graph-center-button {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+}
+.graph-zoom .graph-center-button:hover {
+  border-color: #1d4ed8;
+  background: #1d4ed8;
+}
+.graph-zoom button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
 .graph-canvas-wrap {
   position: relative;
   min-width: 0;

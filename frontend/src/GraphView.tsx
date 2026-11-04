@@ -307,6 +307,16 @@ export function GraphView({
       renderedPosition: { x: instance.width() / 2, y: instance.height() / 2 },
     });
   }
+  function centerSelected() {
+    const instance = cy.current;
+    if (!instance || !selected) return;
+    const node = instance.getElementById(selected);
+    if (node.empty()) return;
+    instance.zoom(
+      Math.min(instance.maxZoom(), Math.max(1, instance.zoom() * 1.25)),
+    );
+    instance.center(node);
+  }
   return (
     <div className="graph-view">
       <div className="graph-toolbar">
@@ -324,6 +334,18 @@ export function GraphView({
           })}
         </div>
         <div className="graph-zoom">
+          {selected &&
+            !selectedEdge &&
+            nodes.some((node) => node.id === selected) && (
+              <button
+                type="button"
+                className="graph-center-button"
+                title="将选中实体移到画布中心并放大"
+                onClick={centerSelected}
+              >
+                居中
+              </button>
+            )}
           <button type="button" onClick={() => zoom(1.25)}>
             ＋
           </button>
