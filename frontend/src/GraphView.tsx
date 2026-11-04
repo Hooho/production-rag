@@ -243,7 +243,7 @@ export function GraphView({
     const instance = cytoscape({
       container: container.current,
       style: STYLE,
-      minZoom: 0.2,
+      minZoom: 0.05,
       maxZoom: 4,
       wheelSensitivity: 0.3,
     });
@@ -303,23 +303,37 @@ export function GraphView({
       instance.elements().remove();
       instance.add(elements(nodes, edges));
     });
+    // Parallel category edges should not multiply the attraction between two nodes.
+    const connectedPairs = new Set<string>();
+    const layoutEdges = instance.edges().filter((edge) => {
+      if (edge.source().id() === edge.target().id()) return false;
+      const pair = [edge.source().id(), edge.target().id()].sort().join("|");
+      if (connectedPairs.has(pair)) return false;
+      connectedPairs.add(pair);
+      return true;
+    });
     instance
+      .nodes()
+      .union(layoutEdges)
       .layout({
         name: "cose",
         randomize: false,
         animate: false,
-        fit: true,
-        padding: 48,
+        fit: false,
+        padding: 64,
         nodeRepulsion: (node: cytoscape.NodeSingular) =>
-          14000 + Number(node.data("size")) * 250,
+          22000 + Number(node.data("size")) * 350,
         idealEdgeLength: (edge: cytoscape.EdgeSingular) =>
-          110 + Math.max(edge.source().width(), edge.target().width()),
-        componentSpacing: 140,
-        nodeOverlap: 24,
+          150 + Math.max(edge.source().width(), edge.target().width()),
+        componentSpacing: 180,
+        nodeOverlap: 40,
         numIter: 1600,
         nodeDimensionsIncludeLabels: true,
       } as cytoscape.LayoutOptions)
       .run();
+    // Fit all displayed category curves after the node positions have settled.
+    instance.fit(instance.elements(), 64);
+    instance.center();
     // 只有几个节点时 fit 会放得很大，限制一下。
     if (instance.zoom() > 1.6) {
       instance.zoom(1.6);
