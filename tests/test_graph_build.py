@@ -217,6 +217,11 @@ def test_build_document_graph(setup, monkeypatch):
         f"/graph/entities/{entity_id}?document_id={document_id}", headers=headers()
     ).json()
     assert {item["name"] for item in detail["names"]} == {"段永平", "阿段"}
+    assert detail["names"][0]["method"] == "new"
+    other_names = [item for item in detail["names"] if item["method"] != "new"]
+    assert [item["count"] for item in other_names] == sorted(
+        [item["count"] for item in other_names], reverse=True
+    )
     assert len(detail["relations"]) == 2
     # Search switches to a scoped one-hop graph and exposes selectable matches.
     searched = client.get(
@@ -1068,3 +1073,39 @@ def test_stop_running_build_discards_late_results_and_protects_restart(
         graph_build.get_build(store.engine, new_builds[0]["id"])["status"]
         == "completed"
     )
+
+
+def test_entity_names_creation_precedes_frequent_matches(setup):
+    from uuid import uuid4
+
+    client, store = setup
+    models = enable_model(client)
+    document_id = add_document(client)
+    assert build(client, document_id).status_code == 202
+    run_graph_jobs(store, models)
+    with store.engine.begin() as connection:
+        original = dict(
+            connection.execute(
+                select(graph_mentions).where(
+                    graph_mentions.c.document_id == document_id,
+                    graph_mentions.c.name == "段永平",
+                    graph_mentions.c.resolve_method == "new",
+                )
+            )
+            .mappings()
+            .first()
+        )
+        for _ in range(3):
+            connection.execute(
+                graph_mentions.insert().values(
+                    **{**original, "id": str(uuid4()), "resolve_method": "exact"}
+                )
+            )
+    detail = client.get(
+        f"/graph/entities/{original['entity_id']}?document_id={document_id}",
+        headers=headers(),
+    ).json()
+    assert detail["names"][0]["method"] == "new"
+    assert detail["names"][0]["count"] == 1
+    assert detail["names"][1]["count"] == 3
+    assert detail["names"][2]["count"] == 1

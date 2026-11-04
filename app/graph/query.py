@@ -844,7 +844,9 @@ def entity_detail(engine, entity_id, document_id=None):
         doc["relation_count"] += 1
     return {
         "entity": dict(entity),
-        "names": sorted(names.values(), key=lambda item: -item["count"]),
+        "names": sorted(
+            names.values(), key=lambda item: (item["method"] != "new", -item["count"])
+        ),
         "documents": sorted(
             documents_value.values(),
             key=lambda item: -(item["mention_count"] + item["relation_count"]),
