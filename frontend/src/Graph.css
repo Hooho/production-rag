@@ -450,7 +450,10 @@
   background: #f7f9fc;
 }
 .graph-pager {
+  margin-top: 16px;
+  padding-bottom: 8px;
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
@@ -633,6 +636,15 @@
   justify-content: space-between;
   align-items: flex-start;
   gap: 8px;
+}
+.graph-side-heading h3 {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.graph-side-heading > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 .graph-side .link-button {
   margin-right: 6px;
