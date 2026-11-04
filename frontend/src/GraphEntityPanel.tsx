@@ -26,10 +26,12 @@ export function GraphEntityPanel({
 }) {
   const [detail, setDetail] = useState<GraphEntityDetail | null>(null);
   const [error, setError] = useState("");
+  const [category, setCategory] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     setDetail(null);
     setError("");
+    setCategory(null);
     getGraphEntity(entityId, documentId)
       .then((value) => !cancelled && setDetail(value))
       .catch((reason: Error) => !cancelled && setError(reason.message));
@@ -50,6 +52,17 @@ export function GraphEntityPanel({
       </aside>
     );
   const color = typeColor(detail.entity.type);
+  const categoryCounts = new Map<string, number>();
+  for (const row of detail.relations) {
+    categoryCounts.set(
+      row.category,
+      (categoryCounts.get(row.category) ?? 0) + 1,
+    );
+  }
+  const relations =
+    category === null
+      ? detail.relations
+      : detail.relations.filter((row) => row.category === category);
   return (
     <aside className="graph-side">
       <div className="graph-side-heading">
@@ -140,18 +153,47 @@ export function GraphEntityPanel({
           </ul>
         </>
       )}
-      <h4>关系（{detail.relations.length}）</h4>
-      <ul>
-        {detail.relations.map((row) => (
-          <RelationItem
-            key={row.id}
-            row={row}
-            entityId={detail.entity.id}
-            onOpenChunk={onOpenChunk}
-            showDocument={!documentId}
-          />
-        ))}
-      </ul>
+      <section className="graph-entity-relations" aria-label="实体关系">
+        <div className="graph-relations-header">
+          <h4>
+            关系（{relations.length} / {detail.relations.length}）
+          </h4>
+          <div
+            className="graph-relation-categories"
+            role="group"
+            aria-label="筛选关系分类"
+          >
+            <button
+              type="button"
+              aria-pressed={category === null}
+              onClick={() => setCategory(null)}
+            >
+              全部 {detail.relations.length}
+            </button>
+            {[...categoryCounts].map(([name, count]) => (
+              <button
+                type="button"
+                key={name}
+                aria-pressed={category === name}
+                onClick={() => setCategory(name)}
+              >
+                {name} {count}
+              </button>
+            ))}
+          </div>
+        </div>
+        <ul>
+          {relations.map((row) => (
+            <RelationItem
+              key={row.id}
+              row={row}
+              entityId={detail.entity.id}
+              onOpenChunk={onOpenChunk}
+              showDocument={!documentId}
+            />
+          ))}
+        </ul>
+      </section>
     </aside>
   );
 }

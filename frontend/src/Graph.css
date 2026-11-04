@@ -266,6 +266,43 @@
   flex-direction: column;
   gap: 6px;
 }
+.graph-relations-header {
+  position: sticky;
+  top: -12px;
+  z-index: 2;
+  margin: 14px -14px 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #e3e8ef;
+  background: #fff;
+}
+.graph-side .graph-relations-header h4 {
+  margin: 0 0 8px;
+}
+.graph-relation-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.graph-relation-categories button {
+  border: 1px solid #d5dce6;
+  border-radius: 999px;
+  background: #fff;
+  color: #475569;
+  padding: 4px 9px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.graph-relation-categories button[aria-pressed="true"] {
+  background: #edf3ff;
+  border-color: #2563eb;
+  color: #1d4ed8;
+}
+.graph-relation-categories button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
 .graph-side li small {
   display: block;
   color: #7a8799;
