@@ -1,3 +1,4 @@
+import { DocumentChunkDialog, type ChunkTarget } from "./DocumentChunkDialog";
 import { GraphBuildTimer } from "./GraphBuildTimer";
 import { GraphChunkDetails } from "./GraphChunkDetails";
 import { GraphRelationPanel } from "./GraphRelationPanel";
@@ -52,12 +53,13 @@ export function isBuildBusy(build: GraphBuild | null | undefined) {
 export function DocumentGraph({
   document,
   onToast,
-  onOpenChunk,
 }: {
   document: DocumentStatus;
   onToast: ShowToast;
-  onOpenChunk: (chunkId: string, position: number) => void;
 }) {
+  const [chunkTarget, setChunkTarget] = useState<ChunkTarget | null>(null);
+  const onOpenChunk = (chunkId: string, position: number) =>
+    setChunkTarget({ documentId: document.document_id, chunkId, position });
   const [view, setView] = useState<GraphViewName>("network");
   const [page, setPage] = useState(1);
   const [query, setQuery] = useState("");
@@ -297,6 +299,12 @@ export function DocumentGraph({
           )}
         </div>
       </div>
+      {chunkTarget && (
+        <DocumentChunkDialog
+          target={chunkTarget}
+          onClose={() => setChunkTarget(null)}
+        />
+      )}
       {chunkDetails && (
         <GraphChunkDetails
           key={build.id}

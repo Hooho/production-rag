@@ -1,3 +1,4 @@
+import { DocumentChunkDialog, type ChunkTarget } from "./DocumentChunkDialog";
 import { GraphRelationPanel } from "./GraphRelationPanel";
 import type { GraphEdge } from "./api";
 import { useEffect, useState } from "react";
@@ -66,6 +67,9 @@ export default function KnowledgeGraph({
 }
 
 function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
+  const [chunkTarget, setChunkTarget] = useState<ChunkTarget | null>(null);
+  const openChunk = (chunkId: string, position: number, documentId: string) =>
+    setChunkTarget({ chunkId, position, documentId });
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [entityType, setEntityType] = useState<string | null>(null);
   const [category, setCategory] = useState<string | null>(null);
@@ -208,15 +212,19 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
             {data.network.total_relations} 条关系）。
           </p>
         </div>
+        {chunkTarget && (
+          <DocumentChunkDialog
+            target={chunkTarget}
+            onClose={() => setChunkTarget(null)}
+          />
+        )}
         {selectedEdge && (
           <GraphRelationPanel
             edge={selectedEdge}
             documentId={documentId}
             category={category}
             onClose={() => setSelectedEdge(null)}
-            onOpenChunk={(_chunkId, _position, id) =>
-              onNavigate(`/knowledge/${id}`)
-            }
+            onOpenChunk={openChunk}
           />
         )}
         {selected && (
@@ -224,9 +232,7 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
             entityId={selected}
             onClose={() => setSelected(null)}
             onOpenDocument={(id) => onNavigate(`/knowledge/${id}`)}
-            onOpenChunk={(_chunkId, _position, id) =>
-              onNavigate(`/knowledge/${id}`)
-            }
+            onOpenChunk={openChunk}
             onFocus={(id) =>
               setFocus((items) => (items.includes(id) ? items : [...items, id]))
             }

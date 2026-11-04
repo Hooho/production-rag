@@ -227,11 +227,10 @@ export function GraphChunkDetails({
                       type="button"
                       className="link-button"
                       onClick={() => {
-                        onClose();
                         onOpenChunk(chunk.chunk_id, chunk.position);
                       }}
                     >
-                      在分块列表中查看
+                      查看分片详情
                     </button>
                   </div>
                 </details>

@@ -81,7 +81,7 @@ export function DocumentChunkCard({
 }: {
   chunk: DocumentChunk;
   expanded: boolean;
-  onToggle: () => void;
+  onToggle?: () => void;
   onRetryGraph?: (chunkId: string) => void;
 }) {
   const [entityId, setEntityId] = useState<string | null>(null);
@@ -125,9 +125,11 @@ export function DocumentChunkCard({
           </strong>
           <small>{heading}</small>
         </div>
-        <button className="chunk-toggle-button" onClick={onToggle}>
-          {expanded ? "收起" : "展开"}
-        </button>
+        {onToggle && (
+          <button className="chunk-toggle-button" onClick={onToggle}>
+            {expanded ? "收起" : "展开"}
+          </button>
+        )}
       </div>
       {expanded && (
         <div className="document-chunk-body">

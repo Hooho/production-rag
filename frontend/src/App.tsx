@@ -5583,19 +5583,7 @@ function Knowledge({
                 )
                 .catch((reason: Error) => onToast("error", reason.message));
             }}
-            graphPanel={
-              <DocumentGraph
-                document={selected}
-                onToast={onToast}
-                onOpenChunk={(chunkId, position) => {
-                  setChunkSource(null);
-                  setChunkGraphStatus(null);
-                  setChunkPage(Math.floor(position / 10) + 1);
-                  setExpandedChunks({ [chunkId]: true });
-                  setDetailTab("chunks");
-                }}
-              />
-            }
+            graphPanel={<DocumentGraph document={selected} onToast={onToast} />}
             onToggleChunk={(chunkId) =>
               setExpandedChunks((items) => ({
                 ...items,
