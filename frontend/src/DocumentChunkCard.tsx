@@ -408,6 +408,7 @@ function ChunkGraphSection({
               <button
                 type="button"
                 className="link-button"
+                title="重新抽取当前分片的实体和关系"
                 onClick={() => onRetry(chunkId)}
               >
                 重试这一片
@@ -431,6 +432,8 @@ function ChunkGraphSection({
                   <button
                     type="button"
                     className="link-button"
+                    title={`查看「${item.entity_name ?? item.canonical ?? item.name}」的实体详情`}
+                    aria-label={`查看「${item.entity_name ?? item.canonical ?? item.name}」的实体详情`}
                     onClick={() => onSelectEntity(item.entity_id!)}
                   >
                     {item.entity_name ?? item.canonical}
@@ -484,6 +487,7 @@ function ChunkGraphSection({
           <button
             type="button"
             className="link-button"
+            title="打开弹窗，查看发送给模型的完整提示词"
             onClick={() => setSourceDetail("prompt")}
           >
             发给模型的完整提示词
@@ -495,6 +499,7 @@ function ChunkGraphSection({
           <button
             type="button"
             className="link-button"
+            title="打开弹窗，查看模型原始输出"
             onClick={() => setSourceDetail("output")}
           >
             模型原始输出
