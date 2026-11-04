@@ -29,6 +29,20 @@ export function useGraphExplorer(
     setLimit(20);
   }
   return {
+    snapshot: { query, search, center, focus, limit },
+    restore: (value: {
+      query: string;
+      search: string;
+      center: string | null;
+      focus: string[];
+      limit: number;
+    }) => {
+      setQuery(value.query);
+      setSearch(value.search);
+      setCenter(value.center);
+      setFocus(value.focus);
+      setLimit(value.limit);
+    },
     expansionCategory,
     query,
     setQuery,

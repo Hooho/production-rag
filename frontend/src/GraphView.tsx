@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef } from "react";
+import type { GraphCanvasState } from "./GraphHistory";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import cytoscape, { type Core, type ElementDefinition } from "cytoscape";
 import type { GraphEdge, GraphNode } from "./api";
 import { labelHue } from "./hues";
@@ -200,6 +201,9 @@ export function GraphView({
   onSelect,
   onExpand,
   onSelectEdge,
+  navigation,
+  canvasRestore,
+  onCanvasChange,
   emptyText = "没有可显示的实体",
 }: {
   nodes: GraphNode[];
@@ -213,10 +217,19 @@ export function GraphView({
   onExpand?: (id: string) => void;
   onSelectEdge?: (edge: GraphEdge) => void;
   emptyText?: string;
+  navigation?: ReactNode;
+  canvasRestore?: { token: number; state: GraphCanvasState } | null;
+  onCanvasChange?: (state: GraphCanvasState) => void;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const selectionHalo = useRef<HTMLDivElement>(null);
   const cy = useRef<Core | null>(null);
+  const canvasHandler = useRef(onCanvasChange);
+  canvasHandler.current = onCanvasChange;
+  const applyingCanvas = useRef(false);
+  const restoreRequest = useRef(canvasRestore);
+  restoreRequest.current = canvasRestore;
+  const appliedRestore = useRef<number | null>(null);
   const activeRelation = useRef<string | null>(null);
   activeRelation.current = selectedEdge || highlightedEdge || null;
   // 事件回调总是用最新的 props，不用每次重新绑定。
@@ -268,12 +281,35 @@ export function GraphView({
       if (container.current) container.current.title = "";
     });
     cy.current = instance;
+    function saveCanvas() {
+      if (
+        applyingCanvas.current ||
+        (restoreRequest.current &&
+          appliedRestore.current !== restoreRequest.current.token)
+      )
+        return;
+      const positions: GraphCanvasState["positions"] = {};
+      instance.nodes().forEach((node) => {
+        positions[node.id()] = { ...node.position() };
+      });
+      canvasHandler.current?.({
+        zoom: instance.zoom(),
+        pan: { ...instance.pan() },
+        positions,
+        edges: instance
+          .edges()
+          .map((edge) => edge.id())
+          .sort(),
+      });
+    }
+    instance.on("pan zoom dragfree layoutstop", saveCanvas);
     let resizeFrame = 0;
     const observer = new ResizeObserver(() => {
       cancelAnimationFrame(resizeFrame);
       resizeFrame = requestAnimationFrame(() => {
         instance.resize();
         if (instance.nodes().empty()) return;
+        if (restoreRequest.current) return;
         if (
           activeRelation.current &&
           focusRelation(instance, activeRelation.current)
@@ -415,6 +451,39 @@ export function GraphView({
     hasNodes,
   ]);
 
+  useEffect(() => {
+    const instance = cy.current;
+    if (
+      !instance ||
+      !canvasRestore ||
+      appliedRestore.current === canvasRestore.token
+    )
+      return;
+    const state = canvasRestore.state;
+    const ids = instance
+      .nodes()
+      .map((node) => node.id())
+      .sort();
+    if (
+      JSON.stringify(ids) !==
+        JSON.stringify(Object.keys(state.positions).sort()) ||
+      JSON.stringify(
+        instance
+          .edges()
+          .map((edge) => edge.id())
+          .sort(),
+      ) !== JSON.stringify(state.edges)
+    )
+      return;
+    applyingCanvas.current = true;
+    instance.batch(() => {
+      instance.nodes().positions((node) => state.positions[node.id()]);
+      instance.viewport({ zoom: state.zoom, pan: state.pan });
+    });
+    appliedRestore.current = canvasRestore.token;
+    applyingCanvas.current = false;
+  }, [canvasRestore, key, hasNodes]);
+
   // The pulse is a DOM overlay: animate only transform/opacity, never the graph layout.
   useEffect(() => {
     const instance = cy.current;
@@ -499,6 +568,14 @@ export function GraphView({
           </button>
         </div>
       </div>
+      <div className="graph-interaction-hint">
+        <span>
+          <strong>单击实体</strong>：突出已显示的邻居、查看详情
+        </span>
+        <span>
+          <strong>双击实体</strong>：每次再显示最多 15 个邻居（可重复双击）
+        </span>
+      </div>
       <div className="graph-canvas-wrap">
         <div ref={container} className="graph-canvas" />
         {selected &&
@@ -514,14 +591,7 @@ export function GraphView({
               <i />
             </div>
           )}
-        <div className="graph-interaction-hint">
-          <span>
-            <strong>单击实体</strong>：突出已显示的邻居、查看详情
-          </span>
-          <span>
-            <strong>双击实体</strong>：每次再显示最多 15 个邻居（可重复双击）
-          </span>
-        </div>
+        {navigation}
       </div>
       <small className="graph-hint">
         滚轮缩放、拖动空白处平移、拖动节点调整位置；点击实体看详情，点击关系线看出处。名字后面的

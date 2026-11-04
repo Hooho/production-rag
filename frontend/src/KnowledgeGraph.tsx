@@ -1,7 +1,8 @@
+import { GraphHistoryControls, useGraphHistory } from "./GraphHistory";
 import { DocumentChunkDialog, type ChunkTarget } from "./DocumentChunkDialog";
 import { GraphRelationPanel } from "./GraphRelationPanel";
 import type { GraphEdge, GraphRelationRow } from "./api";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   getGraphOverview,
   getGraphTasks,
@@ -85,6 +86,29 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
   const [highlightedRelation, setHighlightedRelation] =
     useState<GraphRelationRow | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null);
+  const knownNames = useRef(new Map<string, string>());
+  const [relationScope, setRelationScope] = useState<"visible" | "all">(
+    "visible",
+  );
+  const history = useGraphHistory(
+    JSON.stringify([documentId, entityType, category]),
+    {
+      selected,
+      category: highlightedCategory,
+      relation: highlightedRelation,
+      edge: selectedEdge,
+      scope: relationScope,
+    },
+    explorer.snapshot,
+    (entry, exploration) => {
+      setSelected(entry.selected);
+      setHighlightedCategory(entry.category);
+      setHighlightedRelation(entry.relation);
+      setSelectedEdge(entry.edge);
+      setRelationScope(entry.scope);
+      explorer.restore(exploration);
+    },
+  );
   const [data, setData] = useState<GraphOverview | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -109,6 +133,8 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
       cancelled = true;
     };
   }, [documentId, entityType, category, search, focus, center, limit]);
+  for (const node of data?.network?.nodes ?? [])
+    knownNames.current.set(node.id, node.name);
   if (error) return <div className="document-panel-empty">{error}</div>;
   if (!data) return <div className="document-panel-empty">正在读取图谱…</div>;
   if (data.documents.length === 0)
@@ -175,6 +201,14 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
         >
           <div>
             <GraphView
+              navigation={
+                <GraphHistoryControls
+                  history={history}
+                  name={(id) => knownNames.current.get(id) ?? "实体"}
+                />
+              }
+              canvasRestore={history.canvasRestore}
+              onCanvasChange={history.saveCanvas}
               nodes={data.network.nodes}
               edges={data.network.edges}
               selected={selected}
@@ -228,6 +262,13 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
           {selected && (
             <GraphEntityPanel
               entityId={selected}
+              selectedCategory={
+                highlightedCategory?.entityId === selected
+                  ? highlightedCategory.category
+                  : null
+              }
+              selectedScope={relationScope}
+              onScopeChange={setRelationScope}
               visibleEdges={data.network.edges}
               onHighlightCategory={(category) => {
                 setHighlightedCategory({ entityId: selected, category });

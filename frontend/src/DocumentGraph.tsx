@@ -1,9 +1,10 @@
+import { GraphHistoryControls, useGraphHistory } from "./GraphHistory";
 import { DocumentChunkDialog, type ChunkTarget } from "./DocumentChunkDialog";
 import { GraphBuildTimer } from "./GraphBuildTimer";
 import { GraphChunkDetails } from "./GraphChunkDetails";
 import { GraphRelationPanel } from "./GraphRelationPanel";
 import type { GraphEdge, GraphRelationRow } from "./api";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   getDocumentGraph,
   retryDocumentGraph,
@@ -78,6 +79,29 @@ export function DocumentGraph({
   const [highlightedRelation, setHighlightedRelation] =
     useState<GraphRelationRow | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null);
+  const knownNames = useRef(new Map<string, string>());
+  const [relationScope, setRelationScope] = useState<"visible" | "all">(
+    "visible",
+  );
+  const history = useGraphHistory(
+    JSON.stringify([document.document_id, entityType, category]),
+    {
+      selected,
+      category: highlightedCategory,
+      relation: highlightedRelation,
+      edge: selectedEdge,
+      scope: relationScope,
+    },
+    explorer.snapshot,
+    (entry, exploration) => {
+      setSelected(entry.selected);
+      setHighlightedCategory(entry.category);
+      setHighlightedRelation(entry.relation);
+      setSelectedEdge(entry.edge);
+      setRelationScope(entry.scope);
+      explorer.restore(exploration);
+    },
+  );
   const [data, setData] = useState<DocumentGraphData | null>(null);
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState(false);
@@ -120,6 +144,8 @@ export function DocumentGraph({
     explorer.search,
     tick,
   ]);
+  for (const node of data?.network?.nodes ?? [])
+    knownNames.current.set(node.id, node.name);
   const busy = isBuildBusy(data?.build);
   // 建图进行中每 3 秒刷新一次进度。
   useEffect(() => {
@@ -467,6 +493,14 @@ export function DocumentGraph({
             {view === "network" && data.network && (
               <>
                 <GraphView
+                  navigation={
+                    <GraphHistoryControls
+                      history={history}
+                      name={(id) => knownNames.current.get(id) ?? "实体"}
+                    />
+                  }
+                  canvasRestore={history.canvasRestore}
+                  onCanvasChange={history.saveCanvas}
                   nodes={data.network.nodes}
                   edges={data.network.edges}
                   selected={selected}
@@ -727,6 +761,13 @@ export function DocumentGraph({
           {selected && (
             <GraphEntityPanel
               entityId={selected}
+              selectedCategory={
+                highlightedCategory?.entityId === selected
+                  ? highlightedCategory.category
+                  : null
+              }
+              selectedScope={relationScope}
+              onScopeChange={setRelationScope}
               visibleEdges={
                 view === "network" ? data.network?.edges : undefined
               }

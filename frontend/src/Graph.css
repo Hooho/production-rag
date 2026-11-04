@@ -107,28 +107,17 @@
   }
 }
 .graph-interaction-hint {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  right: 12px;
-  z-index: 2;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 18px;
-  width: fit-content;
-  max-width: calc(100% - 24px);
-  padding: 8px 12px;
-  border: 1px solid #e3e8ef;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.94);
-  color: #475569;
+  gap: 4px 18px;
+  margin: 6px 0 10px;
+  color: #7b8798;
   font-size: 12px;
   line-height: 1.6;
-  pointer-events: none;
 }
 .graph-interaction-hint strong {
-  color: #334155;
-  font-weight: 600;
+  color: inherit;
+  font-weight: 400;
 }
 .graph-canvas {
   width: 100%;
@@ -1144,4 +1133,23 @@
 }
 .graph-merge-table td:last-child .link-button {
   white-space: nowrap;
+}
+
+.graph-history-controls {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  pointer-events: none;
+}
+.graph-history-controls button {
+  pointer-events: auto;
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.95);
 }

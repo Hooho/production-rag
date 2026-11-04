@@ -28,6 +28,9 @@ export function GraphEntityPanel({
   highlightedRelationId,
   onHighlightRelation,
   onHighlightCategory,
+  selectedCategory,
+  selectedScope,
+  onScopeChange,
 }: {
   onOpenDocument?: (documentId: string) => void;
   entityId: string;
@@ -39,6 +42,9 @@ export function GraphEntityPanel({
   highlightedRelationId?: string;
   onHighlightRelation?: (row: GraphRelationRow) => void;
   onHighlightCategory?: (category: string | null) => void;
+  selectedCategory?: string | null;
+  selectedScope?: "visible" | "all";
+  onScopeChange?: (scope: "visible" | "all") => void;
 }) {
   const panel = useRef<HTMLElement>(null);
   const header = useRef<HTMLDivElement>(null);
@@ -47,11 +53,17 @@ export function GraphEntityPanel({
   const [scope, setScope] = useState<"visible" | "all">("visible");
   const [category, setCategory] = useState<string | null>(null);
   useEffect(() => {
+    setCategory(selectedCategory ?? null);
+  }, [selectedCategory]);
+  useEffect(() => {
+    setScope(selectedScope ?? "visible");
+  }, [selectedScope]);
+  useEffect(() => {
     let cancelled = false;
     setDetail(null);
     setError("");
-    setCategory(null);
-    setScope("visible");
+    setCategory(selectedCategory ?? null);
+    setScope(selectedScope ?? "visible");
     getGraphEntity(entityId, documentId)
       .then((value) => !cancelled && setDetail(value))
       .catch((reason: Error) => !cancelled && setError(reason.message));
@@ -217,6 +229,7 @@ export function GraphEntityPanel({
                 aria-pressed={scope === "visible"}
                 onClick={() => {
                   setScope("visible");
+                  onScopeChange?.("visible");
                   setCategory(null);
                   onHighlightCategory?.(null);
                 }}
@@ -228,6 +241,7 @@ export function GraphEntityPanel({
                 aria-pressed={scope === "all"}
                 onClick={() => {
                   setScope("all");
+                  onScopeChange?.("all");
                   setCategory(null);
                   onHighlightCategory?.(null);
                 }}
