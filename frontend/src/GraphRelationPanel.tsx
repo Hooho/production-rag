@@ -4,6 +4,7 @@ import {
   type GraphEdge,
   type GraphRelationDetail,
 } from "./api";
+import { DetailDialog } from "./DetailDialog";
 import { Tag } from "./Tag";
 
 export function GraphRelationPanel({
@@ -20,10 +21,12 @@ export function GraphRelationPanel({
   onOpenChunk?: (chunkId: string, position: number, documentId: string) => void;
 }) {
   const [items, setItems] = useState<GraphRelationDetail[] | null>(null);
+  const [original, setOriginal] = useState<GraphRelationDetail | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
     let cancelled = false;
     setItems(null);
+    setOriginal(null);
     setError("");
     getGraphRelations(edge.source, edge.target, documentId, category)
       .then((data) => {
@@ -81,19 +84,37 @@ export function GraphRelationPanel({
                   `第 ${row.position + 1} 片`
                 )}
               </small>
-              {row.chunk_content ? (
-                <p className="graph-evidence">
-                  {highlightEvidence(row.chunk_content, row.evidence)}
-                </p>
-              ) : (
-                <p className="graph-note">出处分片原文暂不可用。</p>
-              )}
-              {row.evidence && !row.chunk_content.includes(row.evidence) && (
-                <small>抽取时记录的证据：{row.evidence}</small>
-              )}
+              <button
+                type="button"
+                className="secondary-button graph-original-button"
+                title="打开可移动弹窗，查看原文并高亮证据"
+                disabled={!row.chunk_content}
+                onClick={() => setOriginal(row)}
+              >
+                原文
+              </button>
+              {!row.chunk_content && <small>出处分片原文暂不可用。</small>}
             </li>
           ))}
         </ul>
+      )}
+      {original && (
+        <DetailDialog
+          open
+          movable
+          title={`原文 · ${original.document_title ?? "文档"} · 第 ${original.position + 1} 片`}
+          onClose={() => setOriginal(null)}
+        >
+          {original.evidence &&
+            !original.chunk_content.includes(original.evidence) && (
+              <p className="graph-note">
+                抽取的证据与原文未精确匹配，以下显示完整原文。
+              </p>
+            )}
+          <p className="graph-original-content">
+            {highlightEvidence(original.chunk_content, original.evidence)}
+          </p>
+        </DetailDialog>
       )}
     </aside>
   );

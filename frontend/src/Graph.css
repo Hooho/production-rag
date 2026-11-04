@@ -1048,3 +1048,19 @@
   outline: 2px solid #2563eb;
   outline-offset: 2px;
 }
+
+.graph-side .graph-original-button {
+  margin-top: 6px;
+  min-height: 26px;
+  padding: 3px 9px;
+  font-size: 12px;
+}
+.graph-original-content {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+}
+.graph-original-content mark {
+  background: #fff2b8;
+  color: inherit;
+}

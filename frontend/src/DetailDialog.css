@@ -19,3 +19,17 @@
 .ag-original-chunk.is-retrieved { --chunk-text: var(--tone-info-text); --chunk-border: var(--tone-info-border); --chunk-bg: var(--tone-info-bg); }
 .ag-original-chunk.is-extended { --chunk-text: var(--tone-accent-text); --chunk-border: var(--tone-accent-border); --chunk-bg: var(--tone-accent-bg); }
 .ag-target-original-content { margin-top: 20px; }
+
+.ag-delivery-dialog.ag-dialog-movable {
+  width: min(560px, calc(100vw - 32px));
+  height: auto;
+  max-height: var(--companion-max-height, calc(80dvh - 26px));
+  bottom: auto;
+  right: auto;
+}
+.ag-dialog-movable .ag-delivery-dialog-head {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.ag-dialog-movable .ag-delivery-dialog-head:active { cursor: grabbing; }
