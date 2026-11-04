@@ -5606,6 +5606,15 @@ function Knowledge({
             onDelete={() => void remove(selected)}
             onRetry={() => void retry(selected)}
             onRetryContexts={() => void retryContexts(selected)}
+            onRetryGraph={async () => {
+              try {
+                await retryDocumentGraph(selected.document_id);
+                setDetail(await getDocument(selected.document_id));
+                onToast("success", "已开始补跑失败的分片。");
+              } catch (reason) {
+                onToast("error", (reason as Error).message);
+              }
+            }}
             onUploadVersion={() => openUpload(selected)}
             onSelectVersion={selectDocument}
             permission={
@@ -6387,6 +6396,7 @@ function DocumentDetail({
   chunkGraphStatus,
   onGraphStatusChange,
   onRetryChunkGraph,
+  onRetryGraph,
   graphPanel,
 }: {
   chunkSource: ChunkSource | null;
@@ -6394,6 +6404,7 @@ function DocumentDetail({
   chunkGraphStatus: ChunkGraphStatus | null;
   onGraphStatusChange: (status: ChunkGraphStatus | null) => void;
   onRetryChunkGraph: (chunkId: string) => void;
+  onRetryGraph: () => Promise<void>;
   graphPanel: ReactNode;
   permission: ReactNode;
   onRetry: () => void;
@@ -6651,6 +6662,9 @@ function DocumentDetail({
           <div className="document-trace-panel">
             <DocumentTrace
               steps={document.steps}
+              onRetryGraph={
+                document.can_edit !== false ? onRetryGraph : undefined
+              }
               missingContexts={document.context_missing ?? 0}
               onRetry={
                 document.status === "failed" && document.can_edit !== false
@@ -7235,12 +7249,15 @@ function DocumentTrace({
   onRetry,
   onRetryContexts,
   missingContexts = 0,
+  onRetryGraph,
 }: {
   steps: DocumentStep[];
   onRetry?: () => void;
   onRetryContexts?: () => void;
   missingContexts?: number;
+  onRetryGraph?: () => Promise<void>;
 }) {
+  const [retryingGraph, setRetryingGraph] = useState(false);
   if (steps.length === 0)
     return (
       <LoadingSkeleton
@@ -7292,14 +7309,35 @@ function DocumentTrace({
               {formatDuration(step.duration_ms)}
             </time>
           )}
-          {step.status === "failed" && onRetry && (
-            <button
-              className="secondary-button document-step-retry"
-              onClick={onRetry}
-            >
-              重试
-            </button>
-          )}
+          {step.step_id === "graph_extract" &&
+            (step.status === "failed" || step.status === "warning") &&
+            onRetryGraph && (
+              <button
+                type="button"
+                className="secondary-button document-step-retry"
+                disabled={retryingGraph}
+                onClick={async () => {
+                  setRetryingGraph(true);
+                  try {
+                    await onRetryGraph();
+                  } finally {
+                    setRetryingGraph(false);
+                  }
+                }}
+              >
+                {retryingGraph ? "正在重试…" : "重试"}
+              </button>
+            )}
+          {step.step_id !== "graph_extract" &&
+            step.status === "failed" &&
+            onRetry && (
+              <button
+                className="secondary-button document-step-retry"
+                onClick={onRetry}
+              >
+                重试
+              </button>
+            )}
           {step.step_id === "context" &&
             step.status === "completed" &&
             missingContexts > 0 &&
