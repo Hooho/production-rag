@@ -184,6 +184,7 @@ export function GraphView({
   emptyText?: string;
 }) {
   const container = useRef<HTMLDivElement>(null);
+  const selectionHalo = useRef<HTMLDivElement>(null);
   const cy = useRef<Core | null>(null);
   // 事件回调总是用最新的 props，不用每次重新绑定。
   const handlers = useRef({ onSelect, onExpand, onSelectEdge, edges });
@@ -314,6 +315,31 @@ export function GraphView({
     });
   }, [selected, selectedEdge, key, hasNodes]);
 
+  // The pulse is a DOM overlay: animate only transform/opacity, never the graph layout.
+  useEffect(() => {
+    const instance = cy.current;
+    const halo = selectionHalo.current;
+    if (!instance || !halo || !selected || selectedEdge) return;
+    function syncHalo() {
+      const node = instance!.getElementById(selected!);
+      halo!.style.visibility = node.empty() ? "hidden" : "visible";
+      if (node.empty()) return;
+      const position = node.renderedPosition();
+      const diameter = node.renderedWidth();
+      halo!.style.width = `${diameter}px`;
+      halo!.style.height = `${diameter}px`;
+      halo!.style.transform = `translate(${position.x - diameter / 2}px, ${position.y - diameter / 2}px)`;
+      halo!.style.color = node.data("stroke");
+    }
+    syncHalo();
+    instance.on("pan zoom resize layoutstop", syncHalo);
+    instance.on("position", "node", syncHalo);
+    return () => {
+      instance.off("pan zoom resize layoutstop", syncHalo);
+      instance.off("position", "node", syncHalo);
+    };
+  }, [selected, selectedEdge, key, hasNodes]);
+
   if (!hasNodes) return <div className="graph-empty">{emptyText}</div>;
   function zoom(factor: number) {
     const instance = cy.current;
@@ -375,6 +401,19 @@ export function GraphView({
       </div>
       <div className="graph-canvas-wrap">
         <div ref={container} className="graph-canvas" />
+        {selected &&
+          !selectedEdge &&
+          nodes.some((node) => node.id === selected) && (
+            <div
+              key={selected}
+              ref={selectionHalo}
+              className="graph-selection-halo"
+              aria-hidden="true"
+            >
+              <i />
+              <i />
+            </div>
+          )}
         <div className="graph-interaction-hint">
           <span>
             <strong>单击实体</strong>：突出已显示的邻居、查看详情

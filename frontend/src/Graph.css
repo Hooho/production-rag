@@ -59,13 +59,59 @@
 .graph-canvas-wrap {
   position: relative;
   min-width: 0;
+  overflow: hidden;
+  border-radius: 10px;
+}
+.graph-selection-halo {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  visibility: hidden;
+  pointer-events: none;
+  border-radius: 50%;
+}
+.graph-selection-halo i {
+  position: absolute;
+  inset: -5px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  box-shadow:
+    0 0 12px currentColor,
+    inset 0 0 8px currentColor;
+  opacity: 0;
+  animation: graph-selection-wave 2.4s cubic-bezier(0.25, 0.46, 0.45, 0.94)
+    infinite;
+}
+.graph-selection-halo i:nth-child(2) {
+  animation-delay: -1.2s;
+}
+@keyframes graph-selection-wave {
+  0% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(1.85);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .graph-selection-halo i {
+    animation: none;
+    transform: scale(1.1);
+    opacity: 0.25;
+  }
+  .graph-selection-halo i:nth-child(2) {
+    display: none;
+  }
 }
 .graph-interaction-hint {
   position: absolute;
   top: 12px;
   left: 12px;
   right: 12px;
-  z-index: 1;
+  z-index: 2;
   display: flex;
   flex-wrap: wrap;
   gap: 6px 18px;
