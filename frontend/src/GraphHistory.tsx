@@ -15,6 +15,7 @@ export type GraphSelection = {
   scope: "visible" | "all";
 };
 export type GraphExploration = {
+  entitySearch?: { entityId: string; query: string } | null;
   query: string;
   search: string;
   center: string | null;

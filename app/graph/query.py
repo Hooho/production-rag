@@ -1,3 +1,4 @@
+import unicodedata
 from urllib.parse import unquote
 
 from sqlalchemy import false, func, select
@@ -227,8 +228,14 @@ def network(
     # Replay each expansion in order, adding at most 15 unseen direct neighbors.
     expansions = ([center] if center in allowed else []) + list(focus or [])
     for expansion in expansions:
-        item_id, _, encoded_category = expansion.partition("|")
-        expansion_category = unquote(encoded_category) if encoded_category else None
+        parts = expansion.split("|", 2)
+        item_id = parts[0]
+        expansion_category = unquote(parts[1]) if len(parts) > 1 and parts[1] else None
+        name_query = (
+            unicodedata.normalize("NFKC", unquote(parts[2])).strip().lower()
+            if len(parts) > 2
+            else ""
+        )
         if item_id not in allowed or (center and item_id not in chosen):
             continue
         if item_id not in chosen and len(chosen) >= 300:
@@ -245,9 +252,16 @@ def network(
         neighbors = [
             item["id"]
             for item in ranked
-            if item["id"] in candidates and item["id"] not in chosen
+            if item["id"] in candidates
+            and item["id"] not in chosen
+            and (
+                not name_query
+                or name_query in unicodedata.normalize("NFKC", item["name"]).lower()
+            )
         ]
-        chosen.update(neighbors[: min(15, max(0, 300 - len(chosen)))])
+        chosen.update(
+            neighbors[: min(300 if name_query else 15, max(0, 300 - len(chosen)))]
+        )
     edges = {}
     for row in relations:
         if row["source_id"] not in chosen or row["target_id"] not in chosen:

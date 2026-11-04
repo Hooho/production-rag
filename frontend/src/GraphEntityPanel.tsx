@@ -1,3 +1,4 @@
+import { filterRelatedEntities } from "./graphEntitySearch";
 import {
   useEffect,
   useLayoutEffect,
@@ -31,6 +32,10 @@ export function GraphEntityPanel({
   selectedCategory,
   selectedScope,
   onScopeChange,
+  entityQuery,
+  onEntityQueryChange,
+  onShowMatches,
+  matchingLimitReached = false,
 }: {
   onOpenDocument?: (documentId: string) => void;
   entityId: string;
@@ -45,6 +50,10 @@ export function GraphEntityPanel({
   selectedCategory?: string | null;
   selectedScope?: "visible" | "all";
   onScopeChange?: (scope: "visible" | "all") => void;
+  entityQuery?: string;
+  onEntityQueryChange?: (query: string) => void;
+  onShowMatches?: (query: string, category: string | null) => void;
+  matchingLimitReached?: boolean;
 }) {
   const panel = useRef<HTMLElement>(null);
   const header = useRef<HTMLDivElement>(null);
@@ -52,6 +61,8 @@ export function GraphEntityPanel({
   const [error, setError] = useState("");
   const [scope, setScope] = useState<"visible" | "all">("visible");
   const [category, setCategory] = useState<string | null>(null);
+  const [localQuery, setLocalQuery] = useState("");
+  const nameQuery = entityQuery ?? localQuery;
   useEffect(() => {
     setCategory(selectedCategory ?? null);
   }, [selectedCategory]);
@@ -61,6 +72,7 @@ export function GraphEntityPanel({
   useEffect(() => {
     let cancelled = false;
     setDetail(null);
+    setLocalQuery("");
     setError("");
     setCategory(selectedCategory ?? null);
     setScope(selectedScope ?? "visible");
@@ -120,10 +132,27 @@ export function GraphEntityPanel({
       (categoryCounts.get(row.category) ?? 0) + 1,
     );
   }
-  const relations =
+  const categoryRelations =
     category === null
       ? scopedRelations
       : scopedRelations.filter((row) => row.category === category);
+  const relations = filterRelatedEntities(
+    categoryRelations,
+    entityId,
+    nameQuery,
+  );
+  const matchingEntities = new Set(
+    relations.map((row) =>
+      row.source_id === entityId ? row.target_id : row.source_id,
+    ),
+  );
+  const hiddenMatches = new Set(
+    relations
+      .filter((row) => !isVisible(row))
+      .map((row) =>
+        row.source_id === entityId ? row.target_id : row.source_id,
+      ),
+  );
   return (
     <aside ref={panel} className="graph-side graph-entity-panel">
       <div ref={header} className="graph-entity-header">
@@ -281,6 +310,54 @@ export function GraphEntityPanel({
               </button>
             ))}
           </div>
+          <div className="graph-entity-search">
+            <label>
+              <span>在当前关系中查找实体</span>
+              <input
+                type="search"
+                value={nameQuery}
+                placeholder="输入实体名称，例如腾讯"
+                onChange={(event) => {
+                  setLocalQuery(event.target.value);
+                  onEntityQueryChange?.(event.target.value);
+                }}
+              />
+            </label>
+            {nameQuery && (
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => {
+                  setLocalQuery("");
+                  onEntityQueryChange?.("");
+                }}
+              >
+                清空
+              </button>
+            )}
+            {nameQuery.trim() && (
+              <small role="status">
+                匹配 {matchingEntities.size} 个实体、{relations.length} 条关系
+              </small>
+            )}
+            {nameQuery.trim() &&
+              scope === "all" &&
+              hiddenMatches.size > 0 &&
+              onShowMatches && (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={matchingLimitReached}
+                  title="遵循顶部类型筛选，图中最多显示300个实体"
+                  onClick={() => onShowMatches(nameQuery.trim(), category)}
+                >
+                  {matchingLimitReached
+                    ? "已达300个实体上限，请先收起部分展开"
+                    : "显示匹配实体"}
+                  （{hiddenMatches.size} 个未显示）
+                </button>
+              )}
+          </div>
         </div>
         <ul>
           {relations.map((row, index) => (
@@ -302,7 +379,9 @@ export function GraphEntityPanel({
         </ul>
         {relations.length === 0 && (
           <p className="graph-note">
-            当前范围没有关系，可切换显示范围或展开邻居。
+            {nameQuery.trim()
+              ? "当前范围没有名称匹配的实体，可清空查找或切换到全部关系。"
+              : "当前范围没有关系，可切换显示范围或展开邻居。"}
           </p>
         )}
       </section>

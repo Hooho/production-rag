@@ -137,3 +137,40 @@ def test_edges_split_by_category_and_direction():
     assert edges["0>1|评价"]["count"] == 1
     assert all(len(edge["categories"]) == 1 for edge in edges.values())
     assert sum(edge["count"] for edge in edges.values()) == len(relations)
+
+
+def test_show_matching_neighbors_respects_name_category_and_existing_nodes():
+    from urllib.parse import quote
+
+    entities, relations = graph()
+    entities = [
+        {
+            **item,
+            "name": "腾讯" + item["id"]
+            if int(item["id"]) % 2
+            else "Apple " + item["id"],
+        }
+        for item in entities
+    ]
+    relations = [
+        {**row, "category": "投资" if int(row["target_id"]) < 30 else "评价"}
+        for row in relations
+    ]
+    before = network(entities, relations, limit=1)
+    result = network(
+        entities, relations, limit=1, focus=[f"0|{quote('投资')}|{quote('腾讯')}"]
+    )
+    added = ids(result) - ids(before)
+    assert added == {str(i) for i in range(1, 30, 2)}
+    repeated = network(
+        entities, relations, limit=1, focus=[f"0|{quote('投资')}|{quote('腾讯')}"] * 2
+    )
+    assert ids(repeated) == ids(result)
+    all_categories = network(
+        entities, relations, limit=1, focus=[f"0||{quote('腾讯')}"]
+    )
+    assert ids(all_categories) - ids(before) == {str(i) for i in range(1, 36, 2)}
+    no_match = network(entities, relations, limit=1, focus=[f"0||{quote('不存在')}"])
+    assert ids(no_match) == ids(before)
+    english = network(entities, relations, limit=1, focus=[f"0||{quote('ＡＰＰＬＥ')}"])
+    assert ids(english) - ids(before) == {str(i) for i in range(2, 36, 2)}

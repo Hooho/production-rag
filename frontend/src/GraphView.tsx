@@ -1,3 +1,4 @@
+import { matchesEntityName } from "./graphEntitySearch";
 import type { GraphCanvasState } from "./GraphHistory";
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import cytoscape, { type Core, type ElementDefinition } from "cytoscape";
@@ -201,6 +202,7 @@ export function GraphView({
   onSelect,
   onExpand,
   onSelectEdge,
+  entityQuery = "",
   navigation,
   canvasRestore,
   onCanvasChange,
@@ -217,6 +219,7 @@ export function GraphView({
   onExpand?: (id: string) => void;
   onSelectEdge?: (edge: GraphEdge) => void;
   emptyText?: string;
+  entityQuery?: string;
   navigation?: ReactNode;
   canvasRestore?: { token: number; state: GraphCanvasState } | null;
   onCanvasChange?: (state: GraphCanvasState) => void;
@@ -418,10 +421,22 @@ export function GraphView({
       if (!selected) return;
       const node = instance.getElementById(selected);
       if (node.empty()) return;
-      if (highlightedCategory) {
+      if (highlightedCategory || entityQuery.trim()) {
         const ids = new Set(
           edges
-            .filter((edge) => edge.categories.includes(highlightedCategory))
+            .filter((edge) => {
+              if (
+                highlightedCategory &&
+                !edge.categories.includes(highlightedCategory)
+              )
+                return false;
+              const neighbor =
+                edge.source === selected ? edge.target : edge.source;
+              return matchesEntityName(
+                nodes.find((node) => node.id === neighbor)?.name ?? "",
+                entityQuery,
+              );
+            })
             .map((edge) => edge.id),
         );
         const matching = node
@@ -430,6 +445,8 @@ export function GraphView({
         const visible = matching.union(matching.connectedNodes()).union(node);
         node.addClass("is-selected");
         matching.addClass("is-near is-highlighted");
+        if (entityQuery.trim())
+          matching.connectedNodes().addClass("is-selected");
         instance.elements().not(visible).addClass("is-dim");
         return;
       }
@@ -445,6 +462,7 @@ export function GraphView({
     selectedEdge,
     highlightedEdge,
     highlightedCategory,
+    entityQuery,
     highlightedEdgeCategory,
     edges,
     key,

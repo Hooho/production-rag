@@ -1,3 +1,4 @@
+import type { GraphExploration } from "./GraphHistory";
 import { useState } from "react";
 import type { GraphNetwork } from "./api";
 import { GraphFocusButton } from "./GraphWorkspace";
@@ -12,6 +13,8 @@ export function useGraphExplorer(
   const [center, setCenter] = useState<string | null>(null);
   const [focus, setFocus] = useState<string[]>([]);
   const [limit, setLimit] = useState(20);
+  const [entitySearch, setEntitySearch] =
+    useState<GraphExploration["entitySearch"]>(null);
   function find() {
     setSearch(query.trim());
     setCenter(null);
@@ -27,22 +30,29 @@ export function useGraphExplorer(
     setCenter(null);
     setFocus([]);
     setLimit(20);
+    setEntitySearch(null);
   }
   return {
-    snapshot: { query, search, center, focus, limit },
-    restore: (value: {
-      query: string;
-      search: string;
-      center: string | null;
-      focus: string[];
-      limit: number;
-    }) => {
+    snapshot: { query, search, center, focus, limit, entitySearch },
+    restore: (value: GraphExploration) => {
+      setEntitySearch(value.entitySearch ?? null);
       setQuery(value.query);
       setSearch(value.search);
       setCenter(value.center);
       setFocus(value.focus);
       setLimit(value.limit);
     },
+    entitySearch,
+    setEntitySearch,
+    showMatches: (id: string, query: string, category: string | null) =>
+      setFocus((items) =>
+        items.length < 300
+          ? [
+              ...items,
+              `${id}|${encodeURIComponent(category ?? "")}|${encodeURIComponent(query)}`,
+            ]
+          : items,
+      ),
     expansionCategory,
     query,
     setQuery,

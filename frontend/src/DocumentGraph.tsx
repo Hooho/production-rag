@@ -501,6 +501,11 @@ export function DocumentGraph({
                   }
                   canvasRestore={history.canvasRestore}
                   onCanvasChange={history.saveCanvas}
+                  entityQuery={
+                    explorer.entitySearch?.entityId === selected
+                      ? explorer.entitySearch.query
+                      : ""
+                  }
                   nodes={data.network.nodes}
                   edges={data.network.edges}
                   selected={selected}
@@ -761,6 +766,19 @@ export function DocumentGraph({
           {selected && (
             <GraphEntityPanel
               entityId={selected}
+              entityQuery={
+                explorer.entitySearch?.entityId === selected
+                  ? explorer.entitySearch.query
+                  : ""
+              }
+              onEntityQueryChange={(query) => {
+                explorer.setEntitySearch({ entityId: selected, query });
+                setHighlightedRelation(null);
+              }}
+              onShowMatches={(query, category) =>
+                explorer.showMatches(selected, query, category)
+              }
+              matchingLimitReached={(data.network?.nodes.length ?? 0) >= 300}
               selectedCategory={
                 highlightedCategory?.entityId === selected
                   ? highlightedCategory.category

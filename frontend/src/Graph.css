@@ -1153,3 +1153,32 @@
   text-align: left;
   background: rgba(255, 255, 255, 0.95);
 }
+
+.graph-entity-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.graph-entity-search label {
+  display: flex;
+  flex: 1 1 220px;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #64748b;
+}
+.graph-entity-search input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #24435c;
+  box-sizing: border-box;
+}
+.graph-entity-search small {
+  flex-basis: 100%;
+}
