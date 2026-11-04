@@ -1179,8 +1179,8 @@
   flex: 1 1 0;
   width: 0;
   min-width: 0;
-  height: 36px;
-  padding: 6px 8px;
+  height: 30px;
+  padding: 3px 8px;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   background: #fff;
@@ -1189,8 +1189,8 @@
 }
 .graph-entity-search-row button {
   flex: 0 0 auto;
-  height: 36px;
-  padding: 6px 10px;
+  height: 30px;
+  padding: 3px 10px;
   margin: 0;
   display: inline-flex;
   align-items: center;
