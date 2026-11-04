@@ -152,11 +152,7 @@ export function GraphEntityPanel({
           <li key={`${item.name}-${item.method}`}>
             <span className="graph-item-number">{index + 1}.</span>{" "}
             <strong>{item.name}</strong>{" "}
-            <Tag
-              size="sm"
-              plain
-              tone={item.method === "new" ? "neutral" : "info"}
-            >
+            <Tag size="sm" plain hue>
               {item.method_label}
             </Tag>
             <small>

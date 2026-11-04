@@ -641,7 +641,14 @@ export function DocumentGraph({
                   期只按规则合并：名字相同、规范化后相同、模型给的标准名相同；没合上或合错的要等第
                   3 期手动处理。
                 </p>
-                <table className="graph-table">
+                <table className="graph-table graph-merge-table">
+                  <colgroup>
+                    <col />
+                    <col />
+                    <col className="graph-merge-scope-column" />
+                    <col className="graph-merge-method-column" />
+                    <col className="graph-merge-source-column" />
+                  </colgroup>
                   <thead>
                     <tr>
                       <th>原文里的名字</th>
@@ -674,20 +681,12 @@ export function DocumentGraph({
                           </button>
                         </td>
                         <td>
-                          <Tag
-                            size="sm"
-                            plain
-                            tone={row.scope === "global" ? "info" : "neutral"}
-                          >
+                          <Tag size="sm" plain hue>
                             {row.scope_label}
                           </Tag>
                         </td>
                         <td>
-                          <Tag
-                            size="sm"
-                            plain
-                            tone={row.method === "new" ? "neutral" : "info"}
-                          >
+                          <Tag size="sm" plain hue>
                             {row.method_label}
                           </Tag>
                         </td>

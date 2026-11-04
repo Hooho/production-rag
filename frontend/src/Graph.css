@@ -1114,3 +1114,22 @@
   max-height: min(600px, calc(100dvh - 24px));
   box-sizing: border-box;
 }
+
+.graph-merge-table {
+  table-layout: fixed;
+}
+.graph-merge-scope-column {
+  width: 112px;
+}
+.graph-merge-method-column {
+  width: 116px;
+}
+.graph-merge-source-column {
+  width: 120px;
+}
+.graph-merge-table td {
+  overflow-wrap: anywhere;
+}
+.graph-merge-table td:last-child .link-button {
+  white-space: nowrap;
+}
