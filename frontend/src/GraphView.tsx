@@ -313,7 +313,7 @@ export function GraphView({
     const node = instance.getElementById(selected);
     if (node.empty()) return;
     instance.zoom(
-      Math.min(instance.maxZoom(), Math.max(1, instance.zoom() * 1.25)),
+      Math.min(instance.maxZoom(), 1, Math.max(0.65, instance.zoom() * 1.1)),
     );
     instance.center(node);
   }
