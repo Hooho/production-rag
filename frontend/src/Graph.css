@@ -105,13 +105,21 @@
 }
 .graph-summary-stats {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: 6px 14px;
   font-size: 13px;
 }
+.graph-summary-stats > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 24px;
+  line-height: 1.5;
+}
 .graph-summary-stats strong {
   font-size: 16px;
-  margin-right: 2px;
+  line-height: 1;
 }
 .graph-actions {
   display: flex;
