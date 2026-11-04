@@ -106,31 +106,31 @@ export function GraphExplorerControls({
             返回概览
           </button>
         )}
-        {centerNode && (
-          <>
-            <span className="graph-note">中心：{centerNode.name}</span>
-            {centerNode.hidden_neighbors > 0 && (
-              <button
-                type="button"
-                className="link-button"
-                onClick={() => explorer.expand(centerNode.id)}
-              >
-                显示更多邻居（最多 15 个）
-              </button>
-            )}
+      </form>
+      {centerNode && (
+        <div className="graph-explorer-row">
+          <span className="graph-note">中心：{centerNode.name}</span>
+          {centerNode.hidden_neighbors > 0 && (
             <button
               type="button"
               className="link-button"
-              onClick={() => {
-                explorer.choose(centerNode.id);
-                onClearSelection();
-              }}
+              onClick={() => explorer.expand(centerNode.id)}
             >
-              回到中心
+              显示更多邻居（最多 15 个）
             </button>
-          </>
-        )}
-      </form>
+          )}
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => {
+              explorer.choose(centerNode.id);
+              onClearSelection();
+            }}
+          >
+            重置展开
+          </button>
+        </div>
+      )}
       {explorer.search && (
         <div className="graph-filters">
           <span className="graph-note">
@@ -151,8 +151,8 @@ export function GraphExplorerControls({
           ))}
         </div>
       )}
-      {node && (
-        <div className="graph-filters">
+      {node && node.id !== center && (
+        <div className="graph-explorer-row">
           <span className="graph-note">{node.name}</span>
           {node.hidden_neighbors > 0 && (
             <button
@@ -186,22 +186,33 @@ export function GraphExplorerControls({
           )}
         </div>
       )}
-      {explorer.focus.length > 0 && (
-        <div className="graph-filters">
-          {[...new Set(explorer.focus)].map((id) => (
+      {[...new Set(explorer.focus)]
+        .filter((id) => id !== center && id !== node?.id)
+        .map((id) => (
+          <div key={id} className="graph-explorer-row">
+            <span className="graph-note">
+              已展开：
+              {network?.nodes.find((item) => item.id === id)?.name ?? "实体"}
+            </span>
             <button
               type="button"
-              key={id}
+              className="link-button"
+              onClick={() => explorer.expand(id)}
+              disabled={
+                !network?.nodes.find((item) => item.id === id)?.hidden_neighbors
+              }
+            >
+              显示更多邻居（最多 15 个）
+            </button>
+            <button
+              type="button"
               className="link-button"
               onClick={() => explorer.collapse(id)}
             >
-              收起{" "}
-              {network?.nodes.find((item) => item.id === id)?.name ?? "实体"}{" "}
-              的展开
+              收起展开
             </button>
-          ))}
-        </div>
-      )}
+          </div>
+        ))}
       {network && network.nodes.length >= 300 && (
         <p className="graph-note">
           已达到 300 个实体上限，请收起部分展开或选择新的中心实体。

@@ -184,6 +184,51 @@
   flex-direction: column;
   gap: 12px;
 }
+.graph-explorer-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  border: 1px solid #dce5ef;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12px;
+}
+.graph-explorer-row .graph-note {
+  color: #475569;
+  margin-right: auto;
+  overflow-wrap: anywhere;
+}
+.graph-explorer .link-button,
+.graph-explorer .secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid #cbd9eb;
+  border-radius: 6px;
+  background: #fff;
+  color: #426386;
+  font-size: 12px;
+  line-height: 1.5;
+  text-decoration: none;
+  cursor: pointer;
+}
+.graph-explorer button:hover:not(:disabled) {
+  background: #edf3ff;
+  border-color: #93b4f4;
+  color: #1d4ed8;
+}
+.graph-explorer button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.graph-explorer button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
 .graph-explorer .graph-filters input {
   width: 280px;
   max-width: 100%;
