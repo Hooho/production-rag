@@ -389,11 +389,13 @@
   border-radius: 999px;
   background: #fff;
   color: #475569;
-  padding: 4px 9px;
+  padding: 0 7px;
   font: inherit;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: 11px;
+  line-height: 1.6;
   cursor: pointer;
+  min-height: 0;
+  white-space: nowrap;
 }
 .graph-relation-categories button[aria-pressed="true"] {
   background: #e2e8f0;
@@ -1010,10 +1012,13 @@
   border-radius: 6px;
   background: #fff;
   color: #475569;
-  padding: 5px 8px;
+  padding: 0 7px;
   font: inherit;
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
+  line-height: 1.6;
+  min-height: 0;
+  white-space: nowrap;
 }
 .graph-relation-scope button[aria-pressed="true"] {
   background: #edf3ff;
