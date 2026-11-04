@@ -52,9 +52,10 @@ export function GraphRelationPanel({
         <p className="graph-note">当前范围内没有可查看的关系。</p>
       ) : (
         <ul>
-          {items.map((row) => (
+          {items.map((row, index) => (
             <li key={row.id}>
               <h4>
+                <span className="graph-item-number">{index + 1}.</span>{" "}
                 {row.source_entity} → {row.target_entity}
               </h4>
               <Tag size="sm" plain hue>

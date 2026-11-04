@@ -98,8 +98,9 @@ export function GraphEntityPanel({
       )}
       <h4>由这些名字合并而来（{detail.names.length}）</h4>
       <ul>
-        {detail.names.map((item) => (
+        {detail.names.map((item, index) => (
           <li key={`${item.name}-${item.method}`}>
+            <span className="graph-item-number">{index + 1}.</span>{" "}
             <strong>{item.name}</strong>{" "}
             <Tag
               size="sm"
@@ -186,10 +187,11 @@ export function GraphEntityPanel({
           </div>
         </div>
         <ul>
-          {relations.map((row) => (
+          {relations.map((row, index) => (
             <RelationItem
               key={row.id}
               row={row}
+              number={index + 1}
               entityId={detail.entity.id}
               onOpenChunk={onOpenChunk}
               showDocument={!documentId}
@@ -203,11 +205,13 @@ export function GraphEntityPanel({
 
 function RelationItem({
   row,
+  number,
   entityId,
   onOpenChunk,
   showDocument,
 }: {
   row: GraphRelationRow;
+  number: number;
   entityId: string;
   onOpenChunk?: (chunkId: string, position: number, documentId: string) => void;
   showDocument: boolean;
@@ -216,6 +220,7 @@ function RelationItem({
   return (
     <li>
       <span>
+        <span className="graph-item-number">{number}.</span>{" "}
         {outgoing ? "→" : "←"}{" "}
         <strong>{outgoing ? row.target_entity : row.source_entity}</strong>{" "}
         <Tag size="sm" plain hue={true}>

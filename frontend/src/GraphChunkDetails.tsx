@@ -361,6 +361,9 @@ function ExtractionTables({
               <table className="graph-table graph-chunk-entity-table">
                 <thead>
                   <tr>
+                    <th scope="col" className="graph-row-number">
+                      序号
+                    </th>
                     <th scope="col">原文名字</th>
                     <th scope="col">标准名</th>
                     <th scope="col">类型</th>
@@ -370,6 +373,7 @@ function ExtractionTables({
                 <tbody>
                   {graph.mentions.map((item, index) => (
                     <tr key={index}>
+                      <td className="graph-row-number">{index + 1}</td>
                       <td>
                         <strong>{item.name}</strong>
                       </td>
@@ -398,6 +402,9 @@ function ExtractionTables({
             <table className="graph-table graph-chunk-relation-table">
               <thead>
                 <tr>
+                  <th scope="col" className="graph-row-number">
+                    序号
+                  </th>
                   <th scope="col">起点</th>
                   <th scope="col">终点</th>
                   <th scope="col">分类</th>
@@ -408,6 +415,7 @@ function ExtractionTables({
               <tbody>
                 {graph.relations.map((item, index) => (
                   <tr key={index}>
+                    <td className="graph-row-number">{index + 1}</td>
                     <td>
                       <strong>{item.source}</strong>
                     </td>

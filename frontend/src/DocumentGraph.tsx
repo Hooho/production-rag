@@ -493,6 +493,7 @@ export function DocumentGraph({
               <table className="graph-table">
                 <thead>
                   <tr>
+                    <th className="graph-row-number">序号</th>
                     <th>实体</th>
                     <th>类型</th>
                     <th>名字数</th>
@@ -501,12 +502,17 @@ export function DocumentGraph({
                   </tr>
                 </thead>
                 <tbody>
-                  {data.entities.items.map((row) => (
+                  {data.entities.items.map((row, index) => (
                     <tr
                       key={row.id}
                       className="is-clickable"
                       onClick={() => setSelected(row.id)}
                     >
+                      <td className="graph-row-number">
+                        {(data.entities!.page - 1) * data.entities!.page_size +
+                          index +
+                          1}
+                      </td>
                       <td>
                         {row.name}
                         {row.description && <small>{row.description}</small>}
@@ -531,6 +537,7 @@ export function DocumentGraph({
               <table className="graph-table">
                 <thead>
                   <tr>
+                    <th className="graph-row-number">序号</th>
                     <th>起点</th>
                     <th>关系</th>
                     <th>终点</th>
@@ -539,8 +546,14 @@ export function DocumentGraph({
                   </tr>
                 </thead>
                 <tbody>
-                  {data.relations.items.map((row) => (
+                  {data.relations.items.map((row, index) => (
                     <tr key={row.id}>
+                      <td className="graph-row-number">
+                        {(data.relations!.page - 1) *
+                          data.relations!.page_size +
+                          index +
+                          1}
+                      </td>
                       <td>
                         <button
                           className="link-button"

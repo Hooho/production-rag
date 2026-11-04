@@ -752,13 +752,13 @@
   line-height: 1.7;
   overflow-wrap: anywhere;
 }
-.graph-chunk-entity-table th:nth-child(3) {
+.graph-chunk-entity-table th:nth-child(4) {
   width: 80px;
 }
 .graph-chunk-entity-table th:last-child {
   width: 42%;
 }
-.graph-chunk-relation-table th:nth-child(-n + 3) {
+.graph-chunk-relation-table th:nth-child(n + 2):nth-child(-n + 4) {
   width: 90px;
 }
 
@@ -767,4 +767,19 @@
 }
 .graph-chunk-relation-table td:last-child .link-button {
   white-space: nowrap;
+}
+
+.graph-item-number {
+  display: inline-block;
+  min-width: 2ch;
+  color: #7a8799;
+  font-size: 12px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.graph-table .graph-row-number {
+  width: 48px;
+  white-space: nowrap;
+  color: #7a8799;
+  font-variant-numeric: tabular-nums;
 }
