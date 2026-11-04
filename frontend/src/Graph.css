@@ -662,3 +662,10 @@
 .graph-chunk-relation-table th:nth-child(-n + 3) {
   width: 90px;
 }
+
+.graph-chunk-relation-table th:last-child {
+  width: 96px;
+}
+.graph-chunk-relation-table td:last-child .link-button {
+  white-space: nowrap;
+}

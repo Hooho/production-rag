@@ -41,6 +41,7 @@ export function GraphChunkDetails({
     title: string;
     text: string;
     original: boolean;
+    evidence?: string;
   } | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -146,7 +147,17 @@ export function GraphChunkDetails({
                         失败原因：{graph.error || "未记录失败原因"}
                       </p>
                     ) : graph ? (
-                      <ExtractionTables graph={graph} />
+                      <ExtractionTables
+                        graph={graph}
+                        onViewOriginal={(evidence) =>
+                          setSourceDetail({
+                            title: `第 ${chunk.position + 1} 片 · 关系原文`,
+                            text: chunk.content,
+                            original: true,
+                            evidence,
+                          })
+                        }
+                      />
                     ) : (
                       <p className="graph-note">
                         尚未返回结果，不能判断成功或失败。
@@ -265,7 +276,19 @@ export function GraphChunkDetails({
           onClose={() => setSourceDetail(null)}
         >
           {sourceDetail.original ? (
-            <p className="graph-chunk-text">{sourceDetail.text}</p>
+            <>
+              {sourceDetail.evidence &&
+                !sourceDetail.text.includes(sourceDetail.evidence) && (
+                  <p className="graph-note">
+                    抽取的证据与原文未精确匹配，以下显示完整原文。
+                  </p>
+                )}
+              <p className="graph-chunk-text">
+                {sourceDetail.evidence
+                  ? highlightEvidence(sourceDetail.text, sourceDetail.evidence)
+                  : sourceDetail.text}
+              </p>
+            </>
           ) : (
             <pre className="graph-prompt">{sourceDetail.text}</pre>
           )}
@@ -275,7 +298,13 @@ export function GraphChunkDetails({
   );
 }
 
-function ExtractionTables({ graph }: { graph: ChunkGraph }) {
+function ExtractionTables({
+  graph,
+  onViewOriginal,
+}: {
+  graph: ChunkGraph;
+  onViewOriginal: (evidence: string) => void;
+}) {
   const [tab, setTab] = useState<"entities" | "relations">("entities");
   const id = useId();
   return (
@@ -374,7 +403,7 @@ function ExtractionTables({ graph }: { graph: ChunkGraph }) {
                   <th scope="col">终点</th>
                   <th scope="col">分类</th>
                   <th scope="col">关系描述</th>
-                  <th scope="col">原文证据</th>
+                  <th scope="col">原文</th>
                 </tr>
               </thead>
               <tbody>
@@ -392,7 +421,15 @@ function ExtractionTables({ graph }: { graph: ChunkGraph }) {
                       </Tag>
                     </td>
                     <td>{item.description || "—"}</td>
-                    <td>{item.evidence || "—"}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={() => onViewOriginal(item.evidence)}
+                      >
+                        查看原文
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -404,4 +441,14 @@ function ExtractionTables({ graph }: { graph: ChunkGraph }) {
       </div>
     </>
   );
+}
+
+function highlightEvidence(text: string, evidence: string) {
+  const parts = text.split(evidence);
+  return parts.map((part, index) => (
+    <span key={index}>
+      {index > 0 && <mark className="chunk-graph-mark">{evidence}</mark>}
+      {part}
+    </span>
+  ));
 }
