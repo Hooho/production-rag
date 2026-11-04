@@ -27,6 +27,7 @@ export function GraphEntityPanel({
   visibleEdges,
   highlightedRelationId,
   onHighlightRelation,
+  onHighlightCategory,
 }: {
   onOpenDocument?: (documentId: string) => void;
   entityId: string;
@@ -37,6 +38,7 @@ export function GraphEntityPanel({
   visibleEdges?: GraphEdge[];
   highlightedRelationId?: string;
   onHighlightRelation?: (row: GraphRelationRow) => void;
+  onHighlightCategory?: (category: string | null) => void;
 }) {
   const panel = useRef<HTMLElement>(null);
   const header = useRef<HTMLDivElement>(null);
@@ -220,6 +222,7 @@ export function GraphEntityPanel({
                 onClick={() => {
                   setScope("visible");
                   setCategory(null);
+                  onHighlightCategory?.(null);
                 }}
               >
                 图中关系 {visibleRelations.length}
@@ -230,6 +233,7 @@ export function GraphEntityPanel({
                 onClick={() => {
                   setScope("all");
                   setCategory(null);
+                  onHighlightCategory?.(null);
                 }}
               >
                 全部关系 {detail.relations.length}
@@ -244,7 +248,10 @@ export function GraphEntityPanel({
             <button
               type="button"
               aria-pressed={category === null}
-              onClick={() => setCategory(null)}
+              onClick={() => {
+                setCategory(null);
+                onHighlightCategory?.(null);
+              }}
             >
               全部 {scopedRelations.length}
             </button>
@@ -255,7 +262,10 @@ export function GraphEntityPanel({
                 className="tag is-hue"
                 style={{ "--tag-h": labelHue(name) } as CSSProperties}
                 aria-pressed={category === name}
-                onClick={() => setCategory(name)}
+                onClick={() => {
+                  setCategory(name);
+                  onHighlightCategory?.(name);
+                }}
               >
                 {name} {count}
               </button>

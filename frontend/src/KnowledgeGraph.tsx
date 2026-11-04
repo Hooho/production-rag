@@ -78,6 +78,10 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
   const explorer = useGraphExplorer();
   const { search, focus, limit, center } = explorer;
   const [selected, setSelected] = useState<string | null>(null);
+  const [highlightedCategory, setHighlightedCategory] = useState<{
+    entityId: string;
+    category: string | null;
+  } | null>(null);
   const [highlightedRelation, setHighlightedRelation] =
     useState<GraphRelationRow | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null);
@@ -175,6 +179,11 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
               edges={data.network.edges}
               selected={selected}
               selectedEdge={selectedEdge?.id}
+              highlightedCategory={
+                highlightedCategory?.entityId === selected
+                  ? highlightedCategory.category
+                  : null
+              }
               highlightedEdge={
                 highlightedRelation &&
                 (highlightedRelation.source_id === selected ||
@@ -184,6 +193,7 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
               }
               onSelect={(id) => {
                 setSelected(id);
+                setHighlightedCategory(null);
                 setHighlightedRelation(null);
                 setSelectedEdge(null);
               }}
@@ -218,6 +228,10 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
             <GraphEntityPanel
               entityId={selected}
               visibleEdges={data.network.edges}
+              onHighlightCategory={(category) => {
+                setHighlightedCategory({ entityId: selected, category });
+                setHighlightedRelation(null);
+              }}
               highlightedRelationId={highlightedRelation?.id}
               onHighlightRelation={(row) =>
                 setHighlightedRelation((current) =>

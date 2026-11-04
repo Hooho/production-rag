@@ -71,6 +71,10 @@ export function DocumentGraph({
   const explorer = useGraphExplorer();
   const { focus, center, limit } = explorer;
   const [selected, setSelected] = useState<string | null>(null);
+  const [highlightedCategory, setHighlightedCategory] = useState<{
+    entityId: string;
+    category: string | null;
+  } | null>(null);
   const [highlightedRelation, setHighlightedRelation] =
     useState<GraphRelationRow | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null);
@@ -467,6 +471,11 @@ export function DocumentGraph({
                   edges={data.network.edges}
                   selected={selected}
                   selectedEdge={selectedEdge?.id}
+                  highlightedCategory={
+                    highlightedCategory?.entityId === selected
+                      ? highlightedCategory.category
+                      : null
+                  }
                   highlightedEdge={
                     highlightedRelation &&
                     (highlightedRelation.source_id === selected ||
@@ -476,6 +485,7 @@ export function DocumentGraph({
                   }
                   onSelect={(id) => {
                     setSelected(id);
+                    setHighlightedCategory(null);
                     setHighlightedRelation(null);
                     setSelectedEdge(null);
                   }}
@@ -720,6 +730,10 @@ export function DocumentGraph({
               visibleEdges={
                 view === "network" ? data.network?.edges : undefined
               }
+              onHighlightCategory={(category) => {
+                setHighlightedCategory({ entityId: selected, category });
+                setHighlightedRelation(null);
+              }}
               highlightedRelationId={highlightedRelation?.id}
               onHighlightRelation={(row) =>
                 setHighlightedRelation((current) =>

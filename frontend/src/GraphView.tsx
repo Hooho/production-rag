@@ -192,6 +192,7 @@ export function GraphView({
   selected,
   selectedEdge,
   highlightedEdge,
+  highlightedCategory,
   onSelect,
   onExpand,
   onSelectEdge,
@@ -202,6 +203,7 @@ export function GraphView({
   selected?: string | null;
   selectedEdge?: string | null;
   highlightedEdge?: string | null;
+  highlightedCategory?: string | null;
   onSelect?: (id: string) => void;
   onExpand?: (id: string) => void;
   onSelectEdge?: (edge: GraphEdge) => void;
@@ -342,6 +344,21 @@ export function GraphView({
       if (!selected) return;
       const node = instance.getElementById(selected);
       if (node.empty()) return;
+      if (highlightedCategory) {
+        const ids = new Set(
+          edges
+            .filter((edge) => edge.categories.includes(highlightedCategory))
+            .map((edge) => edge.id),
+        );
+        const matching = node
+          .connectedEdges()
+          .filter((edge) => ids.has(edge.id()));
+        const visible = matching.union(matching.connectedNodes()).union(node);
+        node.addClass("is-selected");
+        matching.addClass("is-near is-highlighted");
+        instance.elements().not(visible).addClass("is-dim");
+        return;
+      }
       const near = node.closedNeighborhood();
       node.addClass("is-selected");
       node.connectedEdges().addClass("is-near");
@@ -349,7 +366,15 @@ export function GraphView({
     });
     const activeEdge = selectedEdge || highlightedEdge;
     if (activeEdge) focusRelation(instance, activeEdge);
-  }, [selected, selectedEdge, highlightedEdge, key, hasNodes]);
+  }, [
+    selected,
+    selectedEdge,
+    highlightedEdge,
+    highlightedCategory,
+    edges,
+    key,
+    hasNodes,
+  ]);
 
   // The pulse is a DOM overlay: animate only transform/opacity, never the graph layout.
   useEffect(() => {
