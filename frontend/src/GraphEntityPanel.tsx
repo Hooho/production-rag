@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
+import { labelHue } from "./hues";
 import {
   getGraphEntity,
   type GraphEntityDetail,
@@ -174,6 +175,8 @@ export function GraphEntityPanel({
               <button
                 type="button"
                 key={name}
+                className="tag is-hue"
+                style={{ "--tag-h": labelHue(name) } as CSSProperties}
                 aria-pressed={category === name}
                 onClick={() => setCategory(name)}
               >

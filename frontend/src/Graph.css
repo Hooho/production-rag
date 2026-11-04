@@ -295,9 +295,19 @@
   cursor: pointer;
 }
 .graph-relation-categories button[aria-pressed="true"] {
-  background: #edf3ff;
-  border-color: #2563eb;
-  color: #1d4ed8;
+  background: #e2e8f0;
+  border-color: #64748b;
+  color: #334155;
+}
+.graph-relation-categories button.is-hue {
+  background: var(--tag-bg);
+  border-color: var(--tag-border);
+  color: var(--tag-text);
+}
+.graph-relation-categories button.is-hue[aria-pressed="true"] {
+  background: hsl(var(--tag-h) 80% 90%);
+  border-color: hsl(var(--tag-h) 55% 45%);
+  box-shadow: inset 0 0 0 1px hsl(var(--tag-h) 55% 45%);
 }
 .graph-relation-categories button:focus-visible {
   outline: 2px solid #2563eb;
