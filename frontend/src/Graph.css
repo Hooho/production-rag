@@ -207,7 +207,6 @@
   margin: 12px 0 0;
   line-height: 1.7;
 }
-.graph-filters select,
 .graph-filters select {
   appearance: none;
   padding-right: 34px;
@@ -216,6 +215,7 @@
   background-size: 12px;
   background-repeat: no-repeat;
 }
+.graph-filters select,
 .graph-filters input {
   border: 1px solid #d5dce6;
   border-radius: 6px;
@@ -223,7 +223,7 @@
   padding: 6px 10px;
   font-size: 13px;
   color: var(--t-475569);
-  background: #fff;
+  background-color: #fff;
 }
 .graph-filters input {
   min-width: 180px;
