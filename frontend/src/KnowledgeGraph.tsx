@@ -189,7 +189,7 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
                 highlightedRelation &&
                 (highlightedRelation.source_id === selected ||
                   highlightedRelation.target_id === selected)
-                  ? `${highlightedRelation.source_id}>${highlightedRelation.target_id}`
+                  ? `${highlightedRelation.source_id}>${highlightedRelation.target_id}|${highlightedRelation.category}`
                   : undefined
               }
               onSelect={(id) => {
@@ -220,7 +220,7 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
             <GraphRelationPanel
               edge={selectedEdge}
               documentId={documentId}
-              category={category}
+              category={selectedEdge.categories[0]}
               onClose={() => setSelectedEdge(null)}
               onOpenChunk={openChunk}
             />

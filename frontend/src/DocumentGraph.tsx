@@ -481,7 +481,7 @@ export function DocumentGraph({
                     highlightedRelation &&
                     (highlightedRelation.source_id === selected ||
                       highlightedRelation.target_id === selected)
-                      ? `${highlightedRelation.source_id}>${highlightedRelation.target_id}`
+                      ? `${highlightedRelation.source_id}>${highlightedRelation.target_id}|${highlightedRelation.category}`
                       : undefined
                   }
                   onSelect={(id) => {
@@ -502,7 +502,7 @@ export function DocumentGraph({
                   {data.network.total_entities} 个实体、
                   {data.network.edges.length} 条边（
                   {data.network.total_relations}{" "}
-                  条关系，同一对实体之间的多条关系合成一条边）。
+                  条关系，同一对实体之间按分类分线，同分类关系合并计数）。
                   {data.network.center_id
                     ? "当前为中心实体的一跳关系及手动展开的邻居。"
                     : `当前概览最多显示 ${data.network.limit} 个核心实体。`}
@@ -717,7 +717,7 @@ export function DocumentGraph({
             <GraphRelationPanel
               edge={selectedEdge}
               documentId={documentId}
-              category={category}
+              category={selectedEdge.categories[0]}
               onClose={() => setSelectedEdge(null)}
               onOpenChunk={(chunkId, position) =>
                 onOpenChunk(chunkId, position)

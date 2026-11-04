@@ -186,7 +186,7 @@ def entity_list(entities, relations):
 
 
 # 画图用的点和边：概览限制核心实体数；中心模式仅展示一跳，focus 每次追加 15 个邻居。
-# 两个实体之间的多条关系合成一条边，记下条数、分类和前几条描述。
+# 同一方向、同一分类的关系合成一条边，不同分类分别画线。
 def network(
     entities,
     relations,
@@ -252,11 +252,11 @@ def network(
     for row in relations:
         if row["source_id"] not in chosen or row["target_id"] not in chosen:
             continue
-        key = (row["source_id"], row["target_id"])
+        key = (row["source_id"], row["target_id"], row["category"])
         edge = edges.setdefault(
             key,
             {
-                "id": f"{key[0]}>{key[1]}",
+                "id": f"{key[0]}>{key[1]}|{key[2]}",
                 "source": key[0],
                 "target": key[1],
                 "count": 0,

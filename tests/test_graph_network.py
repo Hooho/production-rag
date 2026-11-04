@@ -110,3 +110,30 @@ def test_category_remaining_neighbors_matches_expansion():
     node = next(item for item in expanded["nodes"] if item["id"] == "0")
     assert node["hidden_neighbors_by_category"] == {"投资": 0, "评价": 17}
     assert node["hidden_neighbors"] == 17
+
+
+def test_edges_split_by_category_and_direction():
+    entities, _ = graph()
+
+    def relation(source, target, category):
+        return {
+            "source_id": source,
+            "target_id": target,
+            "category": category,
+            "description": category,
+        }
+
+    relations = [
+        relation("0", "1", "投资"),
+        relation("0", "1", "投资"),
+        relation("0", "1", "评价"),
+        relation("1", "0", "投资"),
+        relation("0", "0", "评价"),
+    ]
+    result = network(entities, relations)
+    edges = {edge["id"]: edge for edge in result["edges"]}
+    assert set(edges) == {"0>1|投资", "0>1|评价", "1>0|投资", "0>0|评价"}
+    assert edges["0>1|投资"]["count"] == 2
+    assert edges["0>1|评价"]["count"] == 1
+    assert all(len(edge["categories"]) == 1 for edge in edges.values())
+    assert sum(edge["count"] for edge in edges.values()) == len(relations)
