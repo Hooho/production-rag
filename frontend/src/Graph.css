@@ -121,7 +121,7 @@
 }
 .graph-canvas {
   width: 100%;
-  height: 520px;
+  height: 780px;
   border: 1px solid #e3e8ef;
   border-radius: 10px;
   background: #fbfcfe;
@@ -360,8 +360,8 @@
   position: sticky;
   top: -12px;
   z-index: 2;
-  margin: 14px -14px 8px;
-  padding: 12px 14px;
+  margin: 8px -14px 4px;
+  padding: 8px 14px;
   border-bottom: 1px solid #e3e8ef;
   background: #fff;
 }
@@ -1112,7 +1112,8 @@
   > .graph-side {
   position: sticky;
   top: 12px;
-  max-height: min(600px, calc(100dvh - 24px));
+  height: calc(100dvh - 24px);
+  max-height: none;
   box-sizing: border-box;
 }
 
@@ -1156,29 +1157,45 @@
 
 .graph-entity-search {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: 12px;
-}
-.graph-entity-search label {
-  display: flex;
-  flex: 1 1 220px;
   flex-direction: column;
   gap: 6px;
+  margin: 8px 0 0;
+}
+.graph-entity-search label {
+  display: block;
+  margin: 0;
+  font: inherit;
   font-size: 12px;
+  letter-spacing: normal;
   color: #64748b;
 }
-.graph-entity-search input {
-  width: 100%;
+.graph-entity-search-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
-  padding: 8px 10px;
+}
+.graph-entity-search-row input {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  height: 36px;
+  padding: 6px 8px;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   background: #fff;
   color: #24435c;
   box-sizing: border-box;
 }
+.graph-entity-search-row button {
+  flex: 0 0 auto;
+  height: 36px;
+  padding: 6px 10px;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 .graph-entity-search small {
-  flex-basis: 100%;
+  margin: 0;
 }

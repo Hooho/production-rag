@@ -1,6 +1,7 @@
 import { filterRelatedEntities } from "./graphEntitySearch";
 import {
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -63,6 +64,11 @@ export function GraphEntityPanel({
   const [category, setCategory] = useState<string | null>(null);
   const [localQuery, setLocalQuery] = useState("");
   const nameQuery = entityQuery ?? localQuery;
+  const [draftQuery, setDraftQuery] = useState(entityQuery ?? "");
+  const searchId = useId();
+  useEffect(() => {
+    setDraftQuery(entityQuery ?? "");
+  }, [entityQuery, entityId]);
   useEffect(() => {
     setCategory(selectedCategory ?? null);
   }, [selectedCategory]);
@@ -310,31 +316,41 @@ export function GraphEntityPanel({
               </button>
             ))}
           </div>
-          <div className="graph-entity-search">
-            <label>
-              <span>在当前关系中查找实体</span>
+          <form
+            className="graph-entity-search"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const query = draftQuery.trim();
+              setLocalQuery(query);
+              onEntityQueryChange?.(query);
+            }}
+          >
+            <label htmlFor={searchId}>在当前关系中查找实体</label>
+            <div className="graph-entity-search-row">
               <input
+                id={searchId}
                 type="search"
-                value={nameQuery}
+                value={draftQuery}
                 placeholder="输入实体名称，例如腾讯"
-                onChange={(event) => {
-                  setLocalQuery(event.target.value);
-                  onEntityQueryChange?.(event.target.value);
-                }}
+                onChange={(event) => setDraftQuery(event.target.value)}
               />
-            </label>
-            {nameQuery && (
-              <button
-                type="button"
-                className="link-button"
-                onClick={() => {
-                  setLocalQuery("");
-                  onEntityQueryChange?.("");
-                }}
-              >
-                清空
+              <button type="submit" className="secondary-button">
+                搜索
               </button>
-            )}
+              {(draftQuery || nameQuery) && (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    setDraftQuery("");
+                    setLocalQuery("");
+                    onEntityQueryChange?.("");
+                  }}
+                >
+                  清空
+                </button>
+              )}
+            </div>
             {nameQuery.trim() && (
               <small role="status">
                 匹配 {matchingEntities.size} 个实体、{relations.length} 条关系
@@ -357,7 +373,7 @@ export function GraphEntityPanel({
                   （{hiddenMatches.size} 个未显示）
                 </button>
               )}
-          </div>
+          </form>
         </div>
         <ul>
           {relations.map((row, index) => (
