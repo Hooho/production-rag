@@ -34,17 +34,29 @@ export function typeColor(type: string) {
   };
 }
 
-function size(node: GraphNode) {
-  return 16 + Math.min(30, Math.sqrt(node.relation_count) * 6);
+function size(neighbors: number) {
+  if (neighbors <= 2) return 28;
+  if (neighbors <= 5) return 38;
+  if (neighbors <= 10) return 50;
+  if (neighbors <= 20) return 66;
+  return 84;
 }
 
 // 节点和边转成 Cytoscape 的元素。颜色、大小、标签都算好放进 data，样式表里直接取。
 // 初始位置按顺序排在圆上，再用 cose 布局（randomize: false），同一组数据每次画出来都一样。
 function elements(nodes: GraphNode[], edges: GraphEdge[]): ElementDefinition[] {
+  const neighbors = new Map(nodes.map((node) => [node.id, new Set<string>()]));
+  for (const edge of edges) {
+    if (edge.source === edge.target) continue;
+    if (!neighbors.has(edge.source) || !neighbors.has(edge.target)) continue;
+    neighbors.get(edge.source)!.add(edge.target);
+    neighbors.get(edge.target)!.add(edge.source);
+  }
   const count = Math.max(1, nodes.length);
   const radius = 60 + count * 12;
   const result: ElementDefinition[] = nodes.map((node, index) => {
     const color = typeColor(node.type);
+    const neighborCount = neighbors.get(node.id)!.size + node.hidden_neighbors;
     const name =
       node.name.length > 12 ? `${node.name.slice(0, 12)}…` : node.name;
     return {
@@ -55,11 +67,11 @@ function elements(nodes: GraphNode[], edges: GraphEdge[]): ElementDefinition[] {
           node.hidden_neighbors > 0
             ? `${name}  +${node.hidden_neighbors}`
             : name,
-        title: `${node.name}（${node.type}）：${node.relation_count} 条关系，出现 ${node.mention_count} 次`,
+        title: `${node.name}（${node.type}）：连接 ${neighborCount} 个实体，${node.relation_count} 条关系，出现 ${node.mention_count} 次`,
         fill: color.fill,
         stroke: color.stroke,
         text: color.text,
-        size: size(node),
+        size: size(neighborCount),
         focus: node.focus ? 1 : 0,
       },
       position: {
@@ -117,7 +129,19 @@ const STYLE: cytoscape.StylesheetJson = [
       "target-arrow-color": "#94a3b8",
       "target-arrow-shape": "triangle",
       "arrow-scale": 0.9,
+      "curve-style": "unbundled-bezier",
+      "control-point-distances": [32],
+      "control-point-weights": [0.5],
+      "edge-distances": "node-position",
+    },
+  },
+  {
+    selector: "edge:loop",
+    style: {
       "curve-style": "bezier",
+      "loop-direction": "-45deg",
+      "loop-sweep": "70deg",
+      "control-point-step-size": 60,
     },
   },
   {
@@ -126,7 +150,11 @@ const STYLE: cytoscape.StylesheetJson = [
       label: "data(label)",
       "font-size": 10,
       color: "#475569",
-      "text-rotation": "autorotate",
+      "text-rotation": "none",
+      "text-background-color": "#fbfcfe",
+      "text-background-opacity": 0.95,
+      "text-background-padding": "3px",
+      "text-background-shape": "roundrectangle",
       "text-outline-color": "#fbfcfe",
       "text-outline-width": 2,
       "line-color": "#64748b",
@@ -162,7 +190,12 @@ export function GraphView({
   handlers.current = { onSelect, onExpand, onSelectEdge, edges };
   const hasNodes = nodes.length > 0;
   const key =
-    nodes.map((node) => `${node.id}:${node.hidden_neighbors}`).join(",") +
+    nodes
+      .map(
+        (node) =>
+          `${node.id}:${node.hidden_neighbors}:${node.focus}:${node.name}:${node.type}`,
+      )
+      .join(",") +
     "|" +
     edges.map((edge) => `${edge.id}:${edge.count}`).join(",");
   const types = useMemo(
@@ -221,9 +254,14 @@ export function GraphView({
         randomize: false,
         animate: false,
         fit: true,
-        padding: 30,
-        nodeRepulsion: () => 4500,
-        idealEdgeLength: () => 60,
+        padding: 48,
+        nodeRepulsion: (node: cytoscape.NodeSingular) =>
+          14000 + Number(node.data("size")) * 250,
+        idealEdgeLength: (edge: cytoscape.EdgeSingular) =>
+          110 + Math.max(edge.source().width(), edge.target().width()),
+        componentSpacing: 140,
+        nodeOverlap: 24,
+        numIter: 1600,
         nodeDimensionsIncludeLabels: true,
       } as cytoscape.LayoutOptions)
       .run();
