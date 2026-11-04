@@ -95,3 +95,18 @@ def test_category_expansion_adds_only_matching_unseen_neighbors():
     assert ids(network(entities, relations, limit=1, focus=["0|不存在"])) == ids(first)
     all_categories = network(entities, relations, limit=1, focus=["0"])
     assert len(ids(all_categories) - ids(first)) == 15
+
+
+def test_category_remaining_neighbors_matches_expansion():
+    entities, relations = graph()
+    relations = [
+        {**row, "category": "投资" if int(row["target_id"]) % 2 else "评价"}
+        for row in relations
+    ]
+    first = network(entities, relations, limit=1)
+    node = next(item for item in first["nodes"] if item["id"] == "0")
+    assert node["hidden_neighbors_by_category"] == {"投资": 18, "评价": 17}
+    expanded = network(entities, relations, limit=1, focus=["0|%E6%8A%95%E8%B5%84"] * 2)
+    node = next(item for item in expanded["nodes"] if item["id"] == "0")
+    assert node["hidden_neighbors_by_category"] == {"投资": 0, "评价": 17}
+    assert node["hidden_neighbors"] == 17

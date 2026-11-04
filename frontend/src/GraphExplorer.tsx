@@ -29,6 +29,7 @@ export function useGraphExplorer(
     setLimit(20);
   }
   return {
+    expansionCategory,
     query,
     setQuery,
     search,
@@ -72,6 +73,26 @@ export function GraphExplorerControls({
   const center = network?.center_id;
   const node = network?.nodes.find((item) => item.id === selected);
   const centerNode = network?.nodes.find((item) => item.id === center);
+  function remaining(id: string) {
+    const item = network?.nodes.find((node) => node.id === id);
+    const category =
+      explorer.expansionCategory?.entityId === id
+        ? explorer.expansionCategory.category
+        : null;
+    return category && item?.hidden_neighbors_by_category
+      ? (item.hidden_neighbors_by_category[category] ?? 0)
+      : (item?.hidden_neighbors ?? 0);
+  }
+  function expandLabel(id: string) {
+    const category =
+      explorer.expansionCategory?.entityId === id
+        ? explorer.expansionCategory.category
+        : null;
+    const count = remaining(id);
+    return count > 0
+      ? `展开${category ? `「${category}」` : "关系"}（再显示最多 ${Math.min(15, count)} 个邻居）`
+      : `${category ? `「${category}」` : "当前"}关系的邻居已全部显示`;
+  }
   return (
     <div className="graph-explorer">
       <form
@@ -143,13 +164,18 @@ export function GraphExplorerControls({
       {centerNode && (
         <div className="graph-explorer-row">
           <span className="graph-note">中心：{centerNode.name}</span>
-          {centerNode.hidden_neighbors > 0 && (
+          {(centerNode.hidden_neighbors > 0 ||
+            explorer.expansionCategory?.entityId === centerNode.id) && (
             <button
               type="button"
               className="link-button"
+              disabled={
+                remaining(centerNode.id) === 0 ||
+                (network?.nodes.length ?? 0) >= 300
+              }
               onClick={() => explorer.expand(centerNode.id)}
             >
-              显示更多邻居（最多 15 个）
+              {expandLabel(centerNode.id)}
             </button>
           )}
           <button
@@ -167,13 +193,17 @@ export function GraphExplorerControls({
       {node && node.id !== center && (
         <div className="graph-explorer-row">
           <span className="graph-note">{node.name}</span>
-          {node.hidden_neighbors > 0 && (
+          {(node.hidden_neighbors > 0 ||
+            explorer.expansionCategory?.entityId === node.id) && (
             <button
               type="button"
               className="link-button"
+              disabled={
+                remaining(node.id) === 0 || (network?.nodes.length ?? 0) >= 300
+              }
               onClick={() => explorer.expand(node.id)}
             >
-              展开关系（再显示最多 15 个邻居）
+              {expandLabel(node.id)}
             </button>
           )}
           {explorer.focus.some((item) => item.split("|")[0] === node.id) && (

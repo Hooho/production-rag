@@ -3697,6 +3697,7 @@ export type GraphNode = {
   mention_count: number;
   focus: boolean;
   hidden_neighbors: number;
+  hidden_neighbors_by_category?: Record<string, number>;
 };
 export type GraphEdge = {
   id: string;

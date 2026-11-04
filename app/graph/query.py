@@ -286,12 +286,23 @@ def network(
     shown = {node["id"] for node in nodes}
     for node in nodes:
         neighbors = set()
+        category_neighbors = {}
         for row in relations:
             if row["source_id"] == node["id"]:
                 neighbors.add(row["target_id"])
             elif row["target_id"] == node["id"]:
                 neighbors.add(row["source_id"])
+            if node["id"] in (row["source_id"], row["target_id"]):
+                other = (
+                    row["target_id"]
+                    if row["source_id"] == node["id"]
+                    else row["source_id"]
+                )
+                category_neighbors.setdefault(row["category"], set()).add(other)
         node["hidden_neighbors"] = len(neighbors - shown)
+        node["hidden_neighbors_by_category"] = {
+            name: len(values - shown) for name, values in category_neighbors.items()
+        }
     return {
         "nodes": nodes,
         "edges": list(edges.values()),
