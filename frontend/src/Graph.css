@@ -999,3 +999,47 @@
   word-break: normal;
   overflow-wrap: normal;
 }
+
+.graph-relation-scope {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.graph-relation-scope button {
+  border: 1px solid #d5dce6;
+  border-radius: 6px;
+  background: #fff;
+  color: #475569;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.graph-relation-scope button[aria-pressed="true"] {
+  background: #edf3ff;
+  border-color: #2563eb;
+  color: #1d4ed8;
+}
+.graph-relation-highlight-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.graph-relation-highlight-button:hover,
+.graph-relation-highlight-button[aria-pressed="true"] {
+  color: #2563eb;
+}
+.graph-relation-is-highlighted {
+  border-radius: 6px;
+  background: #edf3ff;
+  outline: 1px solid #bfd3ff;
+}
+.graph-relation-scope button:focus-visible,
+.graph-relation-highlight-button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}

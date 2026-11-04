@@ -4,6 +4,7 @@ import {
   getGraphEntity,
   type GraphEntityDetail,
   type GraphRelationRow,
+  type GraphEdge,
 } from "./api";
 import { Tag } from "./Tag";
 import { typeColor } from "./GraphView";
@@ -17,6 +18,9 @@ export function GraphEntityPanel({
   onOpenChunk,
   onFocus,
   onOpenDocument,
+  visibleEdges,
+  highlightedRelationId,
+  onHighlightRelation,
 }: {
   onOpenDocument?: (documentId: string) => void;
   entityId: string;
@@ -24,15 +28,20 @@ export function GraphEntityPanel({
   onClose: () => void;
   onOpenChunk?: (chunkId: string, position: number, documentId: string) => void;
   onFocus?: (entityId: string) => void;
+  visibleEdges?: GraphEdge[];
+  highlightedRelationId?: string;
+  onHighlightRelation?: (row: GraphRelationRow) => void;
 }) {
   const [detail, setDetail] = useState<GraphEntityDetail | null>(null);
   const [error, setError] = useState("");
+  const [scope, setScope] = useState<"visible" | "all">("visible");
   const [category, setCategory] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     setDetail(null);
     setError("");
     setCategory(null);
+    setScope("visible");
     getGraphEntity(entityId, documentId)
       .then((value) => !cancelled && setDetail(value))
       .catch((reason: Error) => !cancelled && setError(reason.message));
@@ -53,8 +62,20 @@ export function GraphEntityPanel({
       </aside>
     );
   const color = typeColor(detail.entity.type);
+  const visibleKeys = new Set(
+    visibleEdges?.flatMap((edge) =>
+      edge.categories.map((name) => `${edge.source}>${edge.target}|${name}`),
+    ),
+  );
+  const isVisible = (row: GraphRelationRow) =>
+    visibleKeys.has(`${row.source_id}>${row.target_id}|${row.category}`);
+  const visibleRelations = detail.relations.filter(isVisible);
+  const scopedRelations =
+    visibleEdges !== undefined && scope === "visible"
+      ? visibleRelations
+      : detail.relations;
   const categoryCounts = new Map<string, number>();
-  for (const row of detail.relations) {
+  for (const row of scopedRelations) {
     categoryCounts.set(
       row.category,
       (categoryCounts.get(row.category) ?? 0) + 1,
@@ -62,8 +83,8 @@ export function GraphEntityPanel({
   }
   const relations =
     category === null
-      ? detail.relations
-      : detail.relations.filter((row) => row.category === category);
+      ? scopedRelations
+      : scopedRelations.filter((row) => row.category === category);
   return (
     <aside className="graph-side">
       <div className="graph-side-heading">
@@ -160,6 +181,34 @@ export function GraphEntityPanel({
           <h4>
             关系（{relations.length} / {detail.relations.length}）
           </h4>
+          {visibleEdges !== undefined && (
+            <div
+              className="graph-relation-scope"
+              role="group"
+              aria-label="关系显示范围"
+            >
+              <button
+                type="button"
+                aria-pressed={scope === "visible"}
+                onClick={() => {
+                  setScope("visible");
+                  setCategory(null);
+                }}
+              >
+                图中关系 {visibleRelations.length}
+              </button>
+              <button
+                type="button"
+                aria-pressed={scope === "all"}
+                onClick={() => {
+                  setScope("all");
+                  setCategory(null);
+                }}
+              >
+                全部关系 {detail.relations.length}
+              </button>
+            </div>
+          )}
           <div
             className="graph-relation-categories"
             role="group"
@@ -170,7 +219,7 @@ export function GraphEntityPanel({
               aria-pressed={category === null}
               onClick={() => setCategory(null)}
             >
-              全部 {detail.relations.length}
+              全部 {scopedRelations.length}
             </button>
             {[...categoryCounts].map(([name, count]) => (
               <button
@@ -195,9 +244,20 @@ export function GraphEntityPanel({
               entityId={detail.entity.id}
               onOpenChunk={onOpenChunk}
               showDocument={!documentId}
+              highlighted={highlightedRelationId === row.id && isVisible(row)}
+              onHighlight={
+                isVisible(row) && onHighlightRelation
+                  ? () => onHighlightRelation(row)
+                  : undefined
+              }
             />
           ))}
         </ul>
+        {relations.length === 0 && (
+          <p className="graph-note">
+            当前范围没有关系，可切换显示范围或展开邻居。
+          </p>
+        )}
       </section>
     </aside>
   );
@@ -209,20 +269,36 @@ function RelationItem({
   entityId,
   onOpenChunk,
   showDocument,
+  onHighlight,
+  highlighted,
 }: {
   row: GraphRelationRow;
   number: number;
   entityId: string;
   onOpenChunk?: (chunkId: string, position: number, documentId: string) => void;
   showDocument: boolean;
+  onHighlight?: () => void;
+  highlighted: boolean;
 }) {
   const outgoing = row.source_id === entityId;
   return (
-    <li>
+    <li className={highlighted ? "graph-relation-is-highlighted" : ""}>
       <span>
         <span className="graph-item-number">{number}.</span>{" "}
         {outgoing ? "→" : "←"}{" "}
-        <strong>{outgoing ? row.target_entity : row.source_entity}</strong>{" "}
+        {onHighlight ? (
+          <button
+            type="button"
+            className="graph-relation-highlight-button"
+            title="高亮图中的对应连线和两端实体"
+            aria-pressed={highlighted}
+            onClick={onHighlight}
+          >
+            <strong>{outgoing ? row.target_entity : row.source_entity}</strong>
+          </button>
+        ) : (
+          <strong>{outgoing ? row.target_entity : row.source_entity}</strong>
+        )}{" "}
         <Tag size="sm" plain hue={true}>
           {row.category}
         </Tag>

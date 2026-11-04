@@ -2,7 +2,7 @@ import { DocumentChunkDialog, type ChunkTarget } from "./DocumentChunkDialog";
 import { GraphBuildTimer } from "./GraphBuildTimer";
 import { GraphChunkDetails } from "./GraphChunkDetails";
 import { GraphRelationPanel } from "./GraphRelationPanel";
-import type { GraphEdge } from "./api";
+import type { GraphEdge, GraphRelationRow } from "./api";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   getDocumentGraph,
@@ -71,6 +71,8 @@ export function DocumentGraph({
   const explorer = useGraphExplorer();
   const { focus, center, limit } = explorer;
   const [selected, setSelected] = useState<string | null>(null);
+  const [highlightedRelation, setHighlightedRelation] =
+    useState<GraphRelationRow | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null);
   const [data, setData] = useState<DocumentGraphData | null>(null);
   const [error, setError] = useState("");
@@ -465,8 +467,16 @@ export function DocumentGraph({
                   edges={data.network.edges}
                   selected={selected}
                   selectedEdge={selectedEdge?.id}
+                  highlightedEdge={
+                    highlightedRelation &&
+                    (highlightedRelation.source_id === selected ||
+                      highlightedRelation.target_id === selected)
+                      ? `${highlightedRelation.source_id}>${highlightedRelation.target_id}`
+                      : undefined
+                  }
                   onSelect={(id) => {
                     setSelected(id);
+                    setHighlightedRelation(null);
                     setSelectedEdge(null);
                   }}
                   onSelectEdge={(edge) => {
@@ -707,6 +717,15 @@ export function DocumentGraph({
           {selected && (
             <GraphEntityPanel
               entityId={selected}
+              visibleEdges={
+                view === "network" ? data.network?.edges : undefined
+              }
+              highlightedRelationId={highlightedRelation?.id}
+              onHighlightRelation={(row) =>
+                setHighlightedRelation((current) =>
+                  current?.id === row.id ? null : row,
+                )
+              }
               documentId={documentId}
               onClose={() => setSelected(null)}
               onOpenChunk={(chunkId, position) =>

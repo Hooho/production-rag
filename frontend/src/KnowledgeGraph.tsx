@@ -1,6 +1,6 @@
 import { DocumentChunkDialog, type ChunkTarget } from "./DocumentChunkDialog";
 import { GraphRelationPanel } from "./GraphRelationPanel";
-import type { GraphEdge } from "./api";
+import type { GraphEdge, GraphRelationRow } from "./api";
 import { useEffect, useState } from "react";
 import {
   getGraphOverview,
@@ -78,6 +78,8 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
   const explorer = useGraphExplorer();
   const { search, focus, limit, center } = explorer;
   const [selected, setSelected] = useState<string | null>(null);
+  const [highlightedRelation, setHighlightedRelation] =
+    useState<GraphRelationRow | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null);
   const [data, setData] = useState<GraphOverview | null>(null);
   const [error, setError] = useState("");
@@ -173,8 +175,16 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
               edges={data.network.edges}
               selected={selected}
               selectedEdge={selectedEdge?.id}
+              highlightedEdge={
+                highlightedRelation &&
+                (highlightedRelation.source_id === selected ||
+                  highlightedRelation.target_id === selected)
+                  ? `${highlightedRelation.source_id}>${highlightedRelation.target_id}`
+                  : undefined
+              }
               onSelect={(id) => {
                 setSelected(id);
+                setHighlightedRelation(null);
                 setSelectedEdge(null);
               }}
               onSelectEdge={(edge) => {
@@ -207,6 +217,13 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
           {selected && (
             <GraphEntityPanel
               entityId={selected}
+              visibleEdges={data.network.edges}
+              highlightedRelationId={highlightedRelation?.id}
+              onHighlightRelation={(row) =>
+                setHighlightedRelation((current) =>
+                  current?.id === row.id ? null : row,
+                )
+              }
               onClose={() => setSelected(null)}
               onOpenDocument={(id) => onNavigate(`/knowledge/${id}`)}
               onOpenChunk={openChunk}

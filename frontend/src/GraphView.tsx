@@ -161,6 +161,17 @@ const STYLE: cytoscape.StylesheetJson = [
       "target-arrow-color": "#64748b",
     },
   },
+  {
+    selector: "edge.is-highlighted",
+    style: {
+      width: 5,
+      "line-color": "#2563eb",
+      "target-arrow-color": "#2563eb",
+      "font-weight": "bold",
+      color: "#1d4ed8",
+      "z-index": 10,
+    },
+  },
   { selector: ".is-dim", style: { opacity: 0.18 } },
 ];
 
@@ -169,6 +180,7 @@ export function GraphView({
   edges,
   selected,
   selectedEdge,
+  highlightedEdge,
   onSelect,
   onExpand,
   onSelectEdge,
@@ -178,6 +190,7 @@ export function GraphView({
   edges: GraphEdge[];
   selected?: string | null;
   selectedEdge?: string | null;
+  highlightedEdge?: string | null;
   onSelect?: (id: string) => void;
   onExpand?: (id: string) => void;
   onSelectEdge?: (edge: GraphEdge) => void;
@@ -294,11 +307,14 @@ export function GraphView({
     const instance = cy.current;
     if (!instance) return;
     instance.batch(() => {
-      instance.elements().removeClass("is-dim is-selected is-near");
-      if (selectedEdge) {
-        const edge = instance.getElementById(selectedEdge);
-        if (edge.empty()) return;
-        edge.addClass("is-near");
+      instance
+        .elements()
+        .removeClass("is-dim is-selected is-near is-highlighted");
+      const activeEdge = selectedEdge || highlightedEdge;
+      if (activeEdge && !instance.getElementById(activeEdge).empty()) {
+        const edge = instance.getElementById(activeEdge);
+        edge.addClass("is-near is-highlighted");
+        edge.connectedNodes().addClass("is-selected");
         instance
           .elements()
           .not(edge.union(edge.connectedNodes()))
@@ -313,7 +329,7 @@ export function GraphView({
       node.connectedEdges().addClass("is-near");
       instance.elements().not(near).addClass("is-dim");
     });
-  }, [selected, selectedEdge, key, hasNodes]);
+  }, [selected, selectedEdge, highlightedEdge, key, hasNodes]);
 
   // The pulse is a DOM overlay: animate only transform/opacity, never the graph layout.
   useEffect(() => {
