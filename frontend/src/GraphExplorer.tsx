@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { GraphNetwork } from "./api";
+import { GraphFocusButton } from "./GraphWorkspace";
 
 type Match = { id: string; name: string; type: string };
 
@@ -106,6 +107,7 @@ export function GraphExplorerControls({
             返回概览
           </button>
         )}
+        <GraphFocusButton />
       </form>
       {explorer.search && (
         <div className="graph-filters">

@@ -1,4 +1,37 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
+
+const FocusContext = createContext<{
+  focused: boolean;
+  toggle: () => void;
+  buttonRef: RefObject<HTMLButtonElement | null>;
+} | null>(null);
+
+export function GraphFocusButton() {
+  const focus = useContext(FocusContext);
+  if (!focus) return null;
+  return (
+    <button
+      ref={focus.buttonRef}
+      type="button"
+      className="secondary-button"
+      aria-pressed={focus.focused}
+      title={
+        focus.focused ? "恢复普通布局（也可按 Esc）" : "铺满窗口，专注查看图谱"
+      }
+      onClick={focus.toggle}
+    >
+      {focus.focused ? "解除专注模式" : "图专注模式"}
+    </button>
+  );
+}
 
 // Both graph pages keep the same controls and canvas mounted while focusing.
 export function GraphWorkspace({
@@ -44,27 +77,23 @@ export function GraphWorkspace({
     };
   }, [focused]);
   return (
-    <div
-      ref={workspace}
-      className={`graph-workspace${focused ? " is-focused" : ""}`}
-    >
-      {enabled && (
-        <div className="graph-workspace-heading">
-          <button
-            ref={toggle}
-            type="button"
-            className="secondary-button"
-            aria-pressed={focused}
-            title={
-              focused ? "恢复普通布局（也可按 Esc）" : "铺满窗口，专注查看图谱"
+    <FocusContext.Provider
+      value={
+        enabled
+          ? {
+              focused,
+              toggle: () => setFocused((value) => !value),
+              buttonRef: toggle,
             }
-            onClick={() => setFocused((value) => !value)}
-          >
-            {focused ? "解除专注模式" : "图专注模式"}
-          </button>
-        </div>
-      )}
-      {children}
-    </div>
+          : null
+      }
+    >
+      <div
+        ref={workspace}
+        className={`graph-workspace${focused ? " is-focused" : ""}`}
+      >
+        {children}
+      </div>
+    </FocusContext.Provider>
   );
 }

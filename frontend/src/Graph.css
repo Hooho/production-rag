@@ -845,15 +845,18 @@
   gap: 16px;
   min-width: 0;
 }
-.graph-workspace-heading {
-  display: flex;
-  justify-content: flex-end;
-  flex-shrink: 0;
-}
-.graph-workspace-heading .secondary-button {
-  min-height: 30px;
-  padding: 4px 10px;
-  font-size: 12px;
+/* Main graph controls share one size; compact entity cards keep their smaller buttons. */
+.graph-workspace .graph-filters > select,
+.graph-workspace .graph-filters > input,
+.graph-workspace .graph-filters > button,
+.graph-workspace .graph-filters .chunk-source-filter > button {
+  box-sizing: border-box;
+  height: 34px;
+  min-height: 34px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  font-size: 13px;
+  line-height: 20px;
 }
 .graph-workspace.is-focused {
   position: fixed;
