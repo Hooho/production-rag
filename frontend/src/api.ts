@@ -3707,6 +3707,7 @@ export type GraphEdge = {
   descriptions: string[];
 };
 export type GraphNetwork = {
+  center_id?: string | null;
   nodes: GraphNode[];
   edges: GraphEdge[];
   total_entities: number;
@@ -3766,6 +3767,7 @@ export type GraphPage<T> = {
 };
 export type GraphView = "network" | "entities" | "relations" | "merges";
 export type DocumentGraphData = {
+  matches?: { id: string; name: string; type: string }[];
   build: GraphBuild | null;
   history: GraphBuild[];
   can_build: boolean;
@@ -3936,6 +3938,8 @@ export function getDocumentGraph(
     type?: string | null;
     category?: string | null;
     focus?: string[];
+    center?: string | null;
+    limit?: number;
   },
 ) {
   return request<DocumentGraphData>(
@@ -3946,6 +3950,8 @@ export function getDocumentGraph(
       type: params.type,
       category: params.category,
       focus: params.focus?.join(","),
+      center: params.center,
+      limit: params.limit,
     })}`,
   );
 }
@@ -3975,6 +3981,7 @@ export function getGraphOverview(params: {
   category?: string | null;
   q?: string;
   focus?: string[];
+  center?: string | null;
   limit?: number;
 }) {
   return request<GraphOverview>(

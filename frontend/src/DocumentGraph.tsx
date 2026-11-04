@@ -16,6 +16,7 @@ import {
 import { formatShortTime } from "./format";
 import { GraphBuildDialog } from "./GraphBuildDialog";
 import { GraphEntityPanel } from "./GraphEntityPanel";
+import { GraphExplorerControls, useGraphExplorer } from "./GraphExplorer";
 import { GraphView, typeColor } from "./GraphView";
 import { Tag } from "./Tag";
 import type { Tone } from "./tags";
@@ -66,7 +67,8 @@ export function DocumentGraph({
   const [search, setSearch] = useState("");
   const [entityType, setEntityType] = useState<string | null>(null);
   const [category, setCategory] = useState<string | null>(null);
-  const [focus, setFocus] = useState<string[]>([]);
+  const explorer = useGraphExplorer();
+  const { focus, center, limit } = explorer;
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null);
   const [data, setData] = useState<DocumentGraphData | null>(null);
@@ -81,10 +83,12 @@ export function DocumentGraph({
     getDocumentGraph(documentId, {
       view,
       page,
-      q: search,
+      q: view === "network" ? explorer.search : search,
       type: entityType,
       category,
       focus,
+      center,
+      limit,
     })
       .then((value) => {
         if (!cancelled) {
@@ -96,7 +100,19 @@ export function DocumentGraph({
     return () => {
       cancelled = true;
     };
-  }, [documentId, view, page, search, entityType, category, focus, tick]);
+  }, [
+    documentId,
+    view,
+    page,
+    search,
+    entityType,
+    category,
+    focus,
+    center,
+    limit,
+    explorer.search,
+    tick,
+  ]);
   const busy = isBuildBusy(data?.build);
   // 建图进行中每 3 秒刷新一次进度。
   useEffect(() => {
@@ -423,12 +439,19 @@ export function DocumentGraph({
             }}
           />
         )}
-        {view === "network" && focus.length > 0 && (
-          <button className="link-button" onClick={() => setFocus([])}>
-            收起展开的 {focus.length} 个实体
-          </button>
-        )}
       </div>
+      {view === "network" && (
+        <GraphExplorerControls
+          explorer={explorer}
+          network={data.network}
+          matches={data.matches}
+          selected={selected}
+          onClearSelection={() => {
+            setSelected(null);
+            setSelectedEdge(null);
+          }}
+        />
+      )}
       <div className={selected || selectedEdge ? "graph-body" : ""}>
         <div>
           {view === "network" && data.network && (
@@ -446,19 +469,17 @@ export function DocumentGraph({
                   setSelectedEdge(edge);
                   setSelected(null);
                 }}
-                onExpand={(id) =>
-                  setFocus((items) =>
-                    items.includes(id) ? items : [...items, id],
-                  )
-                }
+                onExpand={explorer.expand}
                 emptyText={busy ? "建图完成后显示" : "没有抽出实体"}
               />
               <p className="graph-note">
                 显示 {data.network.nodes.length} / {data.network.total_entities}{" "}
                 个实体、{data.network.edges.length} 条边（
                 {data.network.total_relations}{" "}
-                条关系，同一对实体之间的多条关系合成一条边）。默认只显示关系最多的{" "}
-                {data.network.limit} 个。
+                条关系，同一对实体之间的多条关系合成一条边）。
+                {data.network.center_id
+                  ? "当前为中心实体的一跳关系及手动展开的邻居。"
+                  : `当前概览最多显示 ${data.network.limit} 个核心实体。`}
               </p>
             </>
           )}
@@ -666,9 +687,8 @@ export function DocumentGraph({
             onOpenChunk={(chunkId, position) => onOpenChunk(chunkId, position)}
             onFocus={(id) => {
               setView("network");
-              setFocus((items) =>
-                items.includes(id) ? items : [...items, id],
-              );
+              if (view !== "network") explorer.choose(id);
+              else explorer.expand(id);
             }}
           />
         )}

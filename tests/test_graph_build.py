@@ -218,6 +218,31 @@ def test_build_document_graph(setup, monkeypatch):
     ).json()
     assert {item["name"] for item in detail["names"]} == {"段永平", "阿段"}
     assert len(detail["relations"]) == 2
+    # Search switches to a scoped one-hop graph and exposes selectable matches.
+    searched = client.get(
+        f"/documents/{document_id}/graph", params={"q": "段永平"}, headers=headers()
+    ).json()
+    assert searched["network"]["center_id"] == entity_id
+    assert searched["matches"][0]["id"] == entity_id
+    assert searched["network"]["limit"] == 20
+    missing = client.get(
+        f"/documents/{document_id}/graph",
+        params={"q": "不存在的名字"},
+        headers=headers(),
+    ).json()
+    assert missing["network"]["nodes"] == []
+    focused = client.get(
+        f"/documents/{document_id}/graph",
+        params={"center": entity_id, "focus": f"{entity_id},{entity_id}"},
+        headers=headers(),
+    )
+    assert focused.status_code == 200
+    assert focused.json()["network"]["center_id"] == entity_id
+    assert client.get(
+        f"/documents/{document_id}/graph",
+        params={"center": entity_id},
+        headers=headers("bob"),
+    ).status_code in (403, 404)
 
 
 # 分片文字、清单、模型、提示词都没变时，重新建图直接复用，不再调用模型；旧的建图记录不再生效。

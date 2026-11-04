@@ -223,7 +223,9 @@ def build_router(current_user, identity, require_admin):
         q: str | None = Query(None, max_length=100),
         entity_type: str | None = Query(None, alias="type", max_length=32),
         category: str | None = Query(None, max_length=32),
-        focus: str | None = Query(None, max_length=2000),
+        focus: str | None = Query(None, max_length=12000),
+        center: UUID | None = Query(None),
+        limit: int = Query(graph_query.NETWORK_LIMIT, ge=5, le=300),
         user=Depends(current_user),
     ):
         state = request.app.state
@@ -237,7 +239,9 @@ def build_router(current_user, identity, require_admin):
             q or None,
             entity_type or None,
             category or None,
-            [item for item in (focus or "").split(",") if item],
+            [item for item in (focus or "").split(",") if item][:300],
+            str(center) if center else None,
+            limit,
         )
         result["can_build"] = row["owner"] == user["username"] or bool(user["is_admin"])
         result["processed"] = graph_build.is_processed(row["status"])
@@ -295,7 +299,8 @@ def build_router(current_user, identity, require_admin):
         entity_type: str | None = Query(None, alias="type", max_length=32),
         category: str | None = Query(None, max_length=32),
         q: str | None = Query(None, max_length=100),
-        focus: str | None = Query(None, max_length=2000),
+        focus: str | None = Query(None, max_length=12000),
+        center: UUID | None = Query(None),
         limit: int = Query(graph_query.NETWORK_LIMIT, ge=5, le=300),
         admin=Depends(require_admin),
     ):
@@ -304,9 +309,10 @@ def build_router(current_user, identity, require_admin):
             str(document_id) if document_id else None,
             entity_type or None,
             category or None,
-            [item for item in (focus or "").split(",") if item],
+            [item for item in (focus or "").split(",") if item][:300],
             q or None,
             limit,
+            str(center) if center else None,
         )
 
     @router.get("/graph/tasks")

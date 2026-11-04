@@ -12,6 +12,7 @@ import { BUILD_STATUS, TRIGGER_LABELS } from "./DocumentGraph";
 import { formatShortTime } from "./format";
 import { GraphBuildDialog } from "./GraphBuildDialog";
 import { GraphEntityPanel } from "./GraphEntityPanel";
+import { GraphExplorerControls, useGraphExplorer } from "./GraphExplorer";
 import { GraphView } from "./GraphView";
 import { Tag } from "./Tag";
 
@@ -73,10 +74,8 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [entityType, setEntityType] = useState<string | null>(null);
   const [category, setCategory] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [search, setSearch] = useState("");
-  const [focus, setFocus] = useState<string[]>([]);
-  const [limit, setLimit] = useState(50);
+  const explorer = useGraphExplorer();
+  const { search, focus, limit, center } = explorer;
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null);
   const [data, setData] = useState<GraphOverview | null>(null);
@@ -89,6 +88,7 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
       category,
       q: search,
       focus,
+      center,
       limit,
     })
       .then((value) => {
@@ -101,7 +101,7 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
     return () => {
       cancelled = true;
     };
-  }, [documentId, entityType, category, search, focus, limit]);
+  }, [documentId, entityType, category, search, focus, center, limit]);
   if (error) return <div className="document-panel-empty">{error}</div>;
   if (!data) return <div className="document-panel-empty">正在读取图谱…</div>;
   if (data.documents.length === 0)
@@ -115,7 +115,12 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
       <div className="graph-filters">
         <select
           value={documentId ?? ""}
-          onChange={(event) => setDocumentId(event.target.value || null)}
+          onChange={(event) => {
+            setDocumentId(event.target.value || null);
+            explorer.reset();
+            setSelected(null);
+            setSelectedEdge(null);
+          }}
         >
           <option value="">全部 {data.documents.length} 份文档</option>
           {data.documents.map((item) => (
@@ -146,47 +151,17 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
             </option>
           ))}
         </select>
-        <select
-          value={limit}
-          onChange={(event) => setLimit(Number(event.target.value))}
-        >
-          {[50, 100, 200].map((value) => (
-            <option key={value} value={value}>
-              最多显示 {value} 个
-            </option>
-          ))}
-        </select>
-        <input
-          value={query}
-          placeholder="搜索实体，例如 段永平"
-          onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={(event) =>
-            event.key === "Enter" && setSearch(query.trim())
-          }
-          onBlur={() => setSearch(query.trim())}
-        />
-        {focus.length > 0 && (
-          <button className="link-button" onClick={() => setFocus([])}>
-            收起展开的 {focus.length} 个实体
-          </button>
-        )}
       </div>
-      {search && (
-        <p className="graph-note">
-          {data.matches.length > 0
-            ? "搜到："
-            : `没有名字包含「${search}」的实体`}
-          {data.matches.map((item) => (
-            <button
-              key={item.id}
-              className="link-button"
-              onClick={() => setSelected(item.id)}
-            >
-              {item.name}（{item.type}）
-            </button>
-          ))}
-        </p>
-      )}
+      <GraphExplorerControls
+        explorer={explorer}
+        network={data.network}
+        matches={data.matches}
+        selected={selected}
+        onClearSelection={() => {
+          setSelected(null);
+          setSelectedEdge(null);
+        }}
+      />
       <div className={selected || selectedEdge ? "graph-body" : ""}>
         <div>
           <GraphView
@@ -202,9 +177,7 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
               setSelectedEdge(edge);
               setSelected(null);
             }}
-            onExpand={(id) =>
-              setFocus((items) => (items.includes(id) ? items : [...items, id]))
-            }
+            onExpand={explorer.expand}
           />
           <p className="graph-note">
             显示 {data.network.nodes.length} / {data.network.total_entities}{" "}
@@ -233,9 +206,7 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
             onClose={() => setSelected(null)}
             onOpenDocument={(id) => onNavigate(`/knowledge/${id}`)}
             onOpenChunk={openChunk}
-            onFocus={(id) =>
-              setFocus((items) => (items.includes(id) ? items : [...items, id]))
-            }
+            onFocus={explorer.expand}
           />
         )}
       </div>

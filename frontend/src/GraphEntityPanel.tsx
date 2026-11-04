@@ -79,7 +79,7 @@ export function GraphEntityPanel({
           className="link-button"
           onClick={() => onFocus(detail.entity.id)}
         >
-          在图里展开它的全部邻居
+          在图里展开关系（每次最多 15 个邻居）
         </button>
       )}
       <h4>由这些名字合并而来（{detail.names.length}）</h4>

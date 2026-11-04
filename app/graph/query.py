@@ -18,7 +18,7 @@ from ..mysql.tables import (
 from .build import build_view
 from .schemas import ONLINE_SPACE
 
-NETWORK_LIMIT = 50
+NETWORK_LIMIT = 20
 METHOD_LABELS = {
     "new": "新建实体",
     "exact": "名字相同",
@@ -183,7 +183,7 @@ def entity_list(entities, relations):
     return result
 
 
-# 画图用的点和边。默认只取关系最多的 limit 个实体；focus 是点击展开的实体，它的邻居都加进来。
+# 画图用的点和边：概览限制核心实体数；中心模式仅展示一跳，focus 每次追加 15 个邻居。
 # 两个实体之间的多条关系合成一条边，记下条数、分类和前几条描述。
 def network(
     entities,
@@ -192,6 +192,7 @@ def network(
     focus=None,
     entity_type=None,
     category=None,
+    center=None,
 ):
     items = entity_list(entities, relations)
     if entity_type:
@@ -213,15 +214,32 @@ def network(
             item["name"],
         ),
     )
-    chosen = {item["id"] for item in ranked[:limit]}
+    adjacency = {item["id"]: set() for item in items}
+    for row in relations:
+        if row["source_id"] != row["target_id"]:
+            adjacency[row["source_id"]].add(row["target_id"])
+            adjacency[row["target_id"]].add(row["source_id"])
+    chosen = {center} if center in allowed else set()
+    if not center:
+        chosen = {item["id"] for item in ranked[:limit]}
+    # Repeated focus IDs request additional pages of 15 unique neighbors.
+    budgets = {}
+    if center in allowed:
+        budgets[center] = 15
     for item_id in focus or []:
-        if item_id in allowed:
-            chosen.add(item_id)
-            for row in relations:
-                if row["source_id"] == item_id:
-                    chosen.add(row["target_id"])
-                elif row["target_id"] == item_id:
-                    chosen.add(row["source_id"])
+        budgets[item_id] = min(300, budgets.get(item_id, 0) + 15)
+    for item_id, budget in budgets.items():
+        if item_id not in allowed or (center and item_id not in chosen):
+            continue
+        if item_id not in chosen and len(chosen) >= 300:
+            continue
+        chosen.add(item_id)
+        neighbors = [
+            item["id"]
+            for item in ranked
+            if item["id"] in adjacency[item_id] and item["id"] not in chosen
+        ]
+        chosen.update(neighbors[: min(budget, max(0, 300 - len(chosen)))])
     edges = {}
     for row in relations:
         if row["source_id"] not in chosen or row["target_id"] not in chosen:
@@ -250,7 +268,7 @@ def network(
             "type": item["type"],
             "relation_count": count.get(item["id"], 0),
             "mention_count": item["mention_count"],
-            "focus": item["id"] in (focus or []),
+            "focus": item["id"] == center or item["id"] in (focus or []),
             "hidden_neighbors": 0,
         }
         for item in ranked
@@ -271,6 +289,7 @@ def network(
         "total_entities": len(items),
         "total_relations": len(relations),
         "limit": limit,
+        "center_id": center,
     }
 
 
@@ -300,6 +319,8 @@ def document_graph(
     entity_type=None,
     category=None,
     focus=None,
+    center=None,
+    limit=NETWORK_LIMIT,
 ):
     with engine.connect() as connection:
         build = latest_build(connection, document_id)
@@ -364,8 +385,27 @@ def document_graph(
         },
     }
     if view == "network":
+        matches = [
+            row
+            for row in entities
+            if q
+            and match(row["name"], q)
+            and (not entity_type or row["type"] == entity_type)
+        ]
+        result["matches"] = [
+            {"id": row["id"], "name": row["name"], "type": row["type"]}
+            for row in matches[:20]
+        ]
+        if q and not center:
+            center = matches[0]["id"] if matches else "__no_match__"
         result["network"] = network(
-            entities, relations, focus=focus, entity_type=entity_type, category=category
+            entities,
+            relations,
+            limit=limit,
+            focus=focus,
+            entity_type=entity_type,
+            category=category,
+            center=center,
         )
     elif view == "entities":
         items = entity_list(entities, relations)
@@ -644,6 +684,7 @@ def overview(
     focus=None,
     q=None,
     limit=NETWORK_LIMIT,
+    center=None,
 ):
     with engine.connect() as connection:
         builds = visible_builds(connection, document_id=document_id)
@@ -652,8 +693,13 @@ def overview(
         relations = relation_rows(connection, build_ids)
     focus = list(focus or [])
     if q:
-        hits = [row["id"] for row in entities if match(row["name"], q)]
-        focus.extend(hits[:5])
+        hits = [
+            row["id"]
+            for row in entities
+            if match(row["name"], q) and (not entity_type or row["type"] == entity_type)
+        ]
+        if not center:
+            center = hits[0] if hits else "__no_match__"
     return {
         "documents": [
             {"document_id": row["document_id"], "title": row["title"]} for row in builds
@@ -663,6 +709,7 @@ def overview(
             relations,
             limit=limit,
             focus=focus,
+            center=center,
             entity_type=entity_type,
             category=category,
         ),
