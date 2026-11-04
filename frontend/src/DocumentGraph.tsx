@@ -545,10 +545,10 @@ export function DocumentGraph({
                     <tr>
                       <th className="graph-row-number">序号</th>
                       <th>起点</th>
-                      <th>关系</th>
+                      <th className="graph-nowrap">关系</th>
                       <th>终点</th>
                       <th>描述</th>
-                      <th>出处</th>
+                      <th className="graph-nowrap">出处</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -571,7 +571,11 @@ export function DocumentGraph({
                             <small>原文：{row.source_name}</small>
                           )}
                         </td>
-                        <td>{row.category}</td>
+                        <td className="graph-nowrap">
+                          <Tag size="sm" plain hue>
+                            {row.category}
+                          </Tag>
+                        </td>
                         <td>
                           <button
                             className="link-button"
@@ -587,7 +591,7 @@ export function DocumentGraph({
                           {row.description}
                           {row.evidence && <small>「{row.evidence}」</small>}
                         </td>
-                        <td>
+                        <td className="graph-nowrap">
                           <button
                             className="link-button"
                             onClick={() =>
