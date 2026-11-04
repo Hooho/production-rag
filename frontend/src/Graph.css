@@ -1064,3 +1064,16 @@
   background: #fff2b8;
   color: inherit;
 }
+
+.graph-entity-header {
+  position: sticky;
+  top: -12px;
+  z-index: 3;
+  margin: -12px -14px 0;
+  padding: 12px 14px;
+  border-bottom: 1px solid #e3e8ef;
+  background: #fff;
+}
+.graph-entity-panel .graph-relations-header {
+  top: calc(var(--entity-header-height, 0px) - 12px);
+}

@@ -1,4 +1,10 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { labelHue } from "./hues";
 import {
   getGraphEntity,
@@ -32,6 +38,8 @@ export function GraphEntityPanel({
   highlightedRelationId?: string;
   onHighlightRelation?: (row: GraphRelationRow) => void;
 }) {
+  const panel = useRef<HTMLElement>(null);
+  const header = useRef<HTMLDivElement>(null);
   const [detail, setDetail] = useState<GraphEntityDetail | null>(null);
   const [error, setError] = useState("");
   const [scope, setScope] = useState<"visible" | "all">("visible");
@@ -49,6 +57,23 @@ export function GraphEntityPanel({
       cancelled = true;
     };
   }, [entityId, documentId]);
+  useLayoutEffect(() => {
+    const element = header.current;
+    const container = panel.current;
+    if (!detail || !element || !container) return;
+    const measure = () =>
+      container.style.setProperty(
+        "--entity-header-height",
+        `${element.getBoundingClientRect().height}px`,
+      );
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      container.style.removeProperty("--entity-header-height");
+    };
+  }, [detail]);
   if (error)
     return (
       <aside className="graph-side">
@@ -86,37 +111,39 @@ export function GraphEntityPanel({
       ? scopedRelations
       : scopedRelations.filter((row) => row.category === category);
   return (
-    <aside className="graph-side">
-      <div className="graph-side-heading">
-        <h3>
-          {detail.entity.name}{" "}
-          <span
-            className="tag is-sm"
-            style={{
-              background: color.fill,
-              color: color.text,
-              borderColor: color.stroke,
-            }}
+    <aside ref={panel} className="graph-side graph-entity-panel">
+      <div ref={header} className="graph-entity-header">
+        <div className="graph-side-heading">
+          <h3>
+            {detail.entity.name}{" "}
+            <span
+              className="tag is-sm"
+              style={{
+                background: color.fill,
+                color: color.text,
+                borderColor: color.stroke,
+              }}
+            >
+              {detail.entity.type}
+            </span>
+          </h3>
+          <button type="button" className="link-button" onClick={onClose}>
+            关闭
+          </button>
+        </div>
+        {detail.entity.description && (
+          <p className="graph-note">{detail.entity.description}</p>
+        )}
+        {onFocus && (
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => onFocus(detail.entity.id)}
           >
-            {detail.entity.type}
-          </span>
-        </h3>
-        <button type="button" className="link-button" onClick={onClose}>
-          关闭
-        </button>
+            在图里展开关系（每次最多 15 个邻居）
+          </button>
+        )}
       </div>
-      {detail.entity.description && (
-        <p className="graph-note">{detail.entity.description}</p>
-      )}
-      {onFocus && (
-        <button
-          type="button"
-          className="link-button"
-          onClick={() => onFocus(detail.entity.id)}
-        >
-          在图里展开关系（每次最多 15 个邻居）
-        </button>
-      )}
       <h4>由这些名字合并而来（{detail.names.length}）</h4>
       <ul>
         {detail.names.map((item, index) => (
