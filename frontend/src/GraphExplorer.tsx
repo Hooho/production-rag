@@ -107,6 +107,26 @@ export function GraphExplorerControls({
           </button>
         )}
       </form>
+      {explorer.search && (
+        <div className="graph-filters">
+          <span className="graph-note">
+            {matches.length ? "选择中心实体：" : "没有找到匹配的实体"}
+          </span>
+          {matches.map((item) => (
+            <button
+              type="button"
+              key={item.id}
+              className="link-button"
+              onClick={() => {
+                explorer.choose(item.id);
+                onClearSelection();
+              }}
+            >
+              {item.name}（{item.type}）
+            </button>
+          ))}
+        </div>
+      )}
       {centerNode && (
         <div className="graph-explorer-row">
           <span className="graph-note">中心：{centerNode.name}</span>
@@ -129,26 +149,6 @@ export function GraphExplorerControls({
           >
             重置展开
           </button>
-        </div>
-      )}
-      {explorer.search && (
-        <div className="graph-filters">
-          <span className="graph-note">
-            {matches.length ? "选择中心实体：" : "没有找到匹配的实体"}
-          </span>
-          {matches.map((item) => (
-            <button
-              type="button"
-              key={item.id}
-              className="link-button"
-              onClick={() => {
-                explorer.choose(item.id);
-                onClearSelection();
-              }}
-            >
-              {item.name}（{item.type}）
-            </button>
-          ))}
         </div>
       )}
       {node && node.id !== center && (

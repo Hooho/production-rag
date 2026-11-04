@@ -181,10 +181,20 @@
 }
 .graph-explorer {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+}
+.graph-explorer > .graph-filters,
+.graph-explorer > .graph-note {
+  flex-basis: 100%;
+  min-width: 0;
 }
 .graph-explorer-row {
+  box-sizing: border-box;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
