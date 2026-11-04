@@ -476,6 +476,7 @@ export function DocumentGraph({
                       ? highlightedCategory.category
                       : null
                   }
+                  highlightedEdgeCategory={highlightedRelation?.category}
                   highlightedEdge={
                     highlightedRelation &&
                     (highlightedRelation.source_id === selected ||

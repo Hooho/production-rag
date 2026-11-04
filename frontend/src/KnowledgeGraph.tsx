@@ -184,6 +184,7 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
                   ? highlightedCategory.category
                   : null
               }
+              highlightedEdgeCategory={highlightedRelation?.category}
               highlightedEdge={
                 highlightedRelation &&
                 (highlightedRelation.source_id === selected ||

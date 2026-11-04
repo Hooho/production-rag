@@ -92,6 +92,10 @@ function elements(nodes: GraphNode[], edges: GraphEdge[]): ElementDefinition[] {
         label: `${edge.categories.join("、")}${edge.count > 1 ? ` ×${edge.count}` : ""}`,
         title: `${edge.categories.join("、")}（${edge.count} 条）\n${edge.descriptions.join("\n")}`,
         width: Math.min(5, 1 + Math.log2(edge.count + 1)),
+        relationColor:
+          edge.categories.length === 1
+            ? `hsl(${labelHue(edge.categories[0])}, 62%, 30%)`
+            : "#64748b",
       },
     });
   }
@@ -149,7 +153,7 @@ const STYLE: cytoscape.StylesheetJson = [
     style: {
       label: "data(label)",
       "font-size": 10,
-      color: "#475569",
+      color: "data(relationColor)",
       "text-rotation": "none",
       "text-background-color": "#fbfcfe",
       "text-background-opacity": 0.95,
@@ -157,18 +161,18 @@ const STYLE: cytoscape.StylesheetJson = [
       "text-background-shape": "roundrectangle",
       "text-outline-color": "#fbfcfe",
       "text-outline-width": 2,
-      "line-color": "#64748b",
-      "target-arrow-color": "#64748b",
+      "line-color": "data(relationColor)",
+      "target-arrow-color": "data(relationColor)",
     },
   },
   {
     selector: "edge.is-highlighted",
     style: {
       width: 5,
-      "line-color": "#2563eb",
-      "target-arrow-color": "#2563eb",
+      "line-color": "data(relationColor)",
+      "target-arrow-color": "data(relationColor)",
       "font-weight": "bold",
-      color: "#1d4ed8",
+      color: "data(relationColor)",
       "z-index": 10,
     },
   },
@@ -192,6 +196,7 @@ export function GraphView({
   selected,
   selectedEdge,
   highlightedEdge,
+  highlightedEdgeCategory,
   highlightedCategory,
   onSelect,
   onExpand,
@@ -203,6 +208,7 @@ export function GraphView({
   selected?: string | null;
   selectedEdge?: string | null;
   highlightedEdge?: string | null;
+  highlightedEdgeCategory?: string | null;
   highlightedCategory?: string | null;
   onSelect?: (id: string) => void;
   onExpand?: (id: string) => void;
@@ -330,6 +336,25 @@ export function GraphView({
       instance
         .elements()
         .removeClass("is-dim is-selected is-near is-highlighted");
+      for (const edge of edges) {
+        const category =
+          !selectedEdge &&
+          edge.id === highlightedEdge &&
+          highlightedEdgeCategory
+            ? highlightedEdgeCategory
+            : highlightedCategory &&
+                edge.categories.includes(highlightedCategory)
+              ? highlightedCategory
+              : edge.categories.length === 1
+                ? edge.categories[0]
+                : null;
+        instance
+          .getElementById(edge.id)
+          .data(
+            "relationColor",
+            category ? `hsl(${labelHue(category)}, 62%, 30%)` : "#64748b",
+          );
+      }
       const activeEdge = selectedEdge || highlightedEdge;
       if (activeEdge && !instance.getElementById(activeEdge).empty()) {
         const edge = instance.getElementById(activeEdge);
@@ -371,6 +396,7 @@ export function GraphView({
     selectedEdge,
     highlightedEdge,
     highlightedCategory,
+    highlightedEdgeCategory,
     edges,
     key,
     hasNodes,
