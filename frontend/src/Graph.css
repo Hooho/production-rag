@@ -195,6 +195,7 @@
   padding: 12px 14px;
   max-height: 600px;
   overflow: auto;
+  overscroll-behavior: contain;
   font-size: 13px;
 }
 .graph-side h3 {
