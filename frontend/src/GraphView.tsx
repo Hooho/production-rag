@@ -191,6 +191,51 @@ function focusRelation(instance: Core, edgeId: string) {
   return true;
 }
 
+function arrangeGraph(instance: Core) {
+  const count = Math.max(1, instance.nodes().length);
+  const radius = 60 + count * 12;
+  instance.nodes().positions((_node, index) => ({
+    x: radius * Math.cos((2 * Math.PI * index) / count),
+    y: radius * Math.sin((2 * Math.PI * index) / count),
+  }));
+  // Parallel category edges should not multiply the attraction between two nodes.
+  const connectedPairs = new Set<string>();
+  const layoutEdges = instance.edges().filter((edge) => {
+    if (edge.source().id() === edge.target().id()) return false;
+    const pair = [edge.source().id(), edge.target().id()].sort().join("|");
+    if (connectedPairs.has(pair)) return false;
+    connectedPairs.add(pair);
+    return true;
+  });
+  instance
+    .nodes()
+    .union(layoutEdges)
+    .layout({
+      name: "cose",
+      randomize: false,
+      animate: false,
+      fit: false,
+      padding: 64,
+      nodeRepulsion: (node: cytoscape.NodeSingular) =>
+        22000 + Number(node.data("size")) * 350,
+      idealEdgeLength: (edge: cytoscape.EdgeSingular) =>
+        150 + Math.max(edge.source().width(), edge.target().width()),
+      componentSpacing: 180,
+      nodeOverlap: 40,
+      numIter: 1600,
+      nodeDimensionsIncludeLabels: true,
+    } as cytoscape.LayoutOptions)
+    .run();
+  // Fit all displayed category curves after the node positions have settled.
+  instance.fit(instance.elements(), 64);
+  instance.center();
+  // 只有几个节点时 fit 会放得很大，限制一下。
+  if (instance.zoom() > 1.6) {
+    instance.zoom(1.6);
+    instance.center();
+  }
+}
+
 export function GraphView({
   nodes,
   edges,
@@ -342,42 +387,7 @@ export function GraphView({
       instance.elements().remove();
       instance.add(elements(nodes, edges));
     });
-    // Parallel category edges should not multiply the attraction between two nodes.
-    const connectedPairs = new Set<string>();
-    const layoutEdges = instance.edges().filter((edge) => {
-      if (edge.source().id() === edge.target().id()) return false;
-      const pair = [edge.source().id(), edge.target().id()].sort().join("|");
-      if (connectedPairs.has(pair)) return false;
-      connectedPairs.add(pair);
-      return true;
-    });
-    instance
-      .nodes()
-      .union(layoutEdges)
-      .layout({
-        name: "cose",
-        randomize: false,
-        animate: false,
-        fit: false,
-        padding: 64,
-        nodeRepulsion: (node: cytoscape.NodeSingular) =>
-          22000 + Number(node.data("size")) * 350,
-        idealEdgeLength: (edge: cytoscape.EdgeSingular) =>
-          150 + Math.max(edge.source().width(), edge.target().width()),
-        componentSpacing: 180,
-        nodeOverlap: 40,
-        numIter: 1600,
-        nodeDimensionsIncludeLabels: true,
-      } as cytoscape.LayoutOptions)
-      .run();
-    // Fit all displayed category curves after the node positions have settled.
-    instance.fit(instance.elements(), 64);
-    instance.center();
-    // 只有几个节点时 fit 会放得很大，限制一下。
-    if (instance.zoom() > 1.6) {
-      instance.zoom(1.6);
-      instance.center();
-    }
+    arrangeGraph(instance);
   }, [key, hasNodes]);
 
   // 选中某个实体时，突出它和它的邻居，其他的淡化；相连的边显示关系分类。
@@ -536,16 +546,7 @@ export function GraphView({
       renderedPosition: { x: instance.width() / 2, y: instance.height() / 2 },
     });
   }
-  function centerSelected() {
-    const instance = cy.current;
-    if (!instance || !selected) return;
-    const node = instance.getElementById(selected);
-    if (node.empty()) return;
-    instance.zoom(
-      Math.min(instance.maxZoom(), 1, Math.max(0.65, instance.zoom() * 1.1)),
-    );
-    instance.center(node);
-  }
+
   return (
     <div className="graph-view">
       <div className="graph-toolbar">
@@ -563,18 +564,6 @@ export function GraphView({
           })}
         </div>
         <div className="graph-zoom">
-          {selected &&
-            !selectedEdge &&
-            nodes.some((node) => node.id === selected) && (
-              <button
-                type="button"
-                className="graph-center-button"
-                title="将选中实体移到画布中心并放大"
-                onClick={centerSelected}
-              >
-                居中
-              </button>
-            )}
           <button type="button" onClick={() => zoom(1.25)}>
             ＋
           </button>
@@ -583,6 +572,15 @@ export function GraphView({
           </button>
           <button type="button" onClick={() => cy.current?.fit(undefined, 30)}>
             适应
+          </button>
+          <button
+            type="button"
+            title="重新均匀排布当前节点并适配画布"
+            onClick={() => {
+              if (cy.current) arrangeGraph(cy.current);
+            }}
+          >
+            重新布局
           </button>
         </div>
       </div>
