@@ -828,3 +828,108 @@
   color: #7a8799;
   font-variant-numeric: tabular-nums;
 }
+
+.graph-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.graph-workspace-heading {
+  display: flex;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+.graph-workspace-heading .secondary-button {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.graph-workspace.is-focused {
+  position: fixed;
+  inset: 12px;
+  z-index: 80;
+  box-sizing: border-box;
+  padding: 12px;
+  border: 1px solid #dce5ef;
+  border-radius: 12px;
+  background: #f7faff;
+  box-shadow: 0 8px 40px #16362226;
+  overflow: hidden;
+  gap: 10px;
+}
+.graph-workspace.is-focused > .graph-filters {
+  flex-shrink: 0;
+}
+.graph-workspace.is-focused .graph-explorer {
+  min-height: 0;
+  max-height: 26dvh;
+  flex-shrink: 1;
+  overflow: auto;
+}
+.graph-workspace.is-focused .graph-workspace-body {
+  display: grid;
+  align-items: stretch;
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  flex: 1 1 0;
+  min-height: 0;
+  gap: 12px;
+  position: relative;
+}
+.graph-workspace.is-focused .graph-workspace-body.graph-body {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+}
+.graph-workspace.is-focused .graph-workspace-body > div:first-child {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.graph-workspace.is-focused .graph-view {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.graph-workspace.is-focused .graph-toolbar,
+.graph-workspace.is-focused .graph-hint {
+  flex-shrink: 0;
+}
+.graph-workspace.is-focused .graph-canvas-wrap {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.graph-workspace.is-focused .graph-canvas {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  box-sizing: border-box;
+}
+.graph-workspace.is-focused .graph-side {
+  height: 100%;
+  max-height: none;
+  min-height: 0;
+  box-sizing: border-box;
+}
+.graph-workspace.is-focused .graph-workspace-body > div > .graph-note {
+  margin-top: 6px;
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+@media (max-width: 700px) {
+  .graph-workspace.is-focused {
+    inset: 0;
+    border-radius: 0;
+    padding: 8px;
+  }
+  .graph-workspace.is-focused .graph-workspace-body.graph-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .graph-workspace.is-focused .graph-workspace-body > .graph-side {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: min(320px, 80%);
+    z-index: 3;
+    box-shadow: -4px 0 20px #16362226;
+  }
+}

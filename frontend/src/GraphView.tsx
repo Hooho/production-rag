@@ -234,7 +234,23 @@ export function GraphView({
       if (container.current) container.current.title = "";
     });
     cy.current = instance;
+    let resizeFrame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(resizeFrame);
+      resizeFrame = requestAnimationFrame(() => {
+        instance.resize();
+        if (instance.nodes().empty()) return;
+        instance.fit(undefined, 48);
+        if (instance.zoom() > 1.2) {
+          instance.zoom(1.2);
+          instance.center();
+        }
+      });
+    });
+    observer.observe(container.current);
     return () => {
+      observer.disconnect();
+      cancelAnimationFrame(resizeFrame);
       instance.destroy();
       cy.current = null;
     };

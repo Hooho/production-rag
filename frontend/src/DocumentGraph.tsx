@@ -16,6 +16,7 @@ import {
 import { formatShortTime } from "./format";
 import { GraphBuildDialog } from "./GraphBuildDialog";
 import { GraphEntityPanel } from "./GraphEntityPanel";
+import { GraphWorkspace } from "./GraphWorkspace";
 import { GraphExplorerControls, useGraphExplorer } from "./GraphExplorer";
 import { GraphView, typeColor } from "./GraphView";
 import { Tag } from "./Tag";
@@ -375,337 +376,347 @@ export function DocumentGraph({
           </table>
         </details>
       )}
-      <div className="graph-filters">
-        <div className="chunk-source-filter">
-          {VIEWS.map(([value, label]) => (
-            <button
-              key={value}
-              className={view === value ? "active" : ""}
-              onClick={() => {
-                setView(value);
+      <GraphWorkspace enabled={view === "network"}>
+        <div className="graph-filters">
+          <div className="chunk-source-filter">
+            {VIEWS.map(([value, label]) => (
+              <button
+                key={value}
+                className={view === value ? "active" : ""}
+                onClick={() => {
+                  setView(value);
+                  setPage(1);
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {(view === "network" || view === "entities") && stats && (
+            <select
+              value={entityType ?? ""}
+              onChange={(event) => {
+                setEntityType(event.target.value || null);
                 setPage(1);
               }}
             >
-              {label}
-            </button>
-          ))}
-        </div>
-        {(view === "network" || view === "entities") && stats && (
-          <select
-            value={entityType ?? ""}
-            onChange={(event) => {
-              setEntityType(event.target.value || null);
-              setPage(1);
-            }}
-          >
-            <option value="">全部类型</option>
-            {Object.keys(stats.type_counts).map((type) => (
-              <option key={type} value={type}>
-                {type}（{stats.type_counts[type]}）
-              </option>
-            ))}
-          </select>
-        )}
-        {(view === "network" || view === "relations") && stats && (
-          <select
-            value={category ?? ""}
-            onChange={(event) => {
-              setCategory(event.target.value || null);
-              setPage(1);
-            }}
-          >
-            <option value="">全部关系</option>
-            {Object.keys(stats.category_counts).map((item) => (
-              <option key={item} value={item}>
-                {item}（{stats.category_counts[item]}）
-              </option>
-            ))}
-          </select>
-        )}
-        {view !== "network" && (
-          <input
-            value={query}
-            placeholder="搜索名字或描述"
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
+              <option value="">全部类型</option>
+              {Object.keys(stats.type_counts).map((type) => (
+                <option key={type} value={type}>
+                  {type}（{stats.type_counts[type]}）
+                </option>
+              ))}
+            </select>
+          )}
+          {(view === "network" || view === "relations") && stats && (
+            <select
+              value={category ?? ""}
+              onChange={(event) => {
+                setCategory(event.target.value || null);
+                setPage(1);
+              }}
+            >
+              <option value="">全部关系</option>
+              {Object.keys(stats.category_counts).map((item) => (
+                <option key={item} value={item}>
+                  {item}（{stats.category_counts[item]}）
+                </option>
+              ))}
+            </select>
+          )}
+          {view !== "network" && (
+            <input
+              value={query}
+              placeholder="搜索名字或描述"
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  setSearch(query.trim());
+                  setPage(1);
+                }
+              }}
+              onBlur={() => {
                 setSearch(query.trim());
                 setPage(1);
-              }
-            }}
-            onBlur={() => {
-              setSearch(query.trim());
-              setPage(1);
-            }}
-          />
-        )}
-      </div>
-      {view === "network" && (
-        <GraphExplorerControls
-          explorer={explorer}
-          network={data.network}
-          matches={data.matches}
-          selected={selected}
-          onClearSelection={() => {
-            setSelected(null);
-            setSelectedEdge(null);
-          }}
-        />
-      )}
-      <div className={selected || selectedEdge ? "graph-body" : ""}>
-        <div>
-          {view === "network" && data.network && (
-            <>
-              <GraphView
-                nodes={data.network.nodes}
-                edges={data.network.edges}
-                selected={selected}
-                selectedEdge={selectedEdge?.id}
-                onSelect={(id) => {
-                  setSelected(id);
-                  setSelectedEdge(null);
-                }}
-                onSelectEdge={(edge) => {
-                  setSelectedEdge(edge);
-                  setSelected(null);
-                }}
-                onExpand={explorer.expand}
-                emptyText={busy ? "建图完成后显示" : "没有抽出实体"}
-              />
-              <p className="graph-note">
-                显示 {data.network.nodes.length} / {data.network.total_entities}{" "}
-                个实体、{data.network.edges.length} 条边（
-                {data.network.total_relations}{" "}
-                条关系，同一对实体之间的多条关系合成一条边）。
-                {data.network.center_id
-                  ? "当前为中心实体的一跳关系及手动展开的邻居。"
-                  : `当前概览最多显示 ${data.network.limit} 个核心实体。`}
-              </p>
-            </>
-          )}
-          {view === "entities" && data.entities && (
-            <Paged
-              page={data.entities.page}
-              total={data.entities.total}
-              size={data.entities.page_size}
-              onPage={setPage}
-            >
-              <table className="graph-table">
-                <thead>
-                  <tr>
-                    <th className="graph-row-number">序号</th>
-                    <th>实体</th>
-                    <th>类型</th>
-                    <th>名字数</th>
-                    <th>关系数</th>
-                    <th>出现在几片</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.entities.items.map((row, index) => (
-                    <tr
-                      key={row.id}
-                      className="is-clickable"
-                      onClick={() => setSelected(row.id)}
-                    >
-                      <td className="graph-row-number">
-                        {(data.entities!.page - 1) * data.entities!.page_size +
-                          index +
-                          1}
-                      </td>
-                      <td>
-                        {row.name}
-                        {row.description && <small>{row.description}</small>}
-                      </td>
-                      <td>{row.type}</td>
-                      <td>{row.name_count}</td>
-                      <td>{row.relation_count}</td>
-                      <td>{row.chunk_count}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </Paged>
-          )}
-          {view === "relations" && data.relations && (
-            <Paged
-              page={data.relations.page}
-              total={data.relations.total}
-              size={data.relations.page_size}
-              onPage={setPage}
-            >
-              <table className="graph-table">
-                <thead>
-                  <tr>
-                    <th className="graph-row-number">序号</th>
-                    <th>起点</th>
-                    <th>关系</th>
-                    <th>终点</th>
-                    <th>描述</th>
-                    <th>出处</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.relations.items.map((row, index) => (
-                    <tr key={row.id}>
-                      <td className="graph-row-number">
-                        {(data.relations!.page - 1) *
-                          data.relations!.page_size +
-                          index +
-                          1}
-                      </td>
-                      <td>
-                        <button
-                          className="link-button"
-                          onClick={() => setSelected(row.source_id)}
-                        >
-                          {row.source_entity}
-                        </button>
-                        {row.source_name !== row.source_entity && (
-                          <small>原文：{row.source_name}</small>
-                        )}
-                      </td>
-                      <td>{row.category}</td>
-                      <td>
-                        <button
-                          className="link-button"
-                          onClick={() => setSelected(row.target_id)}
-                        >
-                          {row.target_entity}
-                        </button>
-                        {row.target_name !== row.target_entity && (
-                          <small>原文：{row.target_name}</small>
-                        )}
-                      </td>
-                      <td>
-                        {row.description}
-                        {row.evidence && <small>「{row.evidence}」</small>}
-                      </td>
-                      <td>
-                        <button
-                          className="link-button"
-                          onClick={() =>
-                            onOpenChunk(row.chunk_id, row.position)
-                          }
-                        >
-                          第 {row.position + 1} 片
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </Paged>
-          )}
-          {view === "merges" && data.merges && (
-            <Paged
-              page={data.merges.page}
-              total={data.merges.total}
-              size={data.merges.page_size}
-              onPage={setPage}
-            >
-              <p className="graph-note">
-                合并范围区分新建实体、文档内合并和跨文档合并。同一次建图中，首次关联其他文档的实体记为跨文档合并，后续重复归属记为文档内合并。历史记录未保存范围时显示「历史未记录」。第
-                1
-                期只按规则合并：名字相同、规范化后相同、模型给的标准名相同；没合上或合错的要等第
-                3 期手动处理。
-              </p>
-              <table className="graph-table">
-                <thead>
-                  <tr>
-                    <th>原文里的名字</th>
-                    <th>归到</th>
-                    <th>合并范围</th>
-                    <th>方法</th>
-                    <th>出现在</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.merges.items.map((row) => (
-                    <tr
-                      key={`${row.name}-${row.entity_id}-${row.method}-${row.scope}`}
-                    >
-                      <td>
-                        {row.name}
-                        <small>
-                          {row.type}
-                          {row.canonical !== row.name
-                            ? ` · 模型给的标准名：${row.canonical}`
-                            : ""}
-                        </small>
-                      </td>
-                      <td>
-                        <button
-                          className="link-button"
-                          onClick={() => setSelected(row.entity_id)}
-                        >
-                          {row.entity_name}
-                        </button>
-                      </td>
-                      <td>
-                        <Tag
-                          size="sm"
-                          plain
-                          tone={row.scope === "global" ? "info" : "neutral"}
-                        >
-                          {row.scope_label}
-                        </Tag>
-                      </td>
-                      <td>
-                        <Tag
-                          size="sm"
-                          plain
-                          tone={row.method === "new" ? "neutral" : "info"}
-                        >
-                          {row.method_label}
-                        </Tag>
-                      </td>
-                      <td>
-                        {row.positions.slice(0, 6).map((position, index) => (
-                          <button
-                            key={`${row.chunk_ids[index]}-${index}`}
-                            className="link-button"
-                            onClick={() =>
-                              onOpenChunk(row.chunk_ids[index], position)
-                            }
-                          >
-                            第 {position + 1} 片
-                          </button>
-                        ))}
-                        {row.positions.length > 6
-                          ? ` 等 ${row.positions.length} 处`
-                          : ""}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </Paged>
+              }}
+            />
           )}
         </div>
-        {selectedEdge && (
-          <GraphRelationPanel
-            edge={selectedEdge}
-            documentId={documentId}
-            category={category}
-            onClose={() => setSelectedEdge(null)}
-            onOpenChunk={(chunkId, position) => onOpenChunk(chunkId, position)}
-          />
-        )}
-        {selected && (
-          <GraphEntityPanel
-            entityId={selected}
-            documentId={documentId}
-            onClose={() => setSelected(null)}
-            onOpenChunk={(chunkId, position) => onOpenChunk(chunkId, position)}
-            onFocus={(id) => {
-              setView("network");
-              if (view !== "network") explorer.choose(id);
-              else explorer.expand(id);
+        {view === "network" && (
+          <GraphExplorerControls
+            explorer={explorer}
+            network={data.network}
+            matches={data.matches}
+            selected={selected}
+            onClearSelection={() => {
+              setSelected(null);
+              setSelectedEdge(null);
             }}
           />
         )}
-      </div>
+        <div
+          className={`graph-workspace-body${selected || selectedEdge ? " graph-body" : ""}`}
+        >
+          <div>
+            {view === "network" && data.network && (
+              <>
+                <GraphView
+                  nodes={data.network.nodes}
+                  edges={data.network.edges}
+                  selected={selected}
+                  selectedEdge={selectedEdge?.id}
+                  onSelect={(id) => {
+                    setSelected(id);
+                    setSelectedEdge(null);
+                  }}
+                  onSelectEdge={(edge) => {
+                    setSelectedEdge(edge);
+                    setSelected(null);
+                  }}
+                  onExpand={explorer.expand}
+                  emptyText={busy ? "建图完成后显示" : "没有抽出实体"}
+                />
+                <p className="graph-note">
+                  显示 {data.network.nodes.length} /{" "}
+                  {data.network.total_entities} 个实体、
+                  {data.network.edges.length} 条边（
+                  {data.network.total_relations}{" "}
+                  条关系，同一对实体之间的多条关系合成一条边）。
+                  {data.network.center_id
+                    ? "当前为中心实体的一跳关系及手动展开的邻居。"
+                    : `当前概览最多显示 ${data.network.limit} 个核心实体。`}
+                </p>
+              </>
+            )}
+            {view === "entities" && data.entities && (
+              <Paged
+                page={data.entities.page}
+                total={data.entities.total}
+                size={data.entities.page_size}
+                onPage={setPage}
+              >
+                <table className="graph-table">
+                  <thead>
+                    <tr>
+                      <th className="graph-row-number">序号</th>
+                      <th>实体</th>
+                      <th>类型</th>
+                      <th>名字数</th>
+                      <th>关系数</th>
+                      <th>出现在几片</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.entities.items.map((row, index) => (
+                      <tr
+                        key={row.id}
+                        className="is-clickable"
+                        onClick={() => setSelected(row.id)}
+                      >
+                        <td className="graph-row-number">
+                          {(data.entities!.page - 1) *
+                            data.entities!.page_size +
+                            index +
+                            1}
+                        </td>
+                        <td>
+                          {row.name}
+                          {row.description && <small>{row.description}</small>}
+                        </td>
+                        <td>{row.type}</td>
+                        <td>{row.name_count}</td>
+                        <td>{row.relation_count}</td>
+                        <td>{row.chunk_count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Paged>
+            )}
+            {view === "relations" && data.relations && (
+              <Paged
+                page={data.relations.page}
+                total={data.relations.total}
+                size={data.relations.page_size}
+                onPage={setPage}
+              >
+                <table className="graph-table">
+                  <thead>
+                    <tr>
+                      <th className="graph-row-number">序号</th>
+                      <th>起点</th>
+                      <th>关系</th>
+                      <th>终点</th>
+                      <th>描述</th>
+                      <th>出处</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.relations.items.map((row, index) => (
+                      <tr key={row.id}>
+                        <td className="graph-row-number">
+                          {(data.relations!.page - 1) *
+                            data.relations!.page_size +
+                            index +
+                            1}
+                        </td>
+                        <td>
+                          <button
+                            className="link-button"
+                            onClick={() => setSelected(row.source_id)}
+                          >
+                            {row.source_entity}
+                          </button>
+                          {row.source_name !== row.source_entity && (
+                            <small>原文：{row.source_name}</small>
+                          )}
+                        </td>
+                        <td>{row.category}</td>
+                        <td>
+                          <button
+                            className="link-button"
+                            onClick={() => setSelected(row.target_id)}
+                          >
+                            {row.target_entity}
+                          </button>
+                          {row.target_name !== row.target_entity && (
+                            <small>原文：{row.target_name}</small>
+                          )}
+                        </td>
+                        <td>
+                          {row.description}
+                          {row.evidence && <small>「{row.evidence}」</small>}
+                        </td>
+                        <td>
+                          <button
+                            className="link-button"
+                            onClick={() =>
+                              onOpenChunk(row.chunk_id, row.position)
+                            }
+                          >
+                            第 {row.position + 1} 片
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Paged>
+            )}
+            {view === "merges" && data.merges && (
+              <Paged
+                page={data.merges.page}
+                total={data.merges.total}
+                size={data.merges.page_size}
+                onPage={setPage}
+              >
+                <p className="graph-note">
+                  合并范围区分新建实体、文档内合并和跨文档合并。同一次建图中，首次关联其他文档的实体记为跨文档合并，后续重复归属记为文档内合并。历史记录未保存范围时显示「历史未记录」。第
+                  1
+                  期只按规则合并：名字相同、规范化后相同、模型给的标准名相同；没合上或合错的要等第
+                  3 期手动处理。
+                </p>
+                <table className="graph-table">
+                  <thead>
+                    <tr>
+                      <th>原文里的名字</th>
+                      <th>归到</th>
+                      <th>合并范围</th>
+                      <th>方法</th>
+                      <th>出现在</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.merges.items.map((row) => (
+                      <tr
+                        key={`${row.name}-${row.entity_id}-${row.method}-${row.scope}`}
+                      >
+                        <td>
+                          {row.name}
+                          <small>
+                            {row.type}
+                            {row.canonical !== row.name
+                              ? ` · 模型给的标准名：${row.canonical}`
+                              : ""}
+                          </small>
+                        </td>
+                        <td>
+                          <button
+                            className="link-button"
+                            onClick={() => setSelected(row.entity_id)}
+                          >
+                            {row.entity_name}
+                          </button>
+                        </td>
+                        <td>
+                          <Tag
+                            size="sm"
+                            plain
+                            tone={row.scope === "global" ? "info" : "neutral"}
+                          >
+                            {row.scope_label}
+                          </Tag>
+                        </td>
+                        <td>
+                          <Tag
+                            size="sm"
+                            plain
+                            tone={row.method === "new" ? "neutral" : "info"}
+                          >
+                            {row.method_label}
+                          </Tag>
+                        </td>
+                        <td>
+                          {row.positions.slice(0, 6).map((position, index) => (
+                            <button
+                              key={`${row.chunk_ids[index]}-${index}`}
+                              className="link-button"
+                              onClick={() =>
+                                onOpenChunk(row.chunk_ids[index], position)
+                              }
+                            >
+                              第 {position + 1} 片
+                            </button>
+                          ))}
+                          {row.positions.length > 6
+                            ? ` 等 ${row.positions.length} 处`
+                            : ""}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Paged>
+            )}
+          </div>
+          {selectedEdge && (
+            <GraphRelationPanel
+              edge={selectedEdge}
+              documentId={documentId}
+              category={category}
+              onClose={() => setSelectedEdge(null)}
+              onOpenChunk={(chunkId, position) =>
+                onOpenChunk(chunkId, position)
+              }
+            />
+          )}
+          {selected && (
+            <GraphEntityPanel
+              entityId={selected}
+              documentId={documentId}
+              onClose={() => setSelected(null)}
+              onOpenChunk={(chunkId, position) =>
+                onOpenChunk(chunkId, position)
+              }
+              onFocus={(id) => {
+                setView("network");
+                if (view !== "network") explorer.choose(id);
+                else explorer.expand(id);
+              }}
+            />
+          )}
+        </div>
+      </GraphWorkspace>
       {dialogNode}
     </div>
   );

@@ -12,6 +12,7 @@ import { BUILD_STATUS, TRIGGER_LABELS } from "./DocumentGraph";
 import { formatShortTime } from "./format";
 import { GraphBuildDialog } from "./GraphBuildDialog";
 import { GraphEntityPanel } from "./GraphEntityPanel";
+import { GraphWorkspace } from "./GraphWorkspace";
 import { GraphExplorerControls, useGraphExplorer } from "./GraphExplorer";
 import { GraphView } from "./GraphView";
 import { Tag } from "./Tag";
@@ -112,104 +113,108 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
     );
   return (
     <div className="graph-panel">
-      <div className="graph-filters">
-        <select
-          value={documentId ?? ""}
-          onChange={(event) => {
-            setDocumentId(event.target.value || null);
-            explorer.reset();
+      <GraphWorkspace>
+        <div className="graph-filters">
+          <select
+            value={documentId ?? ""}
+            onChange={(event) => {
+              setDocumentId(event.target.value || null);
+              explorer.reset();
+              setSelected(null);
+              setSelectedEdge(null);
+            }}
+          >
+            <option value="">全部 {data.documents.length} 份文档</option>
+            {data.documents.map((item) => (
+              <option key={item.document_id} value={item.document_id}>
+                {item.title}
+              </option>
+            ))}
+          </select>
+          <select
+            value={entityType ?? ""}
+            onChange={(event) => setEntityType(event.target.value || null)}
+          >
+            <option value="">全部类型</option>
+            {Object.entries(data.type_counts).map(([type, count]) => (
+              <option key={type} value={type}>
+                {type}（{count}）
+              </option>
+            ))}
+          </select>
+          <select
+            value={category ?? ""}
+            onChange={(event) => setCategory(event.target.value || null)}
+          >
+            <option value="">全部关系</option>
+            {Object.entries(data.category_counts).map(([item, count]) => (
+              <option key={item} value={item}>
+                {item}（{count}）
+              </option>
+            ))}
+          </select>
+        </div>
+        <GraphExplorerControls
+          explorer={explorer}
+          network={data.network}
+          matches={data.matches}
+          selected={selected}
+          onClearSelection={() => {
             setSelected(null);
             setSelectedEdge(null);
           }}
+        />
+        <div
+          className={`graph-workspace-body${selected || selectedEdge ? " graph-body" : ""}`}
         >
-          <option value="">全部 {data.documents.length} 份文档</option>
-          {data.documents.map((item) => (
-            <option key={item.document_id} value={item.document_id}>
-              {item.title}
-            </option>
-          ))}
-        </select>
-        <select
-          value={entityType ?? ""}
-          onChange={(event) => setEntityType(event.target.value || null)}
-        >
-          <option value="">全部类型</option>
-          {Object.entries(data.type_counts).map(([type, count]) => (
-            <option key={type} value={type}>
-              {type}（{count}）
-            </option>
-          ))}
-        </select>
-        <select
-          value={category ?? ""}
-          onChange={(event) => setCategory(event.target.value || null)}
-        >
-          <option value="">全部关系</option>
-          {Object.entries(data.category_counts).map(([item, count]) => (
-            <option key={item} value={item}>
-              {item}（{count}）
-            </option>
-          ))}
-        </select>
-      </div>
-      <GraphExplorerControls
-        explorer={explorer}
-        network={data.network}
-        matches={data.matches}
-        selected={selected}
-        onClearSelection={() => {
-          setSelected(null);
-          setSelectedEdge(null);
-        }}
-      />
-      <div className={selected || selectedEdge ? "graph-body" : ""}>
-        <div>
-          <GraphView
-            nodes={data.network.nodes}
-            edges={data.network.edges}
-            selected={selected}
-            selectedEdge={selectedEdge?.id}
-            onSelect={(id) => {
-              setSelected(id);
-              setSelectedEdge(null);
-            }}
-            onSelectEdge={(edge) => {
-              setSelectedEdge(edge);
-              setSelected(null);
-            }}
-            onExpand={explorer.expand}
-          />
-          <p className="graph-note">
-            显示 {data.network.nodes.length} / {data.network.total_entities}{" "}
-            个实体、{data.network.edges.length} 条边（
-            {data.network.total_relations} 条关系）。
-          </p>
+          <div>
+            <GraphView
+              nodes={data.network.nodes}
+              edges={data.network.edges}
+              selected={selected}
+              selectedEdge={selectedEdge?.id}
+              onSelect={(id) => {
+                setSelected(id);
+                setSelectedEdge(null);
+              }}
+              onSelectEdge={(edge) => {
+                setSelectedEdge(edge);
+                setSelected(null);
+              }}
+              onExpand={explorer.expand}
+            />
+            <p className="graph-note">
+              显示 {data.network.nodes.length} / {data.network.total_entities}{" "}
+              个实体、{data.network.edges.length} 条边（
+              {data.network.total_relations} 条关系）。
+            </p>
+          </div>
+          {chunkTarget && (
+            <DocumentChunkDialog
+              target={chunkTarget}
+              onClose={() => setChunkTarget(null)}
+            />
+          )}
+          {selectedEdge && (
+            <GraphRelationPanel
+              edge={selectedEdge}
+              documentId={documentId}
+              category={category}
+              onClose={() => setSelectedEdge(null)}
+              onOpenChunk={openChunk}
+            />
+          )}
+          {selected && (
+            <GraphEntityPanel
+              entityId={selected}
+              onClose={() => setSelected(null)}
+              onOpenDocument={(id) => onNavigate(`/knowledge/${id}`)}
+              onOpenChunk={openChunk}
+              onFocus={explorer.expand}
+            />
+          )}
         </div>
-        {chunkTarget && (
-          <DocumentChunkDialog
-            target={chunkTarget}
-            onClose={() => setChunkTarget(null)}
-          />
-        )}
-        {selectedEdge && (
-          <GraphRelationPanel
-            edge={selectedEdge}
-            documentId={documentId}
-            category={category}
-            onClose={() => setSelectedEdge(null)}
-            onOpenChunk={openChunk}
-          />
-        )}
-        {selected && (
-          <GraphEntityPanel
-            entityId={selected}
-            onClose={() => setSelected(null)}
-            onOpenDocument={(id) => onNavigate(`/knowledge/${id}`)}
-            onOpenChunk={openChunk}
-            onFocus={explorer.expand}
-          />
-        )}
-      </div>
+      </GraphWorkspace>
     </div>
   );
 }
