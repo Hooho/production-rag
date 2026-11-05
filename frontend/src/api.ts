@@ -483,6 +483,9 @@ async function authorizedFetch(
 ): Promise<Response> {
   function send() {
     const headers = new Headers(options.headers);
+    // 字符串请求体都是 JSON：没写 Content-Type 时补上，否则后端会把整个请求体当成一段文字，校验失败（422）。
+    if (typeof options.body === "string" && !headers.has("Content-Type"))
+      headers.set("Content-Type", "application/json");
     const token = readStorage(accessStorage);
     if (token) headers.set("Authorization", `Bearer ${token}`);
     return fetch(`${API_BASE}${path}`, { ...options, headers });
@@ -502,13 +505,28 @@ async function authorizedFetch(
   return response;
 }
 
+// FastAPI 校验失败（422）时 detail 是数组，拼成文字，避免页面显示 [object Object]。
+function detailText(detail: unknown): string {
+  if (!detail) return "";
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail))
+    return detail
+      .map((item) =>
+        item && typeof item === "object" && "msg" in item
+          ? `${((item as { loc?: unknown[] }).loc ?? []).join(".")}: ${(item as { msg: string }).msg}`
+          : JSON.stringify(item),
+      )
+      .join("；");
+  return JSON.stringify(detail);
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await authorizedFetch(path, options);
   if (!response.ok) {
     const body = await response
       .json()
       .catch(() => ({ detail: response.statusText }));
-    throw new Error(body.detail || `请求失败：${response.status}`);
+    throw new Error(detailText(body.detail) || `请求失败：${response.status}`);
   }
   return response.json() as Promise<T>;
 }
@@ -4133,6 +4151,7 @@ export function decideGraphReview(
     `/documents/${documentId}/graph/review/decide`,
     {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         build_id: buildId,
         proposal_ids: proposalIds,
@@ -4156,6 +4175,7 @@ export function rewriteGraphReview(
 ) {
   return request<GraphBuild>(`/documents/${documentId}/graph/review/rewrite`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ build_id: buildId, resolutions }),
   });
 }
