@@ -7341,43 +7341,49 @@ function DocumentTrace({
             {/* warning：步骤跑完了但结果有问题（安全扫描发现疑似注入），整行标红。 */}
             <div className="document-step-copy">
               <strong>{step.title}</strong>
-              <Clamp text={step.detail}>
-                <small>{step.detail}</small>
-              </Clamp>
-              {/* 以前把 <strong> 拼进字符串，React 当普通文字输出，页面上直接显示出尖括号；现在用真正的元素渲染字段名。 */}
               {step.step_id === "graph_review" &&
               step.result &&
               "scan" in step.result ? (
-                <div className="document-step-actions">
+                // 说明和入口放一行：按钮用小号，不抢说明的位置。
+                <small className="document-step-inline">
+                  {step.detail}
                   <button
                     type="button"
-                    className={awaiting ? "primary-button" : "secondary-button"}
+                    className={`document-step-link ${awaiting ? "is-primary" : ""}`}
                     onClick={() =>
                       setReviewDetail(
                         step.result as unknown as GraphReviewReport,
                       )
                     }
                   >
-                    {awaiting ? "去人工确认" : "查看检查过程和结果"}
+                    {awaiting ? "去人工确认 →" : "查看检查过程和结果"}
                   </button>
-                </div>
+                </small>
               ) : (
-                step.result && (
-                  <Clamp text={stepResultText(step.result)}>
-                    <span>
-                      {Object.entries(step.result).map(
-                        ([key, value], index) => (
-                          <Fragment key={key}>
-                            {index > 0 && " · "}
-                            <strong>{formatResultLabel(key)}</strong>：
-                            {stepResultValue(key, value)}
-                          </Fragment>
-                        ),
-                      )}
-                    </span>
-                  </Clamp>
-                )
+                <Clamp text={step.detail}>
+                  <small>{step.detail}</small>
+                </Clamp>
               )}
+              {/* 以前把 <strong> 拼进字符串，React 当普通文字输出，页面上直接显示出尖括号；现在用真正的元素渲染字段名。 */}
+              {step.step_id === "graph_review" &&
+              step.result &&
+              "scan" in step.result
+                ? null
+                : step.result && (
+                    <Clamp text={stepResultText(step.result)}>
+                      <span>
+                        {Object.entries(step.result).map(
+                          ([key, value], index) => (
+                            <Fragment key={key}>
+                              {index > 0 && " · "}
+                              <strong>{formatResultLabel(key)}</strong>：
+                              {stepResultValue(key, value)}
+                            </Fragment>
+                          ),
+                        )}
+                      </span>
+                    </Clamp>
+                  )}
             </div>
             {step.duration_ms !== null && step.duration_ms !== undefined && (
               <time title={durationTitle(step.duration_ms)}>

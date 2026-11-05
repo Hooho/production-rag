@@ -429,3 +429,29 @@
   font-style: normal;
   font-weight: 500;
 }
+.document-step-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+.document-step-link {
+  padding: 1px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: #fff;
+  color: #2563eb;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.6;
+  cursor: pointer;
+}
+.document-step-link.is-primary {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+  font-weight: 600;
+}
+.document-step-link:hover {
+  filter: brightness(0.95);
+}
