@@ -46,14 +46,6 @@
    font-size: 13px;
 }
 
-.sec-page .primary-button {
-   height: 32px;
-   border-radius: 4px;
-   padding: 0 14px;
-   font-size: 13px;
-   line-height: 30px;
-   white-space: nowrap;
-}
 
 /* 当前设置一行 */
 .sec-status dl {

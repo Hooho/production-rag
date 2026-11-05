@@ -863,7 +863,7 @@ function diagnosisSentence(item: InspectionDiagnosis["questions"][number], limit
 
 // 系统问题的验证结果：巡检时（或管理员手动）用最近一条记录的原问题、以原提问人身份重新提问，看还会不会出错或被拦截。
 function SystemRecheck({ recheck, verifying, onVerify }: { recheck?: InspectionRecheck; verifying: boolean; onVerify: () => void }) {
-  const button = <button type="button" className="secondary-button inspection-verify-button" onClick={onVerify} disabled={verifying} title="用最近一条记录的原问题，以原提问人的身份完整重问一遍">{verifying ? "提问中…" : "重新提问验证"}</button>;
+  const button = <button type="button" className="secondary-button button-sm inspection-verify-button" onClick={onVerify} disabled={verifying} title="用最近一条记录的原问题，以原提问人的身份完整重问一遍">{verifying ? "提问中…" : "重新提问验证"}</button>;
   if (!recheck) {
     return <div className="inspection-diagnosis">
       <div className="inspection-diagnosis-head">
@@ -891,7 +891,7 @@ function SystemRecheck({ recheck, verifying, onVerify }: { recheck?: InspectionR
 }
 
 function DiagnosisDetail({ diagnosis, verifying, onVerify }: { diagnosis?: InspectionDiagnosis; verifying: boolean; onVerify: () => void }) {
-  const button = <button type="button" className="secondary-button inspection-verify-button" onClick={onVerify} disabled={verifying} title="按提问人现在的权限，用这些问题重新检索一遍">{verifying ? "检索中…" : "重新检索"}</button>;
+  const button = <button type="button" className="secondary-button button-sm inspection-verify-button" onClick={onVerify} disabled={verifying} title="按提问人现在的权限，用这些问题重新检索一遍">{verifying ? "检索中…" : "重新检索"}</button>;
   if (!diagnosis) {
     return <div className="inspection-diagnosis">
       <div className="inspection-diagnosis-head">
@@ -954,7 +954,7 @@ function ParseQuality({ detail, verifying, onVerify }: { detail: InspectionIssue
     <div className="inspection-diagnosis-head">
       <span className="inspection-explain-title">检查结果</span>
       <span className="inspection-diagnosis-time">{detail.checked ? `${formatTime(detail.checked)} · ${detail.checked_by ? `${detail.checked_by} 手动检查` : "巡检时自动检查"}` : ""}</span>
-      <button type="button" className="secondary-button inspection-verify-button" disabled={verifying} onClick={onVerify} title="重新检查这份文档的当前版本">{verifying ? "检查中…" : "重新检查"}</button>
+      <button type="button" className="secondary-button button-sm inspection-verify-button" disabled={verifying} onClick={onVerify} title="重新检查这份文档的当前版本">{verifying ? "检查中…" : "重新检查"}</button>
     </div>
     <p className="inspection-parse-doc">《{detail.document_title}》{detail.filename && <span>{detail.filename}</span>}<span>第 {detail.version} 版 · {detail.chunks} 段 · {detail.chars} 字</span></p>
     {problems.length === 0 ? <p className="inspection-hint">当前版本没有发现解析问题。</p> : <ul className="inspection-parse-list">

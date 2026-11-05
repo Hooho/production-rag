@@ -131,11 +131,11 @@ function DataTable({ type, onToast }: { type: DataType; onToast: ShowToast }) {
     <p className="data-hint">{type.description}</p>
     <div className="data-toolbar">
       <input className="data-search" value={keyword} onChange={(event) => setKeyword(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") search(); }} placeholder={`搜索编号或${type.label}内容`} />
-      <button type="button" className="secondary-button data-small" onClick={search}>搜索</button>
+      <button type="button" className="secondary-button button-sm" onClick={search}>搜索</button>
 
       <div className="data-toolbar-actions">
-        {can("create") && <button type="button" className="secondary-button data-small" onClick={() => setGenerating(true)}>✦ AI 生成</button>}
-        {can("create") && <button type="button" className="primary-button data-small" onClick={() => setEditing("new")}>＋ 手动录入</button>}
+        {can("create") && <button type="button" className="secondary-button button-sm" onClick={() => setGenerating(true)}>✦ AI 生成</button>}
+        {can("create") && <button type="button" className="primary-button button-sm" onClick={() => setEditing("new")}>＋ 手动录入</button>}
       </div>
     </div>
     <div className="data-table-wrap">
@@ -153,7 +153,7 @@ function DataTable({ type, onToast }: { type: DataType; onToast: ShowToast }) {
             {columns.map((field) => <td key={field.name} title={row[field.name] === null ? "" : String(row[field.name])}>{displayValue(row, field)}</td>)}
             <td>{row.source === "ai" ? <Tag size="sm" tone="info" title={`批次 ${row.batch_id}`}>AI</Tag> : <Tag size="sm" outline plain>手动</Tag>}</td>
             <td className="data-actions">
-              {can("update") && <button type="button" className="secondary-button data-mini" onClick={() => setEditing(row)}>编辑</button>}
+              {can("update") && <button type="button" className="secondary-button button-sm" onClick={() => setEditing(row)}>编辑</button>}
               {can("delete") && <button type="button" className="delete-button" onClick={() => void remove(row)}>删除</button>}
               {can("delete") && row.source === "ai" && row.batch_id && <button type="button" className="delete-button" onClick={() => void removeBatch(row.batch_id as string)} title="删除同一次 AI 生成写入的全部数据">删除本批</button>}
             </td>
@@ -163,8 +163,8 @@ function DataTable({ type, onToast }: { type: DataType; onToast: ShowToast }) {
     </div>
     <div className="data-pager">
       <span>共 {data?.total ?? 0} 条 · 第 {page} / {totalPages} 页</span>
-      <button type="button" className="secondary-button data-mini" disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</button>
-      <button type="button" className="secondary-button data-mini" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>下一页</button>
+      <button type="button" className="secondary-button button-sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</button>
+      <button type="button" className="secondary-button button-sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>下一页</button>
     </div>
     {editing && <RecordForm type={type} row={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={(message) => { setEditing(null); onToast("success", message); void reload(); }} />}
     {generating && <GeneratePanel type={type} onClose={() => setGenerating(false)} onToast={onToast} onCommitted={() => { setGenerating(false); setSource("ai"); setPage(1); void reload(); }} />}
@@ -252,7 +252,7 @@ function RecordForm({ type, row, onClose, onSaved }: { type: DataType; row: Data
         {type.fields.filter((field) => field.derived).map((field) => <p key={field.name} className="data-hint">{field.label}由系统根据其他字段自动计算，无需填写。</p>)}
       </div>
       {message && <div className="data-form-error">{message}</div>}
-      <footer><button type="button" className="secondary-button data-small" onClick={onClose}>取消</button><button type="button" className="primary-button data-small" disabled={busy} onClick={() => void submit()}>{busy ? "保存中…" : "保存"}</button></footer>
+      <footer><button type="button" className="secondary-button button-sm" onClick={onClose}>取消</button><button type="button" className="primary-button button-sm" disabled={busy} onClick={() => void submit()}>{busy ? "保存中…" : "保存"}</button></footer>
     </div>
   </div>;
 }
@@ -372,7 +372,7 @@ function GeneratePanel({ type, onClose, onToast, onCommitted }: { type: DataType
       <div className="data-generate-form">
         <label><span>条数</span><input type="number" min={1} max={50} value={count} onChange={(event) => setCount(Math.max(1, Math.min(50, Number(event.target.value) || 1)))} /></label>
         <label><span>描述（可选）</span><input value={prompt} maxLength={500} onChange={(event) => setPrompt(event.target.value)} placeholder={type.key === "products" ? "例如：数码类商品，价格 100～3000" : `例如：生成一些${type.label}，内容尽量多样`} /></label>
-        <button type="button" className="primary-button data-small" disabled={busy} onClick={() => void generate()}>{busy && !preview ? "生成中…" : preview ? "重新生成" : "生成预览"}</button>
+        <button type="button" className="primary-button button-sm" disabled={busy} onClick={() => void generate()}>{busy && !preview ? "生成中…" : preview ? "重新生成" : "生成预览"}</button>
       </div>
       <p className="data-hint">引用字段（如订单的客户、商品）由系统从已有数据中挑选，金额、日期、编号等由代码计算，模型只负责生成内容字段。生成的数据需要你确认后才会写入。</p>
       {error && <div className="data-form-error">{error}</div>}
@@ -405,8 +405,8 @@ function GeneratePanel({ type, onClose, onToast, onCommitted }: { type: DataType
         </div>
       </>}
       <footer>
-        <button type="button" className="secondary-button data-small" onClick={onClose}>取消</button>
-        <button type="button" className="primary-button data-small" disabled={busy || !preview || validCount === 0} onClick={() => void commit()}>确认写入 {validCount} 条</button>
+        <button type="button" className="secondary-button button-sm" onClick={onClose}>取消</button>
+        <button type="button" className="primary-button button-sm" disabled={busy || !preview || validCount === 0} onClick={() => void commit()}>确认写入 {validCount} 条</button>
       </footer>
     </div>
   </div>;

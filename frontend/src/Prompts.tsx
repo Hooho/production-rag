@@ -153,12 +153,12 @@ function VersionRow({ version, isActive, activeText, onLoad, onActivate }: { ver
       <span className="pr-version-note">{version.note || "（没有填写说明）"}</span>
       <span className="pr-version-meta">{version.created_by ? `${version.created_by} · ${formatTime(version.created)}` : "代码内置"}</span>
       <span className="pr-version-actions">
-        <button type="button" className="secondary-button" onClick={() => setOpen(!open)}>{open ? "收起" : "查看"}</button>
-        <button type="button" className="secondary-button" onClick={onLoad}>载入编辑</button>
+        <button type="button" className="secondary-button button-sm" onClick={() => setOpen(!open)}>{open ? "收起" : "查看"}</button>
+        <button type="button" className="secondary-button button-sm" onClick={onLoad}>载入编辑</button>
         {!isActive && (confirming
-          ? <><button type="button" className="primary-button" onClick={() => { setConfirming(false); onActivate(); }}>确认改用</button>
-            <button type="button" className="secondary-button" onClick={() => setConfirming(false)}>取消</button></>
-          : <button type="button" className="secondary-button" onClick={() => setConfirming(true)}>改用这个版本</button>)}
+          ? <><button type="button" className="primary-button button-sm" onClick={() => { setConfirming(false); onActivate(); }}>确认改用</button>
+            <button type="button" className="secondary-button button-sm" onClick={() => setConfirming(false)}>取消</button></>
+          : <button type="button" className="secondary-button button-sm" onClick={() => setConfirming(true)}>改用这个版本</button>)}
       </span>
     </div>
     {open && <div className="pr-version-body">

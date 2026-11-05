@@ -860,14 +860,14 @@ function Paged({
       <div className="graph-pager">
         共 {total} 条 · 第 {page} / {pages} 页
         <button
-          className="secondary-button"
+          className="secondary-button button-sm"
           disabled={page <= 1}
           onClick={() => onPage(page - 1)}
         >
           ‹
         </button>
         <button
-          className="secondary-button"
+          className="secondary-button button-sm"
           disabled={page >= pages}
           onClick={() => onPage(page + 1)}
         >

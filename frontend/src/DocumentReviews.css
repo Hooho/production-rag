@@ -257,15 +257,6 @@
    justify-content: flex-end;
 }
 
-.dr-buttons .primary-button,
-.dr-buttons .secondary-button {
-   height: 32px;
-   border-radius: 4px;
-   padding: 0 14px;
-   font-size: 13px;
-   white-space: nowrap;
-}
-
 .dr-buttons button:disabled,
 .dr-pager button:disabled {
    opacity: .5;

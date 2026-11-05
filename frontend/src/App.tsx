@@ -7351,7 +7351,7 @@ function DocumentTrace({
                   {step.detail}
                   <button
                     type="button"
-                    className={`document-step-link ${reviewPending > 0 ? "is-primary" : ""}`}
+                    className={`${reviewPending > 0 ? "primary-button" : "secondary-button"} button-sm`}
                     onClick={() => setReviewDetail(review)}
                   >
                     {reviewActive
@@ -7396,7 +7396,7 @@ function DocumentTrace({
               !reviewActive && (
                 <button
                   type="button"
-                  className="secondary-button document-step-retry"
+                  className="secondary-button button-sm document-step-retry"
                   disabled={
                     retryingReview ||
                     traceSteps.some(
@@ -7422,7 +7422,7 @@ function DocumentTrace({
               onRetryGraph && (
                 <button
                   type="button"
-                  className="secondary-button document-step-retry"
+                  className="secondary-button button-sm document-step-retry"
                   disabled={retryingGraph}
                   onClick={async () => {
                     setRetryingGraph(true);
@@ -7440,7 +7440,7 @@ function DocumentTrace({
               step.status === "failed" &&
               onRetry && (
                 <button
-                  className="secondary-button document-step-retry"
+                  className="secondary-button button-sm document-step-retry"
                   onClick={onRetry}
                 >
                   重试
@@ -7451,7 +7451,7 @@ function DocumentTrace({
               missingContexts > 0 &&
               onRetryContexts && (
                 <button
-                  className="secondary-button document-step-retry"
+                  className="secondary-button button-sm document-step-retry"
                   onClick={onRetryContexts}
                 >
                   补全 {missingContexts} 个

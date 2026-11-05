@@ -1560,8 +1560,7 @@ input::placeholder {
    color: var(--t-829bb3);
 }
 
-.send-button,
-.primary-button {
+.send-button {
    background: var(--t-2563eb);
    color: #ffffff;
    border: 0;
@@ -1570,14 +1569,93 @@ input::placeholder {
    border-radius: 3px;
 }
 
+/* 按钮规范（AGENTS.md「前端界面约定」）：样式只有主按钮、次按钮、危险按钮三种，尺寸只有默认和 button-sm 两种。
+   尺寸、圆角、字号、字重只在这里定义；页面 CSS 只调外边距、宽度、对齐，不再覆盖这些属性。 */
+.primary-button,
+.secondary-button,
+.delete-button {
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+   gap: 6px;
+   box-sizing: border-box;
+   height: 32px;
+   padding: 0 14px;
+   border: 1px solid transparent;
+   border-radius: 4px;
+   font-size: 13px;
+   font-weight: 600;
+   line-height: 1;
+   white-space: nowrap;
+   text-decoration: none;
+   cursor: pointer;
+   transition: background-color .15s, border-color .15s, color .15s;
+}
+
+.primary-button {
+   background: var(--t-2563eb);
+   border-color: var(--t-2563eb);
+   color: #ffffff;
+}
+
+.primary-button:hover:not(:disabled) {
+   background: var(--t-1d4ed8);
+   border-color: var(--t-1d4ed8);
+}
+
+.secondary-button {
+   background: transparent;
+   border-color: var(--t-abc4dc);
+   color: var(--t-334e68);
+   font-weight: 500;
+}
+
+.secondary-button:hover:not(:disabled) {
+   border-color: var(--t-2563eb);
+   color: var(--t-2563eb);
+}
+
+.delete-button {
+   background: transparent;
+   border-color: #d09aa1;
+   color: #c44e5e;
+   font-weight: 500;
+}
+
+.delete-button:hover:not(:disabled) {
+   border-color: #d45160;
+   color: #b42318;
+   background: #fff0f0;
+}
+
+/* 紧凑尺寸：表格行内、卡片内、处理步骤行、分页里的按钮。 */
+.button-sm {
+   height: 26px;
+   padding: 0 10px;
+   font-size: 12px;
+}
+
+.primary-button:focus-visible,
+.secondary-button:focus-visible,
+.delete-button:focus-visible {
+   outline: 2px solid var(--t-2563eb);
+   outline-offset: 2px;
+}
+
+.primary-button:disabled,
+.secondary-button:disabled,
+.delete-button:disabled {
+   opacity: .45;
+   cursor: not-allowed;
+}
+
 .send-button {
    position: absolute;
    right: 10px;
    bottom: 10px;
 }
 
-.send-button:disabled,
-.primary-button:disabled {
+.send-button:disabled {
    opacity: .4;
    cursor: not-allowed;
 }
@@ -2012,24 +2090,6 @@ input:focus {
    color: var(--t-2563eb);
 }
 
-.delete-button {
-   border: 1px solid #d09aa1;
-   background: transparent;
-   color: #c44e5e;
-   padding: 6px 9px;
-   font-size: 10px;
-}
-
-.delete-button:hover:not(:disabled) {
-   border-color: #d45160;
-   color: #b42318;
-   background: #fff0f0;
-}
-
-.delete-button:disabled {
-   opacity: .35;
-   cursor: not-allowed;
-}
 
 .document-card {
    border-bottom: 1px solid var(--t-d2e2f0);
@@ -2787,13 +2847,6 @@ input:focus {
    margin-top: 24px;
 }
 
-.secondary-button {
-   border: 1px solid var(--t-abc4dc);
-   border-radius: 7px;
-   background: transparent;
-   color: var(--t-6c8198);
-   padding: 5px 10px;
-}
 
 .knowledge-error {
    flex: 0 0 auto;
@@ -3599,10 +3652,6 @@ input:focus {
    align-items: center;
 }
 
-.detail-actions .secondary-button {
-   padding: 6px 10px;
-   font-size: 10px;
-}
 
 .version-history {
    display: grid;
@@ -6168,8 +6217,6 @@ input:focus {
 .document-step-retry {
    flex: none;
    margin-left: auto;
-   padding: 4px 12px;
-   font-size: 12px;
 }
 
 /* 历史回答里的模型思考过程：默认收起，颜色比正文浅，避免和回答混在一起。 */

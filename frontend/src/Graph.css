@@ -661,15 +661,6 @@
 .upload-graph-field .graph-options {
   margin-top: 10px;
 }
-.graph-actions .secondary-button,
-.graph-tasks-actions .secondary-button,
-.graph-tasks-actions .primary-button,
-.graph-table .secondary-button,
-.graph-pager .secondary-button {
-  font-size: 12px;
-  padding: 5px 10px;
-  min-height: 0;
-}
 .graph-table .link-button,
 .graph-side small .link-button {
   margin-right: 6px;
@@ -1256,9 +1247,6 @@
   padding: 8px 0;
   border-bottom: 1px solid #d7e2ed;
   font-size: 13px;
-}
-.graph-review-panel .secondary-button {
-  padding: 5px 10px;
 }
 .graph-review-panel .field-error {
   margin: 0;

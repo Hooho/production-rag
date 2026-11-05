@@ -647,7 +647,7 @@ export function GraphReviewDetails({
               </button>
               <button
                 type="button"
-                className="secondary-button gr-mini"
+                className="secondary-button button-sm"
                 disabled={busy || selected.length === 0}
                 onClick={() => void decide(selected, "rejected")}
               >
@@ -655,7 +655,7 @@ export function GraphReviewDetails({
               </button>
               <button
                 type="button"
-                className="primary-button gr-mini"
+                className="primary-button button-sm"
                 disabled={busy || selected.length === 0}
                 onClick={() => void decide(selected, "approved")}
               >
@@ -883,7 +883,7 @@ export function GraphReviewDetails({
                               <>
                                 <button
                                   type="button"
-                                  className="secondary-button gr-mini"
+                                  className="secondary-button button-sm"
                                   disabled={busy}
                                   onClick={() => void decide([id], "rejected")}
                                 >
@@ -891,7 +891,7 @@ export function GraphReviewDetails({
                                 </button>
                                 <button
                                   type="button"
-                                  className="primary-button gr-mini"
+                                  className="primary-button button-sm"
                                   disabled={busy}
                                   onClick={() => void decide([id], "approved")}
                                 >

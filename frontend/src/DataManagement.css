@@ -100,19 +100,6 @@
    margin-left: auto;
 }
 
-.data-small {
-   /* 原来的按钮高度和输入框一样大，数据管理页操作区显得过重；收紧内边距和字号，保留足够点击区域。 */
-   padding: 6px 12px;
-   font-size: 12px;
-}
-
-.data-mini {
-   /* 表格行内操作只需承载短文本，缩小后能减少操作列占用并保持表格紧凑。 */
-   padding: 4px 8px;
-   font-size: 10px;
-   border-radius: 3px;
-}
-
 .data-actions button {
    /* 操作列原来使用带边框按钮，视觉重量过高；改成文字按钮，让表格内容和操作层级更清楚。 */
    border: 0;

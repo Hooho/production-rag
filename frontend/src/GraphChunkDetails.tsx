@@ -268,7 +268,7 @@ export function GraphChunkDetails({
             </span>
             <button
               type="button"
-              className="secondary-button"
+              className="secondary-button button-sm"
               disabled={loading || page <= 1}
               onClick={() => {
                 setPage(page - 1);
@@ -278,7 +278,7 @@ export function GraphChunkDetails({
             </button>
             <button
               type="button"
-              className="secondary-button"
+              className="secondary-button button-sm"
               disabled={loading || page >= data.total_pages}
               onClick={() => {
                 setPage(page + 1);
