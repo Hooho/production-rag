@@ -1321,6 +1321,31 @@ def rewrite_review(store, build_id, username, resolutions=None):
     return get_build(store.engine, build_id)
 
 
+# 只重试判断失败的组：其他组的判断、人工决定、已应用的合并都保留，用这次检查定下的同一版提示词。
+def retry_failed_review(store, build_id):
+    build, report = _ready_report(store, build_id)
+    failed = [
+        row["candidate_id"] for row in report["judgments"] if row["status"] == "failed"
+    ]
+    if not failed:
+        raise BuildError("没有判断失败的组")
+    report["judgments"] = [
+        row for row in report["judgments"] if row["status"] != "failed"
+    ]
+    report["status"] = "queued"
+    with store.engine.begin() as connection:
+        _lock_build(connection, build_id)
+        _save_report(
+            connection,
+            build,
+            report,
+            status="pending",
+            detail=f"排队重试 {len(failed)} 个判断失败的组（不影响已写入的图谱）",
+        )
+    enqueue(store, build_id, "review")
+    return report
+
+
 # 重新检查（或手动开始）：清掉模型判断和人工决定，只保留图谱上已应用的合并，重新找候选、判断。
 def retry_review(store, build_id):
     build = get_build(store.engine, build_id)

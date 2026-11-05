@@ -222,11 +222,14 @@ def validate(text, candidate, allowed_types):
             not isinstance(ids, list)
             or len(ids) < 2
             or not all(isinstance(key, str) for key in ids)
-            or len(set(ids)) != len(ids)
-            or not set(ids) <= allowed
-            or used.intersection(ids)
         ):
-            raise ValueError("模型合并组包含无效、重复或越界实体")
+            raise ValueError("模型合并组格式错误：ids 需要至少 2 个编号")
+        if len(set(ids)) != len(ids) or used.intersection(ids):
+            raise ValueError(f"模型合并组里有重复的编号：{ids}")
+        if not set(ids) <= allowed:
+            raise ValueError(
+                f"模型合并组里有不在这一组的编号：{sorted(set(ids) - allowed)}"
+            )
         if (
             group.get("type") not in allowed_types
             or not all(
@@ -241,6 +244,16 @@ def validate(text, candidate, allowed_types):
 
 
 def judge(models, schema, candidate, system_prompt=None):
+    # 发给模型的实体用短编号 e1、e2……（原来是 64 位哈希，模型容易抄错或写成组号），返回后再换回真正的 id。
+    # 组号只给界面用，不发给模型。
+    codes = {
+        f"e{index + 1}": item["id"] for index, item in enumerate(candidate["entities"])
+    }
+    short = {
+        "entities": [
+            {**item, "id": code} for code, item in zip(codes, candidate["entities"])
+        ]
+    }
     messages = [
         {
             "role": "system",
@@ -254,10 +267,7 @@ def judge(models, schema, candidate, system_prompt=None):
                 {
                     "types": type_names(schema),
                     # 相似度、排名只用于展示，不给模型，免得分数左右判断。
-                    "candidate": {
-                        "id": candidate["id"],
-                        "entities": candidate["entities"],
-                    },
+                    "candidate": short,
                 },
                 ensure_ascii=False,
             ),
@@ -277,10 +287,10 @@ def judge(models, schema, candidate, system_prompt=None):
         result.update(raw_output=raw, input_tokens=incoming, output_tokens=outgoing)
         if finish == "length":
             raise ValueError("模型输出被截断")
-        result.update(
-            decision=validate(text, candidate, set(type_names(schema))),
-            status="completed",
-        )
+        decision = validate(text, short, set(type_names(schema)))
+        for group in decision["groups"]:
+            group["ids"] = [codes[key] for key in group["ids"]]
+        result.update(decision=decision, codes=codes, status="completed")
     except Exception as error:
         result.update(status="failed", error=str(error)[:1000])
     result["duration_ms"] = round((time.monotonic() - started) * 1000)

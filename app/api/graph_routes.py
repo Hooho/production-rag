@@ -295,6 +295,23 @@ def build_router(current_user, identity, require_admin):
         except graph_build.BuildError as error:
             raise HTTPException(409, str(error)) from None
 
+    # 只重试判断失败的组，其他组的判断和人工决定保留。
+    @router.post("/documents/{document_id}/graph/review/retry-failed", status_code=202)
+    def review_retry_failed(
+        request: Request, document_id: UUID, user=Depends(current_user)
+    ):
+        state = request.app.state
+        row = readable(state, user["username"], document_id)
+        check_can_build(user, row)
+        with state.store.engine.connect() as connection:
+            latest = graph_query.latest_build(connection, str(document_id))
+        if not latest:
+            raise HTTPException(409, "这份文档还没有建过图")
+        try:
+            return graph_build.retry_failed_review(state.store, latest["id"])
+        except graph_build.BuildError as error:
+            raise HTTPException(409, str(error)) from None
+
     @router.post("/documents/{document_id}/graph/review/retry", status_code=202)
     def review_retry(request: Request, document_id: UUID, user=Depends(current_user)):
         state = request.app.state

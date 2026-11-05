@@ -4139,6 +4139,13 @@ export function decideGraphReview(
     },
   );
 }
+// 只重试判断失败的组，其他组的判断和人工决定保留。
+export function retryFailedGraphReview(documentId: string) {
+  return request<GraphReviewReport>(
+    `/documents/${documentId}/graph/review/retry-failed`,
+    { method: "POST" },
+  );
+}
 // 按当前所有已批准的建议重写图谱（不调用模型）。
 export function rewriteGraphReview(
   documentId: string,

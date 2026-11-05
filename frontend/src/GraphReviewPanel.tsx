@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   decideGraphReview,
   getGraphReview,
+  retryFailedGraphReview,
   retryGraphReview,
   rewriteGraphReview,
   type GraphReviewChoice,
@@ -1194,6 +1195,18 @@ export function GraphReviewBody({
     });
   }
 
+  const failedCount = (live?.judgments ?? []).filter(
+    (item) => item.status === "failed",
+  ).length;
+
+  async function retryFailed() {
+    await run(async () => {
+      await retryFailedGraphReview(documentId);
+      setData(await getGraphReview(documentId));
+      onChanged?.();
+    });
+  }
+
   const showRetry =
     canRetry &&
     !!data?.can_confirm &&
@@ -1264,6 +1277,17 @@ export function GraphReviewBody({
               </span>
             ) : (
               <span />
+            )}
+            {canDecide && failedCount > 0 && (
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={busy}
+                title="只重新判断失败的组，其他组的判断和你的决定都保留"
+                onClick={() => void retryFailed()}
+              >
+                重试失败的 {failedCount} 组
+              </button>
             )}
             {showRetry && (
               <button

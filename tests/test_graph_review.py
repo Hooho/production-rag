@@ -162,6 +162,36 @@ def test_judge_preserves_raw_failure_and_usage(monkeypatch):
     assert custom["prompt"][0]["content"] == "自定义提示词"
 
 
+def test_judge_sends_short_codes_and_maps_back(monkeypatch):
+    candidate = {"id": "5", "entities": [{"id": "x" * 64}, {"id": "y" * 64}]}
+    answers = []
+
+    def fake(_, messages):
+        answers.append(json.loads(messages[1]["content"]))
+        text = json.dumps(reply)
+        return text, text, 1, 1, "stop"
+
+    monkeypatch.setattr(review, "call_model", fake)
+    reply = {
+        "groups": [
+            {"ids": ["e1", "e2"], "name": "甲", "type": "人物", "reason": "同一人"}
+        ]
+    }
+    result = review.judge(None, DEFAULT_SCHEMA, candidate)
+    # 组号不发给模型，实体用 e1、e2；返回后换回真正的 id。
+    assert answers[0]["candidate"] == {"entities": [{"id": "e1"}, {"id": "e2"}]}
+    assert result["status"] == "completed"
+    assert result["decision"]["groups"][0]["ids"] == ["x" * 64, "y" * 64]
+    # 写成组号或别的编号：判为失败，并说明是哪个编号不对。
+    reply = {
+        "groups": [
+            {"ids": ["5", "e2"], "name": "甲", "type": "人物", "reason": "同一人"}
+        ]
+    }
+    failed = review.judge(None, DEFAULT_SCHEMA, candidate)
+    assert failed["status"] == "failed" and "'5'" in failed["error"]
+
+
 def test_review_runs_after_write_then_rewrites_with_decisions(monkeypatch):
     db = engine()
     row = {
@@ -319,6 +349,25 @@ def test_review_runs_after_write_then_rewrites_with_decisions(monkeypatch):
     again = build.review_report(db, row)
     assert again["status"] == "ready" and len(calls) == 1
     assert again["decisions"]["1:0"]["decision"] == "approved"
+    # 只重试失败的组：失败的判断去掉、重新排队，其他判断和决定保留。
+    with pytest.raises(build.BuildError, match="没有判断失败"):
+        build.retry_failed_review(store, "b1")
+    broken = build.review_report(db, row)
+    broken["judgments"][0] = {
+        **broken["judgments"][0],
+        "status": "failed",
+        "error": "x",
+    }
+    with db.begin() as connection:
+        build._save_report(connection, row, broken)
+    queue.clear()
+    build.retry_failed_review(store, "b1")
+    assert queue == ["b1"]
+    build.run_review_job(store, fake_models, "b1")
+    retried = build.review_report(db, row)
+    assert retried["status"] == "ready" and len(calls) == 2
+    assert retried["judgments"][0]["status"] == "completed"
+    assert retried["decisions"]["1:0"]["decision"] == "approved"
     # 重新检查：清掉判断和决定，保留已应用的合并。
     build.retry_review(store, "b1")
     fresh = build.review_report(db, row)
