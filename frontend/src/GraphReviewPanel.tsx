@@ -178,11 +178,13 @@ export function GraphReviewDetails({
           : "等待模型判断";
   const steps: {
     label: string;
+    by: string;
     value: string;
     state: "done" | "active" | "todo" | "failed";
   }[] = [
     {
       label: "找出候选",
+      by: "系统规则",
       value: `${report.scan.candidate_count} 组`,
       state:
         report.scan.status === "completed"
@@ -193,11 +195,13 @@ export function GraphReviewDetails({
     },
     {
       label: "模型判断",
+      by: "大模型",
       value: `${judged}/${report.scan.candidate_count}`,
       state: judged >= report.scan.candidate_count ? "done" : "active",
     },
     {
       label: "人工确认",
+      by: "人工",
       value: confirmState,
       state:
         report.approved_by || report.scan.candidate_count === 0
@@ -208,6 +212,7 @@ export function GraphReviewDetails({
     },
     {
       label: "合并实体",
+      by: "系统",
       value: statuses[report.execution.status] ?? report.execution.status,
       state:
         report.execution.status === "completed"
@@ -233,14 +238,18 @@ export function GraphReviewDetails({
                   : index + 1}
             </span>
             <span>
-              <strong>{step.label}</strong>
+              <strong>
+                {step.label}
+                <em className="gr-by">{step.by}</em>
+              </strong>
               <small>{step.value}</small>
             </span>
           </li>
         ))}
       </ol>
       <p className="gr-meta">
-        扫描 {report.scan.entity_count} 个实体 · 找到{" "}
+        系统按名字规则扫描 {report.scan.entity_count}{" "}
+        个实体（名字相同或一个包含另一个就归为一组，不调用模型）· 找到{" "}
         {report.scan.candidate_count} 组候选 · 耗时{" "}
         {report.scan.duration_ms ?? "—"} 毫秒
         {report.approved_by &&
@@ -389,7 +398,9 @@ export function GraphReviewDetails({
               <article className={`gr-card is-${verdict}`} key={candidate.id}>
                 <header className="gr-card-head">
                   <span className="gr-card-id">#{candidate.id}</span>
-                  <span className="gr-card-reason">{candidate.reason}</span>
+                  <span className="gr-card-reason">
+                    系统规则：{candidate.reason}
+                  </span>
                   <Tag size="sm" dot tone={verdicts[verdict].tone}>
                     {verdicts[verdict].label}
                   </Tag>
