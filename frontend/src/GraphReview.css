@@ -594,3 +594,21 @@
   font-family: "DM Mono", monospace;
   text-align: right;
 }
+.gr-steps li.is-link {
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.gr-steps li.is-link:hover {
+  border-color: #93b4f5;
+  box-shadow: 0 1px 4px #2563eb1f;
+}
+.gr-steps li.is-link:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+.gr-steps li.is-selected {
+  border-color: #2563eb;
+  box-shadow: inset 0 0 0 1px #2563eb;
+}

@@ -30,6 +30,8 @@ type Group = NonNullable<Judgment["decision"]>["groups"][number];
 type Verdict = "merge" | "separate" | "failed" | "running";
 type Decision = "approved" | "rejected" | undefined;
 type Filter =
+  | "merge"
+  | "running"
   | "pending"
   | "approved"
   | "rejected"
@@ -150,6 +152,7 @@ export function GraphReviewDetails({
   const [selected, setSelected] = useState<string[]>([]);
   const [view, setView] = useState<"groups" | "execution">("groups");
   const root = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
 
   const decisions = decisionsOf(report);
   const judgments = useMemo(
@@ -182,10 +185,12 @@ export function GraphReviewDetails({
           : row.verdict === key;
   const filters: [Filter, string][] = [
     ["pending", "待处理"],
+    ["merge", "模型建议合并"],
     ["approved", "已批准"],
     ["rejected", "已否决"],
     ["separate", "模型判断不是同一个"],
     ["failed", "判断失败"],
+    ["running", "等待判断"],
     ["all", "全部"],
   ];
   const keyword = query.trim().toLowerCase();
@@ -316,6 +321,9 @@ export function GraphReviewDetails({
     by: string;
     value: string;
     state: "done" | "active" | "todo" | "failed";
+    // 点步骤卡片跳到对应的内容；selected：当前看的正是这一步的内容。
+    open?: () => void;
+    selected?: boolean;
   }[] = [
     {
       label: "找出候选",
@@ -367,11 +375,76 @@ export function GraphReviewDetails({
     },
   ];
 
+  const show = (next: Filter) => {
+    setView("groups");
+    setFilter(next);
+    window.setTimeout(
+      () =>
+        list.current?.scrollIntoView({ block: "start", behavior: "smooth" }),
+      0,
+    );
+  };
+  const actions: Record<
+    string,
+    Pick<(typeof steps)[number], "open" | "selected">
+  > = {
+    找出候选: {
+      open: () => show("all"),
+      selected: view === "groups" && filter === "all",
+    },
+    判断是否同一个: {
+      open: () =>
+        show(
+          rows.some((row) => row.verdict === "running") ? "running" : "merge",
+        ),
+      selected:
+        view === "groups" && (filter === "merge" || filter === "running"),
+    },
+    逐条决定: {
+      open: () => show("pending"),
+      selected: view === "groups" && filter === "pending",
+    },
+    重写图谱: records.length
+      ? {
+          open: () => {
+            setView("execution");
+            window.setTimeout(
+              () =>
+                list.current?.scrollIntoView({
+                  block: "start",
+                  behavior: "smooth",
+                }),
+              0,
+            );
+          },
+          selected: view === "execution",
+        }
+      : {},
+  };
+
   return (
     <div className="gr" ref={root}>
       <ol className="gr-steps">
         {steps.map((step, index) => (
-          <li key={step.label} className={`is-${step.state}`}>
+          <li
+            key={step.label}
+            className={`is-${step.state}${actions[step.label]?.open ? " is-link" : ""}${actions[step.label]?.selected ? " is-selected" : ""}`}
+            role={actions[step.label]?.open ? "button" : undefined}
+            tabIndex={actions[step.label]?.open ? 0 : undefined}
+            title={
+              actions[step.label]?.open ? "点击查看这一步的内容" : undefined
+            }
+            onClick={actions[step.label]?.open}
+            onKeyDown={(event) => {
+              if (
+                (event.key === "Enter" || event.key === " ") &&
+                actions[step.label]?.open
+              ) {
+                event.preventDefault();
+                actions[step.label].open!();
+              }
+            }}
+          >
             <span className="gr-step-dot">
               {step.state === "done"
                 ? "✓"
@@ -453,6 +526,7 @@ export function GraphReviewDetails({
         )}
       </div>
 
+      <div ref={list} />
       {records.length > 0 && (
         <div className="gr-tabs" role="tablist">
           <button
