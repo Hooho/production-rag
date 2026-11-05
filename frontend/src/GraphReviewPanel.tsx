@@ -239,11 +239,17 @@ export function GraphReviewDetails({
     });
   }
 
+  function similarityLabel(candidate: Candidate) {
+    const low = candidate.similarity?.toFixed(2);
+    const high = candidate.similarity_max?.toFixed(2);
+    return high && high !== low ? `${low}–${high}` : low;
+  }
+
   function openSimilarity(candidate: Candidate) {
     const method = scan.method;
-    const [a, b] = candidate.entities;
+    const names = candidate.entities.map((entity) => entityLabel(entity, ""));
     setDialog({
-      title: `相似度 ${candidate.similarity?.toFixed(2)}`,
+      title: `语义相似 ${similarityLabel(candidate)}`,
       body: (
         <div className="gr-similarity">
           <p>
@@ -254,25 +260,37 @@ export function GraphReviewDetails({
                 字面相似，不是语义
               </Tag>
             )}
-            。下面是实际拿去算向量的两段文字（格式：
-            {method?.text_format ?? "名字（类型）：描述"}）。
+            。组里任意两个都 ≥ {method?.min_similarity ?? "门槛"}{" "}
+            才放在一起；名字相同的记 1。
           </p>
-          {[a, b].map((entity, index) => (
+          {candidate.pairs && (
+            <table className="gr-pairs">
+              <tbody>
+                {[...candidate.pairs]
+                  .sort((x, y) => y[2] - x[2])
+                  .map(([i, j, score]) => (
+                    <tr key={`${i}-${j}`}>
+                      <td>{names[i]}</td>
+                      <td>↔</td>
+                      <td>{names[j]}</td>
+                      <td>{score.toFixed(2)}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          )}
+          <p className="gr-small">
+            实际拿去算向量的文字（格式：
+            {method?.text_format ?? "名字（类型）：描述"}）：
+          </p>
+          {candidate.entities.map((entity, index) => (
             <section key={entity.id}>
-              <strong>{entity.names.join(" / ")}</strong>
+              <strong>{names[index]}</strong>
               <pre className="graph-prompt">
                 {candidate.texts?.[index] ?? "—"}
               </pre>
             </section>
           ))}
-          {candidate.ranks && (
-            <p className="gr-small">
-              {entityLabel(b, "")} 是「{entityLabel(a, "")}」最像的第{" "}
-              {candidate.ranks[0]} 名；
-              {entityLabel(a, "")} 是「{entityLabel(b, "")}」最像的第{" "}
-              {candidate.ranks[1]} 名。
-            </p>
-          )}
         </div>
       ),
     });
@@ -376,12 +394,15 @@ export function GraphReviewDetails({
         {method ? (
           <>
             <p>
-              <strong>怎么找出候选：</strong>① 名字完全相同的直接放一组；②
-              其余用向量模型 <strong>{method.embedding?.model ?? "—"}</strong>{" "}
+              <strong>怎么找出候选：</strong>用向量模型{" "}
+              <strong>{method.embedding?.model ?? "—"}</strong>{" "}
               给每个实体算向量，算的文字是「{method.text_format}」，两两算
-              {method.metric}；每个实体取最像的 {method.top_k} 个，相似度 ≥{" "}
-              {method.min_similarity} 才成对，最多 {method.max_pairs}{" "}
-              对。只成对，不串联。
+              {method.metric}（名字完全相同的记
+              1）。从最像的两个开始往组里合并，
+              <strong>组里任意两个都 ≥ {method.min_similarity}</strong>{" "}
+              才能放在一起，每组最多 {method.max_group_size ?? "—"}{" "}
+              个，每个实体只进一组（只看它最像的 {method.top_k}{" "}
+              个）。不会串联，也不补查组外的对。
             </p>
             {method.embedding && !method.embedding.semantic && (
               <p className="gr-warn">
@@ -393,10 +414,10 @@ export function GraphReviewDetails({
             <p className="gr-small">
               扫描 {scan.entity_count} 个实体 · 名字相同{" "}
               {scan.stats?.same_name ?? 0} 组 · 语义相似{" "}
-              {scan.stats?.similar ?? 0} 对
-              {scan.stats &&
-                scan.stats.similar_total > scan.stats.similar &&
-                `（共 ${scan.stats.similar_total} 对达到门槛，只保留相似度最高的 ${scan.stats.similar}）`}{" "}
+              {scan.stats?.similar ?? 0} 组
+              {scan.stats?.total &&
+                scan.stats.total > scan.stats.same_name + scan.stats.similar &&
+                `（共 ${scan.stats.total} 组，只保留最像的 ${scan.stats.same_name + scan.stats.similar} 组）`}{" "}
               · 耗时 {scan.duration_ms ?? "—"} 毫秒
             </p>
           </>
@@ -570,7 +591,7 @@ export function GraphReviewDetails({
                       title="看相似度是拿什么算的"
                       onClick={() => openSimilarity(candidate)}
                     >
-                      语义相似 {candidate.similarity?.toFixed(2)} ▸
+                      语义相似 {similarityLabel(candidate)} ▸
                     </button>
                   ) : candidate.kind === "same_name" ? (
                     <span className="gr-kind is-static">名字相同</span>

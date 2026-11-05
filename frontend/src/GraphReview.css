@@ -581,3 +581,16 @@
 .gr-dropped {
   color: #94a3b8;
 }
+.gr-pairs {
+  border-collapse: collapse;
+  font-size: 13px;
+  margin: 8px 0;
+}
+.gr-pairs td {
+  padding: 4px 8px;
+  border-bottom: 1px solid #eef2f6;
+}
+.gr-pairs td:last-child {
+  font-family: "DM Mono", monospace;
+  text-align: right;
+}

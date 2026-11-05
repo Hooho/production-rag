@@ -4045,17 +4045,28 @@ export type GraphReviewReport = {
       embedding: { mode: string; model: string; semantic: boolean } | null;
       text_format: string;
       metric: string;
+      grouping?: string;
       top_k: number;
       min_similarity: number;
-      max_pairs: number;
+      max_group_size?: number;
+      max_groups?: number;
+      max_pairs?: number;
       error?: string;
     };
-    stats?: { same_name: number; similar: number; similar_total: number };
+    stats?: {
+      same_name: number;
+      similar: number;
+      total?: number;
+      similar_total?: number;
+    };
     candidates: {
       id: string;
       kind?: "same_name" | "similar";
       similarity?: number;
+      similarity_max?: number;
       texts?: string[];
+      // 组里两两的相似度：[第几个实体, 第几个实体, 分数]
+      pairs?: [number, number, number][];
       ranks?: number[];
       reason: string;
       entities: {

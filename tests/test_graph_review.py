@@ -53,13 +53,13 @@ def test_candidates_and_model_validation():
     )
     assert review.candidates(items) == (
         [],
-        {"same_name": 0, "similar": 0, "similar_total": 0},
+        {"same_name": 0, "similar": 0, "total": 0},
     )
     groups, stats = review.candidates(items, fake_embed)
     assert len(groups) == 1 and len(groups[0]["entities"]) == 2
     assert groups[0]["kind"] == "similar" and groups[0]["similarity"] > 0.99
-    assert groups[0]["ranks"] == [1, 1] and len(groups[0]["texts"]) == 2
-    assert stats == {"same_name": 0, "similar": 1, "similar_total": 1}
+    assert len(groups[0]["texts"]) == 2 and groups[0]["pairs"][0][:2] == [0, 1]
+    assert stats == {"same_name": 0, "similar": 1, "total": 1}
     assert len(ids) == 3
     candidate = groups[0]
     keys = [row["id"] for row in candidate["entities"]]
@@ -480,19 +480,32 @@ def item(key, name, kind="组织"):
     }
 
 
-def test_candidates_pair_without_chaining_and_same_name_first():
-    vectors = {"甲": [1.0, 0.0], "乙": [0.9, 0.436], "丙": [0.5, 0.866]}
-    items = [item("a", "甲"), item("b", "乙"), item("c", "丙"), item("d", "甲")]
+def test_candidates_group_only_when_every_pair_is_similar():
+    vectors = {
+        "甲": [1.0, 0.0],
+        "乙": [0.9, 0.436],
+        "丙": [0.5, 0.866],
+        "丁": [0.96, 0.28],
+    }
+    items = [item(key, key) for key in "甲乙丙丁"] + [item("甲2", "甲")]
     groups, stats = review.candidates(
         items, lambda texts: [vectors[text[0]] for text in texts]
     )
-    kinds = [(row["kind"], [e["id"] for e in row["entities"]]) for row in groups]
-    # 甲、甲 名字相同成组；甲~乙、乙~丙 各成一对，甲和丙（相似度 0.5）不会被串到一起。
-    assert kinds[0] == ("same_name", ["a", "d"])
-    pairs = sorted(sorted(ids) for kind, ids in kinds[1:])
-    assert pairs == [["a", "b"], ["b", "c"], ["b", "d"]]
-    assert all(kind == "similar" for kind, _ in kinds[1:])
-    assert stats["same_name"] == 1
+    ids = [sorted(e["id"] for e in row["entities"]) for row in groups]
+    # 甲、甲2 名字相同；乙、丁和甲两两都 ≥ 0.80，放进同一组。
+    # 丙只和乙像（0.83），和甲只有 0.5：进不了这组，也不会把两组串起来，不补查。
+    assert ids == [["丁", "乙", "甲", "甲2"]]
+    assert groups[0]["kind"] == "similar" and groups[0]["similarity"] >= 0.8
+    assert len(groups[0]["pairs"]) == 6
+    assert stats == {"same_name": 0, "similar": 1, "total": 1}
+
+
+def test_candidates_same_name_group_and_size_limit(monkeypatch):
+    monkeypatch.setattr(review, "MAX_GROUP_SIZE", 2)
+    items = [item("a", "项目A", "其他"), item("b", "项目A", "概念"), item("c", "项目A")]
+    groups, _ = review.candidates(items)
+    assert [row["kind"] for row in groups] == ["same_name"]
+    assert len(groups[0]["entities"]) == 2
 
 
 def chained_report():
