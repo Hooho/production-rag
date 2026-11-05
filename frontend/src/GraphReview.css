@@ -162,18 +162,6 @@
   font-size: 12px;
 }
 
-.gr-bulk {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  color: #475569;
-  font-size: 12px;
-}
-.gr-bulk span {
-  margin-right: auto;
-}
-
 .gr-list {
   display: flex;
   flex-direction: column;
@@ -468,10 +456,6 @@
   padding: 6px 10px;
   border-radius: 6px;
   background: #fafafa;
-}
-.gr-decision input {
-  width: auto;
-  margin: 0;
 }
 .gr-decision.is-approved {
   background: #f0fdf4;

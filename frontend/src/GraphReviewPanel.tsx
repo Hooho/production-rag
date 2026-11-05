@@ -189,7 +189,6 @@ export function GraphReviewDetails({
   const [filter, setFilter] = useState<Filter>(firstFilter[step]);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const [selected, setSelected] = useState<string[]>([]);
   const root = useRef<HTMLDivElement>(null);
 
   const decisions = decisionsOf(report);
@@ -265,14 +264,10 @@ export function GraphReviewDetails({
     (current - 1) * PAGE_SIZE,
     current * PAGE_SIZE,
   );
-  const pagePending = visible.flatMap((row) =>
-    row.ids.filter((id) => !decisions[id]),
-  );
 
   useEffect(() => setPage(1), [filter, query, step]);
   useEffect(() => {
     setFilter(firstFilter[step]);
-    setSelected([]);
   }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function goto(next: number) {
@@ -283,7 +278,6 @@ export function GraphReviewDetails({
   async function decide(ids: string[], decision: Decision | null) {
     if (!onDecide || ids.length === 0) return;
     await onDecide(ids, decision);
-    setSelected((items) => items.filter((id) => !ids.includes(id)));
   }
 
   function openEvidence(entity: Entity) {
@@ -559,7 +553,9 @@ export function GraphReviewDetails({
             )}
             {judgment?.decision?.separate_reason && (
               <p className="gr-reason">
-                {verdict === "separate" ? "不合并的原因：" : "其余不合并的原因："}
+                {verdict === "separate"
+                  ? "不合并的原因："
+                  : "其余不合并的原因："}
                 {judgment.decision.separate_reason}
               </p>
             )}
@@ -618,20 +614,6 @@ export function GraphReviewDetails({
                   className={`gr-decision is-${state ?? "pending"}`}
                   key={id}
                 >
-                  {editable && !state && (
-                    <input
-                      type="checkbox"
-                      aria-label="勾选以批量处理"
-                      checked={selected.includes(id)}
-                      onChange={(event) =>
-                        setSelected((items) =>
-                          event.target.checked
-                            ? [...items, id]
-                            : items.filter((key) => key !== id),
-                        )
-                      }
-                    />
-                  )}
                   <span className="gr-grow">
                     {ids.length > 1 && `${group.name}：`}
                     {state === "approved" ? (
@@ -724,48 +706,6 @@ export function GraphReviewDetails({
             onChange={(event) => setQuery(event.target.value)}
           />
         </div>
-
-        {step === 3 && editable && (
-          <div className="gr-bulk">
-            <span>
-              已勾选 <strong>{selected.length}</strong> 条
-            </span>
-            <button
-              type="button"
-              className="link-button"
-              disabled={busy || pagePending.length === 0}
-              onClick={() =>
-                setSelected([...new Set([...selected, ...pagePending])])
-              }
-            >
-              勾选本页待处理
-            </button>
-            <button
-              type="button"
-              className="link-button"
-              disabled={selected.length === 0}
-              onClick={() => setSelected([])}
-            >
-              清空勾选
-            </button>
-            <button
-              type="button"
-              className="secondary-button button-sm"
-              disabled={busy || selected.length === 0}
-              onClick={() => void decide(selected, "rejected")}
-            >
-              所选不合并
-            </button>
-            <button
-              type="button"
-              className="primary-button button-sm"
-              disabled={busy || selected.length === 0}
-              onClick={() => void decide(selected, "approved")}
-            >
-              所选合并（{selected.length}）
-            </button>
-          </div>
-        )}
 
         <div className="gr-list">
           {visible.length === 0 && (
@@ -922,8 +862,7 @@ export function GraphReviewDetails({
       {step === 3 && (
         <div className="gr-method">
           <p>
-            只列出模型建议合并的组。每条可以单独「合并 /
-            不合并」，也可以勾选后批量处理，随时可撤销。这里只记录决定，不会改图谱；全部看完去第
+            只列出模型建议合并的组。每条点「合并」或「不合并」，随时可撤销。这里只记录决定，不会改图谱；全部看完去第
             4 步确认。
           </p>
         </div>
