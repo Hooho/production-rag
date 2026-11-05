@@ -84,12 +84,13 @@ class MySQLStore:
                 document_steps.c.document_id == document_id, document_steps.c.step_order >= from_order))
 
     # 返回文档流水线阶段，按固定顺序供 API 和前端展示。
+    # 不在 SQL 里 ORDER BY：步骤的 result（JSON）可能很大（例如图谱二次检查的报告），
+    # MySQL 排序要把整行放进 sort buffer，会报 1038 Out of sort memory。每个版本只有十几步，在 Python 里排。
     def get_document_steps(self, document_id):
         with self.engine.connect() as connection:
             rows = connection.execute(select(document_steps).where(
-                document_steps.c.document_id == document_id
-            ).order_by(document_steps.c.step_order)).mappings().all()
-        return [dict(row) for row in rows]
+                document_steps.c.document_id == document_id)).mappings().all()
+        return sorted((dict(row) for row in rows), key=lambda row: row["step_order"])
 
     # 更新文档解析状态和错误摘要。
     def update_document(self, document_id, status, error=None):

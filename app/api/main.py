@@ -609,18 +609,19 @@ def check_session(store, session_id, owner):
 
 
 # 查询一个文档的处理阶段，所有结果都来自后端持久化状态。
+# 排序放在 Python 里：步骤的 result（JSON）可能很大，MySQL 排序时整行进 sort buffer 会报 1038。
 def read_document_steps(store, document_id):
     with store.engine.connect() as connection:
         rows = (
             connection.execute(
-                select(document_steps)
-                .where(document_steps.c.document_id == document_id)
-                .order_by(document_steps.c.step_order)
+                select(document_steps).where(
+                    document_steps.c.document_id == document_id
+                )
             )
             .mappings()
             .all()
         )
-    return [dict(row) for row in rows]
+    return sorted((dict(row) for row in rows), key=lambda row: row["step_order"])
 
 
 # 版本号来自旧数据时可能为空，统一视为第 1 版。
