@@ -285,48 +285,32 @@ export function GraphReviewPanel({
   }
   return (
     <>
-      <div className="graph-review-panel">
-        <strong>二次检查合并</strong>
-        <span className="graph-note">
-          {!report
-            ? "旧图尚未执行"
-            : report.status === "awaiting_review"
-              ? "等待人工确认"
-              : report.status === "completed"
-                ? "已完成"
-                : "处理中"}
-        </span>
-        {report && (
-          <button
-            type="button"
-            className="link-button"
-            onClick={() => setOpen(true)}
-          >
-            {report.status === "awaiting_review" ? "查看并确认" : "查看过程"}
-          </button>
-        )}
-        {canRetry && data?.can_confirm && (
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={busy}
-            onClick={() => void submit(true)}
-          >
-            {busy ? "正在提交…" : report ? "重新检查" : "补跑二次检查"}
-          </button>
-        )}
-        {error && (
-          <span className="field-error" role="alert">
-            {error}
-          </span>
-        )}
-      </div>
+      <button
+        type="button"
+        className="secondary-button"
+        disabled={busy}
+        onClick={() => setOpen(true)}
+      >
+        {report?.status === "awaiting_review"
+          ? "二次检查 · 待确认"
+          : "二次检查合并"}
+      </button>
       {open && (
         <DetailDialog open title="二次检查合并" onClose={() => setOpen(false)}>
           {error && (
             <p className="field-error" role="alert">
               {error}
             </p>
+          )}
+          {canRetry && data?.can_confirm && (
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={busy}
+              onClick={() => void submit(true)}
+            >
+              {busy ? "正在提交…" : report ? "重新检查" : "补跑二次检查"}
+            </button>
           )}
           {report ? (
             <GraphReviewDetails

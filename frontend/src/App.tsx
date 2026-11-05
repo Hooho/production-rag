@@ -63,6 +63,7 @@ import {
   retryDocument,
   retryDocumentContexts,
   retryDocumentGraph,
+  retryGraphReview,
   type ChunkGraphStatus,
   type UploadGraphOption,
   listGroups,
@@ -5597,6 +5598,15 @@ function Knowledge({
             onDelete={() => void remove(selected)}
             onRetry={() => void retry(selected)}
             onRetryContexts={() => void retryContexts(selected)}
+            onRetryReview={async () => {
+              try {
+                await retryGraphReview(selected.document_id);
+                setDetail(await getDocument(selected.document_id));
+                onToast("success", "二次检查已重新排队，将复用已有抽取结果。");
+              } catch (reason) {
+                onToast("error", (reason as Error).message);
+              }
+            }}
             onRetryGraph={async () => {
               try {
                 await retryDocumentGraph(selected.document_id);
@@ -6388,6 +6398,7 @@ function DocumentDetail({
   onGraphStatusChange,
   onRetryChunkGraph,
   onRetryGraph,
+  onRetryReview,
   graphPanel,
 }: {
   chunkSource: ChunkSource | null;
@@ -6396,6 +6407,7 @@ function DocumentDetail({
   onGraphStatusChange: (status: ChunkGraphStatus | null) => void;
   onRetryChunkGraph: (chunkId: string) => void;
   onRetryGraph: () => Promise<void>;
+  onRetryReview: () => Promise<void>;
   graphPanel: ReactNode;
   permission: ReactNode;
   onRetry: () => void;
@@ -6653,6 +6665,9 @@ function DocumentDetail({
           <div className="document-trace-panel">
             <DocumentTrace
               steps={document.steps}
+              onRetryReview={
+                document.can_edit !== false ? onRetryReview : undefined
+              }
               onRetryGraph={
                 document.can_edit !== false ? onRetryGraph : undefined
               }
@@ -7241,14 +7256,17 @@ function DocumentTrace({
   onRetryContexts,
   missingContexts = 0,
   onRetryGraph,
+  onRetryReview,
 }: {
   steps: DocumentStep[];
   onRetry?: () => void;
   onRetryContexts?: () => void;
   missingContexts?: number;
   onRetryGraph?: () => Promise<void>;
+  onRetryReview?: () => Promise<void>;
 }) {
   const [retryingGraph, setRetryingGraph] = useState(false);
+  const [retryingReview, setRetryingReview] = useState(false);
   const [reviewDetail, setReviewDetail] = useState<GraphReviewReport | null>(
     null,
   );
@@ -7265,8 +7283,7 @@ function DocumentTrace({
                 stage: "graph_review",
                 title: "二次检查合并",
                 status: "pending" as const,
-                detail:
-                  "未执行：此建图记录早于二次检查功能，可在实体关系页签补跑。",
+                detail: "未执行：此建图记录早于二次检查功能，可点击重试补跑。",
                 result: null,
                 duration_ms: null,
               },
@@ -7339,6 +7356,33 @@ function DocumentTrace({
               {formatDuration(step.duration_ms)}
             </time>
           )}
+          {step.step_id === "graph_review" &&
+            onRetryReview &&
+            step.status !== "running" &&
+            step.result?.status !== "awaiting_review" && (
+              <button
+                type="button"
+                className="secondary-button document-step-retry"
+                disabled={
+                  retryingReview ||
+                  traceSteps.some(
+                    (item) =>
+                      item.step_id.startsWith("graph_") &&
+                      item.status === "running",
+                  )
+                }
+                onClick={async () => {
+                  setRetryingReview(true);
+                  try {
+                    await onRetryReview();
+                  } finally {
+                    setRetryingReview(false);
+                  }
+                }}
+              >
+                {retryingReview ? "正在提交…" : "重试"}
+              </button>
+            )}
           {step.step_id === "graph_extract" &&
             (step.status === "failed" || step.status === "warning") &&
             onRetryGraph && (

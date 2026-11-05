@@ -319,6 +319,13 @@ export function DocumentGraph({
             )}
         </div>
         <div className="graph-actions">
+          <GraphReviewPanel
+            documentId={documentId}
+            buildId={build.id}
+            tick={tick}
+            canRetry={!busy && data.can_build}
+            onChanged={() => setTick((value) => value + 1)}
+          />
           <button
             type="button"
             className="secondary-button"
@@ -417,13 +424,7 @@ export function DocumentGraph({
           </table>
         </details>
       )}
-      <GraphReviewPanel
-        documentId={documentId}
-        buildId={build.id}
-        tick={tick}
-        canRetry={!busy && data.can_build}
-        onChanged={() => setTick((value) => value + 1)}
-      />
+
       <GraphWorkspace enabled={view === "network"}>
         <div className="graph-filters">
           <div className="chunk-source-filter">
