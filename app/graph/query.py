@@ -122,12 +122,9 @@ def relation_rows(connection, build_ids, entity_id=None):
         query = query.where(
             (source_entity.c.id == entity_id) | (target_entity.c.id == entity_id)
         )
-    rows = (
-        connection.execute(query.order_by(graph_chunk_extractions.c.position))
-        .mappings()
-        .all()
-    )
-    return [dict(row) for row in rows]
+    # 带着描述、原文证据（TEXT）的行不在 SQL 里排序：关系一多，MySQL 的 sort buffer 放不下，会报 1038。
+    rows = connection.execute(query).mappings().all()
+    return sorted((dict(row) for row in rows), key=lambda row: row["position"])
 
 
 # 一组建图里的实体：每个实体有几个名字、出现在几个分片、有几条关系。
@@ -509,11 +506,12 @@ def merge_rows(connection, build_id):
                 )
             )
             .where(graph_mentions.c.build_id == build_id)
-            .order_by(graph_chunk_extractions.c.position)
         )
         .mappings()
         .all()
     )
+    # 带 JSON 的行在 Python 里排序，原因见 relation_rows。
+    rows = sorted(rows, key=lambda row: row["position"])
     grouped = {}
     for row in rows:
         scope = (row["merge_detail"] or {}).get("scope", "unknown")
@@ -815,11 +813,11 @@ def entity_detail(engine, entity_id, document_id=None):
                     graph_mentions.c.entity_id == entity_id,
                     graph_mentions.c.build_id.in_(build_ids) if build_ids else false(),
                 )
-                .order_by(graph_chunk_extractions.c.position)
             )
             .mappings()
             .all()
         )
+        mention_rows = sorted(mention_rows, key=lambda row: row["position"])
         if not mention_rows:
             return None
         # 全局实体描述可能来自私有文档；详情只采用当前可见出处的描述。

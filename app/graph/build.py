@@ -295,6 +295,8 @@ def estimate(store, models, document_id, schema_id=None, choice=None):
 
 
 # 以前抽过、可以直接复用的结果：cache_key 相同、抽取成功的最新一条。
+# 不在 SQL 里 ORDER BY：抽取记录带着完整提示词和模型输出（JSON / TEXT），MySQL 排序时要把整行放进
+# sort buffer，分片一多就报 1038 Out of sort memory。取出来以后在 Python 里按时间挑最新的。
 def reusable_extractions(engine, keys):
     if not keys:
         return {}
@@ -304,18 +306,18 @@ def reusable_extractions(engine, keys):
             part = keys[start : start + 500]
             rows = (
                 connection.execute(
-                    select(graph_chunk_extractions)
-                    .where(
+                    select(graph_chunk_extractions).where(
                         graph_chunk_extractions.c.cache_key.in_(part),
                         graph_chunk_extractions.c.status.in_(("extracted", "reused")),
                     )
-                    .order_by(graph_chunk_extractions.c.created)
                 )
                 .mappings()
                 .all()
             )
             for row in rows:
-                found[row["cache_key"]] = dict(row)
+                current = found.get(row["cache_key"])
+                if current is None or row["created"] >= current["created"]:
+                    found[row["cache_key"]] = dict(row)
     return found
 
 
@@ -678,16 +680,16 @@ def finalize(store, build, models=None):
         value = counts(connection, build["id"])
         rows = (
             connection.execute(
-                select(graph_chunk_extractions)
-                .where(
+                select(graph_chunk_extractions).where(
                     graph_chunk_extractions.c.build_id == build["id"],
                     graph_chunk_extractions.c.status.in_(("extracted", "reused")),
                 )
-                .order_by(graph_chunk_extractions.c.position)
             )
             .mappings()
             .all()
         )
+        # 按分片顺序合并；排序放在 Python 里，原因见 reusable_extractions。
+        rows = sorted(rows, key=lambda row: row["position"])
     extract_status = (
         "completed" if not value["failed"] else ("warning" if rows else "failed")
     )
