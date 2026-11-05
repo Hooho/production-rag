@@ -1,5 +1,5 @@
 import { DetailDialog } from "./DetailDialog";
-import { GraphReviewBody } from "./GraphReviewPanel";
+import { GraphReviewBody, pendingCount } from "./GraphReviewPanel";
 import type { GraphReviewReport } from "./api";
 import DataManagement from "./DataManagement";
 import Evaluation, { type EvaluationSection } from "./Evaluation";
@@ -7290,6 +7290,7 @@ function DocumentTrace({
     : steps.flatMap((step) =>
         step.step_id === "graph_write"
           ? [
+              step,
               {
                 ...step,
                 step_id: "graph_review",
@@ -7300,7 +7301,6 @@ function DocumentTrace({
                 result: null,
                 duration_ms: null,
               },
-              step,
             ]
           : [step],
       );
@@ -7319,44 +7319,46 @@ function DocumentTrace({
   return (
     <div className="document-trace">
       {traceSteps.map((step) => {
-        const awaiting =
+        // 二次检查在写入图谱之后单独跑，不阻塞建图：有待处理的建议时只给一个入口，不标红也不标黄。
+        const review =
           step.step_id === "graph_review" &&
-          step.result?.status === "awaiting_review";
+          step.result &&
+          "status" in step.result
+            ? (step.result as unknown as GraphReviewReport)
+            : null;
+        const reviewActive =
+          !!review &&
+          ["queued", "running", "rewriting"].includes(review.status);
+        const reviewPending =
+          review && !reviewActive && review.scan ? pendingCount(review) : 0;
         return (
-          <div
-            className={`document-step ${awaiting ? "awaiting" : step.status}`}
-            key={step.step_id}
-          >
+          <div className={`document-step ${step.status}`} key={step.step_id}>
             <span className="document-step-icon">
               {step.status === "completed"
                 ? "✓"
                 : step.status === "running"
                   ? "·"
-                  : awaiting
-                    ? "?"
-                    : step.status === "pending" || step.status === "stopped"
-                      ? "○"
-                      : "!"}
+                  : step.status === "pending" || step.status === "stopped"
+                    ? "○"
+                    : "!"}
             </span>
             {/* warning：步骤跑完了但结果有问题（安全扫描发现疑似注入），整行标红。 */}
             <div className="document-step-copy">
               <strong>{step.title}</strong>
-              {step.step_id === "graph_review" &&
-              step.result &&
-              "scan" in step.result ? (
+              {review ? (
                 // 说明和入口放一行：按钮用小号，不抢说明的位置。
                 <small className="document-step-inline">
                   {step.detail}
                   <button
                     type="button"
-                    className={`document-step-link ${awaiting ? "is-primary" : ""}`}
-                    onClick={() =>
-                      setReviewDetail(
-                        step.result as unknown as GraphReviewReport,
-                      )
-                    }
+                    className={`document-step-link ${reviewPending > 0 ? "is-primary" : ""}`}
+                    onClick={() => setReviewDetail(review)}
                   >
-                    {awaiting ? "去人工确认 →" : "查看检查过程和结果"}
+                    {reviewActive
+                      ? "查看进度"
+                      : reviewPending > 0
+                        ? `去处理（${reviewPending} 条待处理）→`
+                        : "查看检查过程和结果"}
                   </button>
                 </small>
               ) : (
@@ -7365,9 +7367,7 @@ function DocumentTrace({
                 </Clamp>
               )}
               {/* 以前把 <strong> 拼进字符串，React 当普通文字输出，页面上直接显示出尖括号；现在用真正的元素渲染字段名。 */}
-              {step.step_id === "graph_review" &&
-              step.result &&
-              "scan" in step.result
+              {review || step.step_id === "graph_rewrite"
                 ? null
                 : step.result && (
                     <Clamp text={stepResultText(step.result)}>
@@ -7393,7 +7393,7 @@ function DocumentTrace({
             {step.step_id === "graph_review" &&
               onRetryReview &&
               step.status !== "running" &&
-              step.result?.status !== "awaiting_review" && (
+              !reviewActive && (
                 <button
                   type="button"
                   className="secondary-button document-step-retry"

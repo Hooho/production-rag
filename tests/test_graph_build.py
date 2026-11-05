@@ -162,7 +162,8 @@ def test_build_document_graph(setup, monkeypatch):
     )
     # 正在建图时不能再建一次。
     assert build(client, document_id).status_code == 409
-    assert run_graph_jobs(store, models) == total
+    # 每批一个分片，写入图谱后再多一个二次检查任务（不阻塞建图）。
+    assert run_graph_jobs(store, models) == total + 1
     graph = client.get(f"/documents/{document_id}/graph", headers=headers()).json()
     assert graph["build"]["status"] == "completed" and graph["build"]["active"] is True
     assert graph["build"]["schema_name"] == "默认清单 v1"

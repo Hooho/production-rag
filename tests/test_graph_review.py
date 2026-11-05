@@ -87,59 +87,58 @@ def test_candidates_and_model_validation():
             review.validate(json.dumps(bad), candidate, {"组织"})
 
 
-def test_apply_requires_approval_and_preserves_security_objects_and_provenance():
-    db = engine()
-    plan = plan_for(db)
-    items, ids = review.inventory(plan, {})
-    company_ids = [item["id"] for item in items if item["types"] == ["组织"]]
-    decision = {
-        "ids": company_ids,
-        "name": "腾讯控股",
-        "type": "组织",
-        "reason": "公司别名",
-    }
-    report = {
-        "status": "awaiting_review",
+def one_group_report(ids):
+    return {
         "judgments": [
             {
                 "candidate_id": "1",
                 "status": "completed",
-                "decision": {"groups": [decision]},
+                "decision": {
+                    "groups": [
+                        {
+                            "ids": ids,
+                            "name": "腾讯控股",
+                            "type": "组织",
+                            "reason": "公司简称",
+                        }
+                    ]
+                },
             }
-        ],
-        "approved_ids": ["1:0"],
-        "approved_by": "alice",
+        ]
     }
+
+
+def test_apply_only_approved_groups_and_preserves_security_objects():
+    db = engine()
+    plan = plan_for(db)
+    items, ids = review.inventory(plan, {})
+    company_ids = [item["id"] for item in items if item["types"] == ["组织"]]
+    report = one_group_report(company_ids)
+    assert review.resolve_groups(report, []) == []
+    groups = review.resolve_groups(report, ["1:0"])
+    build_row = {"document_id": "doc-a", "space": "online"}
     with db.begin() as connection:
-        with pytest.raises(ValueError, match="人工确认"):
-            review.apply(
-                connection,
-                plan,
-                {"document_id": "doc-a", "space": "online"},
-                report,
-                ids,
-            )
-        rejected = copy.deepcopy(plan)
-        report["status"] = "confirmed"
-        report["approved_ids"] = []
-        review.apply(
-            connection,
-            rejected,
-            {"document_id": "doc-a", "space": "online"},
-            report,
-            ids,
-        )
-        assert len({row["entity_id"] for row in rejected["mentions"]}) == 3
-        report["approved_ids"] = ["1:0"]
-        review.apply(
-            connection, plan, {"document_id": "doc-a", "space": "online"}, report, ids
-        )
+        untouched = copy.deepcopy(plan)
+        review.apply(connection, untouched, build_row, [], ids, "alice")
+        assert len({row["entity_id"] for row in untouched["mentions"]}) == 3
+        records = review.apply(connection, plan, build_row, groups, ids, "alice")
+        assert records[0]["status"] == "completed"
         assert len({row["entity_id"] for row in plan["mentions"]}) == 2
         assert {row["name"] for row in plan["mentions"]} == {
             "腾讯",
             "腾讯控股",
             "腾讯股票",
         }
+        # 抽取结果变化后找不到的实体：跳过，不报错。
+        missing = review.apply(
+            connection,
+            copy.deepcopy(untouched),
+            build_row,
+            [{**groups[0], "ids": ["gone", company_ids[0]]}],
+            ids,
+            "alice",
+        )
+        assert missing[0]["status"] == "skipped"
         resolve.write_build(connection, "online", "b1", plan)
         assert connection.execute(select(graph_entities.c.id)).all()
         assert len(connection.execute(select(graph_mentions.c.id)).all()) == 3
@@ -160,7 +159,7 @@ def test_judge_preserves_raw_failure_and_usage(monkeypatch):
     assert result["prompt"][0]["content"] == review.SYSTEM
 
 
-def test_review_waits_confirm_then_applies_without_recalling_model(monkeypatch):
+def test_review_runs_after_write_then_rewrites_with_decisions(monkeypatch):
     db = engine()
     row = {
         "id": "b1",
@@ -173,8 +172,8 @@ def test_review_waits_confirm_then_applies_without_recalling_model(monkeypatch):
         "prompt_tag": "test",
         "prompt_identity": "test",
         "trigger_kind": "manual",
-        "status": "running",
-        "active": False,
+        "status": "completed",
+        "active": True,
         "created_by": "alice",
         "created": "t",
         "updated": "t",
@@ -217,7 +216,7 @@ def test_review_waits_confirm_then_applies_without_recalling_model(monkeypatch):
     )
     monkeypatch.setattr(build, "models_for", lambda *_: None)
     queue = []
-    monkeypatch.setattr(build, "enqueue", lambda _, key: queue.append(key))
+    monkeypatch.setattr(build, "enqueue", lambda _, key, stage=None: queue.append(key))
     calls = []
 
     def judge(_, schema, candidate):
@@ -241,29 +240,80 @@ def test_review_waits_confirm_then_applies_without_recalling_model(monkeypatch):
         }
 
     monkeypatch.setattr(review, "judge", judge)
-    report = build.secondary_review(store, fake_models, row, plan_for(db))
+    monkeypatch.setattr(build, "extraction_rows", lambda *_: [])
+    base_plan = plan_for(db)
+    monkeypatch.setattr(
+        build.resolve, "prepare_build", lambda *_: copy.deepcopy(base_plan)
+    )
+    # 建图写入后：排队二次检查，不改建图状态。
+    build.after_write(store, row, None, None)
+    assert queue == ["b1"]
+    build.run_review_job(store, fake_models, "b1")
+    report = build.review_report(db, row)
+    assert report["status"] == "ready"
     assert report["scan"]["method"]["embedding"]["model"] == "bge-test"
     assert report["scan"]["candidates"][0]["kind"] == "similar"
+    with db.connect() as connection:
+        assert (
+            connection.execute(
+                select(graph_builds.c.status).where(graph_builds.c.id == "b1")
+            ).scalar_one()
+            == "completed"
+        )
+    # 单条决定：批准、撤销、否决；无效编号报错。
     build.decide_review(store, "b1", ["1:0"], "approved", "alice")
     build.decide_review(store, "b1", ["1:0"], None, "alice")
     build.decide_review(store, "b1", ["1:0"], "rejected", "alice")
-    saved = build.review_report(db, row)
-    assert saved["decisions"]["1:0"]["decision"] == "rejected"
+    assert build.review_report(db, row)["decisions"]["1:0"]["decision"] == "rejected"
     with pytest.raises(build.BuildError):
         build.decide_review(store, "b1", ["9:9"], "approved", "alice")
-    assert report["status"] == "awaiting_review"
-    with db.connect() as connection:
-        assert not connection.execute(select(graph_entities)).all()
+    with pytest.raises(build.BuildError, match="还没有批准"):
+        build.rewrite_review(store, "b1", "alice")
+    build.decide_review(store, "b1", ["1:0"], "approved", "alice")
+    queue.clear()
+    build.rewrite_review(store, "b1", "alice")
+    assert queue == ["b1"]
+    saved = build.review_report(db, row)
+    assert (
+        saved["status"] == "rewriting"
+        and saved["applied"]["groups"][0]["name"] == "腾讯控股"
+    )
     with pytest.raises(build.BuildError):
-        build.confirm_review(store, "b1", ["invalid"], "alice")
-    build.confirm_review(store, "b1", ["1:0"], "alice")
-    with pytest.raises(build.BuildError):
-        build.confirm_review(store, "b1", ["1:0"], "alice")
+        build.decide_review(store, "b1", ["1:0"], None, "alice")
+    # 写入时应用已确认的合并，写完回到 ready，不再调用模型、不重新排队检查。
     approved_plan = plan_for(db)
-    result = build.secondary_review(store, fake_models, row, approved_plan)
-    assert result["status"] == "prepared"
-    assert len(calls) == 1 and queue == ["b1"]
+    _, ids = review.inventory(approved_plan, {})
+    with db.connect() as connection:
+        records = review.apply(
+            connection, approved_plan, row, saved["applied"]["groups"], ids, "alice"
+        )
     assert len({item["entity_id"] for item in approved_plan["mentions"]}) == 2
+    with db.begin() as connection:  # finalize 写完会把建图标回完成
+        connection.execute(
+            graph_builds.update()
+            .where(graph_builds.c.id == "b1")
+            .values(status="completed")
+        )
+    queue.clear()
+    build.after_write(store, row, saved, records)
+    assert queue == []
+    final = build.review_report(db, row)
+    assert (
+        final["status"] == "ready"
+        and final["applied"]["records"][0]["status"] == "completed"
+    )
+    assert len(calls) == 1
+    # 补跑分片后再写入：沿用报告，重新检查时签名不变，不重复调用模型。
+    build.after_write(store, row, final, records)
+    build.run_review_job(store, fake_models, "b1")
+    again = build.review_report(db, row)
+    assert again["status"] == "ready" and len(calls) == 1
+    assert again["decisions"]["1:0"]["decision"] == "approved"
+    # 重新检查：清掉判断和决定，保留已应用的合并。
+    build.retry_review(store, "b1")
+    fresh = build.review_report(db, row)
+    assert fresh["status"] == "queued" and fresh["applied"]["groups"]
+    assert "decisions" not in fresh
 
 
 def test_review_api_permissions_and_build_identity(monkeypatch):
@@ -290,9 +340,14 @@ def test_review_api_permissions_and_build_identity(monkeypatch):
         "review_report",
         lambda *_: {"build_id": build_id, "status": "awaiting_review"},
     )
+    monkeypatch.setattr(
+        graph_routes.graph_query,
+        "latest_build",
+        lambda *_: {"id": build_id, "document_id": document_id, "status": "completed"},
+    )
     calls = []
     monkeypatch.setattr(
-        build, "confirm_review", lambda *args: calls.append(args) or {"id": build_id}
+        build, "rewrite_review", lambda *args: calls.append(args) or {"id": build_id}
     )
 
     def current_user(x_user: str = Header("alice")):
@@ -310,22 +365,23 @@ def test_review_api_permissions_and_build_identity(monkeypatch):
             is False
         )
         assert client.get(path, headers={"x-user": "outsider"}).status_code == 404
-        body = {"build_id": build_id, "approved_ids": []}
+        assert client.get(path).json()["report"]["status"] == "ready"
+        body = {"build_id": build_id}
         assert (
             client.post(
-                path + "/confirm", headers={"x-user": "reader"}, json=body
+                path + "/rewrite", headers={"x-user": "reader"}, json=body
             ).status_code
             == 403
         )
         assert (
             client.post(
-                path + "/confirm", json={**body, "build_id": document_id}
+                path + "/rewrite", json={**body, "build_id": document_id}
             ).status_code
             == 409
         )
         assert not calls
-        assert client.post(path + "/confirm", json=body).status_code == 202
-        assert len(calls) == 1 and calls[0][3] == "alice" and calls[0][4] == {}
+        assert client.post(path + "/rewrite", json=body).status_code == 202
+        assert len(calls) == 1 and calls[0][2] == "alice" and calls[0][3] == {}
         decided = []
         monkeypatch.setattr(
             build, "decide_review", lambda *args: decided.append(args) or {}
@@ -375,9 +431,6 @@ def test_review_keeps_other_documents_entities_unchanged_and_is_repeatable():
         items, ids = review.inventory(plan, {})
         companies = [item["id"] for item in items if item["types"] == ["组织"]]
         report = {
-            "status": "confirmed",
-            "approved_ids": ["1:0"],
-            "approved_by": "alice",
             "judgments": [
                 {
                     "candidate_id": "1",
@@ -396,7 +449,8 @@ def test_review_keeps_other_documents_entities_unchanged_and_is_repeatable():
             ],
         }
         with db.begin() as connection:
-            records = review.apply(connection, plan, build_row, report, ids)
+            groups = review.resolve_groups(report, ["1:0"])
+            records = review.apply(connection, plan, build_row, groups, ids, "alice")
             targets.append(records[0]["entity_id"])
             resolve.write_build(connection, "online", "b1", plan)
             assert (
@@ -471,3 +525,13 @@ def test_components_join_shared_entities_and_need_a_choice():
         "腾讯控股有限公司",
     ]
     assert len(groups[1]["options"]) == 1
+
+
+def test_resolve_groups_requires_choice_for_conflicting_names():
+    report = chained_report()
+    with pytest.raises(ValueError, match="请先选定"):
+        review.resolve_groups(report, ["1:0", "2:0"])
+    groups = review.resolve_groups(
+        report, ["1:0", "2:0"], {"1:0": {"name": "腾讯控股", "type": "组织"}}
+    )
+    assert groups[0]["ids"] == ["a", "b", "c"] and groups[0]["name"] == "腾讯控股"

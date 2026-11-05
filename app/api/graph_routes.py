@@ -42,9 +42,8 @@ class ReviewChoice(BaseModel):
     type: str = Field(min_length=1, max_length=100)
 
 
-class ReviewConfirmInput(BaseModel):
+class ReviewRewriteInput(BaseModel):
     build_id: UUID
-    approved_ids: list[str] = Field(default_factory=list, max_length=10000)
     # 连在一起的建议名字不一致时，人工选的最终名字和类型；键是组内最小的建议编号。
     resolutions: dict[str, ReviewChoice] = Field(default_factory=dict)
 
@@ -237,18 +236,21 @@ def build_router(current_user, identity, require_admin):
         row = readable(state, user["username"], document_id)
         with state.store.engine.connect() as connection:
             build = graph_query.latest_build(connection, str(document_id))
+        report = graph_build.review_report(state.store.engine, build) if build else None
+        if report:
+            report = {**report, "status": graph_build.review_state(report, build)}
         return {
-            "report": graph_build.review_report(state.store.engine, build)
-            if build
-            else None,
+            "report": report,
+            "build_status": build["status"] if build else None,
             "can_confirm": row["owner"] == user["username"] or bool(user["is_admin"]),
         }
 
-    @router.post("/documents/{document_id}/graph/review/confirm", status_code=202)
-    def review_confirm(
+    # 按当前所有已批准的建议重写图谱（不调用模型）；不确认也不影响已写入的图谱。
+    @router.post("/documents/{document_id}/graph/review/rewrite", status_code=202)
+    def review_rewrite(
         request: Request,
         document_id: UUID,
-        body: ReviewConfirmInput,
+        body: ReviewRewriteInput,
         user=Depends(current_user),
     ):
         state = request.app.state
@@ -259,10 +261,9 @@ def build_router(current_user, identity, require_admin):
         if not latest or latest["id"] != str(body.build_id):
             raise HTTPException(409, "建图记录已切换，请刷新")
         try:
-            return graph_build.confirm_review(
+            return graph_build.rewrite_review(
                 state.store,
                 str(body.build_id),
-                body.approved_ids,
                 user["username"],
                 {key: value.model_dump() for key, value in body.resolutions.items()},
             )

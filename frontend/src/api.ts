@@ -3997,7 +3997,35 @@ export function getGraphTasks() {
 
 export type GraphReviewReport = {
   build_id: string;
+  // queued 排队 / running 模型判断中 / ready 可以逐条决定 / rewriting 正在重写图谱 / failed / idle 未开始
   status: string;
+  error?: string;
+  // 上次「按确认结果重写图谱」应用到图谱上的合并结果；之后每次写入图谱都按它应用。
+  applied?: {
+    groups: (GraphReviewChoice & {
+      key: string;
+      ids: string[];
+      proposal_ids: string[];
+      reason: string;
+    })[];
+    approved_ids: string[];
+    by: string;
+    at: string;
+    records:
+      | {
+          id: string;
+          status: string;
+          name: string;
+          type: string;
+          from_names?: string[];
+          mention_count?: number;
+          relation_count?: number;
+          type_corrections?: number;
+          proposal_ids?: string[];
+          reason: string;
+        }[]
+      | null;
+  };
   approved_by?: string;
   approved_at?: string;
   approved_ids?: string[];
@@ -4007,7 +4035,7 @@ export type GraphReviewReport = {
     string,
     { decision: "approved" | "rejected"; by: string; at: string }
   >;
-  scan: {
+  scan?: {
     duration_ms?: number;
     status: string;
     entity_count: number;
@@ -4053,7 +4081,8 @@ export type GraphReviewReport = {
       separate_reason?: string;
     };
   }[];
-  execution: {
+  // 旧流程的执行结果（新流程看 applied.records）。
+  execution?: {
     status: string;
     records: {
       id: string;
@@ -4072,9 +4101,11 @@ export type GraphReviewReport = {
 };
 export type GraphReviewChoice = { name: string; type: string };
 export function getGraphReview(documentId: string) {
-  return request<{ report: GraphReviewReport | null; can_confirm: boolean }>(
-    `/documents/${documentId}/graph/review`,
-  );
+  return request<{
+    report: GraphReviewReport | null;
+    can_confirm: boolean;
+    build_status: string | null;
+  }>(`/documents/${documentId}/graph/review`);
 }
 export function decideGraphReview(
   documentId: string,
@@ -4094,19 +4125,15 @@ export function decideGraphReview(
     },
   );
 }
-export function confirmGraphReview(
+// 按当前所有已批准的建议重写图谱（不调用模型）。
+export function rewriteGraphReview(
   documentId: string,
   buildId: string,
-  approvedIds: string[],
   resolutions: Record<string, GraphReviewChoice> = {},
 ) {
-  return request<GraphBuild>(`/documents/${documentId}/graph/review/confirm`, {
+  return request<GraphBuild>(`/documents/${documentId}/graph/review/rewrite`, {
     method: "POST",
-    body: JSON.stringify({
-      build_id: buildId,
-      approved_ids: approvedIds,
-      resolutions,
-    }),
+    body: JSON.stringify({ build_id: buildId, resolutions }),
   });
 }
 export function retryGraphReview(documentId: string) {

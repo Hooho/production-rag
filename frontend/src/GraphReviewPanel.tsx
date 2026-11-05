@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  confirmGraphReview,
   decideGraphReview,
   getGraphReview,
   retryGraphReview,
+  rewriteGraphReview,
   type GraphReviewChoice,
   type GraphReviewReport,
 } from "./api";
@@ -23,7 +23,7 @@ const statuses: Record<string, string> = {
   skipped: "未执行",
 };
 
-type Candidate = GraphReviewReport["scan"]["candidates"][number];
+type Candidate = NonNullable<GraphReviewReport["scan"]>["candidates"][number];
 type Entity = Candidate["entities"][number];
 type Judgment = GraphReviewReport["judgments"][number];
 type Group = NonNullable<Judgment["decision"]>["groups"][number];
@@ -55,22 +55,27 @@ function verdictOf(judgment: Judgment | undefined): Verdict {
   return judgment.decision?.groups.length ? "merge" : "separate";
 }
 
-// 每条建议的人工决定：确认前看 decisions；确认后（或旧报告）看 approved_ids。
+// 每条建议的人工决定（只看 decisions；旧流程的 approved_ids 不再沿用，重新检查后按新规则决定）。
 export function decisionsOf(report: GraphReviewReport) {
   const result: Record<string, Decision> = {};
-  if (report.approved_by) {
-    for (const judgment of report.judgments)
-      judgment.decision?.groups.forEach((_, index) => {
-        const id = `${judgment.candidate_id}:${index}`;
-        result[id] = report.approved_ids?.includes(id)
-          ? "approved"
-          : "rejected";
-      });
-    return result;
-  }
   for (const [id, item] of Object.entries(report.decisions ?? {}))
     result[id] = item.decision;
   return result;
+}
+
+// 待处理的建议条数（模型建议合并、还没批准也没否决的）。
+export function pendingCount(report: GraphReviewReport) {
+  const decisions = report.decisions ?? {};
+  return (report.judgments ?? []).reduce(
+    (sum, item) =>
+      sum +
+      (item.status === "completed"
+        ? (item.decision?.groups ?? []).filter(
+            (_, index) => !decisions[`${item.candidate_id}:${index}`],
+          ).length
+        : 0),
+    0,
+  );
 }
 
 // 和后端 review.components 同一规则：共享实体的已批准建议连成一个合并结果；key 取组内字典序最小的建议编号。
@@ -132,6 +137,9 @@ export function GraphReviewDetails({
   busy?: boolean;
 }) {
   const editable = Boolean(onDecide);
+  const scan = report.scan!;
+  const applied = new Set(report.applied?.approved_ids ?? []);
+  const records = report.applied?.records ?? report.execution?.records ?? [];
   const [dialog, setDialog] = useState<{
     title: string;
     body: ReactNode;
@@ -151,13 +159,13 @@ export function GraphReviewDetails({
   const entities = useMemo(
     () =>
       new Map(
-        report.scan.candidates.flatMap((candidate) =>
+        scan.candidates.flatMap((candidate) =>
           candidate.entities.map((item) => [item.id, item] as const),
         ),
       ),
-    [report.scan.candidates],
+    [scan.candidates],
   );
-  const rows = report.scan.candidates.map((candidate) => {
+  const rows = scan.candidates.map((candidate) => {
     const judgment = judgments.get(candidate.id);
     const ids = (judgment?.decision?.groups ?? []).map(
       (_, index) => `${candidate.id}:${index}`,
@@ -232,7 +240,7 @@ export function GraphReviewDetails({
   }
 
   function openSimilarity(candidate: Candidate) {
-    const method = report.scan.method;
+    const method = scan.method;
     const [a, b] = candidate.entities;
     setDialog({
       title: `相似度 ${candidate.similarity?.toFixed(2)}`,
@@ -284,7 +292,7 @@ export function GraphReviewDetails({
   const judged = report.judgments.filter(
     (item) => item.status !== "running",
   ).length;
-  const method = report.scan.method;
+  const method = scan.method;
   const steps: {
     label: string;
     by: string;
@@ -294,46 +302,50 @@ export function GraphReviewDetails({
     {
       label: "找出候选",
       by: "系统",
-      value: `${report.scan.candidate_count} 组`,
+      value: `${scan.candidate_count} 组`,
       state:
-        report.scan.status === "completed"
+        scan.status === "completed"
           ? "done"
-          : report.scan.status === "failed"
+          : scan.status === "failed"
             ? "failed"
             : "active",
     },
     {
       label: "判断是否同一个",
       by: "大模型",
-      value: `${judged}/${report.scan.candidate_count}`,
-      state: judged >= report.scan.candidate_count ? "done" : "active",
+      value: `${judged}/${scan.candidate_count}`,
+      state: judged >= scan.candidate_count ? "done" : "active",
     },
     {
       label: "逐条决定",
       by: "人工",
       value:
-        report.scan.candidate_count === 0
+        scan.candidate_count === 0
           ? "无需确认"
           : `批准 ${approvedCount} · 否决 ${rejectedCount} · 待处理 ${allProposals.length - approvedCount - rejectedCount}`,
       state:
-        report.approved_by || report.scan.candidate_count === 0
+        scan.candidate_count === 0 ||
+        approvedCount + rejectedCount === allProposals.length
           ? "done"
-          : report.status === "awaiting_review"
+          : report.status === "ready"
             ? "active"
             : "todo",
     },
     {
-      label: "写入图谱",
+      label: "重写图谱",
       by: "系统",
-      value: statuses[report.execution.status] ?? report.execution.status,
+      value:
+        report.status === "rewriting"
+          ? "正在重写"
+          : report.applied
+            ? `已应用 ${report.applied.groups.length} 个合并`
+            : "未重写（可选）",
       state:
-        report.execution.status === "completed"
-          ? "done"
-          : report.execution.status === "failed"
-            ? "failed"
-            : report.execution.status === "running"
-              ? "active"
-              : "todo",
+        report.status === "rewriting"
+          ? "active"
+          : report.applied
+            ? "done"
+            : "todo",
     },
   ];
 
@@ -379,31 +391,31 @@ export function GraphReviewDetails({
             )}
             {method.error && <p className="gr-warn">{method.error}</p>}
             <p className="gr-small">
-              扫描 {report.scan.entity_count} 个实体 · 名字相同{" "}
-              {report.scan.stats?.same_name ?? 0} 组 · 语义相似{" "}
-              {report.scan.stats?.similar ?? 0} 对
-              {report.scan.stats &&
-                report.scan.stats.similar_total > report.scan.stats.similar &&
-                `（共 ${report.scan.stats.similar_total} 对达到门槛，只保留相似度最高的 ${report.scan.stats.similar}）`}{" "}
-              · 耗时 {report.scan.duration_ms ?? "—"} 毫秒
+              扫描 {scan.entity_count} 个实体 · 名字相同{" "}
+              {scan.stats?.same_name ?? 0} 组 · 语义相似{" "}
+              {scan.stats?.similar ?? 0} 对
+              {scan.stats &&
+                scan.stats.similar_total > scan.stats.similar &&
+                `（共 ${scan.stats.similar_total} 对达到门槛，只保留相似度最高的 ${scan.stats.similar}）`}{" "}
+              · 耗时 {scan.duration_ms ?? "—"} 毫秒
             </p>
           </>
         ) : (
           <p className="gr-small">
-            旧规则（名字相同或互相包含）找出的候选 · 扫描{" "}
-            {report.scan.entity_count} 个实体 · 耗时{" "}
-            {report.scan.duration_ms ?? "—"}{" "}
+            旧规则（名字相同或互相包含）找出的候选 · 扫描 {scan.entity_count}{" "}
+            个实体 · 耗时 {scan.duration_ms ?? "—"}{" "}
             毫秒。点「重新检查」会按新规则重跑。
           </p>
         )}
-        {report.approved_by && (
+        {report.applied && (
           <p className="gr-small">
-            确认人 {report.approved_by} · {report.approved_at ?? ""}
+            图谱上次按确认结果重写：{report.applied.by} · {report.applied.at}
+            ，应用了 {report.applied.groups.length} 个合并结果
           </p>
         )}
       </div>
 
-      {report.execution.records.length > 0 && (
+      {records.length > 0 && (
         <div className="gr-tabs" role="tablist">
           <button
             type="button"
@@ -420,18 +432,14 @@ export function GraphReviewDetails({
             onClick={() => setView("execution")}
           >
             合并结果{" "}
-            {
-              report.execution.records.filter(
-                (item) => item.status !== "skipped",
-              ).length
-            }
+            {records.filter((item) => item.status !== "skipped").length}
           </button>
         </div>
       )}
 
-      {view === "execution" && report.execution.records.length > 0 ? (
+      {view === "execution" && records.length > 0 ? (
         <div className="gr-list">
-          {report.execution.records
+          {records
             .filter((record) => record.status !== "skipped")
             .map((record) => (
               <article className="gr-card" key={record.id}>
@@ -732,13 +740,15 @@ export function GraphReviewDetails({
                             {ids.length > 1 && `${group.name}：`}
                             {state === "approved" ? (
                               <Tag size="sm" tone="success">
-                                {report.approved_by
-                                  ? "已合并"
-                                  : "已批准，待写入"}
+                                {applied.has(id)
+                                  ? "已批准 · 已写入图谱"
+                                  : "已批准 · 待重写"}
                               </Tag>
                             ) : state === "rejected" ? (
                               <Tag size="sm" tone="neutral">
-                                {report.approved_by ? "未合并" : "已否决"}
+                                {applied.has(id)
+                                  ? "已否决 · 重写后撤掉"
+                                  : "已否决"}
                               </Tag>
                             ) : (
                               <Tag size="sm" tone="warning">
@@ -825,7 +835,8 @@ export function GraphReviewDetails({
   );
 }
 
-// 「将要执行」汇总：把已批准的建议按实际结果合起来；连在一起且名字不一致的，必须先选一个。
+// 「重写后图谱上的合并」汇总：把已批准的建议按实际结果合起来；连在一起且名字不一致的，必须先选一个。
+// 和上次已应用的对比，列出这次会撤掉的合并（结果只取决于现在批准了哪些）。
 function MergePlan({
   report,
   approved,
@@ -837,23 +848,38 @@ function MergePlan({
   choices: Record<string, GraphReviewChoice>;
   onChoose: (key: string, choice: GraphReviewChoice) => void;
 }) {
+  const scan = report.scan!;
   const names = new Map(
-    report.scan.candidates.flatMap((candidate) =>
+    scan.candidates.flatMap((candidate) =>
       candidate.entities.map((item) => [item.id, item.names[0]] as const),
     ),
   );
+  const label = (ids: string[]) =>
+    ids.map((id) => names.get(id) ?? id).join("、");
   const groups = mergeComponents(report, approved);
-  if (groups.length === 0) return null;
+  const sameIds = (a: string[], b: string[]) =>
+    a.length === b.length &&
+    [...a].sort().join("|") === [...b].sort().join("|");
+  const dropped = (report.applied?.groups ?? []).filter(
+    (old) => !groups.some((group) => sameIds(group.entityIds, old.ids)),
+  );
+  if (groups.length === 0 && dropped.length === 0) return null;
   return (
     <details className="gr-plan" open>
-      <summary>将要执行：{groups.length} 个合并结果</summary>
+      <summary>
+        重写后图谱上的合并：{groups.length} 个
+        {dropped.length > 0 && `，撤掉 ${dropped.length} 个`}
+      </summary>
       <ol>
         {groups.map((group) => {
           const choice = choices[group.key];
+          const kept = (report.applied?.groups ?? []).some((old) =>
+            sameIds(group.entityIds, old.ids),
+          );
           return (
             <li key={group.key}>
               <span>
-                {group.entityIds.map((id) => names.get(id) ?? id).join("、")}
+                {label(group.entityIds)}
                 <span className="gr-arrow">→</span>
                 {group.options.length === 1 ? (
                   <strong>
@@ -880,6 +906,9 @@ function MergePlan({
                     ))}
                   </span>
                 )}
+                <Tag size="sm" tone={kept ? "neutral" : "info"}>
+                  {kept ? "已在图谱中" : "新增"}
+                </Tag>
               </span>
               {group.proposalIds.length > 1 && (
                 <small>
@@ -892,17 +921,34 @@ function MergePlan({
             </li>
           );
         })}
+        {dropped.map((old) => (
+          <li key={`drop-${old.key}`} className="gr-dropped">
+            <span>
+              {label(old.ids)}
+              <span className="gr-arrow">→</span>
+              <s>
+                {old.name}（{old.type}）
+              </s>
+              <Tag size="sm" tone="warning">
+                撤掉（现在没有批准）
+              </Tag>
+            </span>
+          </li>
+        ))}
       </ol>
     </details>
   );
 }
 
-// 弹窗正文：读取最新报告；等待确认时可逐条或批量决定，底部是「将要执行」汇总和完成确认。两处入口共用。
+const ACTIVE = ["queued", "running", "rewriting"];
+
+// 弹窗正文：读取最新报告；排队、判断、重写时自动刷新。图谱已经写好，这里的合并是可选的：
+// 逐条或批量记录决定，最后「按确认结果重写图谱」才改图谱。两处入口（实体关系、处理过程）共用。
 export function GraphReviewBody({
   documentId,
   buildId,
   tick = 0,
-  canRetry = false,
+  canRetry = true,
   fallback,
   onChanged,
 }: {
@@ -919,6 +965,7 @@ export function GraphReviewBody({
   const [choices, setChoices] = useState<Record<string, GraphReviewChoice>>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [poll, setPoll] = useState(0);
   useEffect(() => {
     let cancelled = false;
     getGraphReview(documentId)
@@ -932,7 +979,7 @@ export function GraphReviewBody({
     return () => {
       cancelled = true;
     };
-  }, [documentId, buildId, tick]);
+  }, [documentId, buildId, tick, poll]);
   const live =
     data?.report && (!buildId || data.report.build_id === buildId)
       ? data.report
@@ -943,27 +990,30 @@ export function GraphReviewBody({
     (fallback && (!data?.report || data.report.build_id !== fallback.build_id)
       ? fallback
       : null);
-  const canConfirm =
-    !!live && live.status === "awaiting_review" && !!data?.can_confirm;
+  const active = !!live && ACTIVE.includes(live.status);
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setTimeout(() => setPoll((value) => value + 1), 3000);
+    return () => window.clearTimeout(timer);
+  }, [active, poll]);
+  const wasActive = useRef(false);
+  useEffect(() => {
+    // 判断或重写刚结束：通知外面刷新（处理过程、实体关系页签）。
+    if (wasActive.current && !active) onChanged?.();
+    wasActive.current = active;
+  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
+  const canDecide = !!live && live.status === "ready" && !!data?.can_confirm;
   const decisions = report ? decisionsOf(report) : {};
   const approved = Object.keys(decisions)
     .filter((id) => decisions[id] === "approved")
     .sort();
-  const total = report
-    ? report.judgments.reduce(
-        (sum, item) =>
-          sum +
-          (item.status === "completed"
-            ? (item.decision?.groups.length ?? 0)
-            : 0),
-        0,
-      )
-    : 0;
-  const pending = total - Object.keys(decisions).length;
-  const groups = report ? mergeComponents(report, approved) : [];
+  const pending = report ? pendingCount(report) : 0;
+  const groups = report?.scan ? mergeComponents(report, approved) : [];
   const unresolved = groups.filter(
     (group) => group.options.length > 1 && !choices[group.key],
   );
+  const canRewrite =
+    canDecide && (groups.length > 0 || !!live?.applied?.groups.length);
 
   async function run(action: () => Promise<unknown>) {
     if (busy) return;
@@ -990,16 +1040,17 @@ export function GraphReviewBody({
         ids,
         decision ?? null,
       );
-      setData((value) => (value ? { ...value, report: next } : value));
-      onChanged?.();
+      setData((value) =>
+        value ? { ...value, report: { ...next, status: "ready" } } : value,
+      );
     });
   }
 
-  async function finish() {
+  async function rewrite() {
     if (!live) return;
     if (
       !window.confirm(
-        `执行 ${groups.length} 个合并结果并写入图谱？${pending > 0 ? `还有 ${pending} 条未处理，将保持分开。` : ""}`,
+        `按 ${groups.length} 个合并结果重写图谱？从已保存的抽取结果重新写一遍，不调用模型。${pending > 0 ? `还有 ${pending} 条未处理，保持分开。` : ""}`,
       )
     )
       return;
@@ -1009,16 +1060,32 @@ export function GraphReviewBody({
           .filter((group) => group.options.length > 1)
           .map((group) => [group.key, choices[group.key]]),
       );
-      await confirmGraphReview(
-        documentId,
-        live.build_id,
-        approved,
-        resolutions,
-      );
+      await rewriteGraphReview(documentId, live.build_id, resolutions);
       setData(await getGraphReview(documentId));
       onChanged?.();
     });
   }
+
+  async function retry() {
+    if (
+      live?.decisions &&
+      Object.keys(live.decisions).length > 0 &&
+      !window.confirm(
+        "重新检查会清掉模型判断和你的决定（图谱上已应用的合并保留，直到下次重写）。继续？",
+      )
+    )
+      return;
+    await run(async () => {
+      await retryGraphReview(documentId);
+      setData(await getGraphReview(documentId));
+      onChanged?.();
+    });
+  }
+
+  const showRetry =
+    canRetry &&
+    !!data?.can_confirm &&
+    (!live || ["ready", "failed", "idle"].includes(live.status));
 
   return (
     <div className="gr-body">
@@ -1027,26 +1094,41 @@ export function GraphReviewBody({
           {error}
         </p>
       )}
-      {canConfirm && (
+      {canDecide && (
         <p className="gr-hint">
-          每条建议可以单独点「合并 /
-          不合并」，也可以勾选多条批量处理。这里只记录你的决定，随时可撤销；全部看完后点底部「完成确认，写入图谱」才真正执行。没处理的保持分开。
+          图谱已经写好，可以直接用；这里的合并是可选的。每条建议可以单独点「合并
+          /
+          不合并」，也可以勾选多条批量处理，随时可撤销。点底部「按确认结果重写图谱」才会改图谱（不调用模型）。没处理的保持分开。
         </p>
       )}
-      {report ? (
+      {live?.status === "rewriting" && (
+        <p className="gr-hint">正在按确认结果重写图谱…</p>
+      )}
+      {live?.status === "failed" && (
+        <p className="field-error">二次检查失败：{live.error ?? "未知原因"}</p>
+      )}
+      {report?.scan ? (
         <GraphReviewDetails
           report={report}
-          onDecide={canConfirm ? decide : undefined}
+          onDecide={canDecide ? decide : undefined}
           busy={busy}
         />
+      ) : report?.status === "idle" ? (
+        <p className="graph-note">
+          还没开始二次检查。图谱已经写好，不检查也能用。
+        </p>
       ) : data ? (
-        <p className="graph-note">已排队，候选识别完成后自动显示过程。</p>
+        <p className="graph-note">
+          {report || live
+            ? "排队等待二次检查，找出候选后自动显示过程…"
+            : "这次建图还没有二次检查记录。"}
+        </p>
       ) : (
         <p className="graph-note">正在读取…</p>
       )}
-      {(canConfirm || (canRetry && data?.can_confirm)) && (
+      {(canDecide || showRetry) && (
         <div className="gr-footer">
-          {canConfirm && report && (
+          {canDecide && report && (
             <MergePlan
               report={report}
               approved={approved}
@@ -1057,7 +1139,7 @@ export function GraphReviewBody({
             />
           )}
           <div className="gr-footer-row">
-            {canConfirm ? (
+            {canDecide ? (
               <span>
                 已批准 <strong>{approved.length}</strong> · 待处理{" "}
                 <strong>{pending}</strong>
@@ -1071,32 +1153,31 @@ export function GraphReviewBody({
             ) : (
               <span />
             )}
-            {canRetry && data?.can_confirm && !canConfirm && (
+            {showRetry && (
               <button
                 type="button"
                 className="secondary-button"
                 disabled={busy}
-                onClick={() =>
-                  void run(async () => {
-                    await retryGraphReview(documentId);
-                    setData(await getGraphReview(documentId));
-                    onChanged?.();
-                  })
-                }
-              >
-                {busy ? "正在提交…" : report ? "重新检查" : "补跑二次检查"}
-              </button>
-            )}
-            {canConfirm && (
-              <button
-                type="button"
-                className="primary-button"
-                disabled={busy || unresolved.length > 0}
-                onClick={() => void finish()}
+                onClick={() => void retry()}
               >
                 {busy
                   ? "正在提交…"
-                  : `完成确认，写入图谱（${groups.length} 个合并结果）`}
+                  : live?.status === "idle" || !report
+                    ? "开始二次检查"
+                    : "重新检查"}
+              </button>
+            )}
+            {canDecide && (
+              <button
+                type="button"
+                className="primary-button"
+                disabled={busy || unresolved.length > 0 || !canRewrite}
+                title={canRewrite ? undefined : "还没有批准任何合并建议"}
+                onClick={() => void rewrite()}
+              >
+                {busy
+                  ? "正在提交…"
+                  : `按确认结果重写图谱（${groups.length} 个合并）`}
               </button>
             )}
           </div>
@@ -1106,6 +1187,7 @@ export function GraphReviewBody({
   );
 }
 
+// 「实体关系」页签上的入口按钮：有待处理的建议时显示条数。
 export function GraphReviewPanel({
   documentId,
   buildId,
@@ -1119,7 +1201,7 @@ export function GraphReviewPanel({
   canRetry: boolean;
   onChanged: () => void;
 }) {
-  const [status, setStatus] = useState<string | null>(null);
+  const [report, setReport] = useState<GraphReviewReport | null>(null);
   const [open, setOpen] = useState(false);
   useEffect(() => {
     let cancelled = false;
@@ -1127,25 +1209,26 @@ export function GraphReviewPanel({
       .then(
         (value) =>
           !cancelled &&
-          setStatus(
-            value.report?.build_id === buildId ? value.report.status : null,
-          ),
+          setReport(value.report?.build_id === buildId ? value.report : null),
       )
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [documentId, buildId, tick]);
+  }, [documentId, buildId, tick, open]);
+  const pending = report?.status === "ready" ? pendingCount(report) : 0;
   return (
     <>
       <button
         type="button"
-        className={
-          status === "awaiting_review" ? "primary-button" : "secondary-button"
-        }
+        className={pending > 0 ? "primary-button" : "secondary-button"}
         onClick={() => setOpen(true)}
       >
-        {status === "awaiting_review" ? "二次检查 · 去确认" : "二次检查合并"}
+        {pending > 0
+          ? `二次检查 · 待处理 ${pending}`
+          : report && ACTIVE.includes(report.status)
+            ? "二次检查 · 进行中"
+            : "二次检查合并"}
       </button>
       {open && (
         <DetailDialog

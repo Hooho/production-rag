@@ -316,25 +316,49 @@ def components(report, approved):
     return sorted(result, key=lambda item: item["key"])
 
 
-def apply(connection, plan, build, report, ids):
-    if report.get("status") not in ("confirmed", "prepared", "completed"):
-        raise ValueError("尚未人工确认，禁止执行合并")
-    approved = set(report.get("approved_ids", []))
-    resolutions = report.get("resolutions") or {}
-    records = [
-        {"id": proposal_id, "status": "skipped", "reason": "未获人工批准", **group}
-        for proposal_id, group in proposals(report).items()
-        if proposal_id not in approved
-    ]
-    for component in components(report, approved):
-        choice = resolutions.get(component["key"]) or component["options"][0]
-        proposal_id = component["key"]
-        group = {
-            "ids": component["ids"],
-            "name": choice["name"],
-            "type": choice["type"],
-            "reason": "；".join(dict.fromkeys(component["reasons"])),
-        }
+def resolve_groups(report, approved, resolutions=None):
+    """把批准的建议整理成最终要执行的合并结果；连在一起且名字不一致的必须在 resolutions 里选定。"""
+    resolutions = resolutions or {}
+    groups = []
+    for component in components(report, set(approved)):
+        choice = component["options"][0]
+        if len(component["options"]) > 1:
+            choice = resolutions.get(component["key"])
+            if not choice or choice not in component["options"]:
+                raise ValueError(
+                    "连在一起的合并建议名字或类型不一致，请先选定最终名字："
+                    + "、".join(item["name"] for item in component["options"])
+                )
+        groups.append(
+            {
+                "key": component["key"],
+                "proposal_ids": component["proposal_ids"],
+                "ids": component["ids"],
+                "name": choice["name"],
+                "type": choice["type"],
+                "reason": "；".join(dict.fromkeys(component["reasons"])),
+            }
+        )
+    return groups
+
+
+def apply(connection, plan, build, groups, ids, approved_by):
+    """把人工确认过的合并结果应用到这次建图的写入方案上（写图谱前调用）。
+
+    groups 来自 resolve_groups；ids 是 inventory 返回的「候选 id → 实体 id」。抽取结果变化后找不到的实体跳过。"""
+    records = []
+    for group in groups:
+        proposal_id = group["key"]
+        if any(key not in ids for key in group["ids"]):
+            records.append(
+                {
+                    **group,
+                    "id": proposal_id,
+                    "status": "skipped",
+                    "reason": "抽取结果已变化，找不到其中的实体，未合并",
+                }
+            )
+            continue
         sources = {ids[key] for key in group["ids"]}
         merge_key = (
             "review|"
@@ -385,18 +409,14 @@ def apply(connection, plan, build, report, ids):
                     method="review",
                     detail={
                         **merge["detail"],
-                        "review": {
-                            "proposal_id": proposal_id,
-                            "proposal_ids": component["proposal_ids"],
-                            **group,
-                        },
-                        "approved_by": report["approved_by"],
+                        "review": {"proposal_id": proposal_id, **group},
+                        "approved_by": approved_by,
                     },
                 )
         records.append(
             {
+                **group,
                 "id": proposal_id,
-                "proposal_ids": component["proposal_ids"],
                 "status": "completed",
                 "entity_id": target,
                 "mention_count": len(affected),
@@ -407,7 +427,6 @@ def apply(connection, plan, build, report, ids):
                     or row["target_mention_id"] in affected
                     for row in plan["relations"]
                 ),
-                **group,
             }
         )
     used = {item["entity_id"] for item in plan["mentions"]}

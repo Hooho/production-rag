@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 import hashlib
 import json
 import logging
+import os
 import time
 import uuid
 
@@ -33,13 +34,19 @@ QUEUE = "graph:jobs"
 BATCH_SIZE = 20
 # 一批里同时调用模型的数量，和上下文说明（CONTEXT_WORKERS）一样。
 WORKERS = 4
-# 处理流程里的三步，排在「完成」（9）之后。
+# 处理流程里的建图步骤，排在「完成」（9）之后。
+# 二次检查在写入图谱之后单独跑，不阻塞建图；人工确认后「按确认结果重写图谱」再写一次。
 STEPS = {
     "graph_extract": (10, "抽取实体关系"),
     "graph_merge": (11, "合并实体"),
-    "graph_review": (12, "二次检查合并"),
-    "graph_write": (13, "写入图谱"),
+    "graph_write": (12, "写入图谱"),
+    "graph_review": (13, "二次检查合并"),
+    "graph_rewrite": (14, "按确认结果重写图谱"),
 }
+# 写入图谱后自动在后台跑二次检查；设为 0 则需要手动点「开始二次检查」。
+REVIEW_AUTO = os.getenv("GRAPH_REVIEW_AUTO", "1") != "0"
+# 二次检查每个任务最多判断多少组，判断完剩下的重新排队（和抽取一样，不长时间占住 worker）。
+REVIEW_BATCH = 20
 # 处理完成、有分片的版本才能建图。
 PROCESSED_PREFIXES = ("ready:", "staged:", "review:", "flagged:")
 BUSY = ("queued", "running", "awaiting_review")
@@ -340,8 +347,12 @@ def get_build(engine, build_id):
         )
 
 
-def enqueue(store, build_id):
-    store.cache.rpush(QUEUE, json.dumps({"type": "graph", "build_id": build_id}))
+# stage="review"：只跑二次检查（模型判断），不重新抽取和写入。
+def enqueue(store, build_id, stage=None):
+    payload = {"type": "graph", "build_id": build_id}
+    if stage:
+        payload["stage"] = stage
+    store.cache.rpush(QUEUE, json.dumps(payload))
 
 
 # 开始建图：检查文档、清单和模型，写一条排队中的建图记录，投递给 worker。
@@ -433,7 +444,7 @@ def start_build(
         },
     )
     store.mysql.clear_document_steps(document_id, STEPS["graph_merge"][0])
-    for step_id in ("graph_merge", "graph_review", "graph_write"):
+    for step_id in ("graph_merge", "graph_write", "graph_review"):
         write_step(
             store,
             document_id,
@@ -516,6 +527,9 @@ def mark_failed(store, build, message, step_id="graph_extract", duration_ms=None
 
 # worker 处理一个建图任务：抽一批分片，还有剩下的就重新排队，全部抽完后合并实体、写入图谱。
 def run_job(store, models, payload):
+    if payload.get("stage") == "review":
+        run_review_job(store, models, payload["build_id"])
+        return
     build = get_build(store.engine, payload["build_id"])
     if (
         build is None
@@ -745,10 +759,17 @@ def finalize(store, build, models=None):
                 {"build_id": build["id"], **summary},
                 round((time.monotonic() - started) * 1000),
             )
-            step_id = "graph_review"
-            report = secondary_review(store, models, build, plan)
-            if report["status"] == "awaiting_review":
-                return
+            # 之前人工确认并「重写图谱」过的合并，每次写入都按它应用（补跑分片、重写时都一样）。
+            report = review_report(store.engine, build)
+            applied = (report or {}).get("applied")
+            records = None
+            if applied:
+                with store.engine.connect() as connection:
+                    _, ids = review.inventory(plan, {})
+                    records = review.apply(
+                        connection, plan, build, applied["groups"], ids, applied["by"]
+                    )
+                summary = plan["summary"]
             step_id = "graph_write"
             started = time.monotonic()
             write_step(
@@ -790,16 +811,6 @@ def finalize(store, build, models=None):
                 )
             )
         if summary is not None:
-            report["status"] = "completed"
-            report["execution"]["status"] = "completed"
-            write_step(
-                store,
-                build["document_id"],
-                "graph_review",
-                "completed",
-                "二次检查及人工确认的合并已写入图谱",
-                report,
-            )
             write_step(
                 store,
                 build["document_id"],
@@ -809,8 +820,9 @@ def finalize(store, build, models=None):
                 {"build_id": build["id"], **summary},
                 round((time.monotonic() - started) * 1000),
             )
+            after_write(store, build, report, records)
         else:
-            for pending in ("graph_merge", "graph_review", "graph_write"):
+            for pending in ("graph_merge", "graph_write", "graph_review"):
                 write_step(
                     store,
                     build["document_id"],
@@ -863,7 +875,8 @@ def retry(store, build_id, chunk_id=None):
         f"排队中：补跑 {removed} 个失败的分片",
         {"build_id": build_id},
     )
-    for step_id in ("graph_merge", "graph_review", "graph_write"):
+    # 二次检查的报告（含人工决定和已应用的合并）保留：补跑完写入时会继续应用已确认的合并。
+    for step_id in ("graph_merge", "graph_write"):
         write_step(
             store,
             build["document_id"],
@@ -896,6 +909,29 @@ def recover(store):
         if build_id not in queued:
             enqueue(store, build_id)
             count += 1
+    # 二次检查是建图完成后的独立任务：中断的（排队中、判断中）也放回队列。
+    with store.engine.connect() as connection:
+        results = (
+            connection.execute(
+                select(document_steps.c.result).where(
+                    document_steps.c.step_id == "graph_review",
+                    document_steps.c.status.in_(("pending", "running")),
+                )
+            )
+            .scalars()
+            .all()
+        )
+    for result in results:
+        build_id = (result or {}).get("build_id")
+        if (
+            build_id
+            and build_id not in queued
+            and result.get("status") in ("queued", "running")
+        ):
+            build = get_build(store.engine, build_id)
+            if build and build["status"] in ("completed", "partial"):
+                enqueue(store, build_id, "review")
+                count += 1
     return count
 
 
@@ -952,14 +988,144 @@ def review_report(engine, build):
     )
 
 
-def secondary_review(store, models, build, plan):
+# 报告状态：queued 排队 / running 模型判断中 / ready 可以逐条决定 / rewriting 正在按确认结果重写 / failed / idle 未开始。
+# 旧流程留下的状态（awaiting_review、confirmed、completed）都当作 ready；重写中断（建图已不在跑）也回到 ready。
+def review_state(report, build):
+    status = (report or {}).get("status")
+    if status in ("awaiting_review", "confirmed", "prepared", "completed"):
+        return "ready"
+    if status == "rewriting" and build["status"] not in ("queued", "running"):
+        return "ready"
+    return status
+
+
+def review_progress(report):
+    decisions = report.get("decisions") or {}
+    valid = review.proposals(report)
+    total = len(valid)
+    approved = sum(
+        item["decision"] == "approved"
+        for key, item in decisions.items()
+        if key in valid
+    )
+    rejected = sum(
+        item["decision"] == "rejected"
+        for key, item in decisions.items()
+        if key in valid
+    )
+    applied = len((report.get("applied") or {}).get("groups") or [])
+    text = (
+        f"模型给出 {total} 条合并建议：已批准 {approved}，已否决 {rejected}，"
+        f"待处理 {total - approved - rejected}"
+    )
+    return text + (
+        f"；图谱已应用 {applied} 个合并结果" if applied else "；不影响已写入的图谱"
+    )
+
+
+def _review_step(store, build, report, status, detail):
+    write_step(store, build["document_id"], "graph_review", status, detail, report)
+
+
+def _carry(report):
+    return {"applied": report["applied"]} if report and report.get("applied") else {}
+
+
+# 写入图谱之后：如果这次是「按确认结果重写」，记下结果；否则（新建图、补跑分片）开始或排队二次检查。
+def after_write(store, build, report, records):
+    if report and report.get("status") == "rewriting":
+        report["applied"]["records"] = records or []
+        report["status"] = "ready"
+        done = [row for row in records or [] if row["status"] == "completed"]
+        skipped = len(records or []) - len(done)
+        write_step(
+            store,
+            build["document_id"],
+            "graph_rewrite",
+            "completed",
+            f"已按 {len(done)} 个合并结果重写图谱"
+            + (f"，{skipped} 个因抽取结果变化跳过" if skipped else "")
+            + f"（确认人 {report['applied']['by']}）",
+            {"build_id": build["id"], "records": records or []},
+        )
+        _review_step(store, build, report, "completed", review_progress(report))
+        return
+    if not REVIEW_AUTO and not report:
+        _review_step(
+            store,
+            build,
+            {"build_id": build["id"], "status": "idle"},
+            "pending",
+            "未开始：可在「实体关系」页签手动开始二次检查（不影响已写入的图谱）",
+        )
+        return
+    # 保留原报告（模型判断、人工决定）：抽取结果没变时直接沿用，不重复调用模型。
+    queued = {**(report or {}), "build_id": build["id"], "status": "queued"}
+    _review_step(
+        store, build, queued, "pending", "排队等待二次检查（不影响已写入的图谱）"
+    )
+    enqueue(store, build["id"], "review")
+
+
+def extraction_rows(engine, build_id):
+    with engine.connect() as connection:
+        rows = (
+            connection.execute(
+                select(graph_chunk_extractions).where(
+                    graph_chunk_extractions.c.build_id == build_id,
+                    graph_chunk_extractions.c.status.in_(("extracted", "reused")),
+                )
+            )
+            .mappings()
+            .all()
+        )
+    return sorted((dict(row) for row in rows), key=lambda row: row["position"])
+
+
+# 二次检查任务：从已保存的抽取结果重新算一遍归属（只读，不调用模型），找候选，再逐组让模型判断。
+def run_review_job(store, models, build_id):
+    build = get_build(store.engine, build_id)
+    report = review_report(store.engine, build) if build else None
+    if (
+        build is None
+        or build["status"] not in ("completed", "partial")
+        or review_state(report, build) not in ("queued", "running")
+    ):
+        logger.info("graph_review_skipped id=%s", build_id)
+        return
+    try:
+        run_review(store, models, build, report)
+    except BuildStopped:
+        logger.info("graph_review_stopped id=%s", build_id)
+    except Exception as error:
+        logger.exception("graph_review_failed id=%s", build_id)
+        current = review_report(store.engine, build) or report
+        current.update(status="failed", error=str(error)[:1000])
+        try:
+            _review_step(
+                store, build, current, "failed", f"二次检查失败：{str(error)[:300]}"
+            )
+        except BuildStopped:
+            pass
+
+
+def run_review(store, models, build, report):
     inputs = build_inputs(store.engine, build["id"])
     evidence = {
         item["chunk_id"]: item["content"]
         for item in chunk_rows(store.engine, build["document_id"])
     }
     scan_started = time.monotonic()
-    items, ids = review.inventory(plan, evidence)
+    with store.engine.connect() as connection:
+        plan = resolve.prepare_build(
+            connection,
+            build["space"],
+            build["id"],
+            extraction_rows(store.engine, build["id"]),
+            build["created_by"],
+        )
+    items, _ = review.inventory(plan, evidence)
+    method = review.method_info(models)
     signature = hashlib.sha256(
         json.dumps(
             [
@@ -969,15 +1135,13 @@ def secondary_review(store, models, build, plan):
                 build["provider"],
                 build["model"],
                 inputs["schema_snapshot"],
-                review.method_info(models),
+                method,
             ],
             ensure_ascii=False,
             sort_keys=True,
         ).encode()
     ).hexdigest()
-    report = review_report(store.engine, build)
-    if not report or report.get("signature") != signature:
-        method = review.method_info(models)
+    if report.get("signature") != signature:
         try:
             candidates, stats = review.candidates(items, models.embed)
         except Exception as error:  # 向量服务不可用时只按名字相同找，并在报告里说明。
@@ -1000,75 +1164,67 @@ def secondary_review(store, models, build, plan):
                 "stats": stats,
             },
             "judgments": [],
-            "execution": {"status": "pending", "records": []},
+            **_carry(report),
         }
-
-    def persist(status="running", message="正在二次检查合并"):
-        write_step(store, build["document_id"], "graph_review", status, message, report)
-
-    if report.get("status") in ("confirmed", "prepared"):
-        with store.engine.connect() as connection:
-            require_running(connection, build["id"])
-            report["execution"] = {
-                "status": "prepared",
-                "records": review.apply(connection, plan, build, report, ids),
-            }
-        report["status"] = "prepared"
-        persist("running", "已计算人工确认的归属方案，等待写入图谱")
-        return report
-    if report.get("status") == "completed":
-        with store.engine.connect() as connection:
-            report["execution"] = {
-                "status": "prepared",
-                "records": review.apply(connection, plan, build, report, ids),
-            }
-        return report
-    persist()
+    report["status"] = "running"
+    candidates = report["scan"]["candidates"]
     done = {
         row["candidate_id"] for row in report["judgments"] if row["status"] != "running"
     }
-    candidates = report["scan"]["candidates"]
-    run_models = None
-    for candidate in candidates:
-        if candidate["id"] in done:
-            continue
-        with store.engine.connect() as connection:
-            require_running(connection, build["id"])
-        if run_models is None:
-            run_models = models_for(store, models, build)
+    todo = [row for row in candidates if row["id"] not in done]
+    run_models = models_for(store, models, build) if todo else None
+    for candidate in todo[:REVIEW_BATCH]:
+        latest = review_report(store.engine, build)
+        if review_state(latest, build) not in ("queued", "running"):
+            raise BuildStopped()
         report["judgments"] = [
             row for row in report["judgments"] if row["candidate_id"] != candidate["id"]
         ]
         report["judgments"].append(
-            {"candidate_id": candidate["id"], "status": "running"}
+            review.judge(run_models, inputs["schema_snapshot"], candidate)
         )
-        persist(message=f"正在判断候选组 {candidate['id']}")
-        report["judgments"][-1] = review.judge(
-            run_models, inputs["schema_snapshot"], candidate
+        _review_step(
+            store,
+            build,
+            report,
+            "running",
+            f"模型判断：{len(report['judgments'])}/{len(candidates)} 组（不影响已写入的图谱）",
         )
-        persist(message=f"模型判断：{len(report['judgments'])}/{len(candidates)}组")
-    if not candidates:
-        report.update(status="completed", approved_ids=[], approved_by="无需合并")
-        report["execution"] = {"status": "completed", "records": []}
-        persist("completed", "没有疑似重复或类型冲突的候选，无需合并")
-    else:
-        report["status"] = "awaiting_review"
-        persist("warning", review_progress(report))
-        with store.engine.begin() as connection:
-            require_running(connection, build["id"])
-            connection.execute(
-                graph_builds.update()
-                .where(graph_builds.c.id == build["id"])
-                .values(status="awaiting_review", updated=now())
-            )
+    if len(todo) > REVIEW_BATCH:
+        enqueue(store, build["id"], "review")
+        return report
+    report["status"] = "ready"
+    _review_step(
+        store,
+        build,
+        report,
+        "completed",
+        review_progress(report)
+        if candidates
+        else "没有疑似重复或类型冲突的候选，无需合并",
+    )
     return report
 
 
-def _awaiting_report(store, build_id):
+def _ready_report(store, build_id):
     build = get_build(store.engine, build_id)
-    if not build or build["status"] != "awaiting_review":
-        raise BuildError("当前没有等待人工确认的二次检查")
-    return build, review_report(store.engine, build)
+    if build is None:
+        raise BuildError("建图记录不存在")
+    report = review_report(store.engine, build)
+    if review_state(report, build) != "ready":
+        raise BuildError("二次检查还没完成，或正在重写图谱，请稍后再试")
+    return build, report
+
+
+def _lock_build(connection, build_id):
+    current = connection.execute(
+        select(graph_builds.c.status)
+        .where(graph_builds.c.id == build_id)
+        .with_for_update()
+    ).scalar_one()
+    if current in ("queued", "running"):
+        raise BuildError("建图进行中，完成后再试")
+    return current
 
 
 def _save_report(connection, build, report, **values):
@@ -1078,40 +1234,19 @@ def _save_report(connection, build, report, **values):
             document_steps.c.document_id == build["document_id"],
             document_steps.c.step_id == "graph_review",
         )
-        .values(result=report, **values)
+        .values(result=report, updated=now(), **values)
     )
 
 
-def _lock_awaiting(connection, build_id):
-    current = connection.execute(
-        select(graph_builds.c.status)
-        .where(graph_builds.c.id == build_id)
-        .with_for_update()
-    ).scalar_one()
-    if current != "awaiting_review":
-        raise BuildError("二次检查状态已变化，请刷新")
-
-
-def review_progress(report):
-    decisions = report.get("decisions") or {}
-    total = len(review.proposals(report))
-    approved = sum(item["decision"] == "approved" for item in decisions.values())
-    rejected = sum(item["decision"] == "rejected" for item in decisions.values())
-    return (
-        f"模型判断完成，等待人工确认：共 {total} 条建议，已批准 {approved}，"
-        f"已否决 {rejected}，待处理 {total - approved - rejected}；尚未写入图谱"
-    )
-
-
-# 单独或批量记录人工决定（批准 / 否决 / 撤销），只保存，不执行合并；「完成确认」时统一执行。
+# 单独或批量记录人工决定（批准 / 否决 / 撤销），只保存，不改图谱；「按确认结果重写图谱」时统一执行。
 def decide_review(store, build_id, proposal_ids, decision, username):
-    build, report = _awaiting_report(store, build_id)
+    build, report = _ready_report(store, build_id)
     valid = review.proposals(report)
     if not proposal_ids or not set(proposal_ids) <= set(valid):
         raise BuildError("包含无效的合并建议")
     with store.engine.begin() as connection:
-        _lock_awaiting(connection, build_id)
-        report = review_report(store.engine, build)
+        _lock_build(connection, build_id)
+        build, report = _ready_report(store, build_id)
         decisions = report.setdefault("decisions", {})
         for proposal_id in proposal_ids:
             if decision is None:
@@ -1122,81 +1257,83 @@ def decide_review(store, build_id, proposal_ids, decision, username):
                     "by": username,
                     "at": now(),
                 }
-        _save_report(
-            connection, build, report, status="warning", detail=review_progress(report)
-        )
+        _save_report(connection, build, report, detail=review_progress(report))
     return report
 
 
-def confirm_review(store, build_id, approved_ids, username, resolutions=None):
-    build, report = _awaiting_report(store, build_id)
-    proposals = set(review.proposals(report))
-    if (
-        len(set(approved_ids)) != len(approved_ids)
-        or not set(approved_ids) <= proposals
-    ):
-        raise BuildError("确认列表包含无效或重复的建议")
-    resolutions = resolutions or {}
-    chosen = {}
-    for component in review.components(report, set(approved_ids)):
-        choice = resolutions.get(component["key"])
-        if len(component["options"]) > 1:
-            if not choice or choice not in component["options"]:
-                raise BuildError(
-                    "连在一起的合并建议名字或类型不一致，请先选定最终名字："
-                    + "、".join(item["name"] for item in component["options"])
-                )
-            chosen[component["key"]] = choice
+# 按当前所有已批准的建议重写图谱：从已保存的抽取结果重新写一遍，不调用模型。
+# 结果只取决于「现在批准了哪些」：撤销某条后再重写，那个合并就会消失。
+def rewrite_review(store, build_id, username, resolutions=None):
+    build, report = _ready_report(store, build_id)
+    valid = review.proposals(report)
+    approved = sorted(
+        key
+        for key, item in (report.get("decisions") or {}).items()
+        if item["decision"] == "approved" and key in valid
+    )
+    try:
+        groups = review.resolve_groups(report, approved, resolutions)
+    except ValueError as error:
+        raise BuildError(str(error)) from None
+    if not groups and not (report.get("applied") or {}).get("groups"):
+        raise BuildError("还没有批准任何合并建议")
     report.update(
-        status="confirmed",
-        approved_ids=approved_ids,
-        resolutions=chosen,
-        approved_by=username,
-        approved_at=now(),
+        status="rewriting",
+        applied={
+            "groups": groups,
+            "approved_ids": approved,
+            "by": username,
+            "at": now(),
+            "records": None,
+        },
     )
     with store.engine.begin() as connection:
-        _lock_awaiting(connection, build_id)
+        _lock_build(connection, build_id)
         _save_report(
             connection,
             build,
             report,
-            status="running",
-            detail="人工已确认，等待执行合并",
+            status="completed",
+            detail=f"已提交：按 {len(groups)} 个合并结果重写图谱",
         )
-        connection.execute(
-            graph_builds.update()
-            .where(graph_builds.c.id == build_id)
-            .values(status="queued", updated=now())
-        )
-    enqueue(store, build_id)
-    return get_build(store.engine, build_id)
-
-
-def retry_review(store, build_id):
-    build = get_build(store.engine, build_id)
-    if not build or build["status"] in BUSY:
-        raise BuildError("建图进行中或等待人工确认，不能重复检查")
-    build_inputs(store.engine, build_id)
-    with store.engine.begin() as connection:
-        current = connection.execute(
-            select(graph_builds.c.status)
-            .where(graph_builds.c.id == build_id)
-            .with_for_update()
-        ).scalar_one()
-        if current in BUSY:
-            raise BuildError("建图状态已变化，请刷新")
         connection.execute(
             graph_builds.update()
             .where(graph_builds.c.id == build_id)
             .values(status="queued", updated=now(), error=None)
         )
-        connection.execute(
-            document_steps.update()
-            .where(
-                document_steps.c.document_id == build["document_id"],
-                document_steps.c.step_id == "graph_review",
-            )
-            .values(result=None, status="pending", detail="等待重新检查")
-        )
+    write_step(
+        store,
+        build["document_id"],
+        "graph_rewrite",
+        "running",
+        f"排队中：按 {len(groups)} 个合并结果重写图谱（不调用模型）",
+        {"build_id": build_id},
+    )
     enqueue(store, build_id)
+    return get_build(store.engine, build_id)
+
+
+# 重新检查（或手动开始）：清掉模型判断和人工决定，只保留图谱上已应用的合并，重新找候选、判断。
+def retry_review(store, build_id):
+    build = get_build(store.engine, build_id)
+    if build is None:
+        raise BuildError("建图记录不存在")
+    report = review_report(store.engine, build)
+    if review_state(report, build) in ("queued", "running", "rewriting"):
+        raise BuildError("二次检查正在进行，不能重复开始")
+    fresh = {"build_id": build_id, "status": "queued", **_carry(report)}
+    with store.engine.begin() as connection:
+        current = _lock_build(connection, build_id)
+        # 旧流程停在「等待人工确认」的建图还没写入图谱：先写入，写完自动开始检查。
+        legacy = current == "awaiting_review"
+        if legacy:
+            connection.execute(
+                graph_builds.update()
+                .where(graph_builds.c.id == build_id)
+                .values(status="queued", updated=now(), error=None)
+            )
+        _save_report(
+            connection, build, fresh, status="pending", detail="排队等待重新检查"
+        )
+    enqueue(store, build_id, None if legacy else "review")
     return get_build(store.engine, build_id)
