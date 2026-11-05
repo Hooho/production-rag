@@ -218,7 +218,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
-  gap: 10px;
+  gap: 6px;
 }
 .graph-explorer > .graph-filters,
 .graph-explorer > .graph-note {
@@ -233,8 +233,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 12px;
-  padding: 8px 12px;
+  gap: 6px 8px;
+  padding: 5px 9px;
   border: 1px solid #dce5ef;
   border-radius: 8px;
   background: #fff;
@@ -250,8 +250,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 28px;
-  padding: 4px 9px;
+  min-height: 24px;
+  padding: 2px 7px;
   border: 1px solid #cbd9eb;
   border-radius: 6px;
   background: #fff;
@@ -891,7 +891,7 @@
 .graph-workspace {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 8px;
   min-width: 0;
 }
 /* Main graph controls share one size; compact entity cards keep their smaller buttons. */
@@ -900,12 +900,16 @@
 .graph-workspace .graph-filters > button,
 .graph-workspace .graph-filters .chunk-source-filter > button {
   box-sizing: border-box;
-  height: 34px;
-  min-height: 34px;
-  padding-top: 6px;
-  padding-bottom: 6px;
-  font-size: 13px;
+  height: 28px;
+  min-height: 28px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  font-size: 12px;
   line-height: 20px;
+}
+.graph-workspace > .graph-filters,
+.graph-explorer > .graph-filters {
+  gap: 6px 10px;
 }
 .graph-workspace.is-focused {
   position: fixed;
@@ -918,7 +922,7 @@
   background: #f7faff;
   box-shadow: 0 8px 40px #16362226;
   overflow: hidden;
-  gap: 10px;
+  gap: 8px;
 }
 .graph-workspace.is-focused > .graph-filters {
   flex-shrink: 0;

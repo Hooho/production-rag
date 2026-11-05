@@ -203,7 +203,7 @@ export function GraphExplorerControls({
       )}
       {hopInfo && (
         <div className="graph-explorer-row">
-          <span className="graph-note">起点：{hopInfo.rootName} · 0跳</span>
+          <span className="graph-note">起点：{hopInfo.rootName}</span>
           <span className="graph-note">按当前图中最短路径计算</span>
           <button
             type="button"
