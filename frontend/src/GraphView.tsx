@@ -178,6 +178,7 @@ const STYLE: cytoscape.StylesheetJson = [
     },
   },
   { selector: ".is-dim", style: { opacity: 0.18 } },
+  { selector: ".is-layout-hidden", style: { display: "none" } },
 ];
 
 function focusRelation(instance: Core, edgeId: string) {
@@ -191,24 +192,28 @@ function focusRelation(instance: Core, edgeId: string) {
   return true;
 }
 
-function arrangeGraph(instance: Core) {
-  const count = Math.max(1, instance.nodes().length);
+function arrangeGraph(instance: Core, highlightedOnly = false) {
+  instance.elements().removeClass("is-layout-hidden");
+  if (highlightedOnly)
+    instance.elements(".is-dim").addClass("is-layout-hidden");
+  const displayed = instance.elements().not(".is-layout-hidden");
+  const layoutNodes = displayed.nodes();
+  const count = Math.max(1, layoutNodes.length);
   const radius = 60 + count * 12;
-  instance.nodes().positions((_node, index) => ({
+  layoutNodes.positions((_node, index) => ({
     x: radius * Math.cos((2 * Math.PI * index) / count),
     y: radius * Math.sin((2 * Math.PI * index) / count),
   }));
   // Parallel category edges should not multiply the attraction between two nodes.
   const connectedPairs = new Set<string>();
-  const layoutEdges = instance.edges().filter((edge) => {
+  const layoutEdges = displayed.edges().filter((edge) => {
     if (edge.source().id() === edge.target().id()) return false;
     const pair = [edge.source().id(), edge.target().id()].sort().join("|");
     if (connectedPairs.has(pair)) return false;
     connectedPairs.add(pair);
     return true;
   });
-  instance
-    .nodes()
+  layoutNodes
     .union(layoutEdges)
     .layout({
       name: "cose",
@@ -227,12 +232,12 @@ function arrangeGraph(instance: Core) {
     } as cytoscape.LayoutOptions)
     .run();
   // Fit all displayed category curves after the node positions have settled.
-  instance.fit(instance.elements(), 64);
-  instance.center();
+  instance.fit(displayed, 64);
+  instance.center(displayed);
   // 只有几个节点时 fit 会放得很大，限制一下。
   if (instance.zoom() > 1.6) {
     instance.zoom(1.6);
-    instance.center();
+    instance.center(displayed);
   }
 }
 
@@ -397,7 +402,9 @@ export function GraphView({
     instance.batch(() => {
       instance
         .elements()
-        .removeClass("is-dim is-selected is-near is-highlighted");
+        .removeClass(
+          "is-dim is-selected is-near is-highlighted is-layout-hidden",
+        );
       for (const edge of edges) {
         const category =
           !selectedEdge &&
@@ -577,7 +584,7 @@ export function GraphView({
             type="button"
             title="重新均匀排布当前节点并适配画布"
             onClick={() => {
-              if (cy.current) arrangeGraph(cy.current);
+              if (cy.current) arrangeGraph(cy.current, true);
             }}
           >
             重新布局
