@@ -428,6 +428,23 @@ export function GraphReviewDetails({
             毫秒。点「重新检查」会按新规则重跑。
           </p>
         )}
+        {report.prompt_tag && (
+          <p className="gr-small">
+            模型判断用的提示词：<code>{report.prompt_tag}</code>{" "}
+            {report.system_prompt && (
+              <button
+                type="button"
+                className="link-button"
+                onClick={() =>
+                  openText("二次检查合并提示词", report.system_prompt!)
+                }
+              >
+                查看
+              </button>
+            )}
+            （在「提示词管理 · 知识图谱」里修改，改完点「重新检查」生效）
+          </p>
+        )}
         {report.applied && (
           <p className="gr-small">
             图谱上次按确认结果重写：{report.applied.by} · {report.applied.at}

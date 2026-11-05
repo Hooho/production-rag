@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 
+from app import prompts
 from app.graph import build, resolve, review
 from app.graph.schemas import DEFAULT_SCHEMA
 from app.mysql.tables import (
@@ -156,7 +157,9 @@ def test_judge_preserves_raw_failure_and_usage(monkeypatch):
     result = review.judge(None, DEFAULT_SCHEMA, candidate)
     assert result["status"] == "failed" and result["raw_output"] == "bad response"
     assert result["input_tokens"] == 12 and result["output_tokens"] == 3
-    assert result["prompt"][0]["content"] == review.SYSTEM
+    assert result["prompt"][0]["content"] == prompts.compose("graph_review")
+    custom = review.judge(None, DEFAULT_SCHEMA, candidate, "自定义提示词")
+    assert custom["prompt"][0]["content"] == "自定义提示词"
 
 
 def test_review_runs_after_write_then_rewrites_with_decisions(monkeypatch):
@@ -218,9 +221,11 @@ def test_review_runs_after_write_then_rewrites_with_decisions(monkeypatch):
     queue = []
     monkeypatch.setattr(build, "enqueue", lambda _, key, stage=None: queue.append(key))
     calls = []
+    prompts_used = []
 
-    def judge(_, schema, candidate):
+    def judge(_, schema, candidate, system_prompt=None):
         calls.append(candidate)
+        prompts_used.append(system_prompt)
         ids = [
             item["id"] for item in candidate["entities"] if item["types"] == ["组织"]
         ]
@@ -252,6 +257,11 @@ def test_review_runs_after_write_then_rewrites_with_decisions(monkeypatch):
     report = build.review_report(db, row)
     assert report["status"] == "ready"
     assert report["scan"]["method"]["embedding"]["model"] == "bge-test"
+    # 检查开始时定下提示词版本，判断时用报告里存的这一版。
+    assert report["prompt_tag"] == "graph_review@内置"
+    assert (
+        prompts_used == [report["system_prompt"]] == [prompts.compose("graph_review")]
+    )
     assert report["scan"]["candidates"][0]["kind"] == "similar"
     with db.connect() as connection:
         assert (

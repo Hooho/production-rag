@@ -10,7 +10,7 @@ def admin():
 def test_prompt_list(setup):
     client, store = setup
     body = client.get("/prompts", headers=admin()).json()
-    assert [item["id"] for item in body["items"]] == ["intent", "sufficiency", "answer", "memory_summary", "data_query", "long_memory", "chunk_context", "graph_extract", "agent"]
+    assert [item["id"] for item in body["items"]] == ["intent", "sufficiency", "answer", "memory_summary", "data_query", "long_memory", "chunk_context", "graph_extract", "graph_review", "agent"]
     assert {item["active_label"] for item in body["items"]} == {"内置"}
     assert client.get("/prompts", headers=headers("alice")).status_code == 403
 

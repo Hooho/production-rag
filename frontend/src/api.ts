@@ -4000,6 +4000,9 @@ export type GraphReviewReport = {
   // queued 排队 / running 模型判断中 / ready 可以逐条决定 / rewriting 正在重写图谱 / failed / idle 未开始
   status: string;
   error?: string;
+  // 这次检查用的提示词版本（graph_review@v2）和全文；检查开始时定下，之后改提示词要「重新检查」才用新版本。
+  prompt_tag?: string;
+  system_prompt?: string;
   // 上次「按确认结果重写图谱」应用到图谱上的合并结果；之后每次写入图谱都按它应用。
   applied?: {
     groups: (GraphReviewChoice & {

@@ -1130,7 +1130,6 @@ def run_review(store, models, build, report):
         json.dumps(
             [
                 review.VERSION,
-                review.SYSTEM,
                 items,
                 build["provider"],
                 build["model"],
@@ -1150,9 +1149,13 @@ def run_review(store, models, build, report):
             method["error"] = (
                 f"计算实体向量失败，只按名字相同找候选：{str(error)[:300]}"
             )
+        # 提示词在这一刻定下来：之后分批判断都用同一版；改了提示词要点「重新检查」才用新版本。
+        snapshot = review.prompt_snapshot()
         report = {
             "build_id": build["id"],
             "signature": signature,
+            "prompt_tag": snapshot["prompt_tag"],
+            "system_prompt": snapshot["system_prompt"],
             "status": "running",
             "scan": {
                 "status": "completed",
@@ -1181,7 +1184,12 @@ def run_review(store, models, build, report):
             row for row in report["judgments"] if row["candidate_id"] != candidate["id"]
         ]
         report["judgments"].append(
-            review.judge(run_models, inputs["schema_snapshot"], candidate)
+            review.judge(
+                run_models,
+                inputs["schema_snapshot"],
+                candidate,
+                report.get("system_prompt"),
+            )
         )
         _review_step(
             store,
