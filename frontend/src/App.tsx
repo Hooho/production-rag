@@ -1,5 +1,5 @@
 import { DetailDialog } from "./DetailDialog";
-import { GraphReviewDetails } from "./GraphReviewPanel";
+import { GraphReviewBody } from "./GraphReviewPanel";
 import type { GraphReviewReport } from "./api";
 import DataManagement from "./DataManagement";
 import Evaluation, { type EvaluationSection } from "./Evaluation";
@@ -5598,6 +5598,11 @@ function Knowledge({
             onDelete={() => void remove(selected)}
             onRetry={() => void retry(selected)}
             onRetryContexts={() => void retryContexts(selected)}
+            onReviewChanged={() =>
+              void getDocument(selected.document_id)
+                .then(setDetail)
+                .catch(() => undefined)
+            }
             onRetryReview={async () => {
               try {
                 await retryGraphReview(selected.document_id);
@@ -6399,6 +6404,7 @@ function DocumentDetail({
   onRetryChunkGraph,
   onRetryGraph,
   onRetryReview,
+  onReviewChanged,
   graphPanel,
 }: {
   chunkSource: ChunkSource | null;
@@ -6408,6 +6414,7 @@ function DocumentDetail({
   onRetryChunkGraph: (chunkId: string) => void;
   onRetryGraph: () => Promise<void>;
   onRetryReview: () => Promise<void>;
+  onReviewChanged: () => void;
   graphPanel: ReactNode;
   permission: ReactNode;
   onRetry: () => void;
@@ -6664,6 +6671,8 @@ function DocumentDetail({
         ) : (
           <div className="document-trace-panel">
             <DocumentTrace
+              documentId={document.document_id}
+              onReviewChanged={onReviewChanged}
               steps={document.steps}
               onRetryReview={
                 document.can_edit !== false ? onRetryReview : undefined
@@ -7251,6 +7260,8 @@ function stepResultText(result: Record<string, unknown>) {
 // 文档最终失败时，在失败的那一步旁边放"重试"按钮；重试会从解析重新开始整份文档的处理。
 // 文档已完成但有分片的上下文说明生成失败时，在"生成分片上下文"这一步放"补全"按钮，只重做失败的分片。
 function DocumentTrace({
+  documentId,
+  onReviewChanged,
   steps,
   onRetry,
   onRetryContexts,
@@ -7258,6 +7269,8 @@ function DocumentTrace({
   onRetryGraph,
   onRetryReview,
 }: {
+  documentId: string;
+  onReviewChanged?: () => void;
   steps: DocumentStep[];
   onRetry?: () => void;
   onRetryContexts?: () => void;
@@ -7305,133 +7318,154 @@ function DocumentTrace({
     );
   return (
     <div className="document-trace">
-      {traceSteps.map((step) => (
-        <div className={`document-step ${step.status}`} key={step.step_id}>
-          <span className="document-step-icon">
-            {step.status === "completed"
-              ? "✓"
-              : step.status === "running"
-                ? "·"
-                : step.status === "pending" || step.status === "stopped"
-                  ? "○"
-                  : "!"}
-          </span>
-          {/* warning：步骤跑完了但结果有问题（安全扫描发现疑似注入），整行标红。 */}
-          <div className="document-step-copy">
-            <strong>{step.title}</strong>
-            <Clamp text={step.detail}>
-              <small>{step.detail}</small>
-            </Clamp>
-            {/* 以前把 <strong> 拼进字符串，React 当普通文字输出，页面上直接显示出尖括号；现在用真正的元素渲染字段名。 */}
+      {traceSteps.map((step) => {
+        const awaiting =
+          step.step_id === "graph_review" &&
+          step.result?.status === "awaiting_review";
+        return (
+          <div
+            className={`document-step ${awaiting ? "awaiting" : step.status}`}
+            key={step.step_id}
+          >
+            <span className="document-step-icon">
+              {step.status === "completed"
+                ? "✓"
+                : step.status === "running"
+                  ? "·"
+                  : awaiting
+                    ? "?"
+                    : step.status === "pending" || step.status === "stopped"
+                      ? "○"
+                      : "!"}
+            </span>
+            {/* warning：步骤跑完了但结果有问题（安全扫描发现疑似注入），整行标红。 */}
+            <div className="document-step-copy">
+              <strong>{step.title}</strong>
+              <Clamp text={step.detail}>
+                <small>{step.detail}</small>
+              </Clamp>
+              {/* 以前把 <strong> 拼进字符串，React 当普通文字输出，页面上直接显示出尖括号；现在用真正的元素渲染字段名。 */}
+              {step.step_id === "graph_review" &&
+              step.result &&
+              "scan" in step.result ? (
+                <div className="document-step-actions">
+                  <button
+                    type="button"
+                    className={awaiting ? "primary-button" : "secondary-button"}
+                    onClick={() =>
+                      setReviewDetail(
+                        step.result as unknown as GraphReviewReport,
+                      )
+                    }
+                  >
+                    {awaiting ? "去人工确认" : "查看检查过程和结果"}
+                  </button>
+                </div>
+              ) : (
+                step.result && (
+                  <Clamp text={stepResultText(step.result)}>
+                    <span>
+                      {Object.entries(step.result).map(
+                        ([key, value], index) => (
+                          <Fragment key={key}>
+                            {index > 0 && " · "}
+                            <strong>{formatResultLabel(key)}</strong>：
+                            {stepResultValue(key, value)}
+                          </Fragment>
+                        ),
+                      )}
+                    </span>
+                  </Clamp>
+                )
+              )}
+            </div>
+            {step.duration_ms !== null && step.duration_ms !== undefined && (
+              <time title={durationTitle(step.duration_ms)}>
+                {formatDuration(step.duration_ms)}
+              </time>
+            )}
             {step.step_id === "graph_review" &&
-            step.result &&
-            "scan" in step.result ? (
-              <button
-                type="button"
-                className="link-button"
-                onClick={() =>
-                  setReviewDetail(step.result as unknown as GraphReviewReport)
-                }
-              >
-                查看检查过程和结果
-              </button>
-            ) : (
-              step.result && (
-                <Clamp text={stepResultText(step.result)}>
-                  <span>
-                    {Object.entries(step.result).map(([key, value], index) => (
-                      <Fragment key={key}>
-                        {index > 0 && " · "}
-                        <strong>{formatResultLabel(key)}</strong>：
-                        {stepResultValue(key, value)}
-                      </Fragment>
-                    ))}
-                  </span>
-                </Clamp>
-              )
-            )}
+              onRetryReview &&
+              step.status !== "running" &&
+              step.result?.status !== "awaiting_review" && (
+                <button
+                  type="button"
+                  className="secondary-button document-step-retry"
+                  disabled={
+                    retryingReview ||
+                    traceSteps.some(
+                      (item) =>
+                        item.step_id.startsWith("graph_") &&
+                        item.status === "running",
+                    )
+                  }
+                  onClick={async () => {
+                    setRetryingReview(true);
+                    try {
+                      await onRetryReview();
+                    } finally {
+                      setRetryingReview(false);
+                    }
+                  }}
+                >
+                  {retryingReview ? "正在提交…" : "重试"}
+                </button>
+              )}
+            {step.step_id === "graph_extract" &&
+              (step.status === "failed" || step.status === "warning") &&
+              onRetryGraph && (
+                <button
+                  type="button"
+                  className="secondary-button document-step-retry"
+                  disabled={retryingGraph}
+                  onClick={async () => {
+                    setRetryingGraph(true);
+                    try {
+                      await onRetryGraph();
+                    } finally {
+                      setRetryingGraph(false);
+                    }
+                  }}
+                >
+                  {retryingGraph ? "正在重试…" : "重试"}
+                </button>
+              )}
+            {step.step_id !== "graph_extract" &&
+              step.status === "failed" &&
+              onRetry && (
+                <button
+                  className="secondary-button document-step-retry"
+                  onClick={onRetry}
+                >
+                  重试
+                </button>
+              )}
+            {step.step_id === "context" &&
+              step.status === "completed" &&
+              missingContexts > 0 &&
+              onRetryContexts && (
+                <button
+                  className="secondary-button document-step-retry"
+                  onClick={onRetryContexts}
+                >
+                  补全 {missingContexts} 个
+                </button>
+              )}
           </div>
-          {step.duration_ms !== null && step.duration_ms !== undefined && (
-            <time title={durationTitle(step.duration_ms)}>
-              {formatDuration(step.duration_ms)}
-            </time>
-          )}
-          {step.step_id === "graph_review" &&
-            onRetryReview &&
-            step.status !== "running" &&
-            step.result?.status !== "awaiting_review" && (
-              <button
-                type="button"
-                className="secondary-button document-step-retry"
-                disabled={
-                  retryingReview ||
-                  traceSteps.some(
-                    (item) =>
-                      item.step_id.startsWith("graph_") &&
-                      item.status === "running",
-                  )
-                }
-                onClick={async () => {
-                  setRetryingReview(true);
-                  try {
-                    await onRetryReview();
-                  } finally {
-                    setRetryingReview(false);
-                  }
-                }}
-              >
-                {retryingReview ? "正在提交…" : "重试"}
-              </button>
-            )}
-          {step.step_id === "graph_extract" &&
-            (step.status === "failed" || step.status === "warning") &&
-            onRetryGraph && (
-              <button
-                type="button"
-                className="secondary-button document-step-retry"
-                disabled={retryingGraph}
-                onClick={async () => {
-                  setRetryingGraph(true);
-                  try {
-                    await onRetryGraph();
-                  } finally {
-                    setRetryingGraph(false);
-                  }
-                }}
-              >
-                {retryingGraph ? "正在重试…" : "重试"}
-              </button>
-            )}
-          {step.step_id !== "graph_extract" &&
-            step.status === "failed" &&
-            onRetry && (
-              <button
-                className="secondary-button document-step-retry"
-                onClick={onRetry}
-              >
-                重试
-              </button>
-            )}
-          {step.step_id === "context" &&
-            step.status === "completed" &&
-            missingContexts > 0 &&
-            onRetryContexts && (
-              <button
-                className="secondary-button document-step-retry"
-                onClick={onRetryContexts}
-              >
-                补全 {missingContexts} 个
-              </button>
-            )}
-        </div>
-      ))}
+        );
+      })}
       {reviewDetail && (
         <DetailDialog
           open
           title="二次检查合并 · 过程和结果"
+          className="gr-dialog"
           onClose={() => setReviewDetail(null)}
         >
-          <GraphReviewDetails report={reviewDetail} />
+          <GraphReviewBody
+            documentId={documentId}
+            fallback={reviewDetail}
+            onChanged={onReviewChanged}
+          />
         </DetailDialog>
       )}
     </div>

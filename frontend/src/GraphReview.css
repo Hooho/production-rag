@@ -1,0 +1,421 @@
+/* 二次检查合并：过程和结果、逐组确认。 */
+.ag-delivery-dialog.gr-dialog {
+  width: min(880px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 0;
+}
+.ag-delivery-dialog.gr-dialog > .gr-body {
+  flex: 1;
+}
+.gr-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+}
+.gr-hint {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--tone-info-bg);
+  color: var(--tone-info-text);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.gr {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.gr-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.gr-steps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #e3e8ef;
+  border-radius: 8px;
+  background: #fafcfe;
+  min-width: 0;
+}
+.gr-steps li > span:last-child {
+  display: grid;
+  min-width: 0;
+}
+.gr-steps strong {
+  font-size: 13px;
+}
+.gr-steps small {
+  color: #64748b;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gr-step-dot {
+  flex: 0 0 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid #cbd5e1;
+  color: #64748b;
+  background: #fff;
+}
+.gr-steps .is-done .gr-step-dot {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #fff;
+}
+.gr-steps .is-active {
+  border-color: var(--tone-warning-border);
+  background: var(--tone-warning-bg);
+}
+.gr-steps .is-active .gr-step-dot {
+  background: #f59e0b;
+  border-color: #f59e0b;
+  color: #fff;
+}
+.gr-steps .is-failed .gr-step-dot {
+  background: #d45160;
+  border-color: #d45160;
+  color: #fff;
+}
+.gr-meta {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.gr-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #e3e8ef;
+}
+.gr-tabs button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  padding: 6px 10px;
+  font: inherit;
+  color: #64748b;
+  cursor: pointer;
+}
+.gr-tabs button[aria-selected="true"] {
+  color: #0f172a;
+  font-weight: 600;
+  border-bottom-color: #2563eb;
+}
+
+.gr-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.gr-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.gr-filters button {
+  border: 1px solid #dbe3ec;
+  background: #fff;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: #334155;
+  cursor: pointer;
+}
+.gr-filters button span {
+  color: #94a3b8;
+  margin-left: 2px;
+}
+.gr-filters button[aria-pressed="true"] {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: #fff;
+}
+.gr-filters button[aria-pressed="true"] span {
+  color: #cbd5e1;
+}
+.gr-search {
+  width: 180px;
+  padding: 5px 10px;
+  border: 1px solid #dbe3ec;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.gr-bulk {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: #475569;
+  font-size: 12px;
+}
+.gr-bulk span {
+  margin-right: auto;
+}
+
+.gr-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.gr-card {
+  border: 1px solid #e3e8ef;
+  border-left-width: 3px;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gr-card.is-merge {
+  border-left-color: var(--tone-info-text);
+}
+.gr-card.is-failed {
+  border-left-color: #d45160;
+}
+.gr-card.is-running {
+  border-left-color: #f59e0b;
+}
+.gr-card p {
+  margin: 0;
+}
+.gr-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gr-card-head > strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+}
+.gr-card-id {
+  font-family: "DM Mono", monospace;
+  font-size: 12px;
+  color: #64748b;
+}
+.gr-card-reason {
+  color: #94a3b8;
+  font-size: 12px;
+  margin-right: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gr-entities {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 6px;
+}
+.gr-entities li {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f6f9fc;
+  min-width: 0;
+}
+.gr-entity-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.gr-entity-name strong {
+  overflow-wrap: anywhere;
+}
+.gr-source {
+  margin-left: auto;
+  font-size: 12px;
+}
+.gr-desc {
+  margin-top: 4px !important;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.gr-proposal {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px dashed #c3d5fb;
+  border-radius: 6px;
+  background: #f8fbff;
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: normal;
+  margin: 0;
+}
+.gr-proposal.is-checked {
+  border-style: solid;
+  border-color: #16a34a;
+  background: #f0fdf4;
+}
+.gr-proposal input {
+  width: auto;
+  margin-top: 3px;
+}
+.gr-proposal > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.gr-proposal-line {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.gr-arrow {
+  color: #94a3b8;
+}
+.gr-reason {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.gr-merge-from {
+  color: #334155;
+}
+.gr-small {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.gr-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #94a3b8;
+  font-size: 12px;
+  border-top: 1px solid #f1f5f9;
+  padding-top: 6px;
+}
+.gr-card-foot span {
+  margin-right: auto;
+}
+.gr-card-foot .link-button {
+  font-size: 12px;
+}
+
+.gr-pager {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  color: #64748b;
+  font-size: 12px;
+}
+.gr-pager-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.gr-pager button {
+  padding: 4px 10px;
+  border: 1px solid #dbe3ec;
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+.gr-pager button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.gr-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin: 0 -24px;
+  padding: 12px 24px;
+  background: var(--surface, #fff);
+  border-top: 1px solid #e3e8ef;
+  box-shadow: 0 -6px 16px #0f172a0d;
+}
+.gr-footer span {
+  margin-right: auto;
+  color: #475569;
+  font-size: 13px;
+}
+
+.gr-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gr-evidence section {
+  margin-top: 12px !important;
+}
+
+/* 处理过程里「等待人工确认」用提醒色，不用表示出错的红色。 */
+.document-step.awaiting {
+  margin: 4px -10px;
+  border: 1px solid var(--tone-warning-border);
+  border-radius: 6px;
+  background: var(--tone-warning-bg);
+  padding: 10px;
+}
+.document-step.awaiting .document-step-icon {
+  border-color: #f59e0b;
+  background: #f59e0b;
+  color: #fff;
+  font-weight: 700;
+}
+.document-step.awaiting .document-step-copy strong,
+.document-step.awaiting .document-step-copy small {
+  color: var(--tone-warning-text);
+}
+.document-step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+@media (max-width: 640px) {
+  .gr-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .gr-search {
+    width: 100%;
+  }
+}
+.gr-body > :last-child:not(.gr-footer) {
+  margin-bottom: 24px;
+}
