@@ -45,6 +45,57 @@ export function GraphWorkspace({
   const toggle = useRef<HTMLButtonElement>(null);
   const workspace = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    const host = workspace.current;
+    if (!host || focused || !enabled) return;
+    let pinned: HTMLElement | null = null;
+    let offset = 0;
+    function update() {
+      const body = host!.querySelector<HTMLElement>(".graph-workspace-body");
+      if (
+        !body ||
+        !body.querySelector(".graph-view") ||
+        window.innerWidth <= 1100
+      ) {
+        release();
+        return;
+      }
+      if (!pinned)
+        offset =
+          body.getBoundingClientRect().top - host!.getBoundingClientRect().top;
+      const rect = host!.getBoundingClientRect();
+      if (rect.top + offset <= 12) {
+        pinned = body;
+        host!.style.paddingBottom = `${body.getBoundingClientRect().height}px`;
+        Object.assign(body.style, {
+          position: "fixed",
+          top: "12px",
+          left: `${rect.left}px`,
+          width: `${rect.width}px`,
+          zIndex: "10",
+        });
+      } else release();
+    }
+    function release() {
+      if (pinned) {
+        for (const key of ["position", "top", "left", "width", "z-index"])
+          pinned.style.removeProperty(key);
+        pinned = null;
+      }
+      host!.style.removeProperty("padding-bottom");
+    }
+    const observer = new MutationObserver(update);
+    observer.observe(host, { childList: true, subtree: true });
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    update();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+      release();
+    };
+  }, [enabled, focused]);
+  useEffect(() => {
     if (!enabled) setFocused(false);
   }, [enabled]);
   useEffect(() => {
