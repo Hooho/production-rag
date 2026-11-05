@@ -1,3 +1,5 @@
+import { GraphReviewDetails } from "./GraphReviewPanel";
+import type { GraphReviewReport } from "./api";
 import DataManagement from "./DataManagement";
 import Evaluation, { type EvaluationSection } from "./Evaluation";
 import { DocumentChunkCard } from "./DocumentChunkCard";
@@ -7278,18 +7280,26 @@ function DocumentTrace({
               <small>{step.detail}</small>
             </Clamp>
             {/* 以前把 <strong> 拼进字符串，React 当普通文字输出，页面上直接显示出尖括号；现在用真正的元素渲染字段名。 */}
-            {step.result && (
-              <Clamp text={stepResultText(step.result)}>
-                <span>
-                  {Object.entries(step.result).map(([key, value], index) => (
-                    <Fragment key={key}>
-                      {index > 0 && " · "}
-                      <strong>{formatResultLabel(key)}</strong>：
-                      {stepResultValue(key, value)}
-                    </Fragment>
-                  ))}
-                </span>
-              </Clamp>
+            {step.step_id === "graph_review" &&
+            step.result &&
+            "scan" in step.result ? (
+              <GraphReviewDetails
+                report={step.result as unknown as GraphReviewReport}
+              />
+            ) : (
+              step.result && (
+                <Clamp text={stepResultText(step.result)}>
+                  <span>
+                    {Object.entries(step.result).map(([key, value], index) => (
+                      <Fragment key={key}>
+                        {index > 0 && " · "}
+                        <strong>{formatResultLabel(key)}</strong>：
+                        {stepResultValue(key, value)}
+                      </Fragment>
+                    ))}
+                  </span>
+                </Clamp>
+              )
             )}
           </div>
           {step.duration_ms !== null && step.duration_ms !== undefined && (

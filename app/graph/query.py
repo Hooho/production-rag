@@ -23,6 +23,7 @@ from .schemas import ONLINE_SPACE
 
 NETWORK_LIMIT = 20
 METHOD_LABELS = {
+    "review": "二次检查合并（人工确认）",
     "new": "新建实体",
     "exact": "名字相同",
     "normalized": "规范化后相同",

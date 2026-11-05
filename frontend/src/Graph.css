@@ -1243,3 +1243,49 @@
     min-height: 0;
   }
 }
+
+.graph-review-panel {
+  border: 1px solid #d7e2ed;
+  border-radius: 10px;
+  padding: 14px;
+  background: #fff;
+}
+.graph-review-details details {
+  margin: 8px 0;
+  border: 1px solid #e3e8ef;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.graph-review-details summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.graph-review-details p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 8px 0;
+}
+.graph-review-details small {
+  display: block;
+  color: #64748b;
+}
+.graph-review-details .link-button {
+  margin-right: 12px;
+}
+.graph-review-proposal {
+  margin: 10px 0;
+  padding: 10px;
+  background: #f6f9fc;
+  border-radius: 6px;
+}
+.graph-review-proposal label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  font: inherit;
+  letter-spacing: normal;
+}
+.graph-review-proposal input {
+  width: auto;
+}

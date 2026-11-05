@@ -1,3 +1,4 @@
+import { GraphReviewPanel } from "./GraphReviewPanel";
 import { GraphHistoryControls, useGraphHistory } from "./GraphHistory";
 import { DocumentChunkDialog, type ChunkTarget } from "./DocumentChunkDialog";
 import { GraphBuildTimer } from "./GraphBuildTimer";
@@ -26,6 +27,7 @@ import type { Tone } from "./tags";
 type ShowToast = (kind: "success" | "error", message: string) => void;
 
 export const BUILD_STATUS: Record<string, { label: string; tone: Tone }> = {
+  awaiting_review: { label: "等待人工确认", tone: "warning" },
   stopped: { label: "已停止", tone: "neutral" },
   queued: { label: "排队中", tone: "info" },
   running: { label: "建图中", tone: "info" },
@@ -49,7 +51,11 @@ const VIEWS: [GraphViewName, string][] = [
 ];
 
 export function isBuildBusy(build: GraphBuild | null | undefined) {
-  return build?.status === "queued" || build?.status === "running";
+  return (
+    build?.status === "queued" ||
+    build?.status === "running" ||
+    build?.status === "awaiting_review"
+  );
 }
 
 // 文档详情的「实体关系」页签：这个版本最近一次建图的概览、图、实体表、关系表、合并记录（第 1 期只能查看）。
@@ -408,6 +414,13 @@ export function DocumentGraph({
           </table>
         </details>
       )}
+      <GraphReviewPanel
+        documentId={documentId}
+        buildId={build.id}
+        tick={tick}
+        canRetry={!busy && data.can_build}
+        onChanged={() => setTick((value) => value + 1)}
+      />
       <GraphWorkspace enabled={view === "network"}>
         <div className="graph-filters">
           <div className="chunk-source-filter">

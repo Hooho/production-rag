@@ -3607,6 +3607,7 @@ export type UploadGraphOption = {
   model?: string | null;
 };
 export type GraphBuildStatus =
+  | "awaiting_review"
   | "stopped"
   | "queued"
   | "running"
@@ -3992,4 +3993,78 @@ export function getGraphOverview(params: {
 
 export function getGraphTasks() {
   return request<{ items: GraphTask[] }>("/graph/tasks");
+}
+
+export type GraphReviewReport = {
+  build_id: string;
+  status: string;
+  approved_by?: string;
+  approved_at?: string;
+  approved_ids?: string[];
+  scan: {
+    duration_ms?: number;
+    status: string;
+    entity_count: number;
+    candidate_count: number;
+    candidates: {
+      id: string;
+      reason: string;
+      entities: {
+        id: string;
+        names: string[];
+        types: string[];
+        descriptions: string[];
+        evidence: { chunk_id: string; text: string }[];
+      }[];
+    }[];
+  };
+  judgments: {
+    candidate_id: string;
+    status: string;
+    error?: string;
+    duration_ms?: number;
+    input_tokens?: number;
+    output_tokens?: number;
+    prompt?: { role: string; content: string }[];
+    raw_output?: string;
+    decision?: {
+      groups: { ids: string[]; name: string; type: string; reason: string }[];
+      separate_reason?: string;
+    };
+  }[];
+  execution: {
+    status: string;
+    records: {
+      id: string;
+      status: string;
+      name: string;
+      type: string;
+      reason: string;
+      mention_count?: number;
+      from_names?: string[];
+      type_corrections?: number;
+      relation_count?: number;
+      entity_id?: string;
+    }[];
+  };
+};
+export function getGraphReview(documentId: string) {
+  return request<{ report: GraphReviewReport | null; can_confirm: boolean }>(
+    `/documents/${documentId}/graph/review`,
+  );
+}
+export function confirmGraphReview(
+  documentId: string,
+  buildId: string,
+  approvedIds: string[],
+) {
+  return request<GraphBuild>(`/documents/${documentId}/graph/review/confirm`, {
+    method: "POST",
+    body: JSON.stringify({ build_id: buildId, approved_ids: approvedIds }),
+  });
+}
+export function retryGraphReview(documentId: string) {
+  return request<GraphBuild>(`/documents/${documentId}/graph/review/retry`, {
+    method: "POST",
+  });
 }

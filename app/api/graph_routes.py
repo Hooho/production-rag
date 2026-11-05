@@ -35,6 +35,11 @@ class RetryInput(BaseModel):
     chunk_id: str | None = Field(None, max_length=64)
 
 
+class ReviewConfirmInput(BaseModel):
+    build_id: UUID
+    approved_ids: list[str] = Field(default_factory=list, max_length=10000)
+
+
 class StopInput(BaseModel):
     build_id: UUID
 
@@ -207,6 +212,54 @@ def build_router(current_user, identity, require_admin):
             raise HTTPException(409, "这份文档还没有建过图")
         try:
             return graph_build.retry(state.store, build["id"], body.chunk_id)
+        except graph_build.BuildError as error:
+            raise HTTPException(409, str(error)) from None
+
+    @router.get("/documents/{document_id}/graph/review")
+    def review_detail(request: Request, document_id: UUID, user=Depends(current_user)):
+        state = request.app.state
+        row = readable(state, user["username"], document_id)
+        with state.store.engine.connect() as connection:
+            build = graph_query.latest_build(connection, str(document_id))
+        return {
+            "report": graph_build.review_report(state.store.engine, build)
+            if build
+            else None,
+            "can_confirm": row["owner"] == user["username"] or bool(user["is_admin"]),
+        }
+
+    @router.post("/documents/{document_id}/graph/review/confirm", status_code=202)
+    def review_confirm(
+        request: Request,
+        document_id: UUID,
+        body: ReviewConfirmInput,
+        user=Depends(current_user),
+    ):
+        state = request.app.state
+        row = readable(state, user["username"], document_id)
+        check_can_build(user, row)
+        with state.store.engine.connect() as connection:
+            latest = graph_query.latest_build(connection, str(document_id))
+        if not latest or latest["id"] != str(body.build_id):
+            raise HTTPException(409, "建图记录已切换，请刷新")
+        try:
+            return graph_build.confirm_review(
+                state.store, str(body.build_id), body.approved_ids, user["username"]
+            )
+        except graph_build.BuildError as error:
+            raise HTTPException(409, str(error)) from None
+
+    @router.post("/documents/{document_id}/graph/review/retry", status_code=202)
+    def review_retry(request: Request, document_id: UUID, user=Depends(current_user)):
+        state = request.app.state
+        row = readable(state, user["username"], document_id)
+        check_can_build(user, row)
+        with state.store.engine.connect() as connection:
+            latest = graph_query.latest_build(connection, str(document_id))
+        if not latest:
+            raise HTTPException(409, "这份文档还没有建过图")
+        try:
+            return graph_build.retry_review(state.store, latest["id"])
         except graph_build.BuildError as error:
             raise HTTPException(409, str(error)) from None
 
