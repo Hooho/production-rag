@@ -42,7 +42,7 @@ type Filter =
 
 const verdicts: Record<Verdict, { label: string; tone: Tone }> = {
   merge: { label: "建议合并", tone: "info" },
-  separate: { label: "不是同一个", tone: "neutral" },
+  separate: { label: "建议不合并", tone: "neutral" },
   failed: { label: "判断失败", tone: "danger" },
   running: { label: "判断中", tone: "warning" },
 };
@@ -152,7 +152,7 @@ type Row = {
 };
 
 // 二次检查的过程和结果，分五个页签：
-//   1 找出候选（系统）  2 判断是否同一个（大模型）  3 逐条决定（人工）  4 确认（人工）  5 写入图谱（系统）
+//   1 找出候选（系统）  2 模型判断（大模型）  3 逐条决定（人工）  4 确认（人工）  5 写入图谱（系统）
 // onDecide 有值时第 3 步可以操作；第 2 步的按钮、第 4 步的确认内容由外面传进来（它们要调接口）。
 export function GraphReviewDetails({
   report,
@@ -227,7 +227,7 @@ export function GraphReviewDetails({
     1: [["all", "全部"]],
     2: [
       ["merge", "建议合并"],
-      ["separate", "不是同一个"],
+      ["separate", "建议不合并"],
       ["failed", "判断失败"],
       ["running", "等待判断"],
       ["all", "全部"],
@@ -397,7 +397,7 @@ export function GraphReviewDetails({
     },
     {
       step: 2,
-      label: "判断是否同一个",
+      label: "模型判断",
       by: "大模型",
       value: `${judged}/${scan.candidate_count}${failed ? ` · 失败 ${failed}` : ""}`,
       state: judging ? "active" : failed ? "failed" : "done",
@@ -509,7 +509,7 @@ export function GraphReviewDetails({
 
         {showModel && (
           <div className="gr-layer">
-            <span className="gr-layer-label">模型 · 是不是同一个</span>
+            <span className="gr-layer-label">模型判断</span>
             {verdict === "running" && <p className="gr-small">等待模型判断…</p>}
             {judgment?.error && (
               <p className="field-error">{judgment.error}。此组不合并。</p>
@@ -559,7 +559,7 @@ export function GraphReviewDetails({
             )}
             {judgment?.decision?.separate_reason && (
               <p className="gr-reason">
-                {verdict === "separate" ? "不合并：" : "其余不合并："}
+                {verdict === "separate" ? "不合并的原因：" : "其余不合并的原因："}
                 {judgment.decision.separate_reason}
               </p>
             )}
