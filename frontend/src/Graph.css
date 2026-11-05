@@ -59,7 +59,7 @@
 .graph-canvas-wrap {
   position: relative;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
   border-radius: 10px;
 }
 .graph-selection-halo {
@@ -1066,17 +1066,20 @@
   color: inherit;
 }
 
+.graph-entity-panel {
+  padding-top: 0;
+}
 .graph-entity-header {
   position: sticky;
-  top: -12px;
+  top: 0;
   z-index: 3;
-  margin: -12px -14px 0;
+  margin: 0 -14px;
   padding: 12px 14px;
   border-bottom: 1px solid #e3e8ef;
   background: #fff;
 }
 .graph-entity-panel .graph-relations-header {
-  top: calc(var(--entity-header-height, 0px) - 12px);
+  top: var(--entity-header-height, 0px);
 }
 
 .graph-chunk-spinner {
@@ -1137,10 +1140,11 @@
 }
 
 .graph-history-controls {
-  position: absolute;
+  position: sticky;
   top: 12px;
-  left: 12px;
-  right: 12px;
+  height: 0;
+  margin: 0 12px;
+  transform: translateY(12px);
   z-index: 3;
   display: flex;
   flex-wrap: wrap;

@@ -600,6 +600,7 @@ export function GraphView({
         </span>
       </div>
       <div className="graph-canvas-wrap">
+        {navigation}
         <div ref={container} className="graph-canvas" />
         {selected &&
           !selectedEdge &&
@@ -614,7 +615,6 @@ export function GraphView({
               <i />
             </div>
           )}
-        {navigation}
       </div>
       <small className="graph-hint">
         滚轮缩放、拖动空白处平移、拖动节点调整位置；点击实体看详情，点击关系线看出处。名字后面的
