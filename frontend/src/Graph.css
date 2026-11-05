@@ -1249,10 +1249,19 @@
 }
 
 .graph-review-panel {
-  border: 1px solid #d7e2ed;
-  border-radius: 10px;
-  padding: 14px;
-  background: #fff;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 8px 0;
+  border-bottom: 1px solid #d7e2ed;
+  font-size: 13px;
+}
+.graph-review-panel .secondary-button {
+  padding: 5px 10px;
+}
+.graph-review-panel .field-error {
+  margin: 0;
 }
 .graph-review-details details {
   margin: 8px 0;

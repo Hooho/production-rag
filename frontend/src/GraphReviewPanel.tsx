@@ -239,6 +239,7 @@ export function GraphReviewPanel({
   const [approved, setApproved] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
   useEffect(() => {
     setApproved([]);
   }, [buildId]);
@@ -269,8 +270,10 @@ export function GraphReviewPanel({
     setBusy(true);
     setError("");
     try {
-      if (retry) await retryGraphReview(documentId);
-      else await confirmGraphReview(documentId, buildId, approved);
+      if (retry) {
+        await retryGraphReview(documentId);
+        setOpen(true);
+      } else await confirmGraphReview(documentId, buildId, approved);
       setApproved([]);
       setData(await getGraphReview(documentId));
       onChanged();
@@ -281,48 +284,79 @@ export function GraphReviewPanel({
     }
   }
   return (
-    <section className="graph-review-panel">
-      <h3>二次检查合并</h3>
-      {error && (
-        <p className="field-error" role="alert">
-          {error}
-        </p>
+    <>
+      <div className="graph-review-panel">
+        <strong>二次检查合并</strong>
+        <span className="graph-note">
+          {!report
+            ? "旧图尚未执行"
+            : report.status === "awaiting_review"
+              ? "等待人工确认"
+              : report.status === "completed"
+                ? "已完成"
+                : "处理中"}
+        </span>
+        {report && (
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => setOpen(true)}
+          >
+            {report.status === "awaiting_review" ? "查看并确认" : "查看过程"}
+          </button>
+        )}
+        {canRetry && data?.can_confirm && (
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={busy}
+            onClick={() => void submit(true)}
+          >
+            {busy ? "正在提交…" : report ? "重新检查" : "补跑二次检查"}
+          </button>
+        )}
+        {error && (
+          <span className="field-error" role="alert">
+            {error}
+          </span>
+        )}
+      </div>
+      {open && (
+        <DetailDialog open title="二次检查合并" onClose={() => setOpen(false)}>
+          {error && (
+            <p className="field-error" role="alert">
+              {error}
+            </p>
+          )}
+          {report ? (
+            <GraphReviewDetails
+              report={report}
+              approved={approved}
+              onApproval={
+                report.status === "awaiting_review" &&
+                data?.can_confirm &&
+                !busy
+                  ? setApproved
+                  : undefined
+              }
+            />
+          ) : (
+            <p className="graph-note">已排队，候选识别完成后自动显示过程。</p>
+          )}
+          {report?.status === "awaiting_review" && data?.can_confirm && (
+            <button
+              type="button"
+              className="primary-button"
+              disabled={busy}
+              onClick={() => void submit()}
+            >
+              {busy
+                ? "正在提交…"
+                : `确认并继续（批准 ${approved.length} 项，其余不合并）`}
+            </button>
+          )}
+        </DetailDialog>
       )}
-      {report ? (
-        <GraphReviewDetails
-          report={report}
-          approved={approved}
-          onApproval={
-            report.status === "awaiting_review" && data?.can_confirm && !busy
-              ? setApproved
-              : undefined
-          }
-        />
-      ) : (
-        <p className="graph-note">尚未开始二次检查。</p>
-      )}
-      {report?.status === "awaiting_review" && data?.can_confirm && (
-        <button
-          type="button"
-          className="primary-button"
-          disabled={busy}
-          onClick={() => void submit()}
-        >
-          {busy
-            ? "正在提交…"
-            : `确认并继续（批准 ${approved.length} 项，其余不合并）`}
-        </button>
-      )}
-      {canRetry && data?.can_confirm && (
-        <button
-          type="button"
-          className="secondary-button"
-          disabled={busy}
-          onClick={() => void submit(true)}
-        >
-          重新二次检查（复用抽取结果）
-        </button>
-      )}
-    </section>
+    </>
   );
 }

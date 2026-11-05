@@ -1,3 +1,4 @@
+import { DetailDialog } from "./DetailDialog";
 import { GraphReviewDetails } from "./GraphReviewPanel";
 import type { GraphReviewReport } from "./api";
 import DataManagement from "./DataManagement";
@@ -7248,6 +7249,31 @@ function DocumentTrace({
   onRetryGraph?: () => Promise<void>;
 }) {
   const [retryingGraph, setRetryingGraph] = useState(false);
+  const [reviewDetail, setReviewDetail] = useState<GraphReviewReport | null>(
+    null,
+  );
+  const traceSteps: DocumentStep[] = steps.some(
+    (step) => step.step_id === "graph_review",
+  )
+    ? steps
+    : steps.flatMap((step) =>
+        step.step_id === "graph_write"
+          ? [
+              {
+                ...step,
+                step_id: "graph_review",
+                stage: "graph_review",
+                title: "二次检查合并",
+                status: "pending" as const,
+                detail:
+                  "未执行：此建图记录早于二次检查功能，可在实体关系页签补跑。",
+                result: null,
+                duration_ms: null,
+              },
+              step,
+            ]
+          : [step],
+      );
   if (steps.length === 0)
     return (
       <LoadingSkeleton
@@ -7262,7 +7288,7 @@ function DocumentTrace({
     );
   return (
     <div className="document-trace">
-      {steps.map((step) => (
+      {traceSteps.map((step) => (
         <div className={`document-step ${step.status}`} key={step.step_id}>
           <span className="document-step-icon">
             {step.status === "completed"
@@ -7283,9 +7309,15 @@ function DocumentTrace({
             {step.step_id === "graph_review" &&
             step.result &&
             "scan" in step.result ? (
-              <GraphReviewDetails
-                report={step.result as unknown as GraphReviewReport}
-              />
+              <button
+                type="button"
+                className="link-button"
+                onClick={() =>
+                  setReviewDetail(step.result as unknown as GraphReviewReport)
+                }
+              >
+                查看检查过程和结果
+              </button>
             ) : (
               step.result && (
                 <Clamp text={stepResultText(step.result)}>
@@ -7349,6 +7381,15 @@ function DocumentTrace({
             )}
         </div>
       ))}
+      {reviewDetail && (
+        <DetailDialog
+          open
+          title="二次检查合并 · 过程和结果"
+          onClose={() => setReviewDetail(null)}
+        >
+          <GraphReviewDetails report={reviewDetail} />
+        </DetailDialog>
+      )}
     </div>
   );
 }
