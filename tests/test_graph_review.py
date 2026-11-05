@@ -192,6 +192,41 @@ def test_judge_sends_short_codes_and_maps_back(monkeypatch):
     assert failed["status"] == "failed" and "'5'" in failed["error"]
 
 
+def test_validate_ignores_single_id_groups_but_rejects_contradictions():
+    candidate = {"entities": [{"id": "e1"}, {"id": "e2"}, {"id": "e3"}]}
+    merge = {"ids": ["e1", "e3"], "name": "ADR", "type": "产品", "reason": "同一证券"}
+    alone = {"ids": ["e2"], "name": "腾讯控股", "type": "组织", "reason": "公司"}
+    # 实际数据 #41：一条合并 + 一个单独列出的，保留合并、忽略单独的。
+    value = review.validate(
+        json.dumps({"groups": [merge, alone]}), candidate, {"产品", "组织"}
+    )
+    assert value["groups"] == [merge] and value["ignored"] == ["e2"]
+    # 实际数据 #162：两个都单独列出，等于不合并。
+    value = review.validate(
+        json.dumps({"groups": [alone, {**alone, "ids": ["e1"]}]}),
+        candidate,
+        {"组织"},
+    )
+    assert value["groups"] == [] and value["ignored"] == ["e2", "e1"]
+    # 实际数据 #21：同一个编号出现在两个合并组里，结论矛盾，仍然失败。
+    with pytest.raises(ValueError, match="重复"):
+        review.validate(
+            json.dumps({"groups": [merge, {**merge, "ids": ["e1", "e2"]}]}),
+            candidate,
+            {"产品"},
+        )
+    with pytest.raises(ValueError, match="既单独列出"):
+        review.validate(
+            json.dumps({"groups": [merge, {**alone, "ids": ["e1"]}]}),
+            candidate,
+            {"产品", "组织"},
+        )
+    with pytest.raises(ValueError, match="不在这一组"):
+        review.validate(
+            json.dumps({"groups": [{**alone, "ids": ["5"]}]}), candidate, {"组织"}
+        )
+
+
 def test_review_runs_after_write_then_rewrites_with_decisions(monkeypatch):
     db = engine()
     row = {

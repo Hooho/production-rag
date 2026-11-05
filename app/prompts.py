@@ -233,7 +233,9 @@ SPECS = [
         "locked": (
             '只返回JSON：{"groups":[{"ids":["实体编号，如 e1"],"name":"统一名称","type":"清单类型",'
             '"reason":"基于给定描述和原文的判断依据"}],"separate_reason":"未合并实体保持分开的依据"}。\n'
-            "每个id最多出现一次，每组至少2个id。不要返回内部思考过程。"
+            "groups 只放要合并的实体，每组至少2个id，每个id最多出现一次；"
+            "不合并的实体不要写进 groups，在 separate_reason 里说明。没有要合并的就返回空的 groups。"
+            "不要返回内部思考过程。"
         ),
         "locked_reason": "代码按 groups 解析：ids 必须是这一组里的候选 id、每个最多出现一次，type 必须在清单里；"
         "不合规的整组判为失败，不合并。",

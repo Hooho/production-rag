@@ -548,6 +548,15 @@ export function GraphReviewDetails({
                 </div>
               );
             })}
+            {!!judgment?.decision?.ignored?.length && (
+              <p className="gr-small">
+                模型把{" "}
+                {judgment.decision.ignored
+                  .map((key) => entityLabel(entities.get(key), key))
+                  .join("、")}{" "}
+                单独列出，视为不合并。
+              </p>
+            )}
             {judgment?.decision?.separate_reason && (
               <p className="gr-reason">
                 {verdict === "separate" ? "不合并：" : "其余不合并："}

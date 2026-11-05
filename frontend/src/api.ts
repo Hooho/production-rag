@@ -4093,6 +4093,8 @@ export type GraphReviewReport = {
     decision?: {
       groups: { ids: string[]; name: string; type: string; reason: string }[];
       separate_reason?: string;
+      // 模型单独列出（只有一个编号）的实体：视为不合并。
+      ignored?: string[];
     };
   }[];
   // 旧流程的执行结果（新流程看 applied.records）。

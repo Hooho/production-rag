@@ -216,14 +216,21 @@ def validate(text, candidate, allowed_types):
         raise ValueError("模型保持分开的依据必须为文本")
     allowed = {item["id"] for item in candidate["entities"]}
     used = set()
+    groups, ignored = [], []
     for group in value["groups"]:
         ids = group.get("ids") if isinstance(group, dict) else None
         if (
             not isinstance(ids, list)
-            or len(ids) < 2
+            or not ids
             or not all(isinstance(key, str) for key in ids)
         ):
-            raise ValueError("模型合并组格式错误：ids 需要至少 2 个编号")
+            raise ValueError("模型合并组格式错误：ids 需要编号列表")
+        # 只有一个编号的组：模型想说「它就是它自己」，不是合并建议，忽略（视为不合并）。
+        if len(ids) == 1:
+            if ids[0] not in allowed:
+                raise ValueError(f"模型合并组里有不在这一组的编号：{ids}")
+            ignored.append(ids[0])
+            continue
         if len(set(ids)) != len(ids) or used.intersection(ids):
             raise ValueError(f"模型合并组里有重复的编号：{ids}")
         if not set(ids) <= allowed:
@@ -240,6 +247,15 @@ def validate(text, candidate, allowed_types):
         ):
             raise ValueError("模型统一名称、类型或判断依据不合规")
         used.update(ids)
+        groups.append(group)
+    # 同一个编号既单独列出、又在合并组里：结论矛盾，判为失败。
+    if used.intersection(ignored):
+        raise ValueError(
+            f"模型把同一个编号既单独列出又放进合并组：{sorted(used.intersection(ignored))}"
+        )
+    value["groups"] = groups
+    if ignored:
+        value["ignored"] = list(dict.fromkeys(ignored))
     return value
 
 
@@ -290,6 +306,8 @@ def judge(models, schema, candidate, system_prompt=None):
         decision = validate(text, short, set(type_names(schema)))
         for group in decision["groups"]:
             group["ids"] = [codes[key] for key in group["ids"]]
+        if decision.get("ignored"):
+            decision["ignored"] = [codes[key] for key in decision["ignored"]]
         result.update(decision=decision, codes=codes, status="completed")
     except Exception as error:
         result.update(status="failed", error=str(error)[:1000])
