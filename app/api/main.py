@@ -27,7 +27,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import delete, select
+from sqlalchemy import case, delete, select
 from sqlalchemy.exc import IntegrityError
 
 from ..agent.service import Agent
@@ -610,14 +610,23 @@ def check_session(store, session_id, owner):
 
 # 查询一个文档的处理阶段，所有结果都来自后端持久化状态。
 # 排序放在 Python 里：步骤的 result（JSON）可能很大，MySQL 排序时整行进 sort buffer 会报 1038。
-def read_document_steps(store, document_id):
+# results=False 给文档列表用：列表只要每一步的标题和状态（显示「解析中 · 生成向量」这类进度），
+# 以及「切分文本」这一步的分片数，不读其他步骤的 result。详细结果（例如图谱二次检查的报告）打开详情时再读。
+def read_document_steps(store, document_id, results=True):
+    if results:
+        query = select(document_steps)
+    else:
+        columns = [column for column in document_steps.c if column.name != "result"]
+        query = select(
+            *columns,
+            case(
+                (document_steps.c.stage == "chunking", document_steps.c.result),
+                else_=None,
+            ).label("result"),
+        )
     with store.engine.connect() as connection:
         rows = (
-            connection.execute(
-                select(document_steps).where(
-                    document_steps.c.document_id == document_id
-                )
-            )
+            connection.execute(query.where(document_steps.c.document_id == document_id))
             .mappings()
             .all()
         )
@@ -630,7 +639,8 @@ def version_of(row):
 
 
 # 把一个版本记录转换为接口返回结构，is_current 表示它是否是检索使用的当前版本。
-def version_view(store, row, current_id):
+# step_results=False 时步骤不带详细结果（文档列表用），见 read_document_steps。
+def version_view(store, row, current_id, step_results=True):
     return {
         "document_id": row["id"],
         "doc_key": row["doc_key"] or row["id"],
@@ -645,7 +655,7 @@ def version_view(store, row, current_id):
         "version_note": row["version_note"],
         "is_current": row["id"] == current_id,
         "document_metadata": row["document_metadata"] or {},
-        "steps": read_document_steps(store, row["id"]),
+        "steps": read_document_steps(store, row["id"], step_results),
     }
 
 
@@ -1585,7 +1595,8 @@ def create_app(store=None, models=None, jwt_secret=None):
             for row in versions:
                 if row["id"] == current_id:
                     display = row
-            item = version_view(app.state.store, display, current_id)
+            # 列表不带各步骤的详细结果，打开详情（GET /documents/{id}）时再读。
+            item = version_view(app.state.store, display, current_id, False)
             item["version_count"] = len(versions)
             item.update(store.document_permission(doc_key))
             item["can_edit"] = display["owner"] == owner

@@ -562,7 +562,7 @@ def test_document_list_includes_ingestion_steps(setup):
     with store.engine.begin() as connection:
         connection.execute(
             documents.insert().values(
-                id="doc-trace",
+                id="00000000-0000-4000-8000-000000000001",
                 owner="alice",
                 title="带流程文档",
                 filename="trace.txt",
@@ -575,7 +575,7 @@ def test_document_list_includes_ingestion_steps(setup):
         )
         connection.execute(
             document_steps.insert().values(
-                document_id="doc-trace",
+                document_id="00000000-0000-4000-8000-000000000001",
                 step_id="embedding",
                 step_order=4,
                 stage="embedding",
@@ -587,10 +587,14 @@ def test_document_list_includes_ingestion_steps(setup):
                 updated="2026-01-01",
             )
         )
+    # 列表只带每一步的标题和状态，详细结果打开详情时再读。
     listed = client.get("/documents", headers=headers()).json()["documents"]
-    item = next(item for item in listed if item["document_id"] == "doc-trace")
+    item = next(item for item in listed if item["document_id"] == "00000000-0000-4000-8000-000000000001")
     assert item["steps"][0]["step_id"] == "embedding"
-    assert item["steps"][0]["result"]["input_count"] == 2
+    assert item["steps"][0]["status"] == "running"
+    assert item["steps"][0]["result"] is None
+    detail = client.get("/documents/00000000-0000-4000-8000-000000000001", headers=headers()).json()
+    assert detail["steps"][0]["result"]["input_count"] == 2
 
 
 def test_document_upload_persists_file_metadata(setup, tmp_path, monkeypatch):
