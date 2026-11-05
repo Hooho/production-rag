@@ -4001,13 +4001,34 @@ export type GraphReviewReport = {
   approved_by?: string;
   approved_at?: string;
   approved_ids?: string[];
+  resolutions?: Record<string, GraphReviewChoice>;
+  // 人工逐条（或批量）记录的决定，「完成确认」时统一执行；键是建议编号「组号:序号」。
+  decisions?: Record<
+    string,
+    { decision: "approved" | "rejected"; by: string; at: string }
+  >;
   scan: {
     duration_ms?: number;
     status: string;
     entity_count: number;
     candidate_count: number;
+    // 怎么找出候选：用哪个向量模型、拿什么文字算、门槛多少。旧报告没有。
+    method?: {
+      embedding: { mode: string; model: string; semantic: boolean } | null;
+      text_format: string;
+      metric: string;
+      top_k: number;
+      min_similarity: number;
+      max_pairs: number;
+      error?: string;
+    };
+    stats?: { same_name: number; similar: number; similar_total: number };
     candidates: {
       id: string;
+      kind?: "same_name" | "similar";
+      similarity?: number;
+      texts?: string[];
+      ranks?: number[];
       reason: string;
       entities: {
         id: string;
@@ -4045,22 +4066,47 @@ export type GraphReviewReport = {
       type_corrections?: number;
       relation_count?: number;
       entity_id?: string;
+      proposal_ids?: string[];
     }[];
   };
 };
+export type GraphReviewChoice = { name: string; type: string };
 export function getGraphReview(documentId: string) {
   return request<{ report: GraphReviewReport | null; can_confirm: boolean }>(
     `/documents/${documentId}/graph/review`,
+  );
+}
+export function decideGraphReview(
+  documentId: string,
+  buildId: string,
+  proposalIds: string[],
+  decision: "approved" | "rejected" | null,
+) {
+  return request<GraphReviewReport>(
+    `/documents/${documentId}/graph/review/decide`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        build_id: buildId,
+        proposal_ids: proposalIds,
+        decision,
+      }),
+    },
   );
 }
 export function confirmGraphReview(
   documentId: string,
   buildId: string,
   approvedIds: string[],
+  resolutions: Record<string, GraphReviewChoice> = {},
 ) {
   return request<GraphBuild>(`/documents/${documentId}/graph/review/confirm`, {
     method: "POST",
-    body: JSON.stringify({ build_id: buildId, approved_ids: approvedIds }),
+    body: JSON.stringify({
+      build_id: buildId,
+      approved_ids: approvedIds,
+      resolutions,
+    }),
   });
 }
 export function retryGraphReview(documentId: string) {

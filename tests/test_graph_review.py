@@ -36,13 +36,30 @@ def plan_for(db):
         )
 
 
+# 测试用向量：名字里有「股票」的指向另一方向，腾讯和腾讯控股几乎重合。
+def fake_embed(texts):
+    return [[0.0, 1.0] if "股票" in text else [1.0, 0.1] for text in texts]
+
+
+fake_models = SimpleNamespace(
+    embedding_mode="local", embedding_model="bge-test", embed=fake_embed
+)
+
+
 def test_candidates_and_model_validation():
     db = engine()
     items, ids = review.inventory(
         plan_for(db), {"c1": "段永平投资腾讯，持有腾讯股票。"}
     )
-    groups = review.candidates(items)
-    assert len(groups) == 1 and len(groups[0]["entities"]) == 3
+    assert review.candidates(items) == (
+        [],
+        {"same_name": 0, "similar": 0, "similar_total": 0},
+    )
+    groups, stats = review.candidates(items, fake_embed)
+    assert len(groups) == 1 and len(groups[0]["entities"]) == 2
+    assert groups[0]["kind"] == "similar" and groups[0]["similarity"] > 0.99
+    assert groups[0]["ranks"] == [1, 1] and len(groups[0]["texts"]) == 2
+    assert stats == {"same_name": 0, "similar": 1, "similar_total": 1}
     assert len(ids) == 3
     candidate = groups[0]
     keys = [row["id"] for row in candidate["entities"]]
@@ -224,7 +241,16 @@ def test_review_waits_confirm_then_applies_without_recalling_model(monkeypatch):
         }
 
     monkeypatch.setattr(review, "judge", judge)
-    report = build.secondary_review(store, None, row, plan_for(db))
+    report = build.secondary_review(store, fake_models, row, plan_for(db))
+    assert report["scan"]["method"]["embedding"]["model"] == "bge-test"
+    assert report["scan"]["candidates"][0]["kind"] == "similar"
+    build.decide_review(store, "b1", ["1:0"], "approved", "alice")
+    build.decide_review(store, "b1", ["1:0"], None, "alice")
+    build.decide_review(store, "b1", ["1:0"], "rejected", "alice")
+    saved = build.review_report(db, row)
+    assert saved["decisions"]["1:0"]["decision"] == "rejected"
+    with pytest.raises(build.BuildError):
+        build.decide_review(store, "b1", ["9:9"], "approved", "alice")
     assert report["status"] == "awaiting_review"
     with db.connect() as connection:
         assert not connection.execute(select(graph_entities)).all()
@@ -234,7 +260,7 @@ def test_review_waits_confirm_then_applies_without_recalling_model(monkeypatch):
     with pytest.raises(build.BuildError):
         build.confirm_review(store, "b1", ["1:0"], "alice")
     approved_plan = plan_for(db)
-    result = build.secondary_review(store, None, row, approved_plan)
+    result = build.secondary_review(store, fake_models, row, approved_plan)
     assert result["status"] == "prepared"
     assert len(calls) == 1 and queue == ["b1"]
     assert len({item["entity_id"] for item in approved_plan["mentions"]}) == 2
@@ -299,7 +325,26 @@ def test_review_api_permissions_and_build_identity(monkeypatch):
         )
         assert not calls
         assert client.post(path + "/confirm", json=body).status_code == 202
-        assert len(calls) == 1 and calls[0][-1] == "alice"
+        assert len(calls) == 1 and calls[0][3] == "alice" and calls[0][4] == {}
+        decided = []
+        monkeypatch.setattr(
+            build, "decide_review", lambda *args: decided.append(args) or {}
+        )
+        decide = {"build_id": build_id, "proposal_ids": ["1:0"], "decision": "approved"}
+        assert (
+            client.post(
+                path + "/decide", headers={"x-user": "reader"}, json=decide
+            ).status_code
+            == 403
+        )
+        assert (
+            client.post(
+                path + "/decide", json={**decide, "decision": "maybe"}
+            ).status_code
+            == 422
+        )
+        assert client.post(path + "/decide", json=decide).status_code == 200
+        assert decided[0][2:] == (["1:0"], "approved", "alice")
 
 
 def test_review_keeps_other_documents_entities_unchanged_and_is_repeatable():
@@ -369,3 +414,60 @@ def test_review_keeps_other_documents_entities_unchanged_and_is_repeatable():
                 == "腾讯"
             )
     assert targets[0] == targets[1] and targets[0] != original
+
+
+def item(key, name, kind="组织"):
+    return {
+        "id": key,
+        "names": [name],
+        "types": [kind],
+        "descriptions": [],
+        "evidence": [],
+    }
+
+
+def test_candidates_pair_without_chaining_and_same_name_first():
+    vectors = {"甲": [1.0, 0.0], "乙": [0.9, 0.436], "丙": [0.5, 0.866]}
+    items = [item("a", "甲"), item("b", "乙"), item("c", "丙"), item("d", "甲")]
+    groups, stats = review.candidates(
+        items, lambda texts: [vectors[text[0]] for text in texts]
+    )
+    kinds = [(row["kind"], [e["id"] for e in row["entities"]]) for row in groups]
+    # 甲、甲 名字相同成组；甲~乙、乙~丙 各成一对，甲和丙（相似度 0.5）不会被串到一起。
+    assert kinds[0] == ("same_name", ["a", "d"])
+    pairs = sorted(sorted(ids) for kind, ids in kinds[1:])
+    assert pairs == [["a", "b"], ["b", "c"], ["b", "d"]]
+    assert all(kind == "similar" for kind, _ in kinds[1:])
+    assert stats["same_name"] == 1
+
+
+def chained_report():
+    def judgment(candidate_id, ids, name):
+        return {
+            "candidate_id": candidate_id,
+            "status": "completed",
+            "decision": {
+                "groups": [{"ids": ids, "name": name, "type": "组织", "reason": name}]
+            },
+        }
+
+    return {
+        "status": "awaiting_review",
+        "judgments": [
+            judgment("1", ["a", "b"], "腾讯控股"),
+            judgment("2", ["b", "c"], "腾讯控股有限公司"),
+            judgment("3", ["d", "e"], "亚马逊"),
+        ],
+    }
+
+
+def test_components_join_shared_entities_and_need_a_choice():
+    report = chained_report()
+    groups = review.components(report, {"1:0", "2:0", "3:0"})
+    assert [row["key"] for row in groups] == ["1:0", "3:0"]
+    assert groups[0]["ids"] == ["a", "b", "c"]
+    assert [row["name"] for row in groups[0]["options"]] == [
+        "腾讯控股",
+        "腾讯控股有限公司",
+    ]
+    assert len(groups[1]["options"]) == 1

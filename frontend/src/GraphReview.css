@@ -231,7 +231,7 @@
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 6px;
 }
 .gr-entities li {
@@ -264,33 +264,6 @@
   overflow: hidden;
 }
 
-.gr-proposal {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 8px 10px;
-  border: 1px dashed #c3d5fb;
-  border-radius: 6px;
-  background: #f8fbff;
-  cursor: pointer;
-  font: inherit;
-  letter-spacing: normal;
-  margin: 0;
-}
-.gr-proposal.is-checked {
-  border-style: solid;
-  border-color: #16a34a;
-  background: #f0fdf4;
-}
-.gr-proposal input {
-  width: auto;
-  margin-top: 3px;
-}
-.gr-proposal > span {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
 .gr-proposal-line {
   display: inline-flex;
   flex-wrap: wrap;
@@ -353,25 +326,6 @@
 .gr-pager button:disabled {
   opacity: 0.4;
   cursor: default;
-}
-
-.gr-footer {
-  position: sticky;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  margin: 0 -24px;
-  padding: 12px 24px;
-  background: var(--surface, #fff);
-  border-top: 1px solid #e3e8ef;
-  box-shadow: 0 -6px 16px #0f172a0d;
-}
-.gr-footer span {
-  margin-right: auto;
-  color: #475569;
-  font-size: 13px;
 }
 
 .gr-evidence {
@@ -454,4 +408,173 @@
 }
 .document-step-link:hover {
   filter: brightness(0.95);
+}
+
+.gr-grow {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.gr-method {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e3e8ef;
+}
+.gr-method p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #334155;
+}
+.gr-warn {
+  color: var(--tone-warning-text) !important;
+  background: var(--tone-warning-bg);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.gr-warn-inline {
+  color: var(--tone-warning-text);
+}
+
+.gr-kind {
+  border: 1px solid var(--tone-accent-border);
+  background: var(--tone-accent-bg);
+  color: var(--tone-accent-text);
+  border-radius: 4px;
+  padding: 1px 8px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.gr-kind.is-static {
+  cursor: default;
+  border-color: #d1fae5;
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.gr-layer {
+  display: grid;
+  gap: 6px;
+}
+.gr-layer + .gr-layer {
+  border-top: 1px dashed #e3e8ef;
+  padding-top: 8px;
+}
+.gr-layer-label {
+  font-size: 11px;
+  color: #94a3b8;
+  letter-spacing: 0.02em;
+}
+.gr-proposal {
+  display: grid;
+  justify-items: start;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f8fbff;
+  border: 1px solid #dbe7fb;
+}
+
+.gr-decision {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #fafafa;
+}
+.gr-decision input {
+  width: auto;
+  margin: 0;
+}
+.gr-decision.is-approved {
+  background: #f0fdf4;
+}
+.gr-decision.is-rejected {
+  background: #f8fafc;
+}
+.gr-mini {
+  padding: 3px 10px !important;
+  font-size: 12px !important;
+}
+
+.gr-similarity p {
+  margin: 8px 0;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.gr-similarity section {
+  margin-top: 12px !important;
+}
+
+.gr-footer {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  gap: 8px;
+  margin: 0 -24px;
+  padding: 12px 24px;
+  background: var(--surface, #fff);
+  border-top: 1px solid #e3e8ef;
+  box-shadow: 0 -6px 16px #0f172a0d;
+}
+.gr-footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+.gr-footer-row > span:first-child {
+  margin-right: auto;
+  color: #475569;
+  font-size: 13px;
+}
+.gr-plan {
+  font-size: 13px;
+  max-height: 32vh;
+  overflow-y: auto;
+}
+.gr-plan summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.gr-plan ol {
+  margin: 6px 0 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 6px;
+}
+.gr-plan li > span {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.gr-plan small {
+  display: block;
+  color: #94a3b8;
+}
+.gr-choose {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.gr-choose label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font: inherit;
+  letter-spacing: normal;
+}
+.gr-choose input {
+  width: auto;
+  margin: 0;
 }

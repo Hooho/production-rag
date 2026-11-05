@@ -3,6 +3,8 @@
 identity、require_admin 定义在 main.py，这里由 create_app 传进来，避免循环导入。
 """
 
+from typing import Literal
+
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -35,9 +37,23 @@ class RetryInput(BaseModel):
     chunk_id: str | None = Field(None, max_length=64)
 
 
+class ReviewChoice(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    type: str = Field(min_length=1, max_length=100)
+
+
 class ReviewConfirmInput(BaseModel):
     build_id: UUID
     approved_ids: list[str] = Field(default_factory=list, max_length=10000)
+    # 连在一起的建议名字不一致时，人工选的最终名字和类型；键是组内最小的建议编号。
+    resolutions: dict[str, ReviewChoice] = Field(default_factory=dict)
+
+
+class ReviewDecideInput(BaseModel):
+    build_id: UUID
+    proposal_ids: list[str] = Field(min_length=1, max_length=10000)
+    # approved 批准、rejected 否决、null 撤销
+    decision: Literal["approved", "rejected"] | None = None
 
 
 class StopInput(BaseModel):
@@ -244,7 +260,36 @@ def build_router(current_user, identity, require_admin):
             raise HTTPException(409, "建图记录已切换，请刷新")
         try:
             return graph_build.confirm_review(
-                state.store, str(body.build_id), body.approved_ids, user["username"]
+                state.store,
+                str(body.build_id),
+                body.approved_ids,
+                user["username"],
+                {key: value.model_dump() for key, value in body.resolutions.items()},
+            )
+        except graph_build.BuildError as error:
+            raise HTTPException(409, str(error)) from None
+
+    @router.post("/documents/{document_id}/graph/review/decide")
+    def review_decide(
+        request: Request,
+        document_id: UUID,
+        body: ReviewDecideInput,
+        user=Depends(current_user),
+    ):
+        state = request.app.state
+        row = readable(state, user["username"], document_id)
+        check_can_build(user, row)
+        with state.store.engine.connect() as connection:
+            latest = graph_query.latest_build(connection, str(document_id))
+        if not latest or latest["id"] != str(body.build_id):
+            raise HTTPException(409, "建图记录已切换，请刷新")
+        try:
+            return graph_build.decide_review(
+                state.store,
+                str(body.build_id),
+                body.proposal_ids,
+                body.decision,
+                user["username"],
             )
         except graph_build.BuildError as error:
             raise HTTPException(409, str(error)) from None
