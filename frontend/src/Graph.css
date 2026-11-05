@@ -1206,6 +1206,8 @@
 /* Keep the complete graph and detail panes in the viewport, with detail scrolling inside. */
 @media (min-width: 1101px) {
   .graph-workspace:not(.is-focused) .graph-workspace-body:has(.graph-view) {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
     position: sticky;
     top: 12px;
     height: calc(100dvh - 24px);
