@@ -59,7 +59,7 @@
 .graph-canvas-wrap {
   position: relative;
   min-width: 0;
-  overflow: visible;
+  overflow: hidden;
   border-radius: 10px;
 }
 .graph-selection-halo {
@@ -1140,11 +1140,10 @@
 }
 
 .graph-history-controls {
-  position: sticky;
+  position: absolute;
   top: 12px;
-  height: 0;
-  margin: 0 12px;
-  transform: translateY(12px);
+  left: 12px;
+  right: 12px;
   z-index: 3;
   display: flex;
   flex-wrap: wrap;
@@ -1202,4 +1201,43 @@
 }
 .graph-entity-search small {
   margin: 0;
+}
+
+/* Keep the complete graph and detail panes in the viewport, with detail scrolling inside. */
+@media (min-width: 1101px) {
+  .graph-workspace:not(.is-focused) .graph-workspace-body:has(.graph-view) {
+    position: sticky;
+    top: 12px;
+    height: calc(100dvh - 24px);
+    align-items: stretch;
+  }
+  .graph-workspace:not(.is-focused)
+    .graph-workspace-body:has(.graph-view)
+    > div:first-child {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+  }
+  .graph-workspace:not(.is-focused) .graph-workspace-body .graph-view {
+    flex: 1 1 0;
+    min-height: 0;
+  }
+  .graph-workspace:not(.is-focused) .graph-workspace-body .graph-canvas-wrap {
+    flex: 1 1 0;
+    min-height: 0;
+  }
+  .graph-workspace:not(.is-focused) .graph-workspace-body .graph-canvas {
+    position: absolute;
+    inset: 0;
+    height: 100%;
+    box-sizing: border-box;
+  }
+  .graph-workspace:not(.is-focused)
+    .graph-workspace-body:has(.graph-view)
+    > .graph-side {
+    position: static;
+    height: 100%;
+    min-height: 0;
+  }
 }
