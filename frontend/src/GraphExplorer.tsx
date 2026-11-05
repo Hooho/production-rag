@@ -1,3 +1,4 @@
+import type { GraphHopInfo } from "./graphHops";
 import type { GraphExploration } from "./GraphHistory";
 import { useState } from "react";
 import type { GraphNetwork } from "./api";
@@ -82,12 +83,16 @@ export function useGraphExplorer(
 }
 
 export function GraphExplorerControls({
+  hopInfo,
+  onSetRoot,
   explorer,
   network,
   matches = [],
   selected,
   onClearSelection,
 }: {
+  hopInfo?: GraphHopInfo | null;
+  onSetRoot?: (id: string | null) => void;
   explorer: ReturnType<typeof useGraphExplorer>;
   network?: GraphNetwork;
   matches?: Match[];
@@ -163,6 +168,17 @@ export function GraphExplorerControls({
             返回概览
           </button>
         )}
+        {node && onSetRoot && (
+          <button
+            type="button"
+            className="secondary-button"
+            title="只设置跳数起点，不改变图中元素、高亮和视角"
+            disabled={hopInfo?.rootId === node.id}
+            onClick={() => onSetRoot(node.id)}
+          >
+            设为起点
+          </button>
+        )}
         <GraphFocusButton />
       </form>
       {explorer.search && (
@@ -183,6 +199,19 @@ export function GraphExplorerControls({
               {item.name}（{item.type}）
             </button>
           ))}
+        </div>
+      )}
+      {hopInfo && (
+        <div className="graph-explorer-row">
+          <span className="graph-note">起点：{hopInfo.rootName} · 0跳</span>
+          <span className="graph-note">按当前图中最短路径计算</span>
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => onSetRoot?.(null)}
+          >
+            清除起点
+          </button>
         </div>
       )}
       {centerNode && (

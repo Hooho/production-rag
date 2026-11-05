@@ -1,3 +1,4 @@
+import { graphHops } from "./graphHops";
 import { GraphHistoryControls, useGraphHistory } from "./GraphHistory";
 import { DocumentChunkDialog, type ChunkTarget } from "./DocumentChunkDialog";
 import { GraphRelationPanel } from "./GraphRelationPanel";
@@ -82,6 +83,7 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
   } | null>(null);
   const explorer = useGraphExplorer(highlightedCategory);
   const { search, focus, limit, center } = explorer;
+  const [hopRoot, setHopRoot] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [highlightedRelation, setHighlightedRelation] =
     useState<GraphRelationRow | null>(null);
@@ -110,6 +112,7 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
     },
   );
   const [data, setData] = useState<GraphOverview | null>(null);
+  const hopInfo = graphHops(data?.network, hopRoot);
   const [error, setError] = useState("");
   useEffect(() => {
     let cancelled = false;
@@ -187,6 +190,8 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
           </select>
         </div>
         <GraphExplorerControls
+          hopInfo={hopInfo}
+          onSetRoot={setHopRoot}
           explorer={explorer}
           network={data.network}
           matches={data.matches}
@@ -201,6 +206,7 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
         >
           <div>
             <GraphView
+              hopInfo={hopInfo}
               navigation={
                 <GraphHistoryControls
                   history={history}
@@ -267,6 +273,7 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
           {selected && (
             <GraphEntityPanel
               entityId={selected}
+              hopInfo={hopInfo}
               entityQuery={
                 explorer.entitySearch?.entityId === selected
                   ? explorer.entitySearch.query

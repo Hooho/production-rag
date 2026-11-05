@@ -1,3 +1,4 @@
+import type { GraphHopInfo } from "./graphHops";
 import { filterRelatedEntities } from "./graphEntitySearch";
 import {
   useEffect,
@@ -20,6 +21,7 @@ import { typeColor } from "./GraphView";
 // 实体详情：标准名、类型；由哪些名字合并而来（各自出自第几片、用什么方法合并）；出现在哪些文档；全部关系和出处。
 // documentId 给了只看这份文档里的，不给看全局（管理员）。
 export function GraphEntityPanel({
+  hopInfo,
   entityId,
   documentId,
   onClose,
@@ -38,6 +40,7 @@ export function GraphEntityPanel({
   onShowMatches,
   matchingLimitReached = false,
 }: {
+  hopInfo?: GraphHopInfo | null;
   onOpenDocument?: (documentId: string) => void;
   entityId: string;
   documentId?: string | null;
@@ -180,6 +183,14 @@ export function GraphEntityPanel({
             关闭
           </button>
         </div>
+        {hopInfo && (
+          <p className="graph-note">
+            距起点「{hopInfo.rootName}」：
+            {hopInfo.distances.has(entityId)
+              ? `${hopInfo.distances.get(entityId)}跳`
+              : "未连通"}
+          </p>
+        )}
         {detail.entity.description && (
           <p className="graph-note">{detail.entity.description}</p>
         )}

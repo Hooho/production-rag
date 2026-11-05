@@ -1,3 +1,4 @@
+import type { GraphHopInfo } from "./graphHops";
 import { matchesEntityName } from "./graphEntitySearch";
 import type { GraphCanvasState } from "./GraphHistory";
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
@@ -65,6 +66,10 @@ function elements(nodes: GraphNode[], edges: GraphEdge[]): ElementDefinition[] {
       group: "nodes",
       data: {
         id: node.id,
+        baseLabel:
+          node.hidden_neighbors > 0
+            ? `${name}  +${node.hidden_neighbors}`
+            : name,
         label:
           node.hidden_neighbors > 0
             ? `${name}  +${node.hidden_neighbors}`
@@ -185,6 +190,7 @@ function focusRelation(instance: Core, edgeId: string) {
   const edge = instance.getElementById(edgeId);
   if (edge.empty()) return false;
   const target = edge.union(edge.connectedNodes());
+  instance.resize();
   instance.fit(target, 72);
   // Keep the pair readable without excessively magnifying short edges or loops.
   if (instance.zoom() > 1.3) instance.zoom(1.3);
@@ -242,6 +248,7 @@ function arrangeGraph(instance: Core, highlightedOnly = false) {
 }
 
 export function GraphView({
+  hopInfo,
   nodes,
   edges,
   selected,
@@ -258,6 +265,7 @@ export function GraphView({
   onCanvasChange,
   emptyText = "没有可显示的实体",
 }: {
+  hopInfo?: GraphHopInfo | null;
   nodes: GraphNode[];
   edges: GraphEdge[];
   selected?: string | null;
@@ -357,10 +365,21 @@ export function GraphView({
     }
     instance.on("pan zoom dragfree layoutstop", saveCanvas);
     let resizeFrame = 0;
+    let focused = Boolean(
+      container.current?.closest(".graph-workspace.is-focused"),
+    );
     const observer = new ResizeObserver(() => {
       cancelAnimationFrame(resizeFrame);
       resizeFrame = requestAnimationFrame(() => {
         instance.resize();
+        const nextFocused = Boolean(
+          container.current?.closest(".graph-workspace.is-focused"),
+        );
+        const modeChanged = nextFocused !== focused;
+        focused = nextFocused;
+        // Cards and hop labels may change available space; preserve the camera.
+        // Only switching focus mode automatically reframes the whole viewport.
+        if (!modeChanged) return;
         if (instance.nodes().empty()) return;
         if (restoreRequest.current) return;
         if (
@@ -394,6 +413,21 @@ export function GraphView({
     });
     arrangeGraph(instance);
   }, [key, hasNodes]);
+
+  // Updating hop labels must not recreate elements, rerun layout or move the camera.
+  useEffect(() => {
+    const instance = cy.current;
+    if (!instance) return;
+    instance.batch(() =>
+      instance.nodes().forEach((node) => {
+        const distance = hopInfo?.distances.get(node.id());
+        const suffix = hopInfo
+          ? ` · ${distance === undefined ? "未连通" : `${distance}跳`}`
+          : "";
+        node.data("label", `${node.data("baseLabel")}${suffix}`);
+      }),
+    );
+  }, [hopInfo, key, hasNodes]);
 
   // 选中某个实体时，突出它和它的邻居，其他的淡化；相连的边显示关系分类。
   useEffect(() => {

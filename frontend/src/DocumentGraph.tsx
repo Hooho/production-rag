@@ -1,3 +1,4 @@
+import { graphHops } from "./graphHops";
 import { GraphReviewPanel } from "./GraphReviewPanel";
 import { GraphHistoryControls, useGraphHistory } from "./GraphHistory";
 import { DocumentChunkDialog, type ChunkTarget } from "./DocumentChunkDialog";
@@ -81,6 +82,7 @@ export function DocumentGraph({
   } | null>(null);
   const explorer = useGraphExplorer(highlightedCategory);
   const { focus, center, limit } = explorer;
+  const [hopRoot, setHopRoot] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [highlightedRelation, setHighlightedRelation] =
     useState<GraphRelationRow | null>(null);
@@ -109,6 +111,7 @@ export function DocumentGraph({
     },
   );
   const [data, setData] = useState<DocumentGraphData | null>(null);
+  const hopInfo = graphHops(data?.network, hopRoot);
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState(false);
   const [chunkDetails, setChunkDetails] = useState(false);
@@ -489,6 +492,8 @@ export function DocumentGraph({
         </div>
         {view === "network" && (
           <GraphExplorerControls
+            hopInfo={hopInfo}
+            onSetRoot={setHopRoot}
             explorer={explorer}
             network={data.network}
             matches={data.matches}
@@ -506,6 +511,7 @@ export function DocumentGraph({
             {view === "network" && data.network && (
               <>
                 <GraphView
+                  hopInfo={hopInfo}
                   navigation={
                     <GraphHistoryControls
                       history={history}
@@ -779,6 +785,7 @@ export function DocumentGraph({
           {selected && (
             <GraphEntityPanel
               entityId={selected}
+              hopInfo={hopInfo}
               entityQuery={
                 explorer.entitySearch?.entityId === selected
                   ? explorer.entitySearch.query
