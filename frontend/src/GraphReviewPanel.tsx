@@ -128,16 +128,48 @@ function entityLabel(entity: Entity | undefined, fallback: string) {
   return entity ? entity.names.join(" / ") : fallback;
 }
 
-// 二次检查的过程和结果。每张卡片三层：系统为什么放在一起 → 模型的结论 → 人工的决定。
-// 传 onDecide 时可以操作：每条建议可单独「合并 / 不合并」，也可勾选多条批量处理；这里只记录决定，最后统一写入。
+// 五步，每步一个页签，只显示这一步的内容。
+export type ReviewStep = 1 | 2 | 3 | 4 | 5;
+
+// 打开时停在哪一步：判断中 → 2；还有待处理 → 3；有批准、还没写入 → 4；写入中或都处理完 → 5。
+export function defaultStep(report: GraphReviewReport): ReviewStep {
+  if (!report.scan) return 1;
+  if (["queued", "running"].includes(report.status)) return 2;
+  if (report.status === "rewriting") return 5;
+  if (pendingCount(report) > 0) return 3;
+  const approved = Object.values(report.decisions ?? {}).filter(
+    (item) => item.decision === "approved",
+  ).length;
+  if (approved > 0 || report.applied) return report.applied ? 5 : 4;
+  return 2;
+}
+
+type Row = {
+  candidate: Candidate;
+  judgment: Judgment | undefined;
+  verdict: Verdict;
+  ids: string[];
+};
+
+// 二次检查的过程和结果，分五个页签：
+//   1 找出候选（系统）  2 判断是否同一个（大模型）  3 逐条决定（人工）  4 确认（人工）  5 写入图谱（系统）
+// onDecide 有值时第 3 步可以操作；第 2 步的按钮、第 4 步的确认内容由外面传进来（它们要调接口）。
 export function GraphReviewDetails({
   report,
+  step,
+  onStep,
   onDecide,
   busy = false,
+  judgeActions,
+  confirmPanel,
 }: {
   report: GraphReviewReport;
+  step: ReviewStep;
+  onStep: (step: ReviewStep) => void;
   onDecide?: (ids: string[], decision: Decision | null) => Promise<void>;
   busy?: boolean;
+  judgeActions?: ReactNode;
+  confirmPanel?: ReactNode;
 }) {
   const editable = Boolean(onDecide);
   const scan = report.scan!;
@@ -147,13 +179,18 @@ export function GraphReviewDetails({
     title: string;
     body: ReactNode;
   } | null>(null);
-  const [filter, setFilter] = useState<Filter>(editable ? "pending" : "all");
+  const firstFilter: Record<ReviewStep, Filter> = {
+    1: "all",
+    2: "merge",
+    3: "pending",
+    4: "all",
+    5: "all",
+  };
+  const [filter, setFilter] = useState<Filter>(firstFilter[step]);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<string[]>([]);
-  const [view, setView] = useState<"groups" | "execution">("groups");
   const root = useRef<HTMLDivElement>(null);
-  const list = useRef<HTMLDivElement>(null);
 
   const decisions = decisionsOf(report);
   const judgments = useMemo(
@@ -169,14 +206,42 @@ export function GraphReviewDetails({
       ),
     [scan.candidates],
   );
-  const rows = scan.candidates.map((candidate) => {
+  const rows: Row[] = scan.candidates.map((candidate) => {
     const judgment = judgments.get(candidate.id);
     const ids = (judgment?.decision?.groups ?? []).map(
       (_, index) => `${candidate.id}:${index}`,
     );
     return { candidate, judgment, verdict: verdictOf(judgment), ids };
   });
-  const match = (row: (typeof rows)[number], key: Filter) =>
+  const decidable = rows.filter((row) => row.ids.length > 0);
+
+  // 每一步的列表范围和筛选项。
+  const scope: Record<ReviewStep, Row[]> = {
+    1: rows,
+    2: rows,
+    3: decidable,
+    4: [],
+    5: [],
+  };
+  const stepFilters: Record<ReviewStep, [Filter, string][]> = {
+    1: [["all", "全部"]],
+    2: [
+      ["merge", "建议合并"],
+      ["separate", "不是同一个"],
+      ["failed", "判断失败"],
+      ["running", "等待判断"],
+      ["all", "全部"],
+    ],
+    3: [
+      ["pending", "待处理"],
+      ["approved", "已批准"],
+      ["rejected", "已否决"],
+      ["all", "全部"],
+    ],
+    4: [],
+    5: [],
+  };
+  const match = (row: Row, key: Filter) =>
     key === "all"
       ? true
       : key === "pending"
@@ -184,18 +249,8 @@ export function GraphReviewDetails({
         : key === "approved" || key === "rejected"
           ? row.ids.some((id) => decisions[id] === key)
           : row.verdict === key;
-  const filters: [Filter, string][] = [
-    ["pending", "待处理"],
-    ["merge", "模型建议合并"],
-    ["approved", "已批准"],
-    ["rejected", "已否决"],
-    ["separate", "模型判断不是同一个"],
-    ["failed", "判断失败"],
-    ["running", "等待判断"],
-    ["all", "全部"],
-  ];
   const keyword = query.trim().toLowerCase();
-  const filtered = rows.filter(
+  const filtered = scope[step].filter(
     (row) =>
       match(row, filter) &&
       (!keyword ||
@@ -214,7 +269,11 @@ export function GraphReviewDetails({
     row.ids.filter((id) => !decisions[id]),
   );
 
-  useEffect(() => setPage(1), [filter, query]);
+  useEffect(() => setPage(1), [filter, query, step]);
+  useEffect(() => {
+    setFilter(firstFilter[step]);
+    setSelected([]);
+  }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function goto(next: number) {
     setPage(next);
@@ -307,66 +366,76 @@ export function GraphReviewDetails({
   }
 
   const allProposals = rows.flatMap((row) => row.ids);
-  const approvedCount = allProposals.filter(
-    (id) => decisions[id] === "approved",
-  ).length;
+  const approvedIds = allProposals.filter((id) => decisions[id] === "approved");
   const rejectedCount = allProposals.filter(
     (id) => decisions[id] === "rejected",
   ).length;
+  const pending = allProposals.length - approvedIds.length - rejectedCount;
   const judged = report.judgments.filter(
     (item) => item.status !== "running",
   ).length;
+  const failed = report.judgments.filter(
+    (item) => item.status === "failed",
+  ).length;
+  const plan = mergeComponents(report, [...approvedIds].sort());
+  const judging = ["queued", "running"].includes(report.status);
   const method = scan.method;
+
   const steps: {
+    step: ReviewStep;
     label: string;
     by: string;
     value: string;
     state: "done" | "active" | "todo" | "failed";
-    // 点步骤卡片跳到对应的内容；selected：当前看的正是这一步的内容。
-    open?: () => void;
-    selected?: boolean;
   }[] = [
     {
+      step: 1,
       label: "找出候选",
       by: "系统",
       value: `${scan.candidate_count} 组`,
-      state:
-        scan.status === "completed"
-          ? "done"
-          : scan.status === "failed"
-            ? "failed"
-            : "active",
+      state: scan.status === "failed" ? "failed" : "done",
     },
     {
+      step: 2,
       label: "判断是否同一个",
       by: "大模型",
-      value: `${judged}/${scan.candidate_count}`,
-      state: judged >= scan.candidate_count ? "done" : "active",
+      value: `${judged}/${scan.candidate_count}${failed ? ` · 失败 ${failed}` : ""}`,
+      state: judging ? "active" : failed ? "failed" : "done",
     },
     {
+      step: 3,
       label: "逐条决定",
       by: "人工",
-      value:
-        scan.candidate_count === 0
-          ? "无需确认"
-          : `批准 ${approvedCount} · 否决 ${rejectedCount} · 待处理 ${allProposals.length - approvedCount - rejectedCount}`,
+      value: `待处理 ${pending} · 批准 ${approvedIds.length} · 否决 ${rejectedCount}`,
       state:
-        scan.candidate_count === 0 ||
-        approvedCount + rejectedCount === allProposals.length
+        allProposals.length === 0 || pending === 0
+          ? judging
+            ? "todo"
+            : "done"
+          : "active",
+    },
+    {
+      step: 4,
+      label: "确认",
+      by: "人工",
+      value: `${plan.length} 个合并结果`,
+      state:
+        report.status === "rewriting"
           ? "done"
-          : report.status === "ready"
+          : plan.length > 0 || report.applied
             ? "active"
             : "todo",
     },
     {
-      label: "重写图谱",
+      step: 5,
+      label: "写入图谱",
       by: "系统",
       value:
         report.status === "rewriting"
-          ? "正在重写"
+          ? "正在写入"
           : report.applied
-            ? `已应用 ${report.applied.groups.length} 个合并`
-            : "未重写（可选）",
+            ? `已写入 ${report.applied.groups.length} 个合并`
+            : "未写入（可选）",
       state:
         report.status === "rewriting"
           ? "active"
@@ -376,184 +445,512 @@ export function GraphReviewDetails({
     },
   ];
 
-  const show = (next: Filter) => {
-    setView("groups");
-    setFilter(next);
-    window.setTimeout(
-      () =>
-        list.current?.scrollIntoView({ block: "start", behavior: "smooth" }),
-      0,
+  function renderCard(row: Row) {
+    const { candidate, judgment, verdict, ids } = row;
+    const showModel = step >= 2;
+    const showDecide = step === 3 && ids.length > 0;
+    return (
+      <article
+        className={`gr-card ${showModel ? `is-${verdict}` : ""}`}
+        key={candidate.id}
+      >
+        <header className="gr-card-head">
+          <span className="gr-card-id">#{candidate.id}</span>
+          {candidate.kind === "similar" ? (
+            <button
+              type="button"
+              className="gr-kind"
+              title="看相似度是拿什么算的"
+              onClick={() => openSimilarity(candidate)}
+            >
+              语义相似 {similarityLabel(candidate)} ▸
+            </button>
+          ) : candidate.kind === "same_name" ? (
+            <span className="gr-kind is-static">名字相同</span>
+          ) : (
+            <span className="gr-card-reason">{candidate.reason}</span>
+          )}
+          <span className="gr-grow" />
+          {showModel && (
+            <Tag size="sm" dot tone={verdicts[verdict].tone}>
+              {verdicts[verdict].label}
+            </Tag>
+          )}
+        </header>
+
+        <ul className="gr-entities">
+          {candidate.entities.map((item) => (
+            <li key={item.id}>
+              <div className="gr-entity-name">
+                <strong>{item.names.join(" / ")}</strong>
+                {item.types.map((type) => (
+                  <Tag key={type} size="sm" hue>
+                    {type}
+                  </Tag>
+                ))}
+                {item.evidence.length > 0 && (
+                  <button
+                    type="button"
+                    className="link-button gr-source"
+                    onClick={() => openEvidence(item)}
+                  >
+                    原文 {item.evidence.length}
+                  </button>
+                )}
+              </div>
+              {item.descriptions.length > 0 && (
+                <p className="gr-desc" title={item.descriptions.join("；")}>
+                  {item.descriptions.join("；")}
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+
+        {showModel && (
+          <div className="gr-layer">
+            <span className="gr-layer-label">模型 · 是不是同一个</span>
+            {verdict === "running" && <p className="gr-small">等待模型判断…</p>}
+            {judgment?.error && (
+              <p className="field-error">{judgment.error}。此组不合并。</p>
+            )}
+            {judgment?.decision?.groups.map((group, index) => {
+              const corrections = group.ids
+                .map((key) => entities.get(key))
+                .filter(
+                  (item): item is Entity =>
+                    !!item && !item.types.includes(group.type),
+                );
+              return (
+                <div className="gr-proposal" key={index}>
+                  <span className="gr-proposal-line">
+                    {group.ids
+                      .map((key) => entityLabel(entities.get(key), key))
+                      .join(" + ")}
+                    <span className="gr-arrow">→</span>
+                    <strong>{group.name}</strong>
+                    <Tag size="sm" hue>
+                      {group.type}
+                    </Tag>
+                  </span>
+                  {corrections.length > 0 && (
+                    <span className="gr-small">
+                      类型纠正：
+                      {corrections
+                        .map(
+                          (item) =>
+                            `${item.names[0]} ${item.types.join("、")} → ${group.type}`,
+                        )
+                        .join("；")}
+                    </span>
+                  )}
+                  <span className="gr-reason">理由：{group.reason}</span>
+                </div>
+              );
+            })}
+            {judgment?.decision?.separate_reason && (
+              <p className="gr-reason">
+                {verdict === "separate" ? "不合并：" : "其余不合并："}
+                {judgment.decision.separate_reason}
+              </p>
+            )}
+            {step === 2 && judgment && verdict !== "running" && (
+              <div className="gr-card-foot">
+                <span>
+                  {judgment.duration_ms ?? "—"} 毫秒 · Token{" "}
+                  {judgment.input_tokens ?? "—"} /{" "}
+                  {judgment.output_tokens ?? "—"}
+                </span>
+                {judgment.prompt && (
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() =>
+                      openText(
+                        `#${candidate.id} 完整提示词`,
+                        judgment
+                          .prompt!.map(
+                            (item) => `【${item.role}】\n${item.content}`,
+                          )
+                          .join("\n\n"),
+                      )
+                    }
+                  >
+                    提示词
+                  </button>
+                )}
+                {judgment.raw_output != null && (
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() =>
+                      openText(
+                        `#${candidate.id} 模型原始输出`,
+                        judgment.raw_output!,
+                      )
+                    }
+                  >
+                    原始输出
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {showDecide && (
+          <div className="gr-layer gr-decide">
+            <span className="gr-layer-label">人工 · 决定</span>
+            {ids.map((id, index) => {
+              const state = decisions[id];
+              const group = judgment!.decision!.groups[index];
+              return (
+                <div
+                  className={`gr-decision is-${state ?? "pending"}`}
+                  key={id}
+                >
+                  {editable && !state && (
+                    <input
+                      type="checkbox"
+                      aria-label="勾选以批量处理"
+                      checked={selected.includes(id)}
+                      onChange={(event) =>
+                        setSelected((items) =>
+                          event.target.checked
+                            ? [...items, id]
+                            : items.filter((key) => key !== id),
+                        )
+                      }
+                    />
+                  )}
+                  <span className="gr-grow">
+                    {ids.length > 1 && `${group.name}：`}
+                    {state === "approved" ? (
+                      <Tag size="sm" tone="success">
+                        {applied.has(id)
+                          ? "已批准 · 已写入图谱"
+                          : "已批准 · 待写入"}
+                      </Tag>
+                    ) : state === "rejected" ? (
+                      <Tag size="sm" tone="neutral">
+                        {applied.has(id) ? "已否决 · 写入后撤掉" : "已否决"}
+                      </Tag>
+                    ) : (
+                      <Tag size="sm" tone="warning">
+                        待处理
+                      </Tag>
+                    )}
+                  </span>
+                  {editable &&
+                    (state ? (
+                      <button
+                        type="button"
+                        className="link-button"
+                        disabled={busy}
+                        onClick={() => void decide([id], null)}
+                      >
+                        撤销
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="secondary-button button-sm"
+                          disabled={busy}
+                          onClick={() => void decide([id], "rejected")}
+                        >
+                          不合并
+                        </button>
+                        <button
+                          type="button"
+                          className="primary-button button-sm"
+                          disabled={busy}
+                          onClick={() => void decide([id], "approved")}
+                        >
+                          合并
+                        </button>
+                      </>
+                    ))}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </article>
     );
-  };
-  const actions: Record<
-    string,
-    Pick<(typeof steps)[number], "open" | "selected">
-  > = {
-    找出候选: {
-      open: () => show("all"),
-      selected: view === "groups" && filter === "all",
-    },
-    判断是否同一个: {
-      open: () =>
-        show(
-          rows.some((row) => row.verdict === "running") ? "running" : "merge",
-        ),
-      selected:
-        view === "groups" && (filter === "merge" || filter === "running"),
-    },
-    逐条决定: {
-      open: () => show("pending"),
-      selected: view === "groups" && filter === "pending",
-    },
-    重写图谱: records.length
-      ? {
-          open: () => {
-            setView("execution");
-            window.setTimeout(
-              () =>
-                list.current?.scrollIntoView({
-                  block: "start",
-                  behavior: "smooth",
-                }),
-              0,
-            );
-          },
-          selected: view === "execution",
-        }
-      : {},
-  };
+  }
+
+  function renderList() {
+    const options = stepFilters[step];
+    return (
+      <>
+        <div className="gr-toolbar">
+          <div className="gr-filters" role="group" aria-label="筛选">
+            {options
+              .filter(
+                ([key]) =>
+                  key === "all" ||
+                  key === firstFilter[step] ||
+                  scope[step].some((row) => match(row, key)),
+              )
+              .map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  aria-pressed={filter === key}
+                  onClick={() => setFilter(key)}
+                >
+                  {label}{" "}
+                  <span>
+                    {scope[step].filter((row) => match(row, key)).length}
+                  </span>
+                </button>
+              ))}
+          </div>
+          <input
+            type="search"
+            className="gr-search"
+            placeholder="搜实体名或组号"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </div>
+
+        {step === 3 && editable && (
+          <div className="gr-bulk">
+            <span>
+              已勾选 <strong>{selected.length}</strong> 条
+            </span>
+            <button
+              type="button"
+              className="link-button"
+              disabled={busy || pagePending.length === 0}
+              onClick={() =>
+                setSelected([...new Set([...selected, ...pagePending])])
+              }
+            >
+              勾选本页待处理
+            </button>
+            <button
+              type="button"
+              className="link-button"
+              disabled={selected.length === 0}
+              onClick={() => setSelected([])}
+            >
+              清空勾选
+            </button>
+            <button
+              type="button"
+              className="secondary-button button-sm"
+              disabled={busy || selected.length === 0}
+              onClick={() => void decide(selected, "rejected")}
+            >
+              所选不合并
+            </button>
+            <button
+              type="button"
+              className="primary-button button-sm"
+              disabled={busy || selected.length === 0}
+              onClick={() => void decide(selected, "approved")}
+            >
+              所选合并（{selected.length}）
+            </button>
+          </div>
+        )}
+
+        <div className="gr-list">
+          {visible.length === 0 && (
+            <p className="graph-note">
+              {step === 3 && filter === "pending"
+                ? judging
+                  ? "模型还在判断，判断出建议合并的组会出现在这里。"
+                  : "没有待处理的建议了，可以去第 4 步确认。"
+                : "没有符合条件的候选。"}
+            </p>
+          )}
+          {visible.map(renderCard)}
+        </div>
+
+        {filtered.length > PAGE_SIZE && (
+          <nav className="gr-pager" aria-label="分页">
+            <span>
+              第 {(current - 1) * PAGE_SIZE + 1}–
+              {Math.min(current * PAGE_SIZE, filtered.length)} 组，共{" "}
+              {filtered.length} 组
+            </span>
+            <span className="gr-pager-controls">
+              <button
+                type="button"
+                className="secondary-button button-sm"
+                disabled={current === 1}
+                onClick={() => goto(current - 1)}
+              >
+                上一页
+              </button>
+              <span>
+                {current} / {pageCount}
+              </span>
+              <button
+                type="button"
+                className="secondary-button button-sm"
+                disabled={current === pageCount}
+                onClick={() => goto(current + 1)}
+              >
+                下一页
+              </button>
+            </span>
+          </nav>
+        )}
+      </>
+    );
+  }
 
   return (
     <div className="gr" ref={root}>
-      <ol className="gr-steps">
-        {steps.map((step, index) => (
+      <ol className="gr-steps" role="tablist">
+        {steps.map((item) => (
           <li
-            key={step.label}
-            className={`is-${step.state}${actions[step.label]?.open ? " is-link" : ""}${actions[step.label]?.selected ? " is-selected" : ""}`}
-            role={actions[step.label]?.open ? "button" : undefined}
-            tabIndex={actions[step.label]?.open ? 0 : undefined}
-            title={
-              actions[step.label]?.open ? "点击查看这一步的内容" : undefined
-            }
-            onClick={actions[step.label]?.open}
+            key={item.step}
+            role="tab"
+            aria-selected={step === item.step}
+            tabIndex={0}
+            className={`is-${item.state} is-link${step === item.step ? " is-selected" : ""}`}
+            onClick={() => onStep(item.step)}
             onKeyDown={(event) => {
-              if (
-                (event.key === "Enter" || event.key === " ") &&
-                actions[step.label]?.open
-              ) {
+              if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
-                actions[step.label].open!();
+                onStep(item.step);
               }
             }}
           >
             <span className="gr-step-dot">
-              {step.state === "done"
+              {item.state === "done"
                 ? "✓"
-                : step.state === "failed"
+                : item.state === "failed"
                   ? "!"
-                  : index + 1}
+                  : item.step}
             </span>
             <span>
               <strong>
-                {step.label}
-                <em className="gr-by">{step.by}</em>
+                {item.label}
+                <em className="gr-by">{item.by}</em>
               </strong>
-              <small title={step.value}>{step.value}</small>
+              <small title={item.value}>{item.value}</small>
             </span>
           </li>
         ))}
       </ol>
 
-      <div className="gr-method">
-        {method ? (
-          <>
-            <p>
-              <strong>怎么找出候选：</strong>用向量模型{" "}
-              <strong>{method.embedding?.model ?? "—"}</strong>{" "}
-              给每个实体算向量，算的文字是「{method.text_format}」，两两算
-              {method.metric}（名字完全相同的记
-              1）。从最像的两个开始往组里合并，
-              <strong>组里任意两个都 ≥ {method.min_similarity}</strong>{" "}
-              才能放在一起，每组最多 {method.max_group_size ?? "—"}{" "}
-              个，每个实体只进一组（只看它最像的 {method.top_k}{" "}
-              个）。不会串联，也不补查组外的对。
-            </p>
-            {method.embedding && !method.embedding.semantic && (
-              <p className="gr-warn">
-                当前没有配置 embedding
-                模型，用的是字符二元组哈希：只看字面重合，不是语义相似。
+      {step === 1 && (
+        <div className="gr-method">
+          {method ? (
+            <>
+              <p>
+                <strong>怎么找出候选：</strong>用向量模型{" "}
+                <strong>{method.embedding?.model ?? "—"}</strong>{" "}
+                给每个实体算向量，算的文字是「{method.text_format}」，两两算
+                {method.metric}（名字完全相同的记
+                1）。从最像的两个开始往组里合并，
+                <strong>组里任意两个都 ≥ {method.min_similarity}</strong>{" "}
+                才能放在一起，每组最多 {method.max_group_size ?? "—"}{" "}
+                个，每个实体只进一组（只看它最像的 {method.top_k}{" "}
+                个）。不会串联，也不补查组外的对。
               </p>
-            )}
-            {method.error && <p className="gr-warn">{method.error}</p>}
+              {method.embedding && !method.embedding.semantic && (
+                <p className="gr-warn">
+                  当前没有配置 embedding
+                  模型，用的是字符二元组哈希：只看字面重合，不是语义相似。
+                </p>
+              )}
+              {method.error && <p className="gr-warn">{method.error}</p>}
+              <p className="gr-small">
+                扫描 {scan.entity_count} 个实体 · 名字相同{" "}
+                {scan.stats?.same_name ?? 0} 组 · 语义相似{" "}
+                {scan.stats?.similar ?? 0} 组 · 耗时 {scan.duration_ms ?? "—"}{" "}
+                毫秒
+              </p>
+            </>
+          ) : (
             <p className="gr-small">
-              扫描 {scan.entity_count} 个实体 · 名字相同{" "}
-              {scan.stats?.same_name ?? 0} 组 · 语义相似{" "}
-              {scan.stats?.similar ?? 0} 组
-              {scan.stats?.total &&
-                scan.stats.total > scan.stats.same_name + scan.stats.similar &&
-                `（共 ${scan.stats.total} 组，只保留最像的 ${scan.stats.same_name + scan.stats.similar} 组）`}{" "}
-              · 耗时 {scan.duration_ms ?? "—"} 毫秒
+              旧规则找出的候选 · 扫描 {scan.entity_count} 个实体。点第 2
+              步的「重新检查」会按新规则重跑。
             </p>
-          </>
-        ) : (
-          <p className="gr-small">
-            旧规则（名字相同或互相包含）找出的候选 · 扫描 {scan.entity_count}{" "}
-            个实体 · 耗时 {scan.duration_ms ?? "—"}{" "}
-            毫秒。点「重新检查」会按新规则重跑。
-          </p>
-        )}
-        {report.prompt_tag && (
-          <p className="gr-small">
-            模型判断用的提示词：<code>{report.prompt_tag}</code>{" "}
-            {report.system_prompt && (
-              <button
-                type="button"
-                className="link-button"
-                onClick={() =>
-                  openText("二次检查合并提示词", report.system_prompt!)
-                }
-              >
-                查看
-              </button>
-            )}
-            （在「提示词管理 · 知识图谱」里修改，改完点「重新检查」生效）
-          </p>
-        )}
-        {report.applied && (
-          <p className="gr-small">
-            图谱上次按确认结果重写：{report.applied.by} · {report.applied.at}
-            ，应用了 {report.applied.groups.length} 个合并结果
-          </p>
-        )}
-      </div>
-
-      <div ref={list} />
-      {records.length > 0 && (
-        <div className="gr-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === "groups"}
-            onClick={() => setView("groups")}
-          >
-            候选 {rows.length}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === "execution"}
-            onClick={() => setView("execution")}
-          >
-            合并结果{" "}
-            {records.filter((item) => item.status !== "skipped").length}
-          </button>
+          )}
         </div>
       )}
 
-      {view === "execution" && records.length > 0 ? (
+      {step === 2 && (
+        <div className="gr-method">
+          <p>
+            每组调用一次模型，判断组里哪些是同一个东西、统一叫什么。已判断{" "}
+            <strong>
+              {judged}/{scan.candidate_count}
+            </strong>{" "}
+            组{failed ? `，失败 ${failed} 组` : ""}
+            {judging ? "，正在判断…" : "。"}
+          </p>
+          {report.prompt_tag && (
+            <p className="gr-small">
+              用的提示词：<code>{report.prompt_tag}</code>{" "}
+              {report.system_prompt && (
+                <button
+                  type="button"
+                  className="link-button"
+                  onClick={() =>
+                    openText("二次检查合并提示词", report.system_prompt!)
+                  }
+                >
+                  查看
+                </button>
+              )}
+              （在「提示词管理 · 知识图谱」里修改，改完点「重新检查」生效）
+            </p>
+          )}
+          {judgeActions && <div className="gr-actions">{judgeActions}</div>}
+        </div>
+      )}
+
+      {step === 3 && (
+        <div className="gr-method">
+          <p>
+            只列出模型建议合并的组。每条可以单独「合并 /
+            不合并」，也可以勾选后批量处理，随时可撤销。这里只记录决定，不会改图谱；全部看完去第
+            4 步确认。
+          </p>
+        </div>
+      )}
+
+      {step <= 3 && renderList()}
+
+      {step === 4 &&
+        (confirmPanel ?? (
+          <p className="graph-note">
+            {plan.length
+              ? `已批准的建议会合成 ${plan.length} 个合并结果。`
+              : "还没有批准任何合并建议。"}
+          </p>
+        ))}
+
+      {step === 5 && (
         <div className="gr-list">
+          {report.status === "rewriting" && (
+            <p className="gr-hint">正在按确认结果写入图谱（不调用模型）…</p>
+          )}
+          {report.applied ? (
+            <p className="gr-small">
+              上次写入：{report.applied.by} · {report.applied.at}，
+              {report.applied.groups.length}{" "}
+              个合并结果。之后补跑分片、重新写入时也会按这些合并。
+            </p>
+          ) : (
+            report.status !== "rewriting" && (
+              <p className="graph-note">
+                还没有按确认结果写入过。图谱照常可用，合并是可选的。
+              </p>
+            )
+          )}
           {records
-            .filter((record) => record.status !== "skipped")
+            .filter((record) => record.status !== "skipped" || report.applied)
             .map((record) => (
               <article className="gr-card" key={record.id}>
                 <header className="gr-card-head">
@@ -574,7 +971,9 @@ export function GraphReviewDetails({
                           : "neutral"
                     }
                   >
-                    {statuses[record.status] ?? record.status}
+                    {record.status === "skipped"
+                      ? "跳过"
+                      : (statuses[record.status] ?? record.status)}
                   </Tag>
                 </header>
                 <p>由 {record.from_names?.join("、") || "—"} 合并</p>
@@ -582,361 +981,11 @@ export function GraphReviewDetails({
                   {record.mention_count ?? 0} 条名字出处 ·{" "}
                   {record.relation_count ?? 0} 条关系重新归属 ·{" "}
                   {record.type_corrections ?? 0} 处类型纠正
-                  {record.proposal_ids &&
-                    record.proposal_ids.length > 1 &&
-                    ` · 来自 ${record.proposal_ids.length} 条建议`}
                 </p>
                 {record.reason && <p className="gr-reason">{record.reason}</p>}
               </article>
             ))}
         </div>
-      ) : (
-        <>
-          <div className="gr-toolbar">
-            <div className="gr-filters" role="group" aria-label="筛选">
-              {filters
-                .filter(
-                  ([key]) =>
-                    key === "all" ||
-                    key === "pending" ||
-                    rows.some((row) => match(row, key)),
-                )
-                .map(([key, label]) => (
-                  <button
-                    key={key}
-                    type="button"
-                    aria-pressed={filter === key}
-                    onClick={() => setFilter(key)}
-                  >
-                    {label}{" "}
-                    <span>{rows.filter((row) => match(row, key)).length}</span>
-                  </button>
-                ))}
-            </div>
-            <input
-              type="search"
-              className="gr-search"
-              placeholder="搜实体名或组号"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </div>
-
-          {editable && (
-            <div className="gr-bulk">
-              <span>
-                已勾选 <strong>{selected.length}</strong> 条
-              </span>
-              <button
-                type="button"
-                className="link-button"
-                disabled={busy || pagePending.length === 0}
-                onClick={() =>
-                  setSelected([...new Set([...selected, ...pagePending])])
-                }
-              >
-                勾选本页待处理
-              </button>
-              <button
-                type="button"
-                className="link-button"
-                disabled={selected.length === 0}
-                onClick={() => setSelected([])}
-              >
-                清空勾选
-              </button>
-              <button
-                type="button"
-                className="secondary-button button-sm"
-                disabled={busy || selected.length === 0}
-                onClick={() => void decide(selected, "rejected")}
-              >
-                所选不合并
-              </button>
-              <button
-                type="button"
-                className="primary-button button-sm"
-                disabled={busy || selected.length === 0}
-                onClick={() => void decide(selected, "approved")}
-              >
-                所选合并（{selected.length}）
-              </button>
-            </div>
-          )}
-
-          <div className="gr-list">
-            {visible.length === 0 && (
-              <p className="graph-note">
-                {filter === "pending"
-                  ? "没有待处理的建议了。"
-                  : "没有符合条件的候选。"}
-              </p>
-            )}
-            {visible.map(({ candidate, judgment, verdict, ids }) => (
-              <article className={`gr-card is-${verdict}`} key={candidate.id}>
-                <header className="gr-card-head">
-                  <span className="gr-card-id">#{candidate.id}</span>
-                  {candidate.kind === "similar" ? (
-                    <button
-                      type="button"
-                      className="gr-kind"
-                      title="看相似度是拿什么算的"
-                      onClick={() => openSimilarity(candidate)}
-                    >
-                      语义相似 {similarityLabel(candidate)} ▸
-                    </button>
-                  ) : candidate.kind === "same_name" ? (
-                    <span className="gr-kind is-static">名字相同</span>
-                  ) : (
-                    <span className="gr-card-reason">{candidate.reason}</span>
-                  )}
-                  <span className="gr-grow" />
-                  <Tag size="sm" dot tone={verdicts[verdict].tone}>
-                    {verdicts[verdict].label}
-                  </Tag>
-                </header>
-
-                <div className="gr-layer">
-                  <span className="gr-layer-label">系统 · 为什么放在一起</span>
-                  <ul className="gr-entities">
-                    {candidate.entities.map((item) => (
-                      <li key={item.id}>
-                        <div className="gr-entity-name">
-                          <strong>{item.names.join(" / ")}</strong>
-                          {item.types.map((type) => (
-                            <Tag key={type} size="sm" hue>
-                              {type}
-                            </Tag>
-                          ))}
-                          {item.evidence.length > 0 && (
-                            <button
-                              type="button"
-                              className="link-button gr-source"
-                              onClick={() => openEvidence(item)}
-                            >
-                              原文 {item.evidence.length}
-                            </button>
-                          )}
-                        </div>
-                        {item.descriptions.length > 0 && (
-                          <p
-                            className="gr-desc"
-                            title={item.descriptions.join("；")}
-                          >
-                            {item.descriptions.join("；")}
-                          </p>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                <div className="gr-layer">
-                  <span className="gr-layer-label">模型 · 是不是同一个</span>
-                  {verdict === "running" && (
-                    <p className="gr-small">等待模型判断…</p>
-                  )}
-                  {judgment?.error && (
-                    <p className="field-error">
-                      {judgment.error}。此组不合并。
-                    </p>
-                  )}
-                  {judgment?.decision?.groups.map((group, index) => {
-                    const corrections = group.ids
-                      .map((key) => entities.get(key))
-                      .filter(
-                        (item): item is Entity =>
-                          !!item && !item.types.includes(group.type),
-                      );
-                    return (
-                      <div className="gr-proposal" key={index}>
-                        <span className="gr-proposal-line">
-                          {group.ids
-                            .map((key) => entityLabel(entities.get(key), key))
-                            .join(" + ")}
-                          <span className="gr-arrow">→</span>
-                          <strong>{group.name}</strong>
-                          <Tag size="sm" hue>
-                            {group.type}
-                          </Tag>
-                        </span>
-                        {corrections.length > 0 && (
-                          <span className="gr-small">
-                            类型纠正：
-                            {corrections
-                              .map(
-                                (item) =>
-                                  `${item.names[0]} ${item.types.join("、")} → ${group.type}`,
-                              )
-                              .join("；")}
-                          </span>
-                        )}
-                        <span className="gr-reason">理由：{group.reason}</span>
-                      </div>
-                    );
-                  })}
-                  {judgment?.decision?.separate_reason && (
-                    <p className="gr-reason">
-                      {verdict === "separate" ? "不合并：" : "其余不合并："}
-                      {judgment.decision.separate_reason}
-                    </p>
-                  )}
-                  {judgment && verdict !== "running" && (
-                    <div className="gr-card-foot">
-                      <span>
-                        {judgment.duration_ms ?? "—"} 毫秒 · Token{" "}
-                        {judgment.input_tokens ?? "—"} /{" "}
-                        {judgment.output_tokens ?? "—"}
-                      </span>
-                      {judgment.prompt && (
-                        <button
-                          type="button"
-                          className="link-button"
-                          onClick={() =>
-                            openText(
-                              `#${candidate.id} 完整提示词`,
-                              judgment
-                                .prompt!.map(
-                                  (item) => `【${item.role}】\n${item.content}`,
-                                )
-                                .join("\n\n"),
-                            )
-                          }
-                        >
-                          提示词
-                        </button>
-                      )}
-                      {judgment.raw_output != null && (
-                        <button
-                          type="button"
-                          className="link-button"
-                          onClick={() =>
-                            openText(
-                              `#${candidate.id} 模型原始输出`,
-                              judgment.raw_output!,
-                            )
-                          }
-                        >
-                          原始输出
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {ids.length > 0 && (
-                  <div className="gr-layer gr-decide">
-                    <span className="gr-layer-label">人工 · 决定</span>
-                    {ids.map((id, index) => {
-                      const state = decisions[id];
-                      const group = judgment!.decision!.groups[index];
-                      return (
-                        <div
-                          className={`gr-decision is-${state ?? "pending"}`}
-                          key={id}
-                        >
-                          {editable && !state && (
-                            <input
-                              type="checkbox"
-                              aria-label="勾选以批量处理"
-                              checked={selected.includes(id)}
-                              onChange={(event) =>
-                                setSelected((items) =>
-                                  event.target.checked
-                                    ? [...items, id]
-                                    : items.filter((key) => key !== id),
-                                )
-                              }
-                            />
-                          )}
-                          <span className="gr-grow">
-                            {ids.length > 1 && `${group.name}：`}
-                            {state === "approved" ? (
-                              <Tag size="sm" tone="success">
-                                {applied.has(id)
-                                  ? "已批准 · 已写入图谱"
-                                  : "已批准 · 待重写"}
-                              </Tag>
-                            ) : state === "rejected" ? (
-                              <Tag size="sm" tone="neutral">
-                                {applied.has(id)
-                                  ? "已否决 · 重写后撤掉"
-                                  : "已否决"}
-                              </Tag>
-                            ) : (
-                              <Tag size="sm" tone="warning">
-                                待处理
-                              </Tag>
-                            )}
-                          </span>
-                          {editable &&
-                            (state ? (
-                              <button
-                                type="button"
-                                className="link-button"
-                                disabled={busy}
-                                onClick={() => void decide([id], null)}
-                              >
-                                撤销
-                              </button>
-                            ) : (
-                              <>
-                                <button
-                                  type="button"
-                                  className="secondary-button button-sm"
-                                  disabled={busy}
-                                  onClick={() => void decide([id], "rejected")}
-                                >
-                                  不合并
-                                </button>
-                                <button
-                                  type="button"
-                                  className="primary-button button-sm"
-                                  disabled={busy}
-                                  onClick={() => void decide([id], "approved")}
-                                >
-                                  合并
-                                </button>
-                              </>
-                            ))}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </article>
-            ))}
-          </div>
-
-          {filtered.length > PAGE_SIZE && (
-            <nav className="gr-pager" aria-label="候选分页">
-              <span>
-                第 {(current - 1) * PAGE_SIZE + 1}–
-                {Math.min(current * PAGE_SIZE, filtered.length)} 条，共{" "}
-                {filtered.length} 条
-              </span>
-              <span className="gr-pager-controls">
-                <button
-                  type="button"
-                  disabled={current === 1}
-                  onClick={() => goto(current - 1)}
-                >
-                  上一页
-                </button>
-                <span>
-                  {current} / {pageCount}
-                </span>
-                <button
-                  type="button"
-                  disabled={current === pageCount}
-                  onClick={() => goto(current + 1)}
-                >
-                  下一页
-                </button>
-              </span>
-            </nav>
-          )}
-        </>
       )}
 
       {dialog && (
@@ -948,8 +997,8 @@ export function GraphReviewDetails({
   );
 }
 
-// 「重写后图谱上的合并」汇总：把已批准的建议按实际结果合起来；连在一起且名字不一致的，必须先选一个。
-// 和上次已应用的对比，列出这次会撤掉的合并（结果只取决于现在批准了哪些）。
+// 第 4 步「确认」的内容：已批准的建议按实际结果合起来；连在一起且名字不一致的，必须先选一个。
+// 和上次已写入的对比，列出这次会撤掉的合并（结果只取决于现在批准了哪些）。
 function MergePlan({
   report,
   approved,
@@ -976,87 +1025,82 @@ function MergePlan({
   const dropped = (report.applied?.groups ?? []).filter(
     (old) => !groups.some((group) => sameIds(group.entityIds, old.ids)),
   );
-  if (groups.length === 0 && dropped.length === 0) return null;
+  if (groups.length === 0 && dropped.length === 0)
+    return (
+      <p className="graph-note">还没有批准任何合并建议，去第 3 步决定。</p>
+    );
   return (
-    <details className="gr-plan" open>
-      <summary>
-        重写后图谱上的合并：{groups.length} 个
-        {dropped.length > 0 && `，撤掉 ${dropped.length} 个`}
-      </summary>
-      <ol>
-        {groups.map((group) => {
-          const choice = choices[group.key];
-          const kept = (report.applied?.groups ?? []).some((old) =>
-            sameIds(group.entityIds, old.ids),
-          );
-          return (
-            <li key={group.key}>
-              <span>
-                {label(group.entityIds)}
-                <span className="gr-arrow">→</span>
-                {group.options.length === 1 ? (
-                  <strong>
-                    {group.options[0].name}（{group.options[0].type}）
-                  </strong>
-                ) : (
-                  <span className="gr-choose">
-                    <span className="gr-warn-inline">
-                      名字不一致，请选一个：
-                    </span>
-                    {group.options.map((option) => (
-                      <label key={`${option.name}|${option.type}`}>
-                        <input
-                          type="radio"
-                          name={`gr-choice-${group.key}`}
-                          checked={
-                            choice?.name === option.name &&
-                            choice?.type === option.type
-                          }
-                          onChange={() => onChoose(group.key, option)}
-                        />
-                        {option.name}（{option.type}）
-                      </label>
-                    ))}
-                  </span>
-                )}
-                <Tag size="sm" tone={kept ? "neutral" : "info"}>
-                  {kept ? "已在图谱中" : "新增"}
-                </Tag>
-              </span>
-              {group.proposalIds.length > 1 && (
-                <small>
-                  来自 {group.proposalIds.length} 条建议：
-                  {group.proposalIds
-                    .map((id) => `#${id.split(":")[0]}`)
-                    .join("、")}
-                </small>
-              )}
-            </li>
-          );
-        })}
-        {dropped.map((old) => (
-          <li key={`drop-${old.key}`} className="gr-dropped">
+    <ol className="gr-plan">
+      {groups.map((group) => {
+        const choice = choices[group.key];
+        const kept = (report.applied?.groups ?? []).some((old) =>
+          sameIds(group.entityIds, old.ids),
+        );
+        return (
+          <li key={group.key}>
             <span>
-              {label(old.ids)}
+              {label(group.entityIds)}
               <span className="gr-arrow">→</span>
-              <s>
-                {old.name}（{old.type}）
-              </s>
-              <Tag size="sm" tone="warning">
-                撤掉（现在没有批准）
+              {group.options.length === 1 ? (
+                <strong>
+                  {group.options[0].name}（{group.options[0].type}）
+                </strong>
+              ) : (
+                <span className="gr-choose">
+                  <span className="gr-warn-inline">名字不一致，请选一个：</span>
+                  {group.options.map((option) => (
+                    <label key={`${option.name}|${option.type}`}>
+                      <input
+                        type="radio"
+                        name={`gr-choice-${group.key}`}
+                        checked={
+                          choice?.name === option.name &&
+                          choice?.type === option.type
+                        }
+                        onChange={() => onChoose(group.key, option)}
+                      />
+                      {option.name}（{option.type}）
+                    </label>
+                  ))}
+                </span>
+              )}
+              <Tag size="sm" tone={kept ? "neutral" : "info"}>
+                {kept ? "已在图谱中" : "新增"}
               </Tag>
             </span>
+            {group.proposalIds.length > 1 && (
+              <small>
+                来自 {group.proposalIds.length} 条建议：
+                {group.proposalIds
+                  .map((id) => `#${id.split(":")[0]}`)
+                  .join("、")}
+              </small>
+            )}
           </li>
-        ))}
-      </ol>
-    </details>
+        );
+      })}
+      {dropped.map((old) => (
+        <li key={`drop-${old.key}`} className="gr-dropped">
+          <span>
+            {label(old.ids)}
+            <span className="gr-arrow">→</span>
+            <s>
+              {old.name}（{old.type}）
+            </s>
+            <Tag size="sm" tone="warning">
+              撤掉（现在没有批准）
+            </Tag>
+          </span>
+        </li>
+      ))}
+    </ol>
   );
 }
 
 const ACTIVE = ["queued", "running", "rewriting"];
 
-// 弹窗正文：读取最新报告；排队、判断、重写时自动刷新。图谱已经写好，这里的合并是可选的：
-// 逐条或批量记录决定，最后「按确认结果重写图谱」才改图谱。两处入口（实体关系、处理过程）共用。
+// 弹窗正文：读取最新报告；排队、判断、写入时自动刷新。图谱已经写好，这里的合并是可选的。
+// 两处入口（实体关系、处理过程）共用。
 export function GraphReviewBody({
   documentId,
   buildId,
@@ -1079,6 +1123,7 @@ export function GraphReviewBody({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [poll, setPoll] = useState(0);
+  const [step, setStep] = useState<ReviewStep | null>(null);
   useEffect(() => {
     let cancelled = false;
     getGraphReview(documentId)
@@ -1111,10 +1156,14 @@ export function GraphReviewBody({
   }, [active, poll]);
   const wasActive = useRef(false);
   useEffect(() => {
-    // 判断或重写刚结束：通知外面刷新（处理过程、实体关系页签）。
+    // 判断或写入刚结束：通知外面刷新（处理过程、实体关系页签）。
     if (wasActive.current && !active) onChanged?.();
     wasActive.current = active;
   }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 第一次拿到报告时决定停在哪一步，之后由用户切换。
+  useEffect(() => {
+    if (report?.scan && step === null) setStep(defaultStep(report));
+  }, [report, step]);
   const canDecide = !!live && live.status === "ready" && !!data?.can_confirm;
   const decisions = report ? decisionsOf(report) : {};
   const approved = Object.keys(decisions)
@@ -1127,6 +1176,9 @@ export function GraphReviewBody({
   );
   const canRewrite =
     canDecide && (groups.length > 0 || !!live?.applied?.groups.length);
+  const failedCount = (live?.judgments ?? []).filter(
+    (item) => item.status === "failed",
+  ).length;
 
   async function run(action: () => Promise<unknown>) {
     if (busy) return;
@@ -1163,7 +1215,7 @@ export function GraphReviewBody({
     if (!live) return;
     if (
       !window.confirm(
-        `按 ${groups.length} 个合并结果重写图谱？从已保存的抽取结果重新写一遍，不调用模型。${pending > 0 ? `还有 ${pending} 条未处理，保持分开。` : ""}`,
+        `按 ${groups.length} 个合并结果写入图谱？从已保存的抽取结果重新写一遍，不调用模型。${pending > 0 ? `还有 ${pending} 条未处理，保持分开。` : ""}`,
       )
     )
       return;
@@ -1175,6 +1227,7 @@ export function GraphReviewBody({
       );
       await rewriteGraphReview(documentId, live.build_id, resolutions);
       setData(await getGraphReview(documentId));
+      setStep(5);
       onChanged?.();
     });
   }
@@ -1184,20 +1237,17 @@ export function GraphReviewBody({
       live?.decisions &&
       Object.keys(live.decisions).length > 0 &&
       !window.confirm(
-        "重新检查会清掉模型判断和你的决定（图谱上已应用的合并保留，直到下次重写）。继续？",
+        "重新检查会清掉模型判断和你的决定（图谱上已写入的合并保留，直到下次写入）。继续？",
       )
     )
       return;
     await run(async () => {
       await retryGraphReview(documentId);
       setData(await getGraphReview(documentId));
+      setStep(2);
       onChanged?.();
     });
   }
-
-  const failedCount = (live?.judgments ?? []).filter(
-    (item) => item.status === "failed",
-  ).length;
 
   async function retryFailed() {
     await run(async () => {
@@ -1212,6 +1262,75 @@ export function GraphReviewBody({
     !!data?.can_confirm &&
     (!live || ["ready", "failed", "idle"].includes(live.status));
 
+  const retryButton = showRetry && (
+    <button
+      type="button"
+      className="secondary-button"
+      disabled={busy}
+      onClick={() => void retry()}
+    >
+      {busy
+        ? "正在提交…"
+        : live?.status === "idle" || !report
+          ? "开始二次检查"
+          : "重新检查"}
+    </button>
+  );
+
+  const judgeActions =
+    (canDecide && failedCount > 0) || showRetry ? (
+      <>
+        {canDecide && failedCount > 0 && (
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={busy}
+            title="只重新判断失败的组，其他组的判断和你的决定都保留"
+            onClick={() => void retryFailed()}
+          >
+            重试失败的 {failedCount} 组
+          </button>
+        )}
+        {retryButton}
+      </>
+    ) : null;
+
+  const confirmPanel =
+    report?.scan && canDecide ? (
+      <div className="gr-confirm">
+        <p className="gr-small">
+          下面是写入后图谱上会有的合并：根据第 3
+          步批准的建议整理，相关的几条会接成一个结果。
+          和上次写入相比，「新增」会合并，「撤掉」会拆开。还有 {pending}{" "}
+          条没处理，保持分开。
+        </p>
+        <MergePlan
+          report={report}
+          approved={approved}
+          choices={choices}
+          onChoose={(key, choice) =>
+            setChoices((items) => ({ ...items, [key]: choice }))
+          }
+        />
+        <div className="gr-actions">
+          {unresolved.length > 0 && (
+            <span className="gr-warn-inline">
+              有 {unresolved.length} 个合并结果要先选名字
+            </span>
+          )}
+          <button
+            type="button"
+            className="primary-button"
+            disabled={busy || unresolved.length > 0 || !canRewrite}
+            title={canRewrite ? undefined : "还没有批准任何合并建议"}
+            onClick={() => void rewrite()}
+          >
+            {busy ? "正在提交…" : `确认，写入图谱（${groups.length} 个合并）`}
+          </button>
+        </div>
+      </div>
+    ) : undefined;
+
   return (
     <div className="gr-body">
       {error && (
@@ -1219,105 +1338,32 @@ export function GraphReviewBody({
           {error}
         </p>
       )}
-      {canDecide && (
-        <p className="gr-hint">
-          图谱已经写好，可以直接用；这里的合并是可选的。每条建议可以单独点「合并
-          /
-          不合并」，也可以勾选多条批量处理，随时可撤销。点底部「按确认结果重写图谱」才会改图谱（不调用模型）。没处理的保持分开。
-        </p>
-      )}
-      {live?.status === "rewriting" && (
-        <p className="gr-hint">正在按确认结果重写图谱…</p>
-      )}
       {live?.status === "failed" && (
         <p className="field-error">二次检查失败：{live.error ?? "未知原因"}</p>
       )}
-      {report?.scan ? (
+      {report?.scan && step ? (
         <GraphReviewDetails
           report={report}
+          step={step}
+          onStep={setStep}
           onDecide={canDecide ? decide : undefined}
           busy={busy}
+          judgeActions={judgeActions}
+          confirmPanel={confirmPanel}
         />
-      ) : report?.status === "idle" ? (
-        <p className="graph-note">
-          还没开始二次检查。图谱已经写好，不检查也能用。
-        </p>
-      ) : data ? (
-        <p className="graph-note">
-          {report || live
-            ? "排队等待二次检查，找出候选后自动显示过程…"
-            : "这次建图还没有二次检查记录。"}
-        </p>
       ) : (
-        <p className="graph-note">正在读取…</p>
-      )}
-      {(canDecide || showRetry) && (
-        <div className="gr-footer">
-          {canDecide && report && (
-            <MergePlan
-              report={report}
-              approved={approved}
-              choices={choices}
-              onChoose={(key, choice) =>
-                setChoices((items) => ({ ...items, [key]: choice }))
-              }
-            />
-          )}
-          <div className="gr-footer-row">
-            {canDecide ? (
-              <span>
-                已批准 <strong>{approved.length}</strong> · 待处理{" "}
-                <strong>{pending}</strong>
-                {unresolved.length > 0 && (
-                  <span className="gr-warn-inline">
-                    {" "}
-                    · 有 {unresolved.length} 个合并结果要先选名字
-                  </span>
-                )}
-              </span>
-            ) : (
-              <span />
-            )}
-            {canDecide && failedCount > 0 && (
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={busy}
-                title="只重新判断失败的组，其他组的判断和你的决定都保留"
-                onClick={() => void retryFailed()}
-              >
-                重试失败的 {failedCount} 组
-              </button>
-            )}
-            {showRetry && (
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={busy}
-                onClick={() => void retry()}
-              >
-                {busy
-                  ? "正在提交…"
-                  : live?.status === "idle" || !report
-                    ? "开始二次检查"
-                    : "重新检查"}
-              </button>
-            )}
-            {canDecide && (
-              <button
-                type="button"
-                className="primary-button"
-                disabled={busy || unresolved.length > 0 || !canRewrite}
-                title={canRewrite ? undefined : "还没有批准任何合并建议"}
-                onClick={() => void rewrite()}
-              >
-                {busy
-                  ? "正在提交…"
-                  : `按确认结果重写图谱（${groups.length} 个合并）`}
-              </button>
-            )}
-          </div>
-        </div>
+        <>
+          <p className="graph-note">
+            {report?.status === "idle"
+              ? "还没开始二次检查。图谱已经写好，不检查也能用。"
+              : !data
+                ? "正在读取…"
+                : report || live
+                  ? "排队等待二次检查，找出候选后自动显示过程…"
+                  : "这次建图还没有二次检查记录。"}
+          </p>
+          {retryButton && <div className="gr-actions">{retryButton}</div>}
+        </>
       )}
     </div>
   );
