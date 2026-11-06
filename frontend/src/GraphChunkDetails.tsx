@@ -429,8 +429,8 @@ function ExtractionTables({
                   <th scope="col">起点</th>
                   <th scope="col">终点</th>
                   <th scope="col">分类</th>
-                  <th scope="col">关系描述</th>
-                  <th scope="col">原文</th>
+                  <th scope="col">AI 基于原文的总结</th>
+                  <th scope="col">原文引用（原样摘抄）</th>
                 </tr>
               </thead>
               <tbody>

@@ -646,6 +646,10 @@
 .graph-side small .link-button {
   margin-right: 6px;
 }
+/* 表格里的实体名是按钮，按钮默认居中，换行后会居中显示；表格内容统一左对齐。 */
+.graph-table .link-button {
+  text-align: left;
+}
 .ag-delivery-dialog .graph-prompt {
   max-height: none;
 }

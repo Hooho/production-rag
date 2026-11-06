@@ -743,7 +743,9 @@ export function DocumentGraph({
                       <th>起点</th>
                       <th className="graph-nowrap">关系</th>
                       <th>终点</th>
-                      <th>描述</th>
+                      <th title="灰色小字从原文原样摘抄，可以在出处分片里找到">
+                        AI 基于原文的总结（小字为原文引用）
+                      </th>
                       <th className="graph-nowrap">出处</th>
                     </tr>
                   </thead>
