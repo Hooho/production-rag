@@ -10,12 +10,15 @@ import {
   addGraphReviewManual,
   continueGraphReview,
   decideGraphReview,
+  getCheckSummary,
   getGraphReview,
   stopGraphReview,
   searchGraphReviewEntities,
   retryFailedGraphReview,
   retryGraphReview,
   rewriteGraphReview,
+  type CheckStepName,
+  type CheckSummary,
   type GraphReviewChoice,
   type GraphReviewEntity,
   type GraphReviewReport,
@@ -28,6 +31,7 @@ import { Tag } from "./Tag";
 import { errorText, useToast } from "./Toast";
 import type { Tone } from "./tags";
 import { diffPlan, type PlanDiff } from "./graphReviewDiff";
+import { CHECK_INFO, GraphCheckStep } from "./GraphCheckStep";
 import {
   GraphCheckSteps,
   VerticalSteps,
@@ -2178,6 +2182,11 @@ export function GraphReviewBody({
           )}
         </DetailDialog>
       )}
+      {live?.stale && !ACTIVE.includes(live.status) && (
+        <p className="gr-warn">
+          前面的检查步骤写入了新结果，合并需要重新检查（点「重新检查」，在最新结果上找候选）。
+        </p>
+      )}
       {/* 后台检查任务本身失败是状态，不是这次操作的反馈，留在弹窗里说明。 */}
       {live?.status === "failed" && (
         <p className="gr-warn">
@@ -2272,8 +2281,33 @@ export function GraphReviewPanel({
     report && ["ready", "stopped", "running"].includes(report.status)
       ? pendingCount(report)
       : 0;
-  // 图谱检查的 5 步；①～④ 还在开发，先显示「暂未开放」，现有的合并检查是第 ⑤ 步。
-  const [selected, setSelected] = useState(5);
+  // 图谱检查的 5 步：① 补抽 ② 关系核对 ③ 类型核对 ④ 拆分（GraphCheckStep）⑤ 合并（下面的 GraphReviewBody）。
+  const [selected, setSelected] = useState<number | null>(null);
+  const [summary, setSummary] = useState<Partial<
+    Record<CheckStepName, CheckSummary>
+  > | null>(null);
+  const [refresh, setRefresh] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    getCheckSummary(documentId)
+      .then((value) => !cancelled && setSummary(value.steps))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [documentId, buildId, tick, open, refresh]);
+  const checkRunning = Object.values(summary ?? {}).some((value) =>
+    ["queued", "running", "rewriting"].includes(value?.status ?? ""),
+  );
+  useEffect(() => {
+    if (!open || !checkRunning) return;
+    const timer = window.setTimeout(
+      () => setRefresh((value) => value + 1),
+      3000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [open, checkRunning, refresh]);
   const [now, setNow] = useState(() => Date.now());
   const running = !!report && ["queued", "running"].includes(report.status);
   useEffect(() => {
@@ -2281,14 +2315,24 @@ export function GraphReviewPanel({
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [open, running]);
-  const steps: CheckStep[] = [
-    ...CHECK_STEPS.map((item) => ({
-      ...item,
-      state: "locked" as const,
-      text: "暂未开放",
-    })),
-    mergeStep(report, pending, now),
-  ];
+  const early = CHECK_ORDER.map((step, index) =>
+    checkStep(step, index + 1, summary?.[step], now),
+  );
+  // 当前步骤：第一个还没做完（没写入、没跳过）的步骤；之后的显示「还没轮到」。
+  const merge = mergeStep(report, pending, now);
+  const all = [...early, merge];
+  const currentIndex = all.findIndex(
+    (item) => !["done", "skipped"].includes(item.state),
+  );
+  const steps: CheckStep[] = all.map((item, index) =>
+    currentIndex >= 0 &&
+    index > currentIndex &&
+    item.state === "current" &&
+    item.text === "未开始"
+      ? { ...item, state: "waiting" }
+      : item,
+  );
+  const shownStep = selected ?? (currentIndex >= 0 ? currentIndex + 1 : 5);
   return (
     <>
       <button
@@ -2316,10 +2360,10 @@ export function GraphReviewPanel({
         >
           <GraphCheckSteps
             steps={steps}
-            selected={selected}
+            selected={shownStep}
             onSelect={setSelected}
           />
-          {selected === 5 ? (
+          {shownStep === 5 ? (
             <GraphReviewBody
               documentId={documentId}
               buildId={buildId}
@@ -2329,11 +2373,15 @@ export function GraphReviewPanel({
               initialStep={startStep}
             />
           ) : (
-            <div className="gc-placeholder">
-              {CHECK_STEPS.find((item) => item.key === selected)?.hint}
-              <br />
-              这一步还在开发，暂未开放。
-            </div>
+            <GraphCheckStep
+              key={shownStep}
+              documentId={documentId}
+              step={CHECK_ORDER[shownStep - 1]}
+              onChanged={() => {
+                setRefresh((value) => value + 1);
+                onChanged();
+              }}
+            />
           )}
         </DetailDialog>
       )}
@@ -2341,29 +2389,59 @@ export function GraphReviewPanel({
   );
 }
 
-// 图谱检查前 4 步（开发中）：名字和这一步查什么。
-const CHECK_STEPS = [
-  {
-    key: 1,
-    title: "补抽",
-    hint: "补抽漏掉的实体和关系：把原文和已经抽出的交给模型，让它只补漏掉的。",
-  },
-  {
-    key: 2,
-    title: "关系核对",
-    hint: "核对关系：原文引用能不能在分片里找到，原文是否支持这条关系。",
-  },
-  {
-    key: 3,
-    title: "类型核对",
-    hint: "核对类型：同一个实体的名字类型不一致，或者类型不在清单里。",
-  },
-  {
-    key: 4,
-    title: "拆分",
-    hint: "拆开错误的合并：同一个实体下的名字其实指不同的东西，改名拆开。",
-  },
-];
+const CHECK_ORDER: CheckStepName[] = ["glean", "relation", "type", "split"];
+
+// 前 4 步在步骤条上的状态。
+function checkStep(
+  step: CheckStepName,
+  key: number,
+  value: CheckSummary | undefined,
+  now: number,
+): CheckStep {
+  const base = {
+    key,
+    title: CHECK_INFO[step].title,
+    hint: CHECK_INFO[step].hint,
+  };
+  const status = value?.status ?? "idle";
+  const count = value?.count ?? 0;
+  const judged = value?.judged ?? 0;
+  if (value?.stale && !["idle", "skipped"].includes(status))
+    return { ...base, state: "recheck", text: "图已变化，需要重新检查" };
+  if (status === "idle") return { ...base, state: "current", text: "未开始" };
+  if (status === "skipped")
+    return { ...base, state: "skipped", text: "已跳过" };
+  if (status === "failed")
+    return { ...base, state: "failed", text: "检查失败" };
+  if (status === "rewriting")
+    return { ...base, state: "current", text: "正在写入图谱" };
+  if (status === "queued" || status === "running") {
+    const started = value?.started ? Date.parse(value.started) : NaN;
+    return {
+      ...base,
+      state: "current",
+      text:
+        value?.count === undefined || !count
+          ? "找可疑项中"
+          : `AI 判断 ${judged}/${count}`,
+      elapsed: Number.isNaN(started) ? undefined : formatClock(now - started),
+    };
+  }
+  if (status === "scanned")
+    return { ...base, state: "current", text: `找出 ${count} 项，待确认判断` };
+  if (status === "stopped")
+    return { ...base, state: "current", text: `已停止 ${judged}/${count}` };
+  if (value?.failed)
+    return { ...base, state: "failed", text: `${value.failed} 项判断失败` };
+  if (value?.pending)
+    return { ...base, state: "current", text: `待处理 ${value.pending}` };
+  if (!count) return { ...base, state: "done", text: "没有发现可疑项" };
+  return {
+    ...base,
+    state: "done",
+    text: value?.applied ? "已写入" : "已处理完，待写入",
+  };
+}
 
 // 第 ⑤ 步（合并漏掉的）在步骤条上的状态。
 function mergeStep(
@@ -2378,6 +2456,11 @@ function mergeStep(
   };
   if (!report || report.status === "idle")
     return { ...base, state: "current", text: "未开始" };
+  if (
+    report.stale &&
+    !["queued", "running", "rewriting"].includes(report.status)
+  )
+    return { ...base, state: "recheck", text: "图已变化，需要重新检查" };
   if (report.status === "failed")
     return { ...base, state: "failed", text: "检查失败" };
   if (report.status === "rewriting")

@@ -885,6 +885,9 @@
 }
 .gr-split-main {
   min-width: 0;
+  display: grid;
+  gap: 12px;
+  align-content: start;
 }
 @media (max-width: 760px) {
   .gr-split {
@@ -992,4 +995,72 @@
 .gv-step.is-selected .gv-text strong {
   font-weight: 600;
   color: #1d6ff2;
+}
+
+/* 图谱检查前 4 步的页面（GraphCheckStep）。 */
+.gc-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.gc-options label,
+.gc-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 0 8px;
+  font: inherit;
+  letter-spacing: normal;
+}
+.gc-options input {
+  width: auto;
+  margin: 0;
+}
+.gc-options select,
+.gc-inline select {
+  width: auto;
+}
+.gc-filter {
+  justify-content: flex-start;
+}
+.gc-judgment {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+.gc-judgment p {
+  margin: 0 0 4px;
+}
+.gc-decide {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.gc-quote {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+}
+.gc-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.gc-types,
+.gc-groups {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+.gc-groups input {
+  width: 220px;
+  max-width: 100%;
+  margin-right: 6px;
 }

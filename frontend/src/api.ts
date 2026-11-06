@@ -4081,6 +4081,8 @@ export type GraphReviewReport = {
   status: string;
   // 这次检查开始的时间（进度条算已用时间）。
   started?: string;
+  // 前面的检查步骤写入了新结果，这一步需要重新检查。
+  stale?: boolean;
   error?: string;
   // 这次检查用的提示词版本（graph_review@v2）和全文；检查开始时定下，之后改提示词要「重新检查」才用新版本。
   prompt_tag?: string;
@@ -4300,6 +4302,130 @@ export function addGraphReviewManual(
     {
       method: "POST",
       body: JSON.stringify({ build_id: buildId, ids, name, type, reason }),
+    },
+  );
+}
+
+// ---------- 图谱检查前 4 步（补抽、关系核对、类型核对、拆分） ----------
+export type CheckStepName = "glean" | "relation" | "type" | "split";
+// idle 未开始 / queued 排队 / running 进行中 / scanned 找完待确认判断 / stopped 已停止 /
+// ready 可以决定 / rewriting 正在写入 / skipped 已跳过 / failed 失败
+export type CheckSummary = {
+  status: string;
+  stale?: boolean;
+  count?: number;
+  judged?: number;
+  failed?: number;
+  pending?: number;
+  applied?: boolean;
+  started?: string | null;
+  error?: string | null;
+};
+export type CheckJudgment = {
+  item_id: string;
+  status: string;
+  error?: string;
+  duration_ms?: number;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  prompt?: { role: string; content: string }[];
+  raw_output?: string | null;
+  decision?: Record<string, unknown> & { suggest?: boolean; reason?: string };
+};
+export type CheckReport = {
+  build_id: string;
+  step: CheckStepName;
+  status: string;
+  phase?: string;
+  params?: Record<string, unknown>;
+  stale?: boolean;
+  started?: string;
+  error?: string;
+  prompt_tag?: string;
+  system_prompt?: string;
+  scan?: { count: number; duration_ms: number };
+  // 每一步的可疑项结构不同，页面按步骤渲染。
+  items?: (Record<string, unknown> & { id: string })[];
+  judgments?: Record<string, CheckJudgment>;
+  decisions?: Record<
+    string,
+    {
+      decision: "accept" | "reject";
+      by: string;
+      at: string;
+      edit?: Record<string, unknown>;
+    }
+  >;
+  applied?: { items: unknown; by: string; at: string } | null;
+};
+
+export function getCheckSummary(documentId: string) {
+  return request<{
+    build_id: string | null;
+    can_confirm?: boolean;
+    steps: Partial<Record<CheckStepName, CheckSummary>>;
+  }>(`/documents/${documentId}/graph/check`);
+}
+
+export function getCheckDetail(documentId: string, step: CheckStepName) {
+  return request<{
+    report: CheckReport | null;
+    build_id: string | null;
+    can_confirm: boolean;
+  }>(`/documents/${documentId}/graph/check/${step}`);
+}
+
+export function startCheck(
+  documentId: string,
+  step: CheckStepName,
+  buildId: string,
+  params: Record<string, unknown> = {},
+) {
+  return request<CheckReport>(
+    `/documents/${documentId}/graph/check/${step}/start`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ build_id: buildId, params }),
+    },
+  );
+}
+
+export function checkAction(
+  documentId: string,
+  step: CheckStepName,
+  action: "judge" | "stop" | "write" | "skip" | "retry-failed",
+  buildId: string,
+) {
+  return request<CheckReport>(
+    `/documents/${documentId}/graph/check/${step}/${action}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ build_id: buildId }),
+    },
+  );
+}
+
+export function decideCheck(
+  documentId: string,
+  step: CheckStepName,
+  buildId: string,
+  itemIds: string[],
+  decision: "accept" | "reject" | null,
+  edit?: Record<string, unknown> | null,
+) {
+  return request<CheckReport>(
+    `/documents/${documentId}/graph/check/${step}/decide`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        build_id: buildId,
+        item_ids: itemIds,
+        decision,
+        edit: edit ?? null,
+      }),
     },
   );
 }
