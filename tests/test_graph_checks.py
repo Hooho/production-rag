@@ -139,14 +139,14 @@ def test_glean_decision_drops_names_not_in_chunk_and_duplicates():
     output = {
         "entities": [
             {"name": "《富爸爸穷爸爸》", "type": "作品"},  # 原文没有
-            {"name": "巴菲特", "type": "人物"},  # 已有「沃伦·巴菲特」
+            {"name": "巴菲特", "type": "人物"},  # 可能是已有的：只标出来
             {"name": "芒格", "type": "人物"},
             {"name": "国债", "type": "产品"},
             {"name": "股市大跌", "type": "事件"},  # 比已有的长，不算重复
         ],
         "relations": [
             relation("段永平", "芒格", "也读芒格"),
-            relation("段永平", "巴菲特", "段永平很佩服巴菲特"),  # 已有这两个之间的关系
+            relation("段永平", "沃伦·巴菲特", "段永平学习沃伦·巴菲特"),  # 已有关系
             relation("段永平", "国债", "他买了国债"),  # 引用找不到
             relation("段永平", "《富爸爸穷爸爸》", "读了这本书"),  # 终点被去掉
         ],
@@ -155,13 +155,20 @@ def test_glean_decision_drops_names_not_in_chunk_and_duplicates():
     decision = checks.decide_glean(
         json.dumps(output, ensure_ascii=False), item, DEFAULT_SCHEMA, plan, chunk
     )
-    assert [row["name"] for row in decision["entities"]] == ["芒格", "国债", "股市大跌"]
+    assert [row["name"] for row in decision["entities"]] == [
+        "巴菲特",
+        "芒格",
+        "国债",
+        "股市大跌",
+    ]
+    assert decision["entities"][0]["same_as"] == "沃伦·巴菲特"
+    assert "same_as" not in decision["entities"][3]
     assert [(row["source"], row["target"]) for row in decision["relations"]] == [
         ("段永平", "芒格")
     ]
     reasons = {row["name"]: row["reason"] for row in decision["dropped"]}
     assert reasons["《富爸爸穷爸爸》"] == "原文里找不到"
-    assert reasons["巴菲特"] == "和已有的「沃伦·巴菲特」重复"
+    assert "巴菲特" not in reasons
     assert reasons["段永平 → 沃伦·巴菲特"] == "这两个实体之间已经有关系"
     assert reasons["段永平 → 国债"] == "原文引用在这一片里找不到"
     assert reasons["段永平 → 《富爸爸穷爸爸》"] == "起点或终点不是这一片的实体"

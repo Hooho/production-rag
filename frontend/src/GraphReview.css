@@ -1146,3 +1146,14 @@
   font-size: 12px;
   line-height: 1.6;
 }
+
+.gc-chip {
+  display: inline-flex;
+  align-items: center;
+}
+.gc-same {
+  margin-left: 4px;
+  color: #b45309;
+  font-size: 12px;
+  font-style: normal;
+}

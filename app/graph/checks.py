@@ -566,7 +566,7 @@ def glean_key(text):
 
 # 补抽结果先由程序过滤，模型给的不直接当建议：
 # 名字在这一片原文里找不到的（模型自己概括的词、只在上下文说明里出现的）去掉；
-# 是已有实体的另一种写法（「巴菲特」之于已有的「沃伦·巴菲特」）的去掉，关系改挂到已有实体上；
+# 可能是已有实体另一种写法的（「巴菲特」之于已有的「沃伦·巴菲特」）不去掉，标上 same_as 给人判断；
 # 关系的原文引用在这一片里找不到、或这两个实体之间已经有关系的去掉。去掉的记在 dropped 里给人看。
 def decide_glean(text, item, schema, plan, chunk=None):
     value = parse_json(text)
@@ -587,7 +587,7 @@ def decide_glean(text, item, schema, plan, chunk=None):
         for name in (row["name"], row["canonical"]):
             if glean_key(name):
                 keys.setdefault(glean_key(name), row["name"])
-    dropped, alias, fresh = [], {}, []
+    dropped, similar, fresh = [], {}, []
     for row in value.get("entities") or []:
         if not isinstance(row, dict) or not str(row.get("name") or "").strip():
             continue
@@ -595,17 +595,17 @@ def decide_glean(text, item, schema, plan, chunk=None):
         if name in known:
             continue
         key = glean_key(name)
-        # 新名字是已有名字的一部分：当成同一个的简写（新名字更长的不算，「股市大跌」不是「股市」）。
+        if not key or key not in content:
+            dropped.append({"name": name, "reason": "原文里找不到"})
+            continue
+        # 新名字是已有名字的一部分：可能是同一个的简写，只标出来（新名字更长的不算，「股市大跌」不是「股市」）。
+        # 只比字面，会误标（已有「苹果股票」时补「苹果」），所以不自动去掉。
         same = next(
             (keys[other] for other in keys if len(key) >= 2 and key in other), None
         )
         if same:
-            alias[name] = same
-            dropped.append({"name": name, "reason": f"和已有的「{same}」重复"})
-        elif not key or key not in content:
-            dropped.append({"name": name, "reason": "原文里找不到"})
-        else:
-            fresh.append(row)
+            similar[name] = same
+        fresh.append(row)
     names = known | {str(row["name"]).strip() for row in fresh}
     mentions = {row["id"]: row for row in plan["mentions"]}
     pairs = {
@@ -622,8 +622,7 @@ def decide_glean(text, item, schema, plan, chunk=None):
     for row in value.get("relations") or []:
         if not isinstance(row, dict):
             continue
-        source = alias.get(row.get("source"), row.get("source"))
-        target = alias.get(row.get("target"), row.get("target"))
+        source, target = row.get("source"), row.get("target")
         label = f"{source} → {target}"
         parts = [norm(part) for part in str(row.get("evidence") or "").split("||")]
         parts = [part for part in parts if part]
@@ -640,7 +639,11 @@ def decide_glean(text, item, schema, plan, chunk=None):
         dropped.append({"name": label, "reason": reason})
     combined = {"entities": existing + fresh, "relations": relations}
     parsed = extract.parse_output(json.dumps(combined, ensure_ascii=False), schema)
-    entities = [row for row in parsed["entities"] if row["name"] not in known]
+    entities = [
+        {**row, "same_as": similar[row["name"]]} if row["name"] in similar else row
+        for row in parsed["entities"]
+        if row["name"] not in known
+    ]
     return {
         "entities": entities,
         "relations": parsed["relations"],

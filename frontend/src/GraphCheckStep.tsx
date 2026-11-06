@@ -1087,6 +1087,8 @@ function judgmentBody(
         name: string;
         type: string;
         description?: string;
+        // 程序按字面判断可能是这一片已有的哪个实体（只是提示，人来决定）
+        same_as?: string;
       }[]) ?? [];
     const relations =
       (value.relations as {
@@ -1123,9 +1125,22 @@ function judgmentBody(
             <span className="gc-label">补实体</span>
             <span className="gc-chips">
               {entities.map((row) => (
-                <Tag key={row.name} size="sm" plain hue>
-                  {row.name}（{row.type}）
-                </Tag>
+                <span
+                  key={row.name}
+                  className="gc-chip"
+                  title={
+                    row.same_as
+                      ? `名字是已有「${row.same_as}」的一部分，可能是同一个；采纳后会作为单独的实体，第 5 步检查漏合并会再查`
+                      : undefined
+                  }
+                >
+                  <Tag size="sm" plain hue>
+                    {row.name}（{row.type}）
+                  </Tag>
+                  {row.same_as && (
+                    <em className="gc-same">可能就是已有的「{row.same_as}」</em>
+                  )}
+                </span>
               ))}
             </span>
           </div>
