@@ -1050,6 +1050,32 @@ export function GraphReviewDetails({
   );
 }
 
+// 现在要写入的合并和上次写入的对比。没有变化（实体、名字都一样，也不用选名字）的不需要再确认；
+// changes 是这次写入会改变图谱的地方：变化的结果 + 撤掉的旧结果。
+function planChanges(
+  report: GraphReviewReport,
+  approved: string[],
+  choices: Record<string, GraphReviewChoice>,
+) {
+  const groups = mergeComponents(report, approved);
+  const { diffs, dropped } = diffPlan(
+    groups.map((group) => ({
+      entityIds: group.entityIds,
+      naming:
+        group.options.length === 1 ? group.options[0] : choices[group.key],
+    })),
+    report.applied?.groups ?? [],
+  );
+  const unchanged = groups.map(
+    (group, index) =>
+      diffs[index].change.kind === "same" &&
+      !diffs[index].rename &&
+      (group.options.length === 1 || !!choices[group.key]),
+  );
+  const changes = unchanged.filter((value) => !value).length + dropped.length;
+  return { groups, diffs, dropped, unchanged, changes };
+}
+
 // 第 4 步「确认」的内容：已批准的建议按实际结果合起来；连在一起且名字不一致的，必须先选一个。
 // 和上次已写入的对比（规则见 graphReviewDiff）：每条标出不变/新增/扩大/缩小/接成/拆出/改名，
 // 只有和现在任何一条都不重叠的旧结果才单独列为「撤掉」（结果只取决于现在批准了哪些）。
@@ -1077,15 +1103,10 @@ function MergePlan({
   const entities = entityMap(report);
   const label = (ids: string[]) =>
     ids.map((id) => entities.get(id)?.names[0] ?? id).join("、");
-  const groups = mergeComponents(report, approved);
-  const naming = (group: (typeof groups)[number]) =>
-    group.options.length === 1 ? group.options[0] : choices[group.key];
-  const { diffs, dropped } = diffPlan(
-    groups.map((group) => ({
-      entityIds: group.entityIds,
-      naming: naming(group),
-    })),
-    report.applied?.groups ?? [],
+  const { groups, diffs, dropped, unchanged, changes } = planChanges(
+    report,
+    approved,
+    choices,
   );
   const changeTag = ({ change, rename }: PlanDiff) => {
     const tags: [string, Tone, string?][] = [];
@@ -1123,91 +1144,106 @@ function MergePlan({
     return (
       <p className="graph-note">还没有批准任何合并建议，去第 3 步决定。</p>
     );
-  return (
-    <ol className="gr-plan">
-      {groups.map((group, index) => {
-        const choice = choices[group.key];
-        return (
-          <li key={group.key}>
-            <span>
-              {label(group.entityIds)}
-              <span className="gr-arrow">→</span>
-              {group.options.length === 1 ? (
-                <strong>
-                  {group.options[0].name}（{group.options[0].type}）
-                </strong>
-              ) : (
-                <span className="gr-choose">
-                  <span className="gr-warn-inline">名字不一致，请选一个：</span>
-                  {group.options.map((option) => (
-                    <label key={`${option.name}|${option.type}`}>
-                      <input
-                        type="radio"
-                        name={`gr-choice-${group.key}`}
-                        checked={
-                          choice?.name === option.name &&
-                          choice?.type === option.type
-                        }
-                        onChange={() => onChoose(group.key, option)}
-                      />
-                      {option.name}（{option.type}）
-                    </label>
-                  ))}
-                </span>
-              )}
-              {changeTag(diffs[index])}
-              {onView && (
-                <button
-                  type="button"
-                  className="link-button gr-view"
-                  title="看这个结果里的实体，搜索别的实体加进来"
-                  onClick={() => onView(group.entityIds[0])}
-                >
-                  加入新实体
-                </button>
-              )}
-              {onRemove && (
-                <button
-                  type="button"
-                  className={`link-button gr-remove${loadingClass(loading === decideKey(group.proposalIds, null))}`}
-                  disabled={busy}
-                  title="撤销对应建议的批准，回到第 3 步待处理；写入后不会合并"
-                  onClick={() => onRemove(group.proposalIds)}
-                >
-                  移除
-                </button>
-              )}
+  const kept = groups.filter((_, index) => unchanged[index]);
+  const renderGroup = (group: MergeResult) => {
+    const index = groups.indexOf(group);
+    const choice = choices[group.key];
+    return (
+      <li key={group.key}>
+        <span>
+          {label(group.entityIds)}
+          <span className="gr-arrow">→</span>
+          {group.options.length === 1 ? (
+            <strong>
+              {group.options[0].name}（{group.options[0].type}）
+            </strong>
+          ) : (
+            <span className="gr-choose">
+              <span className="gr-warn-inline">名字不一致，请选一个：</span>
+              {group.options.map((option) => (
+                <label key={`${option.name}|${option.type}`}>
+                  <input
+                    type="radio"
+                    name={`gr-choice-${group.key}`}
+                    checked={
+                      choice?.name === option.name &&
+                      choice?.type === option.type
+                    }
+                    onChange={() => onChoose(group.key, option)}
+                  />
+                  {option.name}（{option.type}）
+                </label>
+              ))}
             </span>
-            {group.proposalIds.length > 1 && (
-              <small>
-                来自 {group.proposalIds.length} 条建议：
-                {group.proposalIds
-                  .map((id) =>
-                    id.startsWith("m")
-                      ? `人工 ${id.split(":")[0]}`
-                      : `#${id.split(":")[0]}`,
-                  )
-                  .join("、")}
-              </small>
-            )}
-          </li>
-        );
-      })}
-      {dropped.map((old) => (
-        <li key={`drop-${old.key}`} className="gr-dropped">
-          <span>
-            {label(old.ids)}
-            <span className="gr-arrow">→</span>
-            <s>
-              {old.name}（{old.type}）
-            </s>
-            <Tag size="sm" tone="warning">
-              撤掉：写入后拆开
-            </Tag>
-          </span>
-        </li>
-      ))}
-    </ol>
+          )}
+          {changeTag(diffs[index])}
+          {onView && (
+            <button
+              type="button"
+              className="link-button gr-view"
+              title="看这个结果里的实体，搜索别的实体加进来"
+              onClick={() => onView(group.entityIds[0])}
+            >
+              加入新实体
+            </button>
+          )}
+          {onRemove && (
+            <button
+              type="button"
+              className={`link-button gr-remove${loadingClass(loading === decideKey(group.proposalIds, null))}`}
+              disabled={busy}
+              title="撤销对应建议的批准，回到第 3 步待处理；写入后不会合并"
+              onClick={() => onRemove(group.proposalIds)}
+            >
+              移除
+            </button>
+          )}
+        </span>
+        {group.proposalIds.length > 1 && (
+          <small>
+            来自 {group.proposalIds.length} 条建议：
+            {group.proposalIds
+              .map((id) =>
+                id.startsWith("m")
+                  ? `人工 ${id.split(":")[0]}`
+                  : `#${id.split(":")[0]}`,
+              )
+              .join("、")}
+          </small>
+        )}
+      </li>
+    );
+  };
+  return (
+    <>
+      {changes === 0 ? (
+        <p className="graph-note">和上次写入相比没有新改动，不需要再写入。</p>
+      ) : (
+        <ol className="gr-plan">
+          {groups.filter((_, index) => !unchanged[index]).map(renderGroup)}
+          {dropped.map((old) => (
+            <li key={`drop-${old.key}`} className="gr-dropped">
+              <span>
+                {label(old.ids)}
+                <span className="gr-arrow">→</span>
+                <s>
+                  {old.name}（{old.type}）
+                </s>
+                <Tag size="sm" tone="warning">
+                  撤掉：写入后拆开
+                </Tag>
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+      {kept.length > 0 && (
+        <details className="gr-kept">
+          <summary>已写入图谱、没有变化的 {kept.length} 个合并</summary>
+          <ol className="gr-plan">{kept.map(renderGroup)}</ol>
+        </details>
+      )}
+    </>
   );
 }
 
@@ -1699,8 +1735,11 @@ export function GraphReviewBody({
   const unresolved = groups.filter(
     (group) => group.options.length > 1 && !choices[group.key],
   );
-  const canRewrite =
-    canDecide && (groups.length > 0 || !!live?.applied?.groups.length);
+  const changes = report?.scan
+    ? planChanges(report, approved, choices).changes
+    : 0;
+  // 和上次写入相比有变化才需要写入；第一次写入时每条都算新增。
+  const canRewrite = canDecide && changes > 0;
   const failedCount = (live?.judgments ?? []).filter(
     (item) => item.status === "failed",
   ).length;
@@ -1843,11 +1882,10 @@ export function GraphReviewBody({
     report?.scan && canDecide ? (
       <div className="gr-confirm">
         <p className="gr-small">
-          下面是写入后图谱上会有的合并：根据第 3
-          步批准的建议整理，相关的几条会接成一个结果。
-          每条都标出和上次写入相比的变化（扩大、缩小、接成、拆出、改名等）；
-          只有整条都不再批准的才列为「撤掉」，写入后拆开。还有 {pending}{" "}
-          条没处理，保持分开。
+          下面是这次写入会改变的合并：根据第 3
+          步批准的建议整理，相关的几条会接成一个结果，并标出和上次写入相比的变化（新增、扩大、缩小、接成、拆出、改名等）；
+          整条都不再批准的列为「撤掉」，写入后拆开。已写入且没有变化的收在下面，不用再确认。还有{" "}
+          {pending} 条没处理，保持分开。
         </p>
         <MergePlan
           report={report}
@@ -1882,7 +1920,7 @@ export function GraphReviewBody({
             </span>
           )}
           <ConfirmPopover
-            message={`按 ${groups.length} 个合并结果写入图谱？从已保存的抽取结果重新写一遍，不调用模型。${pending > 0 ? `还有 ${pending} 条未处理，保持分开。` : ""}`}
+            message={`写入 ${changes} 处变化？写入后图谱上共 ${groups.length} 个合并，从已保存的抽取结果重新写一遍，不调用模型。${pending > 0 ? `还有 ${pending} 条未处理，保持分开。` : ""}`}
             confirmText="写入图谱"
             onConfirm={rewrite}
           >
@@ -1890,9 +1928,9 @@ export function GraphReviewBody({
               type="button"
               className={`primary-button${loadingClass(action === "rewrite")}`}
               disabled={busy || unresolved.length > 0 || !canRewrite}
-              title={canRewrite ? undefined : "还没有批准任何合并建议"}
+              title={canRewrite ? undefined : "和上次写入相比没有新改动"}
             >
-              {`确认，写入图谱（${groups.length} 个合并）`}
+              {`确认，写入图谱（${changes} 处变化）`}
             </button>
           </ConfirmPopover>
         </div>

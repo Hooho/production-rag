@@ -498,6 +498,18 @@
 .gr-dropped {
   color: #94a3b8;
 }
+/* 已写入且没有变化的合并：默认收起，展开后还能「加入新实体」「移除」。 */
+.gr-kept {
+  margin-top: 10px;
+  font-size: 13px;
+}
+.gr-kept summary {
+  cursor: pointer;
+  color: #64748b;
+}
+.gr-kept .gr-plan {
+  margin-top: 8px;
+}
 .gr-pairs {
   border-collapse: collapse;
   font-size: 13px;
