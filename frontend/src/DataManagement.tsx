@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ConfirmPopover } from "./ConfirmPopover";
 import { Tag } from "./Tag";
 import { colorTone } from "./tags";
 import { DataRequestError, commitDataBatch, createDataRecord, deleteDataBatch, deleteDataRecord, generateDataPreview, listDataOptions, listDataRecords, listDataTypes, updateDataRecord, type DataAction, type DataField, type DataPage, type DataPreview, type DataRow, type DataType, type DataValue } from "./api";
@@ -105,7 +106,6 @@ function DataTable({ type, onToast }: { type: DataType; onToast: ShowToast }) {
   }
 
   async function remove(row: DataRow) {
-    if (!window.confirm(`确定删除${type.label} ${row.id}？删除后列表和问答里都不再出现（数据库保留记录，可由管理员恢复）。`)) return;
     try {
       await deleteDataRecord(type.key, row.id);
       onToast("success", `已删除 ${row.id}`);
@@ -116,7 +116,6 @@ function DataTable({ type, onToast }: { type: DataType; onToast: ShowToast }) {
   }
 
   async function removeBatch(batchId: string) {
-    if (!window.confirm("确定删除这一批 AI 生成的全部数据？")) return;
     try {
       const result = await deleteDataBatch(type.key, batchId);
       onToast("success", `已删除这一批的 ${result.deleted} 条数据`);
@@ -154,8 +153,8 @@ function DataTable({ type, onToast }: { type: DataType; onToast: ShowToast }) {
             <td>{row.source === "ai" ? <Tag size="sm" tone="info" title={`批次 ${row.batch_id}`}>AI</Tag> : <Tag size="sm" outline plain>手动</Tag>}</td>
             <td className="data-actions">
               {can("update") && <button type="button" className="secondary-button button-sm" onClick={() => setEditing(row)}>编辑</button>}
-              {can("delete") && <button type="button" className="delete-button" onClick={() => void remove(row)}>删除</button>}
-              {can("delete") && row.source === "ai" && row.batch_id && <button type="button" className="delete-button" onClick={() => void removeBatch(row.batch_id as string)} title="删除同一次 AI 生成写入的全部数据">删除本批</button>}
+              {can("delete") && <ConfirmPopover danger message={`删除${type.label} ${row.id}？删除后列表和问答里都不再出现（数据库保留记录，可由管理员恢复）。`} confirmText="删除" onConfirm={() => remove(row)}><button type="button" className="delete-button">删除</button></ConfirmPopover>}
+              {can("delete") && row.source === "ai" && row.batch_id && <ConfirmPopover danger message="删除这一批 AI 生成的全部数据？" confirmText="删除本批" onConfirm={() => removeBatch(row.batch_id as string)}><button type="button" className="delete-button" title="删除同一次 AI 生成写入的全部数据">删除本批</button></ConfirmPopover>}
             </td>
           </tr>)}
         </tbody>

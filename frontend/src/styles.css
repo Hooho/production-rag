@@ -8957,3 +8957,74 @@ input:focus {
 .ag-call.is-compact > .ag-call-params { margin: 0; gap: 4px 6px; font-size: 11px; }
 .ag-call.is-compact .ag-call-param-values { gap: 4px; }
 .ag-call.is-compact .ag-call-params .tag { padding: 0 5px; font-size: 10px; line-height: 1.6; }
+
+/* 二次确认气泡（ConfirmPopover）：出现在按钮旁边，不挡整个页面。 */
+.confirm-popover {
+   position: fixed;
+   inset: auto;
+   margin: 0;
+   width: max-content;
+   max-width: min(320px, calc(100vw - 16px));
+   padding: 12px 14px;
+   border: 1px solid var(--t-cedfec);
+   border-radius: 8px;
+   background: var(--surface, #ffffff);
+   color: var(--t-1d3550);
+   box-shadow: 0 10px 30px rgb(15 23 42 / .16), 0 2px 8px rgb(15 23 42 / .08);
+   overflow: visible;
+   font-size: 13px;
+}
+
+.confirm-popover-message {
+   display: flex;
+   gap: 8px;
+   margin: 0;
+   line-height: 1.6;
+   white-space: normal;
+}
+
+.confirm-popover-icon {
+   flex: 0 0 18px;
+   height: 18px;
+   margin-top: 1px;
+   border-radius: 50%;
+   background: #f59e0b;
+   color: #ffffff;
+   font-size: 11px;
+   font-weight: 700;
+   line-height: 18px;
+   text-align: center;
+}
+
+.confirm-popover-icon.is-danger {
+   background: #d45160;
+}
+
+.confirm-popover-actions {
+   display: flex;
+   justify-content: flex-end;
+   gap: 8px;
+   margin-top: 12px;
+}
+
+.confirm-popover-arrow {
+   position: absolute;
+   width: 10px;
+   height: 10px;
+   margin-left: -5px;
+   background: var(--surface, #ffffff);
+   border: 1px solid var(--t-cedfec);
+   transform: rotate(45deg);
+}
+
+.confirm-popover.is-top .confirm-popover-arrow {
+   bottom: -6px;
+   border-top: 0;
+   border-left: 0;
+}
+
+.confirm-popover.is-bottom .confirm-popover-arrow {
+   top: -6px;
+   border-bottom: 0;
+   border-right: 0;
+}

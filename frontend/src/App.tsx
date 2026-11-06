@@ -1,4 +1,5 @@
 import { DetailDialog } from "./DetailDialog";
+import { ConfirmPopover } from "./ConfirmPopover";
 import { GraphReviewBody, pendingCount } from "./GraphReviewPanel";
 import { useToast, type ShowToast, type ToastKind } from "./Toast";
 import type { GraphReviewReport } from "./api";
@@ -5449,13 +5450,6 @@ function Knowledge({
 
   async function remove(document: DocumentStatus) {
     // 原来处理中直接禁止删除，导致失败或卡住的文档无法清理；后端现在会连同未完成版本和已生成数据一起删除。
-    const count = document.versions?.length ?? document.version_count ?? 1;
-    if (
-      !window.confirm(
-        `确定删除“${document.title}”的全部 ${count} 个版本及其检索索引吗？未完成的解析也会一并删除。`,
-      )
-    )
-      return;
     setError("");
     try {
       await deleteDocument(document.document_id);
@@ -6444,12 +6438,16 @@ function DocumentDetail({
               上传新版本
             </button>
             {/* 删除不再依赖解析状态，卡住或失败的版本也必须能被上传者清理。 */}
-            <button
-              className="delete-button detail-delete-button"
-              onClick={onDelete}
+            <ConfirmPopover
+              danger
+              message={`删除“${document.title}”的全部 ${document.versions?.length ?? document.version_count ?? 1} 个版本及其检索索引？未完成的解析也会一并删除。`}
+              confirmText="删除"
+              onConfirm={onDelete}
             >
-              删除文档（全部版本）
-            </button>
+              <button className="delete-button detail-delete-button">
+                删除文档（全部版本）
+              </button>
+            </ConfirmPopover>
           </div>
         )}
       </div>

@@ -9,6 +9,7 @@ import {
   type GraphReviewReport,
 } from "./api";
 import { DetailDialog } from "./DetailDialog";
+import { ConfirmPopover } from "./ConfirmPopover";
 import { Tag } from "./Tag";
 import { errorText, useToast } from "./Toast";
 import type { Tone } from "./tags";
@@ -1168,12 +1169,6 @@ export function GraphReviewBody({
 
   async function rewrite() {
     if (!live) return;
-    if (
-      !window.confirm(
-        `按 ${groups.length} 个合并结果写入图谱？从已保存的抽取结果重新写一遍，不调用模型。${pending > 0 ? `还有 ${pending} 条未处理，保持分开。` : ""}`,
-      )
-    )
-      return;
     await run(async () => {
       const resolutions = Object.fromEntries(
         groups
@@ -1189,14 +1184,6 @@ export function GraphReviewBody({
   }
 
   async function retry() {
-    if (
-      live?.decisions &&
-      Object.keys(live.decisions).length > 0 &&
-      !window.confirm(
-        "重新检查会清掉模型判断和你的决定（图谱上已写入的合并保留，直到下次写入）。继续？",
-      )
-    )
-      return;
     await run(async () => {
       await retryGraphReview(documentId);
       toast("success", "已开始重新检查");
@@ -1220,19 +1207,22 @@ export function GraphReviewBody({
     !!data?.can_confirm &&
     (!live || ["ready", "failed", "idle"].includes(live.status));
 
+  // 已经有人工决定时，重新检查会把它们清掉，先在按钮旁边确认。
   const retryButton = showRetry && (
-    <button
-      type="button"
-      className="secondary-button"
-      disabled={busy}
-      onClick={() => void retry()}
+    <ConfirmPopover
+      when={!!live?.decisions && Object.keys(live.decisions).length > 0}
+      message="重新检查会清掉模型判断和你的决定（图谱上已写入的合并保留，直到下次写入）。"
+      confirmText="重新检查"
+      onConfirm={retry}
     >
-      {busy
-        ? "正在提交…"
-        : live?.status === "idle" || !report
-          ? "开始二次检查"
-          : "重新检查"}
-    </button>
+      <button type="button" className="secondary-button" disabled={busy}>
+        {busy
+          ? "正在提交…"
+          : live?.status === "idle" || !report
+            ? "开始二次检查"
+            : "重新检查"}
+      </button>
+    </ConfirmPopover>
   );
 
   const judgeActions =
@@ -1276,15 +1266,20 @@ export function GraphReviewBody({
               有 {unresolved.length} 个合并结果要先选名字
             </span>
           )}
-          <button
-            type="button"
-            className="primary-button"
-            disabled={busy || unresolved.length > 0 || !canRewrite}
-            title={canRewrite ? undefined : "还没有批准任何合并建议"}
-            onClick={() => void rewrite()}
+          <ConfirmPopover
+            message={`按 ${groups.length} 个合并结果写入图谱？从已保存的抽取结果重新写一遍，不调用模型。${pending > 0 ? `还有 ${pending} 条未处理，保持分开。` : ""}`}
+            confirmText="写入图谱"
+            onConfirm={rewrite}
           >
-            {busy ? "正在提交…" : `确认，写入图谱（${groups.length} 个合并）`}
-          </button>
+            <button
+              type="button"
+              className="primary-button"
+              disabled={busy || unresolved.length > 0 || !canRewrite}
+              title={canRewrite ? undefined : "还没有批准任何合并建议"}
+            >
+              {busy ? "正在提交…" : `确认，写入图谱（${groups.length} 个合并）`}
+            </button>
+          </ConfirmPopover>
         </div>
       </div>
     ) : undefined;

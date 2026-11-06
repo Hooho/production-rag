@@ -1,4 +1,5 @@
 import "./EvaluationNotes.css";
+import { ConfirmPopover } from "./ConfirmPopover";
 import { DetailDialog } from "./DetailDialog";
 import { ScoringItems } from "./ScoringItems";
 import { ScoringItemEditor } from "./ScoringItemEditor";
@@ -4266,12 +4267,6 @@ function RunHistory({
   // 删除前明确展示时间和状态，避免把误点“删除”当成可逆操作。
   async function remove(item: EvalRunBrief) {
     if (item.status === "running") return;
-    if (
-      !window.confirm(
-        `确定删除 ${formatTime(item.created)} 的${KIND_LABELS[item.kind]}评测记录吗？删除后不可恢复。`,
-      )
-    )
-      return;
     setDeletingId(item.id);
     try {
       await onDelete(item.id);
@@ -4528,23 +4523,27 @@ function RunHistory({
                         >
                           查看
                         </button>
-                        <button
-                          className="ev-delete-link"
-                          disabled={
-                            item.status === "running" || deletingId === item.id
-                          }
-                          title={
-                            item.status === "running"
-                              ? "评测运行中，不能删除"
-                              : "删除这条评测记录"
-                          }
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void remove(item);
-                          }}
+                        <ConfirmPopover
+                          danger
+                          message={`删除 ${formatTime(item.created)} 的${KIND_LABELS[item.kind]}评测记录？删除后不可恢复。`}
+                          confirmText="删除"
+                          onConfirm={() => remove(item)}
                         >
-                          {deletingId === item.id ? "删除中…" : "删除"}
-                        </button>
+                          <button
+                            className="ev-delete-link"
+                            disabled={
+                              item.status === "running" ||
+                              deletingId === item.id
+                            }
+                            title={
+                              item.status === "running"
+                                ? "评测运行中，不能删除"
+                                : "删除这条评测记录"
+                            }
+                          >
+                            {deletingId === item.id ? "删除中…" : "删除"}
+                          </button>
+                        </ConfirmPopover>
                       </div>
                     </td>
                   </tr>
