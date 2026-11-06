@@ -758,3 +758,82 @@ def test_apply_records_which_proposals_brought_each_name():
     via = {row["mention_id"]: row["detail"]["review"]["via"] for row in plan["merges"]}
     assert via == {"m-a": ["41:0"], "m-b": ["41:0", "m1:0"], "m-c": ["m1:0"]}
     assert "members" not in plan["merges"][0]["detail"]["review"]
+
+
+def test_review_merge_joins_same_named_entity_of_other_documents():
+    # 另一份文档里已有「腾讯控股（组织）」；这份文档把腾讯、腾讯控股合并成「腾讯控股（组织）」，
+    # 要归到那个共用实体上，而不是新建一个只属于这份文档的同名实体。
+    db = engine()
+    with db.begin() as connection:
+        resolve.resolve_build(
+            connection,
+            "online",
+            "other-build",
+            [
+                extraction(
+                    "other-extraction",
+                    "other-chunk",
+                    [entity("腾讯控股", "组织")],
+                    document_id="doc-b",
+                )
+            ],
+        )
+        shared = connection.execute(
+            select(graph_mentions.c.entity_id).where(
+                graph_mentions.c.document_id == "doc-b"
+            )
+        ).scalar_one()
+    plan = plan_for(db)
+    items, ids = review.inventory(plan, {})
+    companies = [item["id"] for item in items if item["types"] == ["组织"]]
+    groups = review.resolve_groups(one_group_report(companies), ["1:0"])
+    with db.begin() as connection:
+        records = review.apply(
+            connection,
+            plan,
+            {"document_id": "doc-a", "space": "online"},
+            groups,
+            ids,
+            "alice",
+        )
+        resolve.write_build(connection, "online", "b1", plan)
+        assert records[0]["entity_id"] == shared
+        names = connection.execute(
+            select(graph_entities.c.name).where(graph_entities.c.name == "腾讯控股")
+        ).all()
+        assert len(names) == 1
+
+
+def test_rename_moves_only_chosen_mentions_and_updates_name_and_type():
+    # 拆分：同一个实体里只把其中几处名字改成新名字，它们归到新实体，其余不动；改回已有的名字就并回去。
+    db = engine()
+    with db.connect() as connection:
+        plan = resolve.prepare_build(
+            connection,
+            "online",
+            "b1",
+            [
+                extraction("e1", "c1", [entity("苹果", "组织")]),
+                extraction("e2", "c2", [entity("苹果", "组织")]),
+                extraction("e3", "c3", [entity("苹果", "组织")]),
+            ],
+        )
+        apple = {row["entity_id"] for row in plan["mentions"]}
+        assert len(apple) == 1
+        fruit = [row["id"] for row in plan["mentions"] if row["chunk_id"] == "c3"]
+        target, affected = review.rename(
+            connection, plan, "online", fruit, "苹果（水果）", "产品", "一种水果"
+        )
+        assert affected == fruit and target not in apple
+        moved = next(row for row in plan["mentions"] if row["id"] == fruit[0])
+        assert (moved["canonical"], moved["type"], moved["resolve_method"]) == (
+            "苹果（水果）",
+            "产品",
+            "review",
+        )
+        assert {
+            row["entity_id"] for row in plan["mentions"] if row["chunk_id"] != "c3"
+        } == apple
+        # 改成和已有实体同样的名字和类型：并进那个实体，不新建。
+        back, _ = review.rename(connection, plan, "online", fruit, "苹果", "组织")
+        assert back in apple

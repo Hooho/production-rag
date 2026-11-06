@@ -13,7 +13,7 @@ from sqlalchemy import select
 from .. import prompts
 from ..mysql.tables import graph_entities
 from .extract import call_model
-from .resolve import normalize
+from .resolve import merge_key as resolve_key, normalize
 from .schemas import now, type_names
 
 VERSION = 2
@@ -426,9 +426,55 @@ def resolve_groups(report, approved, resolutions=None):
     return groups
 
 
+# 改名：把一组名字的标准名、类型改掉，再按规则合并的身份（类型 + 规范化后的标准名）重新归属。
+# 已有同身份的实体（这次写入的方案里，或空间里其他文档已经用着的）就并进去，没有就新建。
+# 二次检查的合并、类型纠正、拆分都用它：合并 = 几个实体的名字改成同一个标准名；拆分 = 其中几处改成新名字。
+# 只改这份文档里这些名字的归属，不动其他文档。返回 (实体 id, 受影响的名字 id 列表)。
+def rename(connection, plan, space, mention_ids, name, entity_type, description=""):
+    key = resolve_key(entity_type, name)
+    target = (
+        next(
+            (item["id"] for item in plan["entities"] if item["merge_key"] == key), None
+        )
+        or connection.execute(
+            select(graph_entities.c.id).where(
+                graph_entities.c.space == space, graph_entities.c.merge_key == key
+            )
+        ).scalar_one_or_none()
+    )
+    if target is None:
+        target = str(uuid.uuid4())
+        plan["entities"].append(
+            {
+                "id": target,
+                "space": space,
+                "name": name[:200],
+                "type": entity_type,
+                "merge_key": key,
+                "description": (description or "")[:500] or None,
+                "origin": "extracted",
+                "created": now(),
+                "updated": now(),
+            }
+        )
+    wanted = set(mention_ids)
+    affected = []
+    for mention in plan["mentions"]:
+        if mention["id"] in wanted:
+            mention.update(
+                entity_id=target,
+                canonical=name,
+                type=entity_type,
+                resolve_method="review",
+            )
+            affected.append(mention["id"])
+    return target, affected
+
+
 def apply(connection, plan, build, groups, ids, approved_by):
     """把人工确认过的合并结果应用到这次建图的写入方案上（写图谱前调用）。
 
+    做法是改名：组里实体的名字都改成选定的标准名和类型，再按身份归属（见 rename）。
     groups 来自 resolve_groups；ids 是 inventory 返回的「候选 id → 实体 id」。抽取结果变化后找不到的实体跳过。"""
     records = []
     for group in groups:
@@ -453,51 +499,23 @@ def apply(connection, plan, build, groups, ids, approved_by):
             for key in keys:
                 if key in ids:
                     via.setdefault(ids[key], set()).add(pid)
-        via_of = {}
-        merge_key = (
-            "review|"
-            + build["document_id"]
-            + "|"
-            + hashlib.sha256(
-                json.dumps(
-                    [sorted(group["ids"]), group["name"], group["type"]],
-                    ensure_ascii=False,
-                ).encode()
-            ).hexdigest()
+        chosen = [row for row in plan["mentions"] if row["entity_id"] in sources]
+        via_of = {
+            row["id"]: sorted(via[row["entity_id"]])
+            for row in chosen
+            if row["entity_id"] in via
+        }
+        from_names = {row["name"] for row in chosen}
+        type_corrections = sum(row["type"] != group["type"] for row in chosen)
+        target, affected = rename(
+            connection,
+            plan,
+            build["space"],
+            [row["id"] for row in chosen],
+            group["name"],
+            group["type"],
+            group["reason"],
         )
-        existing = connection.execute(
-            select(graph_entities.c.id).where(
-                graph_entities.c.space == build["space"],
-                graph_entities.c.merge_key == merge_key,
-            )
-        ).scalar_one_or_none()
-        target = existing or str(uuid.uuid4())
-        if not existing:
-            plan["entities"].append(
-                {
-                    "id": target,
-                    "space": build["space"],
-                    "name": group["name"],
-                    "type": group["type"],
-                    "merge_key": merge_key,
-                    "description": group["reason"][:500],
-                    "origin": "extracted",
-                    "created": now(),
-                    "updated": now(),
-                }
-            )
-        affected = []
-        type_corrections = 0
-        from_names = set()
-        for mention in plan["mentions"]:
-            if mention["entity_id"] in sources:
-                affected.append(mention["id"])
-                if mention["entity_id"] in via:
-                    via_of[mention["id"]] = sorted(via[mention["entity_id"]])
-                from_names.add(mention["name"])
-                type_corrections += int(mention["type"] != group["type"])
-                mention["entity_id"] = target
-                mention["resolve_method"] = "review"
         for merge in plan["merges"]:
             if merge["mention_id"] in affected:
                 merge.update(
