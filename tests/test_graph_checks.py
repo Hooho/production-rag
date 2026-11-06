@@ -168,6 +168,10 @@ def test_glean_decision_drops_names_not_in_chunk_and_duplicates():
     ]
     reasons = {row["name"]: row["reason"] for row in decision["dropped"]}
     assert reasons["《富爸爸穷爸爸》"] == "原文里找不到"
+    kinds = {row["name"]: row["kind"] for row in decision["dropped"]}
+    assert kinds["《富爸爸穷爸爸》"] == "entity"
+    assert kinds["段永平 → 国债"] == "relation"
+    assert decision["dropped_count"] == len(decision["dropped"])
     assert "巴菲特" not in reasons
     assert reasons["段永平 → 沃伦·巴菲特"] == "这两个实体之间已经有关系"
     assert reasons["段永平 → 国债"] == "原文引用在这一片里找不到"

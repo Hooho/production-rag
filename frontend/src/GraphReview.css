@@ -1115,12 +1115,26 @@
   font-weight: 600;
 }
 
-.gc-dropped {
-  display: block;
-  margin-top: 8px;
+/* 补抽卡片上的「程序过滤」说明：引用样式，写明查了什么、去掉了什么。 */
+.gc-filter-note {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 10px 0 0;
+  padding: 6px 10px;
+  border-left: 3px solid #cbd5e1;
+  background: #f8fafc;
   color: #64748b;
   font-size: 12px;
   line-height: 1.6;
+}
+.gc-filter-note strong {
+  color: #475569;
+  font-weight: 600;
+}
+.gc-filter-note ul {
+  margin: 0;
+  padding-left: 18px;
 }
 
 .gc-chip {

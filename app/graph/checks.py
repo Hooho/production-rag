@@ -612,7 +612,7 @@ def decide_glean(text, item, schema, plan, chunk=None):
             continue
         key = glean_key(name)
         if not key or key not in content:
-            dropped.append({"name": name, "reason": "原文里找不到"})
+            dropped.append({"kind": "entity", "name": name, "reason": "原文里找不到"})
             continue
         # 新名字是已有名字的一部分：可能是同一个的简写，只标出来（新名字更长的不算，「股市大跌」不是「股市」）。
         # 只比字面，会误标（已有「苹果股票」时补「苹果」），所以不自动去掉。
@@ -652,7 +652,7 @@ def decide_glean(text, item, schema, plan, chunk=None):
             relations.append({**row, "source": source, "target": target})
             pairs.add(frozenset((source, target)))
             continue
-        dropped.append({"name": label, "reason": reason})
+        dropped.append({"kind": "relation", "name": label, "reason": reason})
     combined = {"entities": existing + fresh, "relations": relations}
     parsed = extract.parse_output(json.dumps(combined, ensure_ascii=False), schema)
     entities = [
@@ -664,6 +664,7 @@ def decide_glean(text, item, schema, plan, chunk=None):
         "entities": entities,
         "relations": parsed["relations"],
         "dropped": dropped[:50],
+        "dropped_count": len(dropped),
         "suggest": bool(entities or parsed["relations"]),
     }
 
