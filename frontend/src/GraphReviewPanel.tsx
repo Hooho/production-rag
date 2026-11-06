@@ -126,6 +126,12 @@ export function mergeComponents(report: GraphReviewReport, approved: string[]) {
     .sort((a, b) => (a.key < b.key ? -1 : 1));
 }
 
+// 正在执行的是哪个操作：只给被点的那个按钮显示加载图标（AGENTS.md「前端交互约束 · 加载状态」）。
+function decideKey(ids: string[], decision: Decision | null | undefined) {
+  return `decide:${ids.join(",")}:${decision ?? "undo"}`;
+}
+const loadingClass = (on: boolean) => (on ? " is-loading" : "");
+
 function entityLabel(entity: Entity | undefined, fallback: string) {
   return entity ? entity.names.join(" / ") : fallback;
 }
@@ -162,6 +168,7 @@ export function GraphReviewDetails({
   onStep,
   onDecide,
   busy = false,
+  loading = null,
   judgeActions,
   confirmPanel,
 }: {
@@ -170,6 +177,7 @@ export function GraphReviewDetails({
   onStep: (step: ReviewStep) => void;
   onDecide?: (ids: string[], decision: Decision | null) => Promise<unknown>;
   busy?: boolean;
+  loading?: string | null;
   judgeActions?: ReactNode;
   confirmPanel?: ReactNode;
 }) {
@@ -638,7 +646,7 @@ export function GraphReviewDetails({
                     (state ? (
                       <button
                         type="button"
-                        className="link-button"
+                        className={`link-button${loadingClass(loading === decideKey([id], null))}`}
                         disabled={busy}
                         onClick={() => void decide([id], null)}
                       >
@@ -648,7 +656,7 @@ export function GraphReviewDetails({
                       <>
                         <button
                           type="button"
-                          className="secondary-button button-sm"
+                          className={`secondary-button button-sm${loadingClass(loading === decideKey([id], "rejected"))}`}
                           disabled={busy}
                           onClick={() => void decide([id], "rejected")}
                         >
@@ -656,7 +664,7 @@ export function GraphReviewDetails({
                         </button>
                         <button
                           type="button"
-                          className="primary-button button-sm"
+                          className={`primary-button button-sm${loadingClass(loading === decideKey([id], "approved"))}`}
                           disabled={busy}
                           onClick={() => void decide([id], "approved")}
                         >
@@ -956,6 +964,7 @@ function MergePlan({
   onChoose,
   onRemove,
   busy = false,
+  loading = null,
 }: {
   report: GraphReviewReport;
   approved: string[];
@@ -964,6 +973,7 @@ function MergePlan({
   // 移除一个合并结果：撤销它对应的批准，建议回到第 3 步「待处理」。
   onRemove?: (proposalIds: string[]) => void;
   busy?: boolean;
+  loading?: string | null;
 }) {
   const scan = report.scan!;
   const names = new Map(
@@ -1025,7 +1035,7 @@ function MergePlan({
               {onRemove && (
                 <button
                   type="button"
-                  className="link-button gr-remove"
+                  className={`link-button gr-remove${loadingClass(loading === decideKey(group.proposalIds, null))}`}
                   disabled={busy}
                   title="撤销对应建议的批准，回到第 3 步待处理；写入后不会合并"
                   onClick={() => onRemove(group.proposalIds)}
@@ -1092,7 +1102,9 @@ export function GraphReviewBody({
   // 操作反馈统一走 Toast（AGENTS.md「前端交互约束 · 操作反馈」），弹窗里不再放错误横幅。
   const toast = useToast();
   const loadFailed = useRef(false);
-  const [busy, setBusy] = useState(false);
+  // 正在执行的操作（null 表示空闲）：按钮据此显示加载图标。
+  const [action, setAction] = useState<string | null>(null);
+  const busy = action !== null;
   const [poll, setPoll] = useState(0);
   const [step, setStep] = useState<ReviewStep | null>(null);
   useEffect(() => {
@@ -1158,17 +1170,17 @@ export function GraphReviewBody({
   ).length;
 
   // 返回是否成功：失败已经用 Toast 提示过，调用方只在成功时接着做事。
-  async function run(action: () => Promise<unknown>) {
+  async function run(name: string, task: () => Promise<unknown>) {
     if (busy) return false;
-    setBusy(true);
+    setAction(name);
     try {
-      await action();
+      await task();
       return true;
     } catch (reason) {
       toast("error", errorText(reason));
       return false;
     } finally {
-      setBusy(false);
+      setAction(null);
     }
   }
 
@@ -1177,7 +1189,7 @@ export function GraphReviewBody({
     decision: "approved" | "rejected" | null | undefined,
   ) {
     if (!live) return false;
-    return run(async () => {
+    return run(decideKey(ids, decision), async () => {
       const next = await decideGraphReview(
         documentId,
         live.build_id,
@@ -1192,7 +1204,7 @@ export function GraphReviewBody({
 
   async function rewrite() {
     if (!live) return;
-    await run(async () => {
+    await run("rewrite", async () => {
       const resolutions = Object.fromEntries(
         groups
           .filter((group) => group.options.length > 1)
@@ -1207,7 +1219,7 @@ export function GraphReviewBody({
   }
 
   async function retry() {
-    await run(async () => {
+    await run("retry", async () => {
       await retryGraphReview(documentId);
       toast("success", "已开始重新检查");
       setData(await getGraphReview(documentId));
@@ -1217,7 +1229,7 @@ export function GraphReviewBody({
   }
 
   async function retryFailed() {
-    await run(async () => {
+    await run("retryFailed", async () => {
       await retryFailedGraphReview(documentId);
       toast("success", `已排队重试 ${failedCount} 组`);
       setData(await getGraphReview(documentId));
@@ -1238,12 +1250,12 @@ export function GraphReviewBody({
       confirmText="重新检查"
       onConfirm={retry}
     >
-      <button type="button" className="secondary-button" disabled={busy}>
-        {busy
-          ? "正在提交…"
-          : live?.status === "idle" || !report
-            ? "开始二次检查"
-            : "重新检查"}
+      <button
+        type="button"
+        className={`secondary-button${loadingClass(action === "retry")}`}
+        disabled={busy}
+      >
+        {live?.status === "idle" || !report ? "开始二次检查" : "重新检查"}
       </button>
     </ConfirmPopover>
   );
@@ -1254,7 +1266,7 @@ export function GraphReviewBody({
         {canDecide && failedCount > 0 && (
           <button
             type="button"
-            className="secondary-button"
+            className={`secondary-button${loadingClass(action === "retryFailed")}`}
             disabled={busy}
             title="只重新判断失败的组，其他组的判断和你的决定都保留"
             onClick={() => void retryFailed()}
@@ -1283,6 +1295,7 @@ export function GraphReviewBody({
             setChoices((items) => ({ ...items, [key]: choice }))
           }
           busy={busy}
+          loading={action}
           onRemove={(ids) =>
             void decide(ids, null).then(
               (ok) =>
@@ -1303,11 +1316,11 @@ export function GraphReviewBody({
           >
             <button
               type="button"
-              className="primary-button"
+              className={`primary-button${loadingClass(action === "rewrite")}`}
               disabled={busy || unresolved.length > 0 || !canRewrite}
               title={canRewrite ? undefined : "还没有批准任何合并建议"}
             >
-              {busy ? "正在提交…" : `确认，写入图谱（${groups.length} 个合并）`}
+              {`确认，写入图谱（${groups.length} 个合并）`}
             </button>
           </ConfirmPopover>
         </div>
@@ -1329,6 +1342,7 @@ export function GraphReviewBody({
           onStep={setStep}
           onDecide={canDecide ? decide : undefined}
           busy={busy}
+          loading={action}
           judgeActions={judgeActions}
           confirmPanel={confirmPanel}
         />

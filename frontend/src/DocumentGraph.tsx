@@ -130,7 +130,8 @@ export function DocumentGraph({
     step: ReviewStep;
     key: number;
   } | null>(null);
-  const [undoing, setUndoing] = useState(false);
+  // 正在提交撤销 / 取消撤销的那一行：只给它的按钮显示加载图标。
+  const [undoing, setUndoing] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     getGraphReview(documentId)
@@ -174,7 +175,7 @@ export function DocumentGraph({
   }
   async function setUndo(row: GraphMergeRow, undo: boolean) {
     if (!review || undoing) return;
-    setUndoing(true);
+    setUndoing(`${row.review!.proposal_ids.join(",")}:${undo}`);
     try {
       await decideGraphReview(
         documentId,
@@ -190,7 +191,7 @@ export function DocumentGraph({
     } catch (reason) {
       onToast("error", errorText(reason));
     } finally {
-      setUndoing(false);
+      setUndoing(null);
     }
   }
   useEffect(() => {
@@ -846,8 +847,8 @@ export function DocumentGraph({
                               </Tag>
                               <button
                                 type="button"
-                                className="link-button"
-                                disabled={undoing}
+                                className={`link-button${undoing === `${row.review?.proposal_ids.join(",")}:false` ? " is-loading" : ""}`}
+                                disabled={!!undoing}
                                 onClick={() => void setUndo(row, false)}
                               >
                                 取消
@@ -857,8 +858,8 @@ export function DocumentGraph({
                           {undoState(row) === "available" && (
                             <button
                               type="button"
-                              className="link-button graph-undo-link"
-                              disabled={undoing}
+                              className={`link-button graph-undo-link${undoing === `${row.review?.proposal_ids.join(",")}:true` ? " is-loading" : ""}`}
+                              disabled={!!undoing}
                               title={
                                 row.review?.reason
                                   ? `合并理由：${row.review.reason}`

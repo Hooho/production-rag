@@ -183,11 +183,12 @@ export function ConfirmPopover({
             </button>
             <button
               type="button"
-              className={`${danger ? "delete-button" : "primary-button"} button-sm`}
+              className={`${danger ? "delete-button" : "primary-button"} button-sm${busy ? " is-loading" : ""}`}
               disabled={busy}
+              aria-busy={busy}
               onClick={() => void confirm()}
             >
-              {busy ? "处理中…" : confirmText}
+              {confirmText}
             </button>
           </div>
           <span

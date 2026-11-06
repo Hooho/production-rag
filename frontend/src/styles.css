@@ -1649,6 +1649,53 @@ input::placeholder {
    cursor: not-allowed;
 }
 
+/* 加载状态：点了按钮、请求还没返回时加 is-loading，文字前出现转圈图标（AGENTS.md「前端交互约束 · 加载状态」）。 */
+.is-loading::before {
+   content: "";
+   display: inline-block;
+   flex: none;
+   width: 12px;
+   height: 12px;
+   margin-right: 6px;
+   border: 2px solid currentColor;
+   border-right-color: transparent;
+   border-radius: 50%;
+   vertical-align: -2px;
+   animation: button-spin .7s linear infinite;
+}
+
+.primary-button.is-loading::before,
+.secondary-button.is-loading::before,
+.delete-button.is-loading::before {
+   margin-right: 0;
+}
+
+.button-sm.is-loading::before,
+.link-button.is-loading::before {
+   width: 10px;
+   height: 10px;
+}
+
+.primary-button.is-loading:disabled,
+.secondary-button.is-loading:disabled,
+.delete-button.is-loading:disabled,
+.link-button.is-loading:disabled {
+   opacity: .8;
+   cursor: progress;
+}
+
+@keyframes button-spin {
+   to {
+      transform: rotate(360deg);
+   }
+}
+
+@media (prefers-reduced-motion: reduce) {
+   .is-loading::before {
+      animation-duration: 2s;
+   }
+}
+
 .send-button {
    position: absolute;
    right: 10px;
