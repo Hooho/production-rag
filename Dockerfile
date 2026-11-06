@@ -10,10 +10,8 @@ COPY requirements.txt .
 # PIP_PROXY：pip 走代理下载（apt 用上面的 APT_PROXY 单独开关）。
 ARG PIP_MIRROR=
 ARG PIP_PROXY=
-# pip 下载的包缓存在构建缓存里（--mount=type=cache），不进镜像：构建中途失败或被停止，
-# 已经下载完的包下次直接用，不用从头再下（以前用 --no-cache-dir，网络慢时一失败就全部重来）。
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --timeout 300 --retries 10 ${PIP_MIRROR:+--index-url "$PIP_MIRROR"} ${PIP_PROXY:+--proxy "$PIP_PROXY"} -r requirements.txt
+# 本机 docker compose（Colima）用的是旧版构建器，不支持 BuildKit 的 RUN --mount 缓存，这里保持普通写法。
+RUN pip install --no-cache-dir --timeout 300 --retries 10 ${PIP_MIRROR:+--index-url "$PIP_MIRROR"} ${PIP_PROXY:+--proxy "$PIP_PROXY"} -r requirements.txt
 RUN useradd --create-home app \
     && mkdir -p uploads /home/app/.cache \
     && chown -R app:app /app /home/app
