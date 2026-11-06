@@ -22,6 +22,7 @@ services:
         PIP_MIRROR: ${PIP_MIRROR:-}
         # pip 走代理（只给这一步用，apt 仍直连）：.env 里设 PIP_PROXY，例如和 HTTPS_PROXY 一样。
         PIP_PROXY: ${PIP_PROXY:-}
+        APT_PROXY: ${APT_PROXY:-}
     command: ["alembic", "upgrade", "head"]
     env_file: .env
     environment:
@@ -44,6 +45,7 @@ services:
         PIP_MIRROR: ${PIP_MIRROR:-}
         # pip 走代理（只给这一步用，apt 仍直连）：.env 里设 PIP_PROXY，例如和 HTTPS_PROXY 一样。
         PIP_PROXY: ${PIP_PROXY:-}
+        APT_PROXY: ${APT_PROXY:-}
     env_file: .env
     environment:
       MYSQL_HOST: mysql
@@ -112,6 +114,7 @@ services:
         PIP_MIRROR: ${PIP_MIRROR:-}
         # pip 走代理（只给这一步用，apt 仍直连）：.env 里设 PIP_PROXY，例如和 HTTPS_PROXY 一样。
         PIP_PROXY: ${PIP_PROXY:-}
+        APT_PROXY: ${APT_PROXY:-}
     command: ["python", "-m", "scripts.worker"]
     env_file: .env
     environment:

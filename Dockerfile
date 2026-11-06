@@ -1,11 +1,13 @@
 FROM python:3.11-slim
 WORKDIR /app
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libmagic1 libgl1 libglib2.0-0 poppler-utils tesseract-ocr tesseract-ocr-chi-sim \
+# APT_PROXY：apt 走代理（.env 里设，留空直连）。以前把 HTTP_PROXY 整个传给构建时 apt 失败过，所以单独开关。
+ARG APT_PROXY=
+RUN apt-get ${APT_PROXY:+-o Acquire::http::Proxy="$APT_PROXY"} update \
+    && apt-get ${APT_PROXY:+-o Acquire::http::Proxy="$APT_PROXY"} install -y --no-install-recommends libmagic1 libgl1 libglib2.0-0 poppler-utils tesseract-ocr tesseract-ocr-chi-sim \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 # PIP_MIRROR 留空用 PyPI；国内网络从 PyPI 下载超时时，在 .env 里设成镜像源（如阿里云、清华）。
-# PIP_PROXY：pip 走代理下载（只给这一步用，apt 仍直连）。
+# PIP_PROXY：pip 走代理下载（apt 用上面的 APT_PROXY 单独开关）。
 ARG PIP_MIRROR=
 ARG PIP_PROXY=
 # pip 下载的包缓存在构建缓存里（--mount=type=cache），不进镜像：构建中途失败或被停止，
