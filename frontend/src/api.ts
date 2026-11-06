@@ -4064,6 +4064,17 @@ export type GraphReviewReport = {
     string,
     { decision: "approved" | "rejected"; by: string; at: string }
   >;
+  // 人工添加的合并（m1、m2……），添加即批准，提案编号是「m1:0」；manual_entities 是它们用到的实体卡片。
+  manual?: {
+    id: string;
+    ids: string[];
+    name: string;
+    type: string;
+    reason: string;
+    by: string;
+    at: string;
+  }[];
+  manual_entities?: Record<string, GraphReviewEntity>;
   scan?: {
     duration_ms?: number;
     status: string;
@@ -4098,13 +4109,7 @@ export type GraphReviewReport = {
       pairs?: [number, number, number][];
       ranks?: number[];
       reason: string;
-      entities: {
-        id: string;
-        names: string[];
-        types: string[];
-        descriptions: string[];
-        evidence: { chunk_id: string; text: string }[];
-      }[];
+      entities: GraphReviewEntity[];
     }[];
   };
   judgments: {
@@ -4142,6 +4147,14 @@ export type GraphReviewReport = {
   };
 };
 export type GraphReviewChoice = { name: string; type: string };
+// 二次检查里的一个实体：编号在重写图谱后保持不变。
+export type GraphReviewEntity = {
+  id: string;
+  names: string[];
+  types: string[];
+  descriptions: string[];
+  evidence: { chunk_id: string; text: string }[];
+};
 export function getGraphReview(documentId: string) {
   return request<{
     report: GraphReviewReport | null;
@@ -4191,4 +4204,33 @@ export function retryGraphReview(documentId: string) {
   return request<GraphBuild>(`/documents/${documentId}/graph/review/retry`, {
     method: "POST",
   });
+}
+// 人工合并：搜这份文档的全部实体（按名字或描述），或按编号取。
+export function searchGraphReviewEntities(
+  documentId: string,
+  query: string,
+  ids: string[] = [],
+) {
+  const params = new URLSearchParams({ q: query, ids: ids.join(",") });
+  return request<{ items: GraphReviewEntity[] }>(
+    `/documents/${documentId}/graph/review/entities?${params}`,
+  );
+}
+// 人工添加一条合并（添加即批准），到第 4 步确认后写入图谱。
+// 往已有合并结果里加实体时，ids 带上结果里的一个实体，会按共享实体接到那个结果上。
+export function addGraphReviewManual(
+  documentId: string,
+  buildId: string,
+  ids: string[],
+  name: string,
+  type: string,
+  reason = "",
+) {
+  return request<GraphReviewReport>(
+    `/documents/${documentId}/graph/review/manual`,
+    {
+      method: "POST",
+      body: JSON.stringify({ build_id: buildId, ids, name, type, reason }),
+    },
+  );
 }

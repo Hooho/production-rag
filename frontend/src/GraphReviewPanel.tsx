@@ -1,15 +1,26 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
+import {
+  addGraphReviewManual,
   decideGraphReview,
   getGraphReview,
+  searchGraphReviewEntities,
   retryFailedGraphReview,
   retryGraphReview,
   rewriteGraphReview,
   type GraphReviewChoice,
+  type GraphReviewEntity,
   type GraphReviewReport,
 } from "./api";
 import { DetailDialog } from "./DetailDialog";
 import { ConfirmPopover } from "./ConfirmPopover";
+import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import { Tag } from "./Tag";
 import { errorText, useToast } from "./Toast";
 import type { Tone } from "./tags";
@@ -27,7 +38,7 @@ const statuses: Record<string, string> = {
 };
 
 type Candidate = NonNullable<GraphReviewReport["scan"]>["candidates"][number];
-type Entity = Candidate["entities"][number];
+type Entity = GraphReviewEntity;
 type Judgment = GraphReviewReport["judgments"][number];
 type Group = NonNullable<Judgment["decision"]>["groups"][number];
 type Verdict = "merge" | "separate" | "failed" | "running";
@@ -83,15 +94,33 @@ export function pendingCount(report: GraphReviewReport) {
   );
 }
 
+// 和后端 review.proposals 同一规则：模型给的建议「组号:序号」，人工添加的「m1:0」。
+export function proposalsOf(report: GraphReviewReport) {
+  const result = new Map<string, Group>();
+  for (const judgment of report.judgments)
+    if (judgment.status === "completed")
+      judgment.decision?.groups.forEach((group, index) =>
+        result.set(`${judgment.candidate_id}:${index}`, group),
+      );
+  for (const item of report.manual ?? []) result.set(`${item.id}:0`, item);
+  return result;
+}
+
+// 报告里能看到的全部实体卡片：候选组里的，加上人工合并时搜出来加入的。
+function entityMap(report: GraphReviewReport) {
+  const result = new Map<string, Entity>();
+  for (const candidate of report.scan?.candidates ?? [])
+    for (const item of candidate.entities) result.set(item.id, item);
+  for (const [id, item] of Object.entries(report.manual_entities ?? {}))
+    if (!result.has(id)) result.set(id, item);
+  return result;
+}
+
 // 和后端 review.components 同一规则：共享实体的已批准建议连成一个合并结果；key 取组内字典序最小的建议编号。
 export function mergeComponents(report: GraphReviewReport, approved: string[]) {
   const chosen = new Map<string, Group>();
-  for (const judgment of report.judgments)
-    if (judgment.status === "completed")
-      judgment.decision?.groups.forEach((group, index) => {
-        const id = `${judgment.candidate_id}:${index}`;
-        if (approved.includes(id)) chosen.set(id, group);
-      });
+  for (const [id, group] of proposalsOf(report))
+    if (approved.includes(id)) chosen.set(id, group);
   const parents = new Map<string, string>();
   const root = (key: string): string => {
     if (!parents.has(key)) parents.set(key, key);
@@ -134,6 +163,80 @@ const loadingClass = (on: boolean) => (on ? " is-loading" : "");
 
 function entityLabel(entity: Entity | undefined, fallback: string) {
   return entity ? entity.names.join(" / ") : fallback;
+}
+
+function EvidenceList({ entity }: { entity: Entity }) {
+  return (
+    <div className="gr-evidence">
+      {entity.evidence.map((item, index) => (
+        <section key={`${item.chunk_id}-${index}`}>
+          <Tag mono size="sm" title={item.chunk_id}>
+            分片 {item.chunk_id.split(":").at(-1)}
+          </Tag>
+          <p className="graph-chunk-text">{item.text}</p>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+// 一个实体的卡片：名字、类型、描述、原文。各步骤和「查看组内实体」浮窗共用。
+// 有 onEvidence 时「原文」打开浮窗；没有时就地展开（浮窗里不再套浮窗，最多两层）。
+function EntityItem({
+  entity,
+  code,
+  onEvidence,
+  actions,
+  note,
+}: {
+  entity: Entity;
+  code?: string;
+  onEvidence?: (entity: Entity) => void;
+  actions?: ReactNode;
+  note?: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <li>
+      <div className="gr-entity-name">
+        {code && (
+          <span
+            className="gr-code"
+            title="发给模型时的编号，模型的理由里会用它指代这个实体"
+          >
+            {code}
+          </span>
+        )}
+        <strong>{entity.names.join(" / ")}</strong>
+        {entity.types.map((type) => (
+          <Tag key={type} size="sm" hue>
+            {type}
+          </Tag>
+        ))}
+        {entity.evidence.length > 0 && (
+          <button
+            type="button"
+            className="link-button gr-source"
+            onClick={() =>
+              onEvidence ? onEvidence(entity) : setOpen((value) => !value)
+            }
+          >
+            {!onEvidence && open
+              ? "收起原文"
+              : `原文 ${entity.evidence.length}`}
+          </button>
+        )}
+        {actions && <span className="gr-entity-actions">{actions}</span>}
+      </div>
+      {note}
+      {entity.descriptions.length > 0 && (
+        <p className="gr-desc" title={entity.descriptions.join("；")}>
+          {entity.descriptions.join("；")}
+        </p>
+      )}
+      {!onEvidence && open && <EvidenceList entity={entity} />}
+    </li>
+  );
 }
 
 // 五步，每步一个页签，只显示这一步的内容。
@@ -206,15 +309,7 @@ export function GraphReviewDetails({
     () => new Map(report.judgments.map((item) => [item.candidate_id, item])),
     [report.judgments],
   );
-  const entities = useMemo(
-    () =>
-      new Map(
-        scan.candidates.flatMap((candidate) =>
-          candidate.entities.map((item) => [item.id, item] as const),
-        ),
-      ),
-    [scan.candidates],
-  );
+  const entities = useMemo(() => entityMap(report), [report]);
   const rows: Row[] = scan.candidates.map((candidate) => {
     const judgment = judgments.get(candidate.id);
     const ids = (judgment?.decision?.groups ?? []).map(
@@ -293,18 +388,7 @@ export function GraphReviewDetails({
   function openEvidence(entity: Entity) {
     setDialog({
       title: `原文依据 · ${entity.names.join(" / ")}`,
-      body: (
-        <div className="gr-evidence">
-          {entity.evidence.map((item, index) => (
-            <section key={`${item.chunk_id}-${index}`}>
-              <Tag mono size="sm" title={item.chunk_id}>
-                分片 {item.chunk_id.split(":").at(-1)}
-              </Tag>
-              <p className="graph-chunk-text">{item.text}</p>
-            </section>
-          ))}
-        </div>
-      ),
+      body: <EvidenceList entity={entity} />,
     });
   }
 
@@ -371,7 +455,8 @@ export function GraphReviewDetails({
     setDialog({ title, body: <pre className="graph-prompt">{text}</pre> });
   }
 
-  const allProposals = rows.flatMap((row) => row.ids);
+  const manualIds = (report.manual ?? []).map((item) => `${item.id}:0`);
+  const allProposals = [...rows.flatMap((row) => row.ids), ...manualIds];
   const approvedIds = allProposals.filter((id) => decisions[id] === "approved");
   const rejectedCount = allProposals.filter(
     (id) => decisions[id] === "rejected",
@@ -485,38 +570,14 @@ export function GraphReviewDetails({
         </header>
 
         <ul className="gr-entities">
+          {/* 发给模型时用的编号（e1、e2……），模型的理由里会引用它。 */}
           {candidate.entities.map((item, index) => (
-            <li key={item.id}>
-              <div className="gr-entity-name">
-                {/* 发给模型时用的编号（e1、e2……），模型的理由里会引用它。 */}
-                <span
-                  className="gr-code"
-                  title="发给模型时的编号，模型的理由里会用它指代这个实体"
-                >
-                  e{index + 1}
-                </span>
-                <strong>{item.names.join(" / ")}</strong>
-                {item.types.map((type) => (
-                  <Tag key={type} size="sm" hue>
-                    {type}
-                  </Tag>
-                ))}
-                {item.evidence.length > 0 && (
-                  <button
-                    type="button"
-                    className="link-button gr-source"
-                    onClick={() => openEvidence(item)}
-                  >
-                    原文 {item.evidence.length}
-                  </button>
-                )}
-              </div>
-              {item.descriptions.length > 0 && (
-                <p className="gr-desc" title={item.descriptions.join("；")}>
-                  {item.descriptions.join("；")}
-                </p>
-              )}
-            </li>
+            <EntityItem
+              key={item.id}
+              entity={item}
+              code={`e${index + 1}`}
+              onEvidence={openEvidence}
+            />
           ))}
         </ul>
 
@@ -687,6 +748,74 @@ export function GraphReviewDetails({
           </div>
         )}
       </article>
+    );
+  }
+
+  // 第 3 步顶部：第 4 步里人工添加的合并，可以撤销（撤销即删除）。
+  function renderManual() {
+    const items = report.manual ?? [];
+    if (items.length === 0) return null;
+    return (
+      <div className="gr-list">
+        <p className="gr-section-title">人工添加的合并 {items.length}</p>
+        {items.map((item) => {
+          const id = `${item.id}:0`;
+          return (
+            <article className="gr-card is-manual" key={item.id}>
+              <header className="gr-card-head">
+                <span className="gr-card-id">{item.id}</span>
+                <Tag size="sm" tone="info">
+                  人工添加
+                </Tag>
+                <span className="gr-grow" />
+                <span className="gr-small">
+                  {item.by} · {item.at}
+                </span>
+              </header>
+              <ul className="gr-entities">
+                {item.ids.map((key) => {
+                  const entity = entities.get(key);
+                  return entity ? (
+                    <EntityItem
+                      key={key}
+                      entity={entity}
+                      onEvidence={openEvidence}
+                    />
+                  ) : (
+                    <li key={key}>{key}</li>
+                  );
+                })}
+              </ul>
+              <div className="gr-layer gr-decide">
+                <span className="gr-layer-label">人工 · 合并</span>
+                <div className="gr-decision is-approved">
+                  <span className="gr-grow gr-proposal-line">
+                    <span className="gr-arrow">→</span>
+                    <strong>{item.name}</strong>
+                    <Tag size="sm" hue>
+                      {item.type}
+                    </Tag>
+                    <Tag size="sm" tone="success">
+                      {applied.has(id) ? "已写入图谱" : "待写入"}
+                    </Tag>
+                  </span>
+                  {editable && (
+                    <button
+                      type="button"
+                      className={`link-button${loadingClass(loading === decideKey([id], null))}`}
+                      disabled={busy}
+                      title="删除这条人工合并"
+                      onClick={() => void decide([id], null)}
+                    >
+                      撤销
+                    </button>
+                  )}
+                </div>
+              </div>
+            </article>
+          );
+        })}
+      </div>
     );
   }
 
@@ -881,12 +1010,14 @@ export function GraphReviewDetails({
       {step === 3 && (
         <div className="gr-method">
           <p>
-            只列出模型建议合并的组。每条点「合并」或「不合并」，随时可撤销。这里只记录决定，不会改图谱；全部看完去第
+            列出模型建议合并的组，和第 4
+            步人工添加的合并。每条点「合并」或「不合并」，随时可撤销。这里只记录决定，不会改图谱；全部看完去第
             4 步确认。
           </p>
         </div>
       )}
 
+      {step === 3 && renderManual()}
       {step <= 3 && renderList()}
 
       {step === 4 &&
@@ -972,6 +1103,7 @@ function MergePlan({
   choices,
   onChoose,
   onRemove,
+  onView,
   busy = false,
   loading = null,
 }: {
@@ -979,19 +1111,16 @@ function MergePlan({
   approved: string[];
   choices: Record<string, GraphReviewChoice>;
   onChoose: (key: string, choice: GraphReviewChoice) => void;
+  // 打开「查看组内实体」浮窗；传结果里的一个实体编号（结果的 key 加实体后可能变）。
+  onView?: (entityId: string) => void;
   // 移除一个合并结果：撤销它对应的批准，建议回到第 3 步「待处理」。
   onRemove?: (proposalIds: string[]) => void;
   busy?: boolean;
   loading?: string | null;
 }) {
-  const scan = report.scan!;
-  const names = new Map(
-    scan.candidates.flatMap((candidate) =>
-      candidate.entities.map((item) => [item.id, item.names[0]] as const),
-    ),
-  );
+  const entities = entityMap(report);
   const label = (ids: string[]) =>
-    ids.map((id) => names.get(id) ?? id).join("、");
+    ids.map((id) => entities.get(id)?.names[0] ?? id).join("、");
   const groups = mergeComponents(report, approved);
   const sameIds = (a: string[], b: string[]) =>
     a.length === b.length &&
@@ -1041,6 +1170,16 @@ function MergePlan({
               <Tag size="sm" tone={kept ? "neutral" : "info"}>
                 {kept ? "已在图谱中" : "新增"}
               </Tag>
+              {onView && (
+                <button
+                  type="button"
+                  className="link-button gr-view"
+                  title="看这个结果里每个实体的详情，或搜索别的实体加进来"
+                  onClick={() => onView(group.entityIds[0])}
+                >
+                  查看组内实体
+                </button>
+              )}
               {onRemove && (
                 <button
                   type="button"
@@ -1057,7 +1196,11 @@ function MergePlan({
               <small>
                 来自 {group.proposalIds.length} 条建议：
                 {group.proposalIds
-                  .map((id) => `#${id.split(":")[0]}`)
+                  .map((id) =>
+                    id.startsWith("m")
+                      ? `人工 ${id.split(":")[0]}`
+                      : `#${id.split(":")[0]}`,
+                  )
                   .join("、")}
               </small>
             )}
@@ -1079,6 +1222,335 @@ function MergePlan({
         </li>
       ))}
     </ol>
+  );
+}
+
+type MergeResult = ReturnType<typeof mergeComponents>[number];
+
+// 人工合并的浮窗，两个页签切换：
+//   group 有值 → 「查看组内实体」：组内实体（这个合并结果里的全部卡片）/ 搜索（搜全文档实体，「加入」前二次确认）。
+//   group 为空 → 「新建人工合并」：已选（选中的卡片 + 名字、类型）/ 搜索（「选择」）。
+function EntityPicker({
+  report,
+  documentId,
+  group,
+  target,
+  groups,
+  onAdd,
+  onClose,
+  busy,
+  loading,
+}: {
+  report: GraphReviewReport;
+  documentId: string;
+  group: MergeResult | null;
+  // 往已有结果里加时，合并后的名字和类型（人工选过的，或结果唯一的那个）。
+  target: GraphReviewChoice | null;
+  // 第 4 步当前全部合并结果：搜索结果里标出实体已经在哪个结果里。
+  groups: MergeResult[];
+  onAdd: (
+    ids: string[],
+    choice: GraphReviewChoice,
+    key: string,
+  ) => Promise<boolean>;
+  onClose: () => void;
+  busy: boolean;
+  loading: string | null;
+}) {
+  const toast = useToast();
+  const known = entityMap(report);
+  const [tab, setTab] = useState<"current" | "search">(
+    group ? "current" : "search",
+  );
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<Entity[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [picked, setPicked] = useState<Entity[]>([]);
+  const [name, setName] = useState("");
+  const [type, setType] = useState("");
+  const members = group
+    ? group.entityIds.map((id) => known.get(id)).filter((item) => !!item)
+    : picked;
+  const owners = new Map<string, MergeResult>();
+  for (const item of groups)
+    for (const id of item.entityIds) owners.set(id, item);
+  const ownerName = (item: MergeResult) =>
+    (item.options[0]?.name ?? "") || item.entityIds[0];
+  const types = [
+    ...new Set([
+      ...picked.flatMap((item) => item.types),
+      ...[...known.values()].flatMap((item) => item.types),
+    ]),
+  ];
+
+  async function search(event?: FormEvent) {
+    event?.preventDefault();
+    const keyword = query.trim();
+    if (!keyword || searching) return;
+    setSearching(true);
+    try {
+      const { items } = await searchGraphReviewEntities(documentId, keyword);
+      setResults(items);
+    } catch (reason) {
+      toast("error", `搜索失败：${errorText(reason)}`);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function pick(entity: Entity) {
+    setPicked((items) => [...items, entity]);
+    if (!name) setName(entity.names[0] ?? "");
+    if (!type) setType(entity.types[0] ?? "");
+  }
+
+  async function join(entity: Entity) {
+    if (!group || !target) return;
+    const ok = await onAdd(
+      [group.entityIds[0], entity.id],
+      target,
+      `manual:${entity.id}`,
+    );
+    if (ok) {
+      toast(
+        "success",
+        `已把「${entity.names[0]}」加入，到第 4 步确认后写入图谱`,
+      );
+      setTab("current");
+    }
+  }
+
+  async function create() {
+    const ok = await onAdd(
+      picked.map((item) => item.id),
+      { name: name.trim(), type },
+      "manual:new",
+    );
+    if (ok) {
+      toast(
+        "success",
+        `已添加人工合并「${name.trim()}」，到第 4 步确认后写入图谱`,
+      );
+      onClose();
+    }
+  }
+
+  function action(entity: Entity) {
+    const owner = owners.get(entity.id);
+    if (group) {
+      if (group.entityIds.includes(entity.id))
+        return (
+          <Tag size="sm" tone="neutral">
+            已在组内
+          </Tag>
+        );
+      return (
+        <ConfirmPopover
+          message={
+            <>
+              把「{entity.names[0]}」加入这个合并结果？合并后叫「{target?.name}
+              」（
+              {target?.type}）。
+              {owner &&
+                `它已经在「${ownerName(owner)}」里，加入后两个结果会合成一个。`}
+            </>
+          }
+          confirmText="加入"
+          onConfirm={() => join(entity)}
+        >
+          <button
+            type="button"
+            className={`primary-button button-sm${loadingClass(loading === `manual:${entity.id}`)}`}
+            disabled={busy}
+          >
+            加入
+          </button>
+        </ConfirmPopover>
+      );
+    }
+    return picked.some((item) => item.id === entity.id) ? (
+      <button
+        type="button"
+        className="secondary-button button-sm"
+        onClick={() =>
+          setPicked((items) => items.filter((item) => item.id !== entity.id))
+        }
+      >
+        取消选择
+      </button>
+    ) : (
+      <button
+        type="button"
+        className="secondary-button button-sm"
+        onClick={() => pick(entity)}
+      >
+        选择
+      </button>
+    );
+  }
+
+  function ownerNote(entity: Entity) {
+    const owner = owners.get(entity.id);
+    if (!owner || group?.entityIds.includes(entity.id)) return null;
+    return (
+      <p className="gr-small gr-owner">已在合并结果「{ownerName(owner)}」里</p>
+    );
+  }
+
+  return (
+    <div className="gr-picker">
+      {group && target && (
+        <p className="gr-small">
+          合并后叫 <strong>{target.name}</strong>（{target.type}），共{" "}
+          {group.entityIds.length} 个实体。搜到要合进来的实体，点「加入」。
+        </p>
+      )}
+      {!group && (
+        <p className="gr-small">
+          搜索并选择至少 2 个实体，在「已选」里填合并后的名字和类型。
+        </p>
+      )}
+      <div className="gr-filters" role="tablist" aria-label="切换">
+        <button
+          type="button"
+          role="tab"
+          aria-pressed={tab === "current"}
+          onClick={() => setTab("current")}
+        >
+          {group ? "组内实体" : "已选"} <span>{members.length}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-pressed={tab === "search"}
+          onClick={() => setTab("search")}
+        >
+          搜索
+        </button>
+      </div>
+
+      {tab === "current" && (
+        <>
+          {members.length === 0 ? (
+            <p className="graph-note">还没选实体，去「搜索」里找。</p>
+          ) : (
+            <ul className="gr-entities">
+              {members.map((entity) => (
+                <EntityItem
+                  key={entity.id}
+                  entity={entity}
+                  actions={
+                    !group && (
+                      <button
+                        type="button"
+                        className="link-button gr-remove"
+                        onClick={() =>
+                          setPicked((items) =>
+                            items.filter((item) => item.id !== entity.id),
+                          )
+                        }
+                      >
+                        移除
+                      </button>
+                    )
+                  }
+                  note={!group && ownerNote(entity)}
+                />
+              ))}
+            </ul>
+          )}
+          {!group && (
+            <div className="gr-picker-form">
+              <label>
+                合并后的名字
+                <input
+                  value={name}
+                  maxLength={200}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </label>
+              <label>
+                类型
+                <select
+                  value={type}
+                  onChange={(event) => setType(event.target.value)}
+                >
+                  {!type && <option value="">请选择</option>}
+                  {types.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <ConfirmPopover
+                message={`把这 ${picked.length} 个实体合并成「${name.trim()}」（${type}）？到第 4 步确认后才写入图谱。`}
+                confirmText="添加"
+                onConfirm={create}
+              >
+                <button
+                  type="button"
+                  className={`primary-button${loadingClass(loading === "manual:new")}`}
+                  disabled={busy || picked.length < 2 || !name.trim() || !type}
+                  title={picked.length < 2 ? "至少选 2 个实体" : undefined}
+                >
+                  添加合并
+                </button>
+              </ConfirmPopover>
+            </div>
+          )}
+        </>
+      )}
+
+      {tab === "search" && (
+        <>
+          <form className="gr-picker-search" onSubmit={search}>
+            <input
+              type="search"
+              placeholder="搜实体名或描述，例如：腾讯控股"
+              value={query}
+              autoFocus
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            <button
+              type="submit"
+              className={`secondary-button${loadingClass(searching)}`}
+              disabled={searching || !query.trim()}
+            >
+              搜索
+            </button>
+          </form>
+          {searching ? (
+            <LoadingSkeleton label="正在搜索">
+              {[0, 1, 2].map((index) => (
+                <SkeletonBlock
+                  key={index}
+                  className="gr-skeleton-card"
+                  style={{ height: 64 }}
+                />
+              ))}
+            </LoadingSkeleton>
+          ) : results === null ? (
+            <p className="graph-note">
+              在这份文档的全部实体里搜（不只是候选组）。
+            </p>
+          ) : results.length === 0 ? (
+            <p className="graph-note">没有匹配的实体。</p>
+          ) : (
+            <ul className="gr-entities">
+              {results.map((entity) => (
+                <EntityItem
+                  key={entity.id}
+                  entity={entity}
+                  actions={action(entity)}
+                  note={ownerNote(entity)}
+                />
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -1116,6 +1588,10 @@ export function GraphReviewBody({
   const busy = action !== null;
   const [poll, setPoll] = useState(0);
   const [step, setStep] = useState<ReviewStep | null>(null);
+  // 人工合并浮窗：看某个结果（按结果里的一个实体找）或新建。
+  const [picker, setPicker] = useState<
+    { mode: "group"; anchor: string } | { mode: "new" } | null
+  >(null);
   useEffect(() => {
     let cancelled = false;
     getGraphReview(documentId)
@@ -1211,6 +1687,31 @@ export function GraphReviewBody({
     });
   }
 
+  async function addManual(
+    ids: string[],
+    choice: GraphReviewChoice,
+    key: string,
+  ) {
+    if (!live) return false;
+    return run(key, async () => {
+      const next = await addGraphReviewManual(
+        documentId,
+        live.build_id,
+        ids,
+        choice.name,
+        choice.type,
+      );
+      setData((value) =>
+        value ? { ...value, report: { ...next, status: "ready" } } : value,
+      );
+    });
+  }
+  const pickerGroup =
+    picker?.mode === "group"
+      ? (groups.find((group) => group.entityIds.includes(picker.anchor)) ??
+        null)
+      : null;
+
   async function rewrite() {
     if (!live) return;
     await run("rewrite", async () => {
@@ -1305,6 +1806,7 @@ export function GraphReviewBody({
           }
           busy={busy}
           loading={action}
+          onView={(anchor) => setPicker({ mode: "group", anchor })}
           onRemove={(ids) =>
             void decide(ids, null).then(
               (ok) =>
@@ -1313,6 +1815,15 @@ export function GraphReviewBody({
           }
         />
         <div className="gr-actions">
+          <button
+            type="button"
+            className="secondary-button gr-actions-start"
+            disabled={busy}
+            title="模型没找出来的，自己搜实体合并"
+            onClick={() => setPicker({ mode: "new" })}
+          >
+            + 新建人工合并
+          </button>
           {unresolved.length > 0 && (
             <span className="gr-warn-inline">
               有 {unresolved.length} 个合并结果要先选名字
@@ -1338,6 +1849,34 @@ export function GraphReviewBody({
 
   return (
     <div className="gr-body">
+      {picker && report?.scan && canDecide && (
+        <DetailDialog
+          open
+          title={picker.mode === "group" ? "查看组内实体" : "新建人工合并"}
+          className="gr-picker-dialog"
+          onClose={() => setPicker(null)}
+        >
+          {picker.mode === "group" && !pickerGroup ? (
+            <p className="graph-note">这个合并结果已经移除。</p>
+          ) : (
+            <EntityPicker
+              report={report}
+              documentId={documentId}
+              group={pickerGroup}
+              target={
+                pickerGroup
+                  ? (choices[pickerGroup.key] ?? pickerGroup.options[0])
+                  : null
+              }
+              groups={groups}
+              onAdd={addManual}
+              onClose={() => setPicker(null)}
+              busy={busy}
+              loading={action}
+            />
+          )}
+        </DetailDialog>
+      )}
       {/* 后台检查任务本身失败是状态，不是这次操作的反馈，留在弹窗里说明。 */}
       {live?.status === "failed" && (
         <p className="gr-warn">

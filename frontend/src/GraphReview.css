@@ -576,3 +576,85 @@
   font-weight: 600;
   line-height: 18px;
 }
+
+/* 人工合并：「查看组内实体」/「新建人工合并」浮窗 */
+.gr-entity-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.gr-source + .gr-entity-actions {
+  margin-left: 4px;
+}
+.gr-view {
+  margin-left: 4px;
+  font-size: 12px;
+}
+.gr-actions-start {
+  margin-right: auto;
+}
+.gr-section-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+.gr-card.is-manual {
+  border-left: 3px solid #93b4f5;
+}
+.gr-picker {
+  display: grid;
+  gap: 10px;
+}
+.gr-picker .gr-entities {
+  grid-template-columns: 1fr;
+}
+.gr-picker .gr-desc {
+  -webkit-line-clamp: 4;
+}
+.gr-picker .gr-evidence {
+  margin-top: 8px;
+}
+.gr-picker-search {
+  display: flex;
+  gap: 8px;
+}
+.gr-picker-search input {
+  flex: 1;
+  min-width: 0;
+}
+.gr-picker-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #eef2f6;
+}
+.gr-picker-form label {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  font-size: 12px;
+  color: #475569;
+}
+.gr-picker-form input,
+.gr-picker-form select {
+  height: 32px;
+  box-sizing: border-box;
+}
+.gr-picker-form input {
+  width: 220px;
+}
+.gr-picker-form select {
+  min-width: 140px;
+}
+.gr-owner {
+  margin-top: 2px !important;
+  color: #b45309;
+}
+.gr-picker .loading-skeleton {
+  display: grid;
+  gap: 6px;
+}
