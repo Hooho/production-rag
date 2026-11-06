@@ -790,9 +790,10 @@
   background: #1d6ff2;
   color: #fff;
 }
+/* 已完成：绿色。 */
 .gc-step.is-done {
-  background: #e8f1ff;
-  color: #1d4ed8;
+  background: #e7f6ec;
+  color: #15803d;
 }
 .gc-step.is-recheck {
   background: #fff4e5;
@@ -919,7 +920,7 @@
   background: #e5e7eb;
 }
 .gv-step.is-done:not(:last-child)::after {
-  background: #1d6ff2;
+  background: #22a35a;
 }
 .gv-step > button {
   display: flex;
@@ -948,8 +949,8 @@
   font-size: 14px;
 }
 .gv-step.is-done .gv-dot {
-  background: #e8f1ff;
-  color: #1d6ff2;
+  background: #e7f6ec;
+  color: #15803d;
 }
 .gv-step.is-current .gv-dot {
   background: #1d6ff2;

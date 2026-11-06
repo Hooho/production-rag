@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 // 窄屏时横向滚动：还有内容没显示的那一侧边缘显示渐变阴影；打开或切换步骤时把当前步骤滚到可见区域。
 export type CheckStepState =
   | "current" // 当前步骤（未开始 / 待处理 / 检查中）：实心蓝
-  | "done" // 已完成：浅蓝
+  | "done" // 已完成：浅绿
   | "skipped" // 已跳过：浅灰
   | "recheck" // 图已变化，需要重新检查：浅橙
   | "failed" // 有失败：浅红
@@ -99,7 +99,7 @@ export function GraphCheckSteps({
 }
 
 // 竖直步骤条：用在某一步里面的小步骤（例如合并这一步的 找出可疑项 → AI 判断 → …），放在内容左边。
-// 已完成：浅蓝圆圈打勾、下面的连线是蓝色；当前：实心蓝圆圈；没轮到：灰圆圈；失败：红圆圈。
+// 已完成：浅绿圆圈打勾、下面的连线是绿色；当前：实心蓝圆圈；没轮到：灰圆圈；失败：红圆圈。
 export function VerticalSteps({
   steps,
   selected,
