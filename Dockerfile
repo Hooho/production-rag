@@ -4,7 +4,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends libmagic1 libgl1 libglib2.0-0 poppler-utils tesseract-ocr tesseract-ocr-chi-sim \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
-RUN pip install --no-cache-dir --timeout 300 --retries 10 -r requirements.txt
+# PIP_MIRROR 留空用 PyPI；国内网络从 PyPI 下载超时时，在 .env 里设成镜像源（如阿里云、清华）。
+ARG PIP_MIRROR=
+RUN pip install --no-cache-dir --timeout 300 --retries 10 ${PIP_MIRROR:+--index-url "$PIP_MIRROR"} -r requirements.txt
 RUN useradd --create-home app \
     && mkdir -p uploads /home/app/.cache \
     && chown -R app:app /app /home/app
