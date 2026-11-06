@@ -1,8 +1,14 @@
 import { DetailDialog } from "./DetailDialog";
 import { ConfirmPopover } from "./ConfirmPopover";
-import { GraphReviewBody, pendingCount } from "./GraphReviewPanel";
+import {
+  checkOverview,
+  GraphCheckDialogBody,
+  GraphReviewBody,
+  pendingCount,
+  summarizeCheck,
+} from "./GraphReviewPanel";
 import { useToast, type ShowToast, type ToastKind } from "./Toast";
-import type { GraphReviewReport } from "./api";
+import type { CheckReport, CheckStepName, GraphReviewReport } from "./api";
 import DataManagement from "./DataManagement";
 import Evaluation, { type EvaluationSection } from "./Evaluation";
 import { DocumentChunkCard } from "./DocumentChunkCard";
@@ -7227,27 +7233,46 @@ function DocumentTrace({
   const [reviewDetail, setReviewDetail] = useState<GraphReviewReport | null>(
     null,
   );
-  const traceSteps: DocumentStep[] = steps.some(
-    (step) => step.step_id === "graph_review",
-  )
-    ? steps
-    : steps.flatMap((step) =>
-        step.step_id === "graph_write"
-          ? [
-              step,
-              {
-                ...step,
-                step_id: "graph_review",
-                stage: "graph_review",
-                title: "二次检查合并",
-                status: "pending" as const,
-                detail: "未执行：此建图记录早于二次检查功能，可点击重试补跑。",
-                result: null,
-                duration_ms: null,
-              },
-            ]
-          : [step],
-      );
+  // 图谱检查（补抽、关系核对、类型核对、拆分、合并，以及按确认结果重写）在处理流程里只显示一行「图谱检查」，
+  // 写明 5 步各自的状态，点按钮打开图谱检查弹窗。
+  const [checkOpen, setCheckOpen] = useState(false);
+  const checkRows = steps.filter((step) => CHECK_ROW_IDS.has(step.step_id));
+  const checkResult = (id: string) => {
+    const row = checkRows.find((step) => step.step_id === id);
+    return row?.result && "status" in row.result ? row.result : null;
+  };
+  const overview = checkOverview(
+    Object.fromEntries(
+      CHECK_STEP_IDS.map(([name, id]) => [
+        name,
+        summarizeCheck(checkResult(id) as unknown as CheckReport | null),
+      ]),
+    ),
+    checkResult("graph_review") as unknown as GraphReviewReport | null,
+  );
+  const traceSteps: DocumentStep[] = steps.flatMap((step) =>
+    CHECK_ROW_IDS.has(step.step_id)
+      ? []
+      : step.step_id === "graph_write"
+        ? [
+            step,
+            {
+              ...step,
+              step_id: "graph_check",
+              stage: "graph_check",
+              title: "图谱检查",
+              status: overview.active
+                ? ("running" as const)
+                : overview.done
+                  ? ("completed" as const)
+                  : ("pending" as const),
+              detail: overview.text,
+              result: null,
+              duration_ms: null,
+            },
+          ]
+        : [step],
+  );
   if (steps.length === 0)
     return (
       <LoadingSkeleton
@@ -7275,6 +7300,37 @@ function DocumentTrace({
           ["queued", "running", "rewriting"].includes(review.status);
         const reviewPending =
           review && !reviewActive && review.scan ? pendingCount(review) : 0;
+        if (step.step_id === "graph_check")
+          return (
+            <div className={`document-step ${step.status}`} key={step.step_id}>
+              <span className="document-step-icon">
+                {step.status === "completed"
+                  ? "✓"
+                  : step.status === "running"
+                    ? "·"
+                    : "○"}
+              </span>
+              <div className="document-step-copy">
+                <strong>{step.title}</strong>
+                <small className="document-step-inline">
+                  {step.detail}
+                  <button
+                    type="button"
+                    className={`${overview.pending > 0 ? "primary-button" : "secondary-button"} button-sm`}
+                    onClick={() => setCheckOpen(true)}
+                  >
+                    {overview.active
+                      ? "查看进度"
+                      : overview.pending > 0
+                        ? `去处理（${overview.pending} 项待处理）→`
+                        : overview.done
+                          ? "查看检查结果"
+                          : "打开图谱检查"}
+                  </button>
+                </small>
+              </div>
+            </div>
+          );
         return (
           <div className={`document-step ${step.status}`} key={step.step_id}>
             <span className="document-step-icon">
@@ -7404,6 +7460,19 @@ function DocumentTrace({
           </div>
         );
       })}
+      {checkOpen && (
+        <DetailDialog
+          open
+          title="图谱检查"
+          className="gr-dialog"
+          onClose={() => setCheckOpen(false)}
+        >
+          <GraphCheckDialogBody
+            documentId={documentId}
+            onChanged={onReviewChanged}
+          />
+        </DetailDialog>
+      )}
       {reviewDetail && (
         <DetailDialog
           open
@@ -7423,6 +7492,19 @@ function DocumentTrace({
 }
 
 export default App;
+
+// 处理流程里合成一行「图谱检查」的步骤。
+const CHECK_STEP_IDS: [CheckStepName, string][] = [
+  ["glean", "graph_check_glean"],
+  ["relation", "graph_check_relation"],
+  ["type", "graph_check_type"],
+  ["split", "graph_check_split"],
+];
+const CHECK_ROW_IDS = new Set([
+  ...CHECK_STEP_IDS.map(([, id]) => id),
+  "graph_review",
+  "graph_rewrite",
+]);
 
 // 上传弹窗里的图检索选项：开启后处理完自动建图（可以选清单和模型）。
 // 上传新版本时不改就沿用上一版的设置；从列表上传、作为同名文档的新版本时上一版的设置由服务端沿用。

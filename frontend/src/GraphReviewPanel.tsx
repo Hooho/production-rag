@@ -17,6 +17,7 @@ import {
   retryFailedGraphReview,
   retryGraphReview,
   rewriteGraphReview,
+  type CheckReport,
   type CheckStepName,
   type CheckSummary,
   type GraphReviewChoice,
@@ -2253,10 +2254,11 @@ export function GraphReviewPanel({
   tick: number;
   canRetry: boolean;
   onChanged: () => void;
-  // 外面要求打开弹窗并停在某一步；key 变了就打开一次。
+  // 外面要求打开弹窗并停在合并这一步的某个小步骤；key 变了就打开一次。
   openAt?: { step: ReviewStep; key: number } | null;
 }) {
   const [report, setReport] = useState<GraphReviewReport | null>(null);
+  const [summary, setSummary] = useState<CheckSummaries | null>(null);
   const [open, setOpen] = useState(false);
   const [startStep, setStartStep] = useState<ReviewStep | undefined>();
   useEffect(() => {
@@ -2273,83 +2275,29 @@ export function GraphReviewPanel({
           setReport(value.report?.build_id === buildId ? value.report : null),
       )
       .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [documentId, buildId, tick, open]);
-  const pending =
-    report && ["ready", "stopped", "running"].includes(report.status)
-      ? pendingCount(report)
-      : 0;
-  // 图谱检查的 5 步：① 补抽 ② 关系核对 ③ 类型核对 ④ 拆分（GraphCheckStep）⑤ 合并（下面的 GraphReviewBody）。
-  const [selected, setSelected] = useState<number | null>(null);
-  const [summary, setSummary] = useState<Partial<
-    Record<CheckStepName, CheckSummary>
-  > | null>(null);
-  const [refresh, setRefresh] = useState(0);
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
     getCheckSummary(documentId)
       .then((value) => !cancelled && setSummary(value.steps))
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [documentId, buildId, tick, open, refresh]);
-  const checkRunning = Object.values(summary ?? {}).some((value) =>
-    ["queued", "running", "rewriting"].includes(value?.status ?? ""),
-  );
-  useEffect(() => {
-    if (!open || !checkRunning) return;
-    const timer = window.setTimeout(
-      () => setRefresh((value) => value + 1),
-      3000,
-    );
-    return () => window.clearTimeout(timer);
-  }, [open, checkRunning, refresh]);
-  const [now, setNow] = useState(() => Date.now());
-  const running = !!report && ["queued", "running"].includes(report.status);
-  useEffect(() => {
-    if (!open || !running) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [open, running]);
-  const early = CHECK_ORDER.map((step, index) =>
-    checkStep(step, index + 1, summary?.[step], now),
-  );
-  // 当前步骤：第一个还没做完（没写入、没跳过）的步骤；之后的显示「还没轮到」。
-  const merge = mergeStep(report, pending, now);
-  const all = [...early, merge];
-  const currentIndex = all.findIndex(
-    (item) => !["done", "skipped"].includes(item.state),
-  );
-  const steps: CheckStep[] = all.map((item, index) =>
-    currentIndex >= 0 &&
-    index > currentIndex &&
-    item.state === "current" &&
-    item.text === "未开始"
-      ? { ...item, state: "waiting" }
-      : item,
-  );
-  const shownStep = selected ?? (currentIndex >= 0 ? currentIndex + 1 : 5);
+  }, [documentId, buildId, tick, open]);
+  const overview = checkOverview(summary, report);
   return (
     <>
       <button
         type="button"
-        className={pending > 0 ? "primary-button" : "secondary-button"}
+        className={overview.pending > 0 ? "primary-button" : "secondary-button"}
         onClick={() => {
           setStartStep(undefined);
           setOpen(true);
         }}
       >
-        {pending > 0
-          ? `图谱检查 · 待处理 ${pending}`
-          : report && ACTIVE.includes(report.status)
+        {overview.pending > 0
+          ? `图谱检查 · 待处理 ${overview.pending}`
+          : overview.active
             ? "图谱检查 · 进行中"
-            : report?.status === "scanned"
-              ? "图谱检查 · 待确认判断"
-              : "图谱检查"}
+            : "图谱检查"}
       </button>
       {open && (
         <DetailDialog
@@ -2358,32 +2306,187 @@ export function GraphReviewPanel({
           className="gr-dialog"
           onClose={() => setOpen(false)}
         >
-          <GraphCheckSteps
-            steps={steps}
-            selected={shownStep}
-            onSelect={setSelected}
+          <GraphCheckDialogBody
+            documentId={documentId}
+            buildId={buildId}
+            tick={tick}
+            canRetry={canRetry}
+            onChanged={onChanged}
+            initialStep={startStep}
           />
-          {shownStep === 5 ? (
-            <GraphReviewBody
-              documentId={documentId}
-              buildId={buildId}
-              tick={tick}
-              canRetry={canRetry}
-              onChanged={onChanged}
-              initialStep={startStep}
-            />
-          ) : (
-            <GraphCheckStep
-              key={shownStep}
-              documentId={documentId}
-              step={CHECK_ORDER[shownStep - 1]}
-              onChanged={() => {
-                setRefresh((value) => value + 1);
-                onChanged();
-              }}
-            />
-          )}
         </DetailDialog>
+      )}
+    </>
+  );
+}
+
+type CheckSummaries = Partial<Record<CheckStepName, CheckSummary>>;
+
+// 5 步合起来的概况：每步一个状态，加上待处理数、是否进行中。
+// 「实体关系」页签的入口按钮、处理流程里的「图谱检查」一行都用它。
+export function checkOverview(
+  summary: CheckSummaries | null,
+  report: GraphReviewReport | null,
+  now = Date.now(),
+) {
+  const pendingMerge =
+    report && ["ready", "stopped", "running", "scanned"].includes(report.status)
+      ? pendingCount(report)
+      : 0;
+  const early = CHECK_ORDER.map((step, index) =>
+    checkStep(step, index + 1, summary?.[step], now),
+  );
+  const all = [...early, mergeStep(report, pendingMerge, now)];
+  const currentIndex = all.findIndex(
+    (item) => !["done", "skipped"].includes(item.state),
+  );
+  // 当前步骤：第一个还没做完（没写入、没跳过）的步骤；之后还没开始的显示「还没轮到」。
+  const steps: CheckStep[] = all.map((item, index) =>
+    currentIndex >= 0 &&
+    index > currentIndex &&
+    item.state === "current" &&
+    item.text === "未开始"
+      ? { ...item, state: "waiting" }
+      : item,
+  );
+  const pending =
+    CHECK_ORDER.reduce(
+      (sum, step) => sum + (summary?.[step]?.pending ?? 0),
+      0,
+    ) + pendingMerge;
+  const active =
+    CHECK_ORDER.some((step) =>
+      ["queued", "running", "rewriting"].includes(
+        summary?.[step]?.status ?? "",
+      ),
+    ) ||
+    (!!report && ACTIVE.includes(report.status));
+  return {
+    steps,
+    pending,
+    active,
+    current: currentIndex >= 0 ? currentIndex + 1 : 5,
+    done: currentIndex < 0,
+    text: steps.map((item) => `${item.title}：${item.text}`).join(" · "),
+  };
+}
+
+// 和后端 checks.summary 同一规则：从一步的完整报告算出步骤条要的概要（处理流程里拿到的是完整报告）。
+export function summarizeCheck(value: CheckReport | null): CheckSummary {
+  if (!value) return { status: "idle" };
+  const items = value.items ?? [];
+  const judgments = value.judgments ?? {};
+  const decisions = value.decisions ?? {};
+  return {
+    status: value.status,
+    stale: !!value.stale,
+    count: items.length,
+    judged: Object.values(judgments).filter((row) => row.status !== "running")
+      .length,
+    failed: Object.values(judgments).filter((row) => row.status === "failed")
+      .length,
+    pending: items.filter(
+      (item) => judgments[item.id]?.decision?.suggest && !decisions[item.id],
+    ).length,
+    applied: !!value.applied && countItems(value.applied.items) > 0,
+    started: value.started ?? null,
+    error: value.error ?? null,
+  };
+}
+
+function countItems(items: unknown) {
+  if (Array.isArray(items)) return items.length;
+  if (items && typeof items === "object") return Object.keys(items).length;
+  return 0;
+}
+
+// 图谱检查弹窗的正文：上面 5 步的箭头步骤条，下面是选中那一步的内容。
+// 「实体关系」页签的入口和处理流程里的「图谱检查」一行共用。
+export function GraphCheckDialogBody({
+  documentId,
+  buildId,
+  tick = 0,
+  canRetry = true,
+  onChanged,
+  initialStep,
+}: {
+  documentId: string;
+  buildId?: string;
+  tick?: number;
+  canRetry?: boolean;
+  onChanged?: () => void;
+  // 指定时直接打开合并这一步的某个小步骤（例如合并记录里标记撤销后去确认）。
+  initialStep?: ReviewStep;
+}) {
+  const [report, setReport] = useState<GraphReviewReport | null>(null);
+  const [summary, setSummary] = useState<CheckSummaries | null>(null);
+  const [selected, setSelected] = useState<number | null>(
+    initialStep ? 5 : null,
+  );
+  const [refresh, setRefresh] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    let cancelled = false;
+    getGraphReview(documentId)
+      .then(
+        (value) =>
+          !cancelled &&
+          setReport(
+            !buildId || value.report?.build_id === buildId
+              ? value.report
+              : null,
+          ),
+      )
+      .catch(() => undefined);
+    getCheckSummary(documentId)
+      .then((value) => !cancelled && setSummary(value.steps))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [documentId, buildId, tick, refresh]);
+  const overview = checkOverview(summary, report, now);
+  useEffect(() => {
+    if (!overview.active) return;
+    const timer = window.setTimeout(
+      () => setRefresh((value) => value + 1),
+      3000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [overview.active, refresh]);
+  useEffect(() => {
+    if (!overview.active) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [overview.active]);
+  const shownStep = selected ?? overview.current;
+  const changed = () => {
+    setRefresh((value) => value + 1);
+    onChanged?.();
+  };
+  return (
+    <>
+      <GraphCheckSteps
+        steps={overview.steps}
+        selected={shownStep}
+        onSelect={setSelected}
+      />
+      {shownStep === 5 ? (
+        <GraphReviewBody
+          documentId={documentId}
+          buildId={buildId}
+          tick={tick + refresh}
+          canRetry={canRetry}
+          onChanged={changed}
+          initialStep={initialStep}
+        />
+      ) : (
+        <GraphCheckStep
+          key={shownStep}
+          documentId={documentId}
+          step={CHECK_ORDER[shownStep - 1]}
+          onChanged={changed}
+        />
       )}
     </>
   );
