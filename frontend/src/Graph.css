@@ -1290,3 +1290,7 @@
 .graph-review-proposal input {
   width: auto;
 }
+/* 合并记录里标记撤销：攒起来到二次检查第 4 步一起确认、写入。 */
+.graph-undo-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 0; padding: 8px 12px; border: 1px solid var(--tone-warning-border); border-radius: 6px; background: var(--tone-warning-bg); color: var(--tone-warning-text); font-size: 13px; }
+.graph-undo-cell { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; }
+.graph-undo-link { margin-left: 8px; font-size: 12px; }

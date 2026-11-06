@@ -642,3 +642,22 @@ def test_resolve_groups_requires_choice_for_conflicting_names():
         report, ["1:0", "2:0"], {"1:0": {"name": "腾讯控股", "type": "组织"}}
     )
     assert groups[0]["ids"] == ["a", "b", "c"] and groups[0]["name"] == "腾讯控股"
+
+
+def test_merge_record_keeps_review_proposals_for_undo():
+    from app.graph import query
+
+    detail = {
+        "scope": "document",
+        "review": {
+            "proposal_id": "41:0",
+            "proposal_ids": ["41:0", "108:0"],
+            "name": "腾讯控股ADR",
+            "type": "产品",
+            "reason": "同一证券",
+        },
+        "approved_by": "alice",
+    }
+    info = query.review_info(detail)
+    assert info["proposal_ids"] == ["41:0", "108:0"] and info["approved_by"] == "alice"
+    assert query.review_info({"scope": "new"}) is None

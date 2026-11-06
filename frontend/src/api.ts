@@ -3778,6 +3778,14 @@ export type GraphMergeRow = {
   method_label: string;
   positions: number[];
   chunk_ids: string[];
+  // 二次检查人工确认的合并：来自哪几条建议（可以在合并记录里标记撤销）。
+  review?: {
+    proposal_ids: string[];
+    name: string;
+    type: string;
+    reason: string;
+    approved_by?: string;
+  } | null;
 };
 export type GraphPage<T> = {
   items: T[];

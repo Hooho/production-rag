@@ -478,6 +478,19 @@ def document_graph(
     return result
 
 
+def review_info(detail):
+    review = (detail or {}).get("review") or {}
+    if not review:
+        return None
+    return {
+        "proposal_ids": review.get("proposal_ids") or [review.get("proposal_id")],
+        "name": review.get("name"),
+        "type": review.get("type"),
+        "reason": review.get("reason"),
+        "approved_by": (detail or {}).get("approved_by"),
+    }
+
+
 # 合并记录：同一个名字归到同一个实体、用同一种方法的合成一行，列出出现在第几片。
 def merge_rows(connection, build_id):
     rows = (
@@ -537,11 +550,22 @@ def merge_rows(connection, build_id):
                 ),
                 "positions": [],
                 "chunk_ids": [],
+                # 二次检查人工确认的合并：记下来自哪几条建议，合并记录里可以标记撤销。
+                "review": review_info(row["merge_detail"])
+                if row["resolve_method"] == "review"
+                else None,
             },
         )
         item["positions"].append(row["position"])
         item["chunk_ids"].append(row["chunk_id"])
-    order = {"canonical": 0, "alias": 1, "normalized": 2, "exact": 3, "new": 4}
+    order = {
+        "review": -1,
+        "canonical": 0,
+        "alias": 1,
+        "normalized": 2,
+        "exact": 3,
+        "new": 4,
+    }
     return sorted(
         grouped.values(),
         key=lambda item: (

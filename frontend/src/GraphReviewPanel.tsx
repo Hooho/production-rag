@@ -1074,6 +1074,7 @@ export function GraphReviewBody({
   canRetry = true,
   fallback,
   onChanged,
+  initialStep,
 }: {
   documentId: string;
   buildId?: string;
@@ -1081,6 +1082,8 @@ export function GraphReviewBody({
   canRetry?: boolean;
   fallback?: GraphReviewReport | null;
   onChanged?: () => void;
+  // 从别处跳进来时直接停在某一步（例如合并记录里标记撤销后去第 4 步确认）。
+  initialStep?: ReviewStep;
 }) {
   const [data, setData] = useState<Awaited<
     ReturnType<typeof getGraphReview>
@@ -1135,7 +1138,8 @@ export function GraphReviewBody({
   }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
   // 第一次拿到报告时决定停在哪一步，之后由用户切换。
   useEffect(() => {
-    if (report?.scan && step === null) setStep(defaultStep(report));
+    if (report?.scan && step === null)
+      setStep(initialStep ?? defaultStep(report));
   }, [report, step]);
   const canDecide = !!live && live.status === "ready" && !!data?.can_confirm;
   const decisions = report ? decisionsOf(report) : {};
@@ -1353,15 +1357,24 @@ export function GraphReviewPanel({
   tick,
   canRetry,
   onChanged,
+  openAt,
 }: {
   documentId: string;
   buildId: string;
   tick: number;
   canRetry: boolean;
   onChanged: () => void;
+  // 外面要求打开弹窗并停在某一步；key 变了就打开一次。
+  openAt?: { step: ReviewStep; key: number } | null;
 }) {
   const [report, setReport] = useState<GraphReviewReport | null>(null);
   const [open, setOpen] = useState(false);
+  const [startStep, setStartStep] = useState<ReviewStep | undefined>();
+  useEffect(() => {
+    if (!openAt) return;
+    setStartStep(openAt.step);
+    setOpen(true);
+  }, [openAt?.key]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     let cancelled = false;
     getGraphReview(documentId)
@@ -1381,7 +1394,10 @@ export function GraphReviewPanel({
       <button
         type="button"
         className={pending > 0 ? "primary-button" : "secondary-button"}
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setStartStep(undefined);
+          setOpen(true);
+        }}
       >
         {pending > 0
           ? `二次检查 · 待处理 ${pending}`
@@ -1402,6 +1418,7 @@ export function GraphReviewPanel({
             tick={tick}
             canRetry={canRetry}
             onChanged={onChanged}
+            initialStep={startStep}
           />
         </DetailDialog>
       )}

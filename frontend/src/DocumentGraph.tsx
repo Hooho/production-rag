@@ -1,5 +1,6 @@
 import { graphHops } from "./graphHops";
-import { GraphReviewPanel } from "./GraphReviewPanel";
+import { GraphReviewPanel, type ReviewStep } from "./GraphReviewPanel";
+import { errorText } from "./Toast";
 import { GraphHistoryControls, useGraphHistory } from "./GraphHistory";
 import { DocumentChunkDialog, type ChunkTarget } from "./DocumentChunkDialog";
 import { GraphBuildTimer } from "./GraphBuildTimer";
@@ -8,12 +9,16 @@ import { GraphRelationPanel } from "./GraphRelationPanel";
 import type { GraphEdge, GraphRelationRow } from "./api";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  decideGraphReview,
   getDocumentGraph,
+  getGraphReview,
   retryDocumentGraph,
   stopDocumentGraph,
   type DocumentGraphData,
   type DocumentStatus,
   type GraphBuild,
+  type GraphMergeRow,
+  type GraphReviewReport,
   type GraphView as GraphViewName,
 } from "./api";
 import { formatShortTime } from "./format";
@@ -118,6 +123,76 @@ export function DocumentGraph({
   const [tick, setTick] = useState(0);
   const [stopping, setStopping] = useState(false);
   const documentId = document.document_id;
+  // 合并记录里标记撤销：只改二次检查的决定，攒起来到第 4 步一起确认、写入图谱。
+  const [review, setReview] = useState<GraphReviewReport | null>(null);
+  const [canDecide, setCanDecide] = useState(false);
+  const [reviewOpenAt, setReviewOpenAt] = useState<{
+    step: ReviewStep;
+    key: number;
+  } | null>(null);
+  const [undoing, setUndoing] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    getGraphReview(documentId)
+      .then((value) => {
+        if (cancelled) return;
+        setReview(value.report);
+        setCanDecide(value.can_confirm);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [documentId, tick]);
+  const reviewDecisions = review?.decisions ?? {};
+  const appliedIds = new Set(review?.applied?.approved_ids ?? []);
+  const reviewProposals = new Set(
+    (review?.judgments ?? []).flatMap((item) =>
+      (item.decision?.groups ?? []).map(
+        (_, index) => `${item.candidate_id}:${index}`,
+      ),
+    ),
+  );
+  const isApproved = (id: string) =>
+    reviewDecisions[id]?.decision === "approved";
+  // 已写入图谱、但现在不再批准的合并结果：下次写入时会拆开。
+  const undoCount = (review?.applied?.groups ?? []).filter((group) =>
+    group.proposal_ids.some((id) => !isApproved(id)),
+  ).length;
+  function undoState(row: GraphMergeRow) {
+    const ids = row.review?.proposal_ids ?? [];
+    if (!ids.length) return null;
+    if (ids.some((id) => appliedIds.has(id) && !isApproved(id)))
+      return "marked" as const;
+    if (
+      review?.status === "ready" &&
+      canDecide &&
+      ids.every((id) => reviewProposals.has(id))
+    )
+      return "available" as const;
+    return "unavailable" as const;
+  }
+  async function setUndo(row: GraphMergeRow, undo: boolean) {
+    if (!review || undoing) return;
+    setUndoing(true);
+    try {
+      await decideGraphReview(
+        documentId,
+        review.build_id,
+        row.review!.proposal_ids,
+        undo ? null : "approved",
+      );
+      onToast(
+        "success",
+        undo ? "已标记撤销，到确认页确认后写入图谱才生效" : "已取消撤销",
+      );
+      setTick((value) => value + 1);
+    } catch (reason) {
+      onToast("error", errorText(reason));
+    } finally {
+      setUndoing(false);
+    }
+  }
   useEffect(() => {
     let cancelled = false;
     getDocumentGraph(documentId, {
@@ -325,6 +400,7 @@ export function DocumentGraph({
             tick={tick}
             canRetry={!busy && data.can_build}
             onChanged={() => setTick((value) => value + 1)}
+            openAt={reviewOpenAt}
           />
           <button
             type="button"
@@ -695,11 +771,26 @@ export function DocumentGraph({
                 onPage={setPage}
               >
                 <p className="graph-note">
-                  合并范围区分新建实体、文档内合并和跨文档合并。同一次建图中，首次关联其他文档的实体记为跨文档合并，后续重复归属记为文档内合并。历史记录未保存范围时显示「历史未记录」。第
-                  1
-                  期只按规则合并：名字相同、规范化后相同、模型给的标准名相同；没合上或合错的要等第
-                  3 期手动处理。
+                  合并范围区分新建实体、文档内合并和跨文档合并。同一次建图中，首次关联其他文档的实体记为跨文档合并，后续重复归属记为文档内合并。历史记录未保存范围时显示「历史未记录」。
+                  建图时按规则合并（名字相同、规范化后相同、模型给的标准名相同）；之后可以用「二次检查合并」补充，方法显示为「二次检查合并（人工确认）」，这类合并可以在这里标记撤销，到确认页一起确认后重新写入图谱。
                 </p>
+                {undoCount > 0 && (
+                  <div className="graph-undo-bar">
+                    <span>
+                      已标记撤销 <strong>{undoCount}</strong>{" "}
+                      个合并，还没写入图谱。
+                    </span>
+                    <button
+                      type="button"
+                      className="primary-button button-sm"
+                      onClick={() =>
+                        setReviewOpenAt({ step: 4, key: Date.now() })
+                      }
+                    >
+                      去确认并写入
+                    </button>
+                  </div>
+                )}
                 <table className="graph-table graph-merge-table">
                   <colgroup>
                     <col />
@@ -748,6 +839,41 @@ export function DocumentGraph({
                           <Tag size="sm" plain hue>
                             {row.method_label}
                           </Tag>
+                          {undoState(row) === "marked" && (
+                            <span className="graph-undo-cell">
+                              <Tag size="sm" tone="warning">
+                                已标记撤销
+                              </Tag>
+                              <button
+                                type="button"
+                                className="link-button"
+                                disabled={undoing}
+                                onClick={() => void setUndo(row, false)}
+                              >
+                                取消
+                              </button>
+                            </span>
+                          )}
+                          {undoState(row) === "available" && (
+                            <button
+                              type="button"
+                              className="link-button graph-undo-link"
+                              disabled={undoing}
+                              title={
+                                row.review?.reason
+                                  ? `合并理由：${row.review.reason}`
+                                  : undefined
+                              }
+                              onClick={() => void setUndo(row, true)}
+                            >
+                              撤销
+                            </button>
+                          )}
+                          {undoState(row) === "unavailable" && (
+                            <small title="二次检查已重新检查或正在进行，请在二次检查里处理">
+                              （检查结果已更新）
+                            </small>
+                          )}
                         </td>
                         <td>
                           {row.positions.slice(0, 6).map((position, index) => (
