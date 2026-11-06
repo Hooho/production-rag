@@ -27,13 +27,10 @@ export function GraphCheckSteps({
   steps,
   selected,
   onSelect,
-  compact = false,
 }: {
   steps: CheckStep[];
   selected: number;
   onSelect: (key: number) => void;
-  // 嵌在某一步里面的小步骤条：矮一些。
-  compact?: boolean;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const [shadow, setShadow] = useState({ left: false, right: false });
@@ -66,7 +63,7 @@ export function GraphCheckSteps({
 
   return (
     <div
-      className={`gc-steps${compact ? " is-compact" : ""}${shadow.left ? " has-left" : ""}${shadow.right ? " has-right" : ""}`}
+      className={`gc-steps${shadow.left ? " has-left" : ""}${shadow.right ? " has-right" : ""}`}
     >
       <div
         className="gc-steps-scroll"
@@ -98,5 +95,52 @@ export function GraphCheckSteps({
         })}
       </div>
     </div>
+  );
+}
+
+// 竖直步骤条：用在某一步里面的小步骤（例如合并这一步的 找出可疑项 → AI 判断 → …），放在内容左边。
+// 已完成：浅蓝圆圈打勾、下面的连线是蓝色；当前：实心蓝圆圈；没轮到：灰圆圈；失败：红圆圈。
+export function VerticalSteps({
+  steps,
+  selected,
+  onSelect,
+}: {
+  steps: CheckStep[];
+  selected: number;
+  onSelect: (key: number) => void;
+}) {
+  return (
+    <ol className="gv-steps" role="tablist" aria-orientation="vertical">
+      {steps.map((item) => (
+        <li
+          key={item.key}
+          className={`gv-step is-${item.state}${selected === item.key ? " is-selected" : ""}`}
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={selected === item.key}
+            disabled={item.state === "locked"}
+            title={item.hint}
+            onClick={() => onSelect(item.key)}
+          >
+            <span className="gv-dot">
+              {item.state === "done"
+                ? "✓"
+                : item.state === "failed"
+                  ? "!"
+                  : item.key}
+            </span>
+            <span className="gv-text">
+              <strong>
+                {item.title}
+                {item.elapsed && <em>{item.elapsed}</em>}
+              </strong>
+              <small>{item.text}</small>
+            </span>
+          </button>
+        </li>
+      ))}
+    </ol>
   );
 }

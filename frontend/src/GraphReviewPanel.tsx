@@ -28,7 +28,11 @@ import { Tag } from "./Tag";
 import { errorText, useToast } from "./Toast";
 import type { Tone } from "./tags";
 import { diffPlan, type PlanDiff } from "./graphReviewDiff";
-import { GraphCheckSteps, type CheckStep } from "./GraphCheckSteps";
+import {
+  GraphCheckSteps,
+  VerticalSteps,
+  type CheckStep,
+} from "./GraphCheckSteps";
 import "./GraphReview.css";
 
 const PAGE_SIZE = 10;
@@ -881,9 +885,8 @@ export function GraphReviewDetails({
   }
 
   return (
-    <div className="gr" ref={root}>
-      <GraphCheckSteps
-        compact
+    <div className="gr gr-split" ref={root}>
+      <VerticalSteps
         steps={steps.map((item) => ({
           key: item.step,
           title: item.label,
@@ -901,190 +904,193 @@ export function GraphReviewDetails({
         selected={step}
         onSelect={(key) => onStep(key as ReviewStep)}
       />
-
-      {step === 1 && (
-        <div className="gr-method">
-          {method ? (
-            <>
-              <p>
-                <strong>怎么找出候选：</strong>用向量模型{" "}
-                <strong>{method.embedding?.model ?? "—"}</strong>{" "}
-                给每个实体算向量，算的文字是「{method.text_format}」，两两算
-                {method.metric}（名字完全相同的记
-                1）。从最像的两个开始往组里合并，
-                <strong>组里任意两个都 ≥ {method.min_similarity}</strong>{" "}
-                才能放在一起，每组最多 {method.max_group_size ?? "—"}{" "}
-                个，每个实体只进一组（只看它最像的 {method.top_k}{" "}
-                个）。不会串联，也不补查组外的对。
-              </p>
-              {method.embedding && !method.embedding.semantic && (
-                <p className="gr-warn">
-                  当前没有配置 embedding
-                  模型，用的是字符二元组哈希：只看字面重合，不是语义相似。
+      <div className="gr-split-main">
+        {step === 1 && (
+          <div className="gr-method">
+            {method ? (
+              <>
+                <p>
+                  <strong>怎么找出候选：</strong>用向量模型{" "}
+                  <strong>{method.embedding?.model ?? "—"}</strong>{" "}
+                  给每个实体算向量，算的文字是「{method.text_format}」，两两算
+                  {method.metric}（名字完全相同的记
+                  1）。从最像的两个开始往组里合并，
+                  <strong>组里任意两个都 ≥ {method.min_similarity}</strong>{" "}
+                  才能放在一起，每组最多 {method.max_group_size ?? "—"}{" "}
+                  个，每个实体只进一组（只看它最像的 {method.top_k}{" "}
+                  个）。不会串联，也不补查组外的对。
                 </p>
-              )}
-              {method.error && <p className="gr-warn">{method.error}</p>}
+                {method.embedding && !method.embedding.semantic && (
+                  <p className="gr-warn">
+                    当前没有配置 embedding
+                    模型，用的是字符二元组哈希：只看字面重合，不是语义相似。
+                  </p>
+                )}
+                {method.error && <p className="gr-warn">{method.error}</p>}
+                <p className="gr-small">
+                  扫描 {scan.entity_count} 个实体 · 名字相同{" "}
+                  {scan.stats?.same_name ?? 0} 组 · 语义相似{" "}
+                  {scan.stats?.similar ?? 0} 组 · 耗时 {scan.duration_ms ?? "—"}{" "}
+                  毫秒
+                </p>
+              </>
+            ) : (
               <p className="gr-small">
-                扫描 {scan.entity_count} 个实体 · 名字相同{" "}
-                {scan.stats?.same_name ?? 0} 组 · 语义相似{" "}
-                {scan.stats?.similar ?? 0} 组 · 耗时 {scan.duration_ms ?? "—"}{" "}
-                毫秒
+                旧规则找出的候选 · 扫描 {scan.entity_count} 个实体。点第 2
+                步的「重新检查」会按新规则重跑。
               </p>
-            </>
-          ) : (
-            <p className="gr-small">
-              旧规则找出的候选 · 扫描 {scan.entity_count} 个实体。点第 2
-              步的「重新检查」会按新规则重跑。
-            </p>
-          )}
-          {scannedOnly && (
-            <div className="gr-actions">
-              <span className="graph-note">
-                下面列出了全部 {scan.candidate_count}{" "}
-                组可疑项，看完点确认，到下一步让 AI 判断。
-              </span>
-              <button
-                type="button"
-                className="primary-button"
-                onClick={() => onStep(2)}
-              >
-                确认，进入下一步
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {step === 2 && progress}
-      {step === 2 && (
-        <div className="gr-method">
-          {scannedOnly ? (
-            <p>
-              每组调用一次模型，判断组里哪些是同一个东西、统一叫什么。共{" "}
-              {scan.candidate_count} 组
-              {judged > 0 ? `，其中 ${judged} 组之前判断过` : ""}，还要判断{" "}
-              <strong>{toJudge}</strong> 组，约 <strong>{toJudge} 次</strong>
-              模型调用。
-            </p>
-          ) : (
-            <p>
-              每组调用一次模型，判断组里哪些是同一个东西、统一叫什么。已判断{" "}
-              <strong>
-                {judged}/{scan.candidate_count}
-              </strong>{" "}
-              组{failed ? `，失败 ${failed} 组` : ""}
-              {judging ? "，正在判断…" : "。"}
-            </p>
-          )}
-          {scannedOnly && onStartJudge && (
-            <div className="gr-actions">
-              <button
-                type="button"
-                className={`primary-button${loadingClass(loading === "continue")}`}
-                disabled={busy}
-                onClick={onStartJudge}
-              >
-                开始 AI 判断（约 {toJudge} 次调用）
-              </button>
-            </div>
-          )}
-          {report.prompt_tag && (
-            <p className="gr-small">
-              用的提示词：<code>{report.prompt_tag}</code>{" "}
-              {report.system_prompt && (
+            )}
+            {scannedOnly && (
+              <div className="gr-actions">
+                <span className="graph-note">
+                  下面列出了全部 {scan.candidate_count}{" "}
+                  组可疑项，看完点确认，到下一步让 AI 判断。
+                </span>
                 <button
                   type="button"
-                  className="link-button button-sm"
-                  onClick={() =>
-                    openText("二次检查合并提示词", report.system_prompt!)
-                  }
+                  className="primary-button"
+                  onClick={() => onStep(2)}
                 >
-                  查看
+                  确认，进入下一步
                 </button>
-              )}
-              （在「提示词管理 · 知识图谱」里修改，改完点「重新检查」生效）
-            </p>
-          )}
-          {judgeActions && <div className="gr-actions">{judgeActions}</div>}
-        </div>
-      )}
+              </div>
+            )}
+          </div>
+        )}
 
-      {step === 3 && (
-        <div className="gr-method">
-          <p>
-            只列出模型建议合并的组。每条点「合并」或「不合并」，随时可撤销。这里只记录决定，不会改图谱；全部看完去第
-            4 步确认。
-          </p>
-        </div>
-      )}
-
-      {step <= 3 && renderList()}
-
-      {step === 4 &&
-        (confirmPanel ?? (
-          <p className="graph-note">
-            {plan.length
-              ? `已批准的建议会合成 ${plan.length} 个合并结果。`
-              : "还没有批准任何合并建议。"}
-          </p>
-        ))}
-
-      {step === 5 && (
-        <div className="gr-list">
-          {report.status === "rewriting" && (
-            <p className="gr-hint">正在按确认结果写入图谱（不调用模型）…</p>
-          )}
-          {report.applied ? (
-            <p className="gr-small">
-              上次写入：{report.applied.by} · {report.applied.at}，
-              {report.applied.groups.length}{" "}
-              个合并结果。之后补跑分片、重新写入时也会按这些合并。
-            </p>
-          ) : (
-            report.status !== "rewriting" && (
-              <p className="graph-note">
-                还没有按确认结果写入过。图谱照常可用，合并是可选的。
+        {step === 2 && progress}
+        {step === 2 && (
+          <div className="gr-method">
+            {scannedOnly ? (
+              <p>
+                每组调用一次模型，判断组里哪些是同一个东西、统一叫什么。共{" "}
+                {scan.candidate_count} 组
+                {judged > 0 ? `，其中 ${judged} 组之前判断过` : ""}，还要判断{" "}
+                <strong>{toJudge}</strong> 组，约 <strong>{toJudge} 次</strong>
+                模型调用。
               </p>
-            )
-          )}
-          {records
-            .filter((record) => record.status !== "skipped" || report.applied)
-            .map((record) => (
-              <article className="gr-card" key={record.id}>
-                <header className="gr-card-head">
-                  <strong className="gr-grow">
-                    {record.name}
-                    <Tag size="sm" hue>
-                      {record.type}
-                    </Tag>
-                  </strong>
-                  <Tag
-                    size="sm"
-                    dot
-                    tone={
-                      record.status === "completed"
-                        ? "success"
-                        : record.status === "failed"
-                          ? "danger"
-                          : "neutral"
+            ) : (
+              <p>
+                每组调用一次模型，判断组里哪些是同一个东西、统一叫什么。已判断{" "}
+                <strong>
+                  {judged}/{scan.candidate_count}
+                </strong>{" "}
+                组{failed ? `，失败 ${failed} 组` : ""}
+                {judging ? "，正在判断…" : "。"}
+              </p>
+            )}
+            {scannedOnly && onStartJudge && (
+              <div className="gr-actions">
+                <button
+                  type="button"
+                  className={`primary-button${loadingClass(loading === "continue")}`}
+                  disabled={busy}
+                  onClick={onStartJudge}
+                >
+                  开始 AI 判断（约 {toJudge} 次调用）
+                </button>
+              </div>
+            )}
+            {report.prompt_tag && (
+              <p className="gr-small">
+                用的提示词：<code>{report.prompt_tag}</code>{" "}
+                {report.system_prompt && (
+                  <button
+                    type="button"
+                    className="link-button button-sm"
+                    onClick={() =>
+                      openText("二次检查合并提示词", report.system_prompt!)
                     }
                   >
-                    {record.status === "skipped"
-                      ? "跳过"
-                      : (statuses[record.status] ?? record.status)}
-                  </Tag>
-                </header>
-                <p>由 {record.from_names?.join("、") || "—"} 合并</p>
-                <p className="gr-small">
-                  {record.mention_count ?? 0} 条名字出处 ·{" "}
-                  {record.relation_count ?? 0} 条关系重新归属 ·{" "}
-                  {record.type_corrections ?? 0} 处类型纠正
+                    查看
+                  </button>
+                )}
+                （在「提示词管理 · 知识图谱」里修改，改完点「重新检查」生效）
+              </p>
+            )}
+            {judgeActions && <div className="gr-actions">{judgeActions}</div>}
+          </div>
+        )}
+
+        {step === 3 && (
+          <div className="gr-method">
+            <p>
+              只列出模型建议合并的组。每条点「合并」或「不合并」，随时可撤销。这里只记录决定，不会改图谱；全部看完去第
+              4 步确认。
+            </p>
+          </div>
+        )}
+
+        {step <= 3 && renderList()}
+
+        {step === 4 &&
+          (confirmPanel ?? (
+            <p className="graph-note">
+              {plan.length
+                ? `已批准的建议会合成 ${plan.length} 个合并结果。`
+                : "还没有批准任何合并建议。"}
+            </p>
+          ))}
+
+        {step === 5 && (
+          <div className="gr-list">
+            {report.status === "rewriting" && (
+              <p className="gr-hint">正在按确认结果写入图谱（不调用模型）…</p>
+            )}
+            {report.applied ? (
+              <p className="gr-small">
+                上次写入：{report.applied.by} · {report.applied.at}，
+                {report.applied.groups.length}{" "}
+                个合并结果。之后补跑分片、重新写入时也会按这些合并。
+              </p>
+            ) : (
+              report.status !== "rewriting" && (
+                <p className="graph-note">
+                  还没有按确认结果写入过。图谱照常可用，合并是可选的。
                 </p>
-                {record.reason && <p className="gr-reason">{record.reason}</p>}
-              </article>
-            ))}
-        </div>
-      )}
+              )
+            )}
+            {records
+              .filter((record) => record.status !== "skipped" || report.applied)
+              .map((record) => (
+                <article className="gr-card" key={record.id}>
+                  <header className="gr-card-head">
+                    <strong className="gr-grow">
+                      {record.name}
+                      <Tag size="sm" hue>
+                        {record.type}
+                      </Tag>
+                    </strong>
+                    <Tag
+                      size="sm"
+                      dot
+                      tone={
+                        record.status === "completed"
+                          ? "success"
+                          : record.status === "failed"
+                            ? "danger"
+                            : "neutral"
+                      }
+                    >
+                      {record.status === "skipped"
+                        ? "跳过"
+                        : (statuses[record.status] ?? record.status)}
+                    </Tag>
+                  </header>
+                  <p>由 {record.from_names?.join("、") || "—"} 合并</p>
+                  <p className="gr-small">
+                    {record.mention_count ?? 0} 条名字出处 ·{" "}
+                    {record.relation_count ?? 0} 条关系重新归属 ·{" "}
+                    {record.type_corrections ?? 0} 处类型纠正
+                  </p>
+                  {record.reason && (
+                    <p className="gr-reason">{record.reason}</p>
+                  )}
+                </article>
+              ))}
+          </div>
+        )}
+      </div>
 
       {dialog && (
         <DetailDialog open title={dialog.title} onClose={() => setDialog(null)}>

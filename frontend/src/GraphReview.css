@@ -876,13 +876,120 @@
   color: #475569;
   font-variant-numeric: tabular-nums;
 }
-/* 合并这一步里面的小步骤条：和外层同样的箭头样式，矮一些。 */
-.gc-steps.is-compact .gc-step {
-  flex-basis: 150px;
-  min-height: 48px;
-  padding-top: 6px;
-  padding-bottom: 6px;
+/* 合并这一步里面：左边竖直步骤条，右边是这一小步的内容；窄屏时步骤条放到上面。 */
+.gr-split {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
 }
-.gc-steps.is-compact .gc-step strong {
-  font-size: 13px;
+.gr-split-main {
+  min-width: 0;
+}
+@media (max-width: 760px) {
+  .gr-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.gv-steps {
+  position: sticky;
+  top: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.gv-step {
+  position: relative;
+  padding-bottom: 18px;
+}
+.gv-step:last-child {
+  padding-bottom: 0;
+}
+/* 圆圈下面的连线：上一步完成了就是蓝色。 */
+.gv-step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 15px;
+  top: 38px;
+  bottom: 4px;
+  width: 2px;
+  background: #e5e7eb;
+}
+.gv-step.is-done:not(:last-child)::after {
+  background: #1d6ff2;
+}
+.gv-step > button {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.gv-step > button:disabled {
+  cursor: not-allowed;
+}
+.gv-dot {
+  flex: 0 0 32px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #f3f4f6;
+  color: #6b7280;
+  font-size: 14px;
+}
+.gv-step.is-done .gv-dot {
+  background: #e8f1ff;
+  color: #1d6ff2;
+}
+.gv-step.is-current .gv-dot {
+  background: #1d6ff2;
+  color: #fff;
+}
+.gv-step.is-failed .gv-dot {
+  background: #fff1f0;
+  color: #dc2626;
+}
+.gv-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding-top: 5px;
+}
+.gv-text strong {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #1f2937;
+}
+.gv-text strong em {
+  font-style: normal;
+  font-size: 12px;
+  color: #1d6ff2;
+  font-variant-numeric: tabular-nums;
+}
+.gv-text small {
+  font-size: 12px;
+  color: #6b7280;
+  overflow-wrap: anywhere;
+}
+.gv-step.is-current .gv-text small {
+  color: #1f2937;
+}
+.gv-step.is-waiting .gv-text strong,
+.gv-step.is-locked .gv-text strong {
+  color: #6b7280;
+}
+/* 正在查看的那一小步：标题加粗、蓝色。 */
+.gv-step.is-selected .gv-text strong {
+  font-weight: 600;
+  color: #1d6ff2;
 }
