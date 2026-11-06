@@ -9,6 +9,7 @@ import uuid
 from sqlalchemy import and_, delete, func, select
 
 from .. import prompts
+from ..mysql import step_judgments
 from ..mysql.tables import (
     chunks,
     document_chunks,
@@ -1064,6 +1065,7 @@ def remove_documents(connection, document_ids):
             graph_chunk_extractions.c.document_id.in_(document_ids)
         )
     )
+    step_judgments.remove(connection, document_ids)
     for space in {row[1] for row in rows}:
         resolve.remove_orphans(connection, space)
 
@@ -1078,19 +1080,10 @@ def current_document_ids(connection):
     }
 
 
-def review_report(engine, build):
+# judgments 的含义同 checks.report_in：True 全部判断，"light" 不带 prompt 和原始输出，False 不读判断。
+def review_report(engine, build, judgments=True):
     with engine.connect() as connection:
-        result = connection.execute(
-            select(document_steps.c.result).where(
-                document_steps.c.document_id == build["document_id"],
-                document_steps.c.step_id == "graph_review",
-            )
-        ).scalar_one_or_none()
-    return (
-        result
-        if isinstance(result, dict) and result.get("build_id") == build["id"]
-        else None
-    )
+        return _report_in(connection, build, judgments)
 
 
 # 报告状态：queued 排队 / running 模型判断中 / ready 可以逐条决定 / rewriting 正在按确认结果重写 / failed / idle 未开始。
@@ -1183,7 +1176,7 @@ def after_write(store, build, report, records):
     # 人确认写入或跳过一步后，自动开始下一步（checks.auto_next）。
     # （建图开始时只写了一个占位的 {"build_id"}，没有 status，也算没检查过。）
     if not (report or {}).get("status") and not any(
-        checks.reports(store.engine, build).values()
+        checks.reports(store.engine, build, judgments=False).values()
     ):
         checks.start(store, build["id"], "glean", {}, "system", phase="judge")
         return
@@ -1367,7 +1360,7 @@ def run_review(store, models, build, report):
     ):
         raise BuildStopped()
     for candidate in todo[:REVIEW_BATCH]:
-        latest = review_report(store.engine, build)
+        latest = review_report(store.engine, build, judgments=False)
         if review_state(latest, build) not in ("queued", "running"):
             raise BuildStopped()
         result = review.judge(
@@ -1406,17 +1399,23 @@ def run_review(store, models, build, report):
 HUMAN_KEYS = ("decisions", "manual", "manual_entities", "applied")
 
 
-def _report_in(connection, build):
+def _report_in(connection, build, judgments=True):
     result = connection.execute(
         select(document_steps.c.result).where(
             document_steps.c.document_id == build["document_id"],
             document_steps.c.step_id == "graph_review",
         )
     ).scalar_one_or_none()
-    return (
-        result
-        if isinstance(result, dict) and result.get("build_id") == build["id"]
-        else None
+    if not (isinstance(result, dict) and result.get("build_id") == build["id"]):
+        return None
+    if not judgments:
+        return result
+    return step_judgments.attach(
+        connection,
+        build["document_id"],
+        "graph_review",
+        result,
+        trace=judgments != "light",
     )
 
 
@@ -1429,7 +1428,7 @@ def _save_progress(store, build, report, detail, step_status="running"):
             .where(graph_builds.c.id == build["id"])
             .with_for_update()
         )
-        latest = _report_in(connection, build)
+        latest = _report_in(connection, build, judgments=False)
         for key in HUMAN_KEYS:
             if latest and key in latest:
                 report[key] = latest[key]
@@ -1524,13 +1523,17 @@ def _lock_build(connection, build_id):
 
 
 def _save_report(connection, build, report, **values):
+    # 模型判断逐组存到 graph_step_judgments（只写变了的），document_steps 里只存其余部分。
+    result = step_judgments.detach(
+        connection, build["document_id"], "graph_review", report
+    )
     connection.execute(
         document_steps.update()
         .where(
             document_steps.c.document_id == build["document_id"],
             document_steps.c.step_id == "graph_review",
         )
-        .values(result=report, updated=now(), **values)
+        .values(result=result, updated=now(), **values)
     )
 
 
@@ -1737,6 +1740,8 @@ def retry_review(store, build_id):
             "build_id": build_id,
             "status": "queued",
             "phase": "scan",
+            # 重新检查清掉模型判断：显式给空列表（报告里没有 judgments 键表示判断不变）。
+            "judgments": [],
             **_carry(report),
         }
     with store.engine.begin() as connection:

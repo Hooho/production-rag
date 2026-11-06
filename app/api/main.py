@@ -39,6 +39,7 @@ from ..agentic.records import (
 )
 from ..agentic.service import AgentFailed, AgentMode
 from ..memory import outbox as memory_outbox
+from ..mysql import step_judgments
 from . import live as live_state
 from .live import LiveLog
 from ..business.sample_data import MAX_COUNT, generate_preview
@@ -630,6 +631,21 @@ def read_document_steps(store, document_id, results=True):
             .mappings()
             .all()
         )
+        # 图谱检查的 AI 判断单独存表，拼回报告；处理流程只用来算进度和待处理数，不带 prompt 和模型原始输出。
+        if results:
+            rows = [
+                {
+                    **row,
+                    "result": step_judgments.attach(
+                        connection,
+                        document_id,
+                        row["step_id"],
+                        row["result"],
+                        trace=False,
+                    ),
+                }
+                for row in rows
+            ]
     return sorted((dict(row) for row in rows), key=lambda row: row["step_order"])
 
 

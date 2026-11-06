@@ -8,6 +8,8 @@
 
 报告存在 document_steps 里（每步一行），结构：
   {build_id, step, status, phase, params, signature, items, judgments, decisions, applied, stale, started, scan}
+其中 judgments（每项的 AI 判断，带 prompt 和模型原始输出）逐项存在 graph_step_judgments，
+读写报告时由 mysql/step_judgments.py 拆开、拼回（每判断完一项只写一行，不再整份重写）。
 status：idle 未开始 / queued 排队 / running 进行中 / scanned 找完待确认判断 / stopped 已停止 /
         ready 可以决定 / rewriting 正在写入 / skipped 已跳过 / failed 失败。
 """
@@ -23,6 +25,7 @@ import numpy
 from sqlalchemy import select
 
 from .. import prompts
+from ..mysql import step_judgments
 from ..mysql.tables import document_steps, graph_builds
 from . import build as graph_build
 from . import extract, resolve, review
@@ -90,28 +93,38 @@ def excerpt(content, name, size=EXCERPT):
 # ---------- 报告读写 ----------
 
 
-def report_in(connection, build, step):
+# judgments：True 带上全部 AI 判断（含 prompt、原始输出）；"light" 不带 prompt 和原始输出；
+# False 不读判断（只看状态、人工决定时用，判断多时省很多读取）。不读判断的报告写回去时判断保持不变。
+def report_in(connection, build, step, judgments=True):
     result = connection.execute(
         select(document_steps.c.result).where(
             document_steps.c.document_id == build["document_id"],
             document_steps.c.step_id == STEP_IDS[step],
         )
     ).scalar_one_or_none()
-    return (
-        result
-        if isinstance(result, dict) and result.get("build_id") == build["id"]
-        else None
+    if not (isinstance(result, dict) and result.get("build_id") == build["id"]):
+        return None
+    if not judgments:
+        return result
+    return step_judgments.attach(
+        connection,
+        build["document_id"],
+        STEP_IDS[step],
+        result,
+        trace=judgments != "light",
     )
 
 
-def report(engine, build, step):
+def report(engine, build, step, judgments=True):
     with engine.connect() as connection:
-        return report_in(connection, build, step)
+        return report_in(connection, build, step, judgments)
 
 
-def reports(engine, build):
+def reports(engine, build, judgments=True):
     with engine.connect() as connection:
-        return {step: report_in(connection, build, step) for step in STEP_IDS}
+        return {
+            step: report_in(connection, build, step, judgments) for step in STEP_IDS
+        }
 
 
 def write(store, build, step, value, status, detail):
@@ -121,13 +134,16 @@ def write(store, build, step, value, status, detail):
 
 
 def save_in(connection, build, step, value, status, detail):
+    result = step_judgments.detach(
+        connection, build["document_id"], STEP_IDS[step], value
+    )
     connection.execute(
         document_steps.update()
         .where(
             document_steps.c.document_id == build["document_id"],
             document_steps.c.step_id == STEP_IDS[step],
         )
-        .values(result=value, status=status, detail=detail, updated=now())
+        .values(result=result, status=status, detail=detail, updated=now())
     )
 
 
@@ -165,7 +181,7 @@ def plan_for(connection, build, rows, applied, upto=None):
 def applied_of(engine, build):
     return {
         step: (value or {}).get("applied", {}).get("items")
-        for step, value in reports(engine, build).items()
+        for step, value in reports(engine, build, judgments=False).items()
     }
 
 
@@ -835,7 +851,7 @@ def save_progress(store, build, step, value, detail, status="running"):
             .where(graph_builds.c.id == build["id"])
             .with_for_update()
         )
-        latest = report_in(connection, build, step)
+        latest = report_in(connection, build, step, judgments=False)
         for key in HUMAN_KEYS:
             if latest and key in latest:
                 value[key] = latest[key]
@@ -914,7 +930,7 @@ def run(store, models, build, step, value):
         return
     value["status"] = "running"
     for item in todo[:BATCH]:
-        latest = report(store.engine, build, step)
+        latest = report(store.engine, build, step, judgments=False)
         if (latest or {}).get("status") not in ("queued", "running"):
             raise graph_build.BuildStopped()
         result = judge(
@@ -977,6 +993,8 @@ def start(store, build_id, step, params, username, phase="scan"):
         "phase": phase,
         "params": params,
         "started_by": username,
+        # 参数变了不沿用判断：显式清空（报告里没有 judgments 键表示判断不变）。
+        "judgments": {},
         **kept,
     }
     write(store, build, step, fresh, "pending", "排队找可疑项（不调用模型）")
@@ -1176,7 +1194,9 @@ def auto_next(store, build, step):
             store, build, graph_build.review_report(store.engine, build)
         )
         return
-    if (report(store.engine, build, following) or {}).get("status") in (
+    if (report(store.engine, build, following, judgments=False) or {}).get(
+        "status"
+    ) in (
         "queued",
         "running",
         "rewriting",
@@ -1187,7 +1207,7 @@ def auto_next(store, build, step):
 
 # 写入图谱之后：正在写入的步骤回到可以决定；依赖它的后续步骤标成「需要重新检查」。
 def after_write(store, build, merge_report=None):
-    current = reports(store.engine, build)
+    current = reports(store.engine, build, judgments=False)
     written = [
         step
         for step, value in current.items()
@@ -1217,14 +1237,14 @@ def after_write(store, build, merge_report=None):
 def checking(engine, build):
     return any(
         (value or {}).get("status") == "rewriting"
-        for value in reports(engine, build).values()
+        for value in reports(engine, build, judgments=False).values()
     )
 
 
 def busy(engine, build):
     return any(
         (value or {}).get("status") in ("queued", "running", "rewriting")
-        for value in reports(engine, build).values()
+        for value in reports(engine, build, judgments=False).values()
     )
 
 

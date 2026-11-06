@@ -426,7 +426,7 @@ def build_router(current_user, identity, require_admin):
             build = graph_query.latest_build(connection, str(document_id))
         if not build:
             return {"build_id": None, "steps": {}}
-        items = graph_checks.reports(state.store.engine, build)
+        items = graph_checks.reports(state.store.engine, build, judgments="light")
         return {
             "build_id": build["id"],
             "can_confirm": row["owner"] == user["username"] or bool(user["is_admin"]),

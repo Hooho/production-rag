@@ -1,12 +1,29 @@
-from sqlalchemy import Boolean, Column, Float, Index, JSON, Integer, MetaData, String, Table, Text, UniqueConstraint, text
+from sqlalchemy import (
+    Boolean,
+    Column,
+    Float,
+    Index,
+    JSON,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+    text,
+)
 
 
 metadata = MetaData()
-sessions = Table("sessions", metadata,
+sessions = Table(
+    "sessions",
+    metadata,
     Column("id", String(36), primary_key=True),
     Column("owner", String(32), nullable=False),
 )
-runs = Table("runs", metadata,
+runs = Table(
+    "runs",
+    metadata,
     Column("id", String(36), primary_key=True),
     Column("session_id", String(36), nullable=False, index=True),
     Column("owner", String(32), nullable=False),
@@ -27,7 +44,9 @@ runs = Table("runs", metadata,
 )
 # 处理失败的问答。runs 只保存成功结果（同一 request_id 重放会直接返回它），
 # 失败以前只写日志，统计不出错误率，也看不到失败在哪个阶段；这里单独记录。
-run_errors = Table("run_errors", metadata,
+run_errors = Table(
+    "run_errors",
+    metadata,
     Column("id", String(36), primary_key=True),
     Column("request_id", String(36), nullable=False, index=True),
     Column("session_id", String(36), nullable=False),
@@ -42,7 +61,9 @@ run_errors = Table("run_errors", metadata,
     Column("created", String(32), nullable=False),
 )
 # 用户对一次回答的反馈，每次回答（runs.id）最多一条，重复提交覆盖。
-feedback = Table("feedback", metadata,
+feedback = Table(
+    "feedback",
+    metadata,
     Column("run_id", String(36), primary_key=True),
     Column("owner", String(32), nullable=False, index=True),
     Column("session_id", String(36), nullable=False),
@@ -75,7 +96,9 @@ def record_columns(required=True):
 # 订单。原来只有 id、owner、status、arrival 四列，只够演示"查自己的订单"；
 # 接入数据管理后补上客户、商品、数量、金额、下单日期，新增列都允许为空，旧订单不用补数据。
 # 金额用 Float 是为了和 SQLite 测试库兼容，真实财务系统应改用 Numeric 避免浮点误差。
-orders = Table("orders", metadata,
+orders = Table(
+    "orders",
+    metadata,
     Column("id", String(32), primary_key=True),
     Column("owner", String(32), nullable=False),
     Column("status", String(100), nullable=False),
@@ -89,7 +112,9 @@ orders = Table("orders", metadata,
 )
 # 下面是业务数据页的其余业务表，字段含义、校验规则和中文名在 app/business/definitions.py 里配置。
 # 日期统一存 YYYY-MM-DD 字符串，和项目里其他时间列的做法一致，按字符串比较即可排序和筛选。
-products = Table("products", metadata,
+products = Table(
+    "products",
+    metadata,
     Column("id", String(16), primary_key=True),
     Column("name", String(100), nullable=False),
     Column("category", String(50), nullable=False),
@@ -98,7 +123,9 @@ products = Table("products", metadata,
     Column("description", Text),
     *record_columns(),
 )
-customers = Table("customers", metadata,
+customers = Table(
+    "customers",
+    metadata,
     Column("id", String(16), primary_key=True),
     Column("name", String(50), nullable=False),
     Column("phone", String(20), nullable=False),
@@ -108,7 +135,9 @@ customers = Table("customers", metadata,
     *record_columns(),
 )
 # 同一商品在同一仓库只能有一条库存。因为是软删除，唯一性由代码检查（只看未删除的行），不用数据库唯一约束。
-inventory = Table("inventory", metadata,
+inventory = Table(
+    "inventory",
+    metadata,
     Column("id", String(16), primary_key=True),
     Column("product_id", String(16), nullable=False, index=True),
     Column("warehouse", String(20), nullable=False),
@@ -116,7 +145,9 @@ inventory = Table("inventory", metadata,
     Column("safety_stock", Integer, nullable=False),
     *record_columns(),
 )
-shipments = Table("shipments", metadata,
+shipments = Table(
+    "shipments",
+    metadata,
     Column("id", String(16), primary_key=True),
     Column("order_id", String(32), nullable=False, index=True),
     Column("carrier", String(20), nullable=False),
@@ -126,7 +157,9 @@ shipments = Table("shipments", metadata,
     Column("delivered_at", String(10)),
     *record_columns(),
 )
-after_sales = Table("after_sales", metadata,
+after_sales = Table(
+    "after_sales",
+    metadata,
     Column("id", String(16), primary_key=True),
     Column("order_id", String(32), nullable=False, index=True),
     Column("type", String(10), nullable=False),
@@ -137,7 +170,9 @@ after_sales = Table("after_sales", metadata,
     *record_columns(),
 )
 # product_id 为空表示全场活动。
-promotions = Table("promotions", metadata,
+promotions = Table(
+    "promotions",
+    metadata,
     Column("id", String(16), primary_key=True),
     Column("name", String(100), nullable=False),
     Column("type", String(10), nullable=False),
@@ -147,7 +182,9 @@ promotions = Table("promotions", metadata,
     Column("end_date", String(10), nullable=False),
     *record_columns(),
 )
-reviews = Table("reviews", metadata,
+reviews = Table(
+    "reviews",
+    metadata,
     Column("id", String(16), primary_key=True),
     Column("product_id", String(16), nullable=False, index=True),
     Column("customer_id", String(16), nullable=False, index=True),
@@ -158,7 +195,9 @@ reviews = Table("reviews", metadata,
 )
 # 部门对每种数据的操作权限。用户的权限是他所在各部门权限的并集，管理员拥有全部权限。
 # 权限每次请求都从这里读取，不写进 JWT：写进令牌的话，改了权限要等令牌过期才生效。
-data_permissions = Table("data_permissions", metadata,
+data_permissions = Table(
+    "data_permissions",
+    metadata,
     Column("group_id", String(32), primary_key=True),
     Column("data_type", String(32), primary_key=True),
     Column("can_read", Boolean, nullable=False, default=False),
@@ -167,7 +206,9 @@ data_permissions = Table("data_permissions", metadata,
     Column("can_delete", Boolean, nullable=False, default=False),
 )
 # 数据管理的操作记录：谁在什么时候对哪条数据做了什么，changes 保存新增或修改的字段值。
-data_audit = Table("data_audit", metadata,
+data_audit = Table(
+    "data_audit",
+    metadata,
     Column("id", String(36), primary_key=True),
     Column("data_type", String(32), nullable=False, index=True),
     Column("record_id", String(32), nullable=False),
@@ -176,7 +217,9 @@ data_audit = Table("data_audit", metadata,
     Column("changes", JSON),
     Column("created", String(32), nullable=False),
 )
-documents = Table("documents", metadata,
+documents = Table(
+    "documents",
+    metadata,
     Column("id", String(36), primary_key=True),
     Column("owner", String(32), nullable=False, index=True),
     Column("title", String(200), nullable=False),
@@ -199,7 +242,9 @@ documents = Table("documents", metadata,
 # 每份逻辑文档一行，只保存"当前版本"指针。检索只看这里指向的版本：
 # 切换版本只改这一行，单行更新天然原子，不会出现两个当前版本或没有当前版本的中间状态。
 # 只有版本处理成功后才写入这里，因此每一行都一定指向一个可用版本。
-document_heads = Table("document_heads", metadata,
+document_heads = Table(
+    "document_heads",
+    metadata,
     Column("doc_key", String(36), primary_key=True),
     Column("owner", String(32), nullable=False, index=True),
     Column("title", String(200), nullable=False),
@@ -209,7 +254,9 @@ document_heads = Table("document_heads", metadata,
     Column("listed", Boolean, nullable=False, default=True, server_default=text("1")),
     Column("updated", String(32), nullable=False),
 )
-chunks = Table("chunks", metadata,
+chunks = Table(
+    "chunks",
+    metadata,
     # 主键为"版本 id:序号"。以前用"用户+标题+全文+序号"的哈希，只要全文改一个字所有 ID 都变；
     # 现在每个版本的分片各占一行、互不覆盖，可以按版本整体删除。
     Column("id", String(64), primary_key=True),
@@ -221,7 +268,9 @@ chunks = Table("chunks", metadata,
     # 供评测标注、用户反馈长期对应同一段内容，以后做增量 embedding 也靠它找到可复用的向量。
     Column("chunk_key", String(64), index=True),
 )
-document_steps = Table("document_steps", metadata,
+document_steps = Table(
+    "document_steps",
+    metadata,
     Column("document_id", String(36), primary_key=True),
     Column("step_id", String(32), primary_key=True),
     Column("step_order", Integer, nullable=False),
@@ -233,7 +282,9 @@ document_steps = Table("document_steps", metadata,
     Column("duration_ms", Integer),
     Column("updated", String(32), nullable=False),
 )
-document_chunks = Table("document_chunks", metadata,
+document_chunks = Table(
+    "document_chunks",
+    metadata,
     Column("document_id", String(36), primary_key=True),
     Column("chunk_id", String(64), primary_key=True),
     Column("position", Integer),
@@ -242,7 +293,9 @@ document_chunks = Table("document_chunks", metadata,
 # 系统设置（目前只有聊天大模型配置）。原来模型只能写在 .env 里、改完要重启容器；
 # 存进 MySQL 后 API 保存即生效，worker 处理下一个文档时也能读到同一份配置。
 # 为了学习项目简单起见，密钥以明文保存；接口只返回脱敏后的值。
-settings = Table("settings", metadata,
+settings = Table(
+    "settings",
+    metadata,
     Column("key", String(64), primary_key=True),
     Column("value", JSON, nullable=False),
     Column("updated", String(32), nullable=False),
@@ -251,7 +304,9 @@ settings = Table("settings", metadata,
 # 登录用户。原来身份来自 .env 里给每个用户配置的 API Key：密钥不会过期、泄露后只能改配置重启，
 # 新增用户也要改配置。现在用户名密码登录后发放短期 JWT，用户存在数据库里，可以随时新增、停用。
 # username 同时就是各业务表里的 owner，已有数据不用迁移。
-users = Table("users", metadata,
+users = Table(
+    "users",
+    metadata,
     Column("username", String(32), primary_key=True),
     # scrypt 哈希，格式见 app/auth.py，不保存明文密码。
     Column("password_hash", String(255), nullable=False),
@@ -260,17 +315,23 @@ users = Table("users", metadata,
     Column("created", String(32), nullable=False),
 )
 # 部门（用户组），文档可以共享给一个或多个部门。
-user_groups = Table("user_groups", metadata,
+user_groups = Table(
+    "user_groups",
+    metadata,
     Column("id", String(32), primary_key=True),
     Column("name", String(100), nullable=False),
 )
-user_group_members = Table("user_group_members", metadata,
+user_group_members = Table(
+    "user_group_members",
+    metadata,
     Column("username", String(32), primary_key=True),
     Column("group_id", String(32), primary_key=True, index=True),
 )
 # 刷新令牌。访问令牌（JWT）只有 30 分钟有效期、服务端不保存；刷新令牌有效期长，
 # 因此保存在服务端，才能在退出登录、改密码、停用用户时让它立即失效。只保存 sha256，数据库泄露也拿不到可用令牌。
-refresh_tokens = Table("refresh_tokens", metadata,
+refresh_tokens = Table(
+    "refresh_tokens",
+    metadata,
     Column("token_hash", String(64), primary_key=True),
     Column("username", String(32), nullable=False, index=True),
     Column("expires", String(32), nullable=False),
@@ -279,12 +340,16 @@ refresh_tokens = Table("refresh_tokens", metadata,
 )
 # 文档可见范围，按逻辑文档（doc_key）设置，所有版本共用。没有记录的文档按 private 处理，升级前的文档保持原来的"只有自己可见"。
 # private：只有上传者；shared：上传者和 document_shares 中的部门成员；public：所有登录用户。
-document_permissions = Table("document_permissions", metadata,
+document_permissions = Table(
+    "document_permissions",
+    metadata,
     Column("doc_key", String(36), primary_key=True),
     Column("visibility", String(16), nullable=False),
     Column("updated", String(32), nullable=False),
 )
-document_shares = Table("document_shares", metadata,
+document_shares = Table(
+    "document_shares",
+    metadata,
     Column("doc_key", String(36), primary_key=True),
     Column("group_id", String(32), primary_key=True, index=True),
 )
@@ -294,7 +359,9 @@ document_shares = Table("document_shares", metadata,
 #       version 公开文档的新版本（解析完先不切换，通过后才替换当前版本，没通过之前旧版本继续服务）。
 # status：pending 待审核、approved 已通过、rejected 未通过、cancelled 已撤回（上传者改了可见范围）、
 #         superseded 被同一文档更新的版本取代（只审最新的一版）。
-document_reviews = Table("document_reviews", metadata,
+document_reviews = Table(
+    "document_reviews",
+    metadata,
     Column("id", String(36), primary_key=True),
     Column("doc_key", String(36), nullable=False, index=True),
     Column("kind", String(16), nullable=False),
@@ -314,7 +381,9 @@ document_reviews = Table("document_reviews", metadata,
 
 # 知识巡检：定期从问答日志里收集问题（拒答、资料不足、差评、处理失败），合并成待处理清单，只有管理员可见。
 # 每次巡检一行，记录时间窗口、执行状态和各类问题数量。
-inspection_runs = Table("inspection_runs", metadata,
+inspection_runs = Table(
+    "inspection_runs",
+    metadata,
     Column("id", String(36), primary_key=True),
     Column("status", String(16), nullable=False),
     # cli 表示命令行（定时任务）发起，api 表示管理员在页面上发起。
@@ -331,7 +400,9 @@ inspection_runs = Table("inspection_runs", metadata,
 # kind：knowledge_gap 知识缺口（答不上来），suspect_content 可疑内容（被引用却常收到差评），system_error 系统问题。
 # status：open 待处理；handled 管理员已处理、等待验证；resolved 已解决；ignored 已忽略。
 # handled、resolved 之后又出现新的同类问答会自动重新打开；ignored 不会。
-inspection_issues = Table("inspection_issues", metadata,
+inspection_issues = Table(
+    "inspection_issues",
+    metadata,
     Column("id", String(36), primary_key=True),
     Column("fingerprint", String(64), nullable=False, unique=True),
     Column("kind", String(32), nullable=False, index=True),
@@ -361,7 +432,9 @@ inspection_issues = Table("inspection_issues", metadata,
 )
 # 问题与原始记录的关联：source 为 run（runs.id）或 error（run_errors.id）。
 # 同一条问答只会挂到同一个问题一次，重复巡检不会重复计数。
-inspection_issue_events = Table("inspection_issue_events", metadata,
+inspection_issue_events = Table(
+    "inspection_issue_events",
+    metadata,
     Column("issue_id", String(36), primary_key=True),
     Column("source", String(16), primary_key=True),
     Column("source_id", String(36), primary_key=True, index=True),
@@ -375,7 +448,9 @@ inspection_issue_events = Table("inspection_issue_events", metadata,
 # 巡检复测集：管理员自建、自定义名字的评测集，题目多数从知识巡检的问题加入。
 # 和调参评测集、专项评测集不同：那两种跑在隔离的评测语料上；
 # 巡检复测集的题目是真实用户的提问，按提问人的权限在线上知识库里跑，内容随知识库变化，所以存数据库、不进代码仓库。
-eval_sets = Table("eval_sets", metadata,
+eval_sets = Table(
+    "eval_sets",
+    metadata,
     Column("id", String(36), primary_key=True),
     Column("name", String(100), nullable=False, unique=True),
     Column("description", String(500)),
@@ -386,7 +461,9 @@ eval_sets = Table("eval_sets", metadata,
 # 巡检复测集的题目。expect：answer 应该回答，refuse 应该拒答。
 # documents 是期望命中的文档 [{doc_key, title}]，用 doc_key 而不是分片：文档更新版本后分片会变，doc_key 不变。
 # issue_id 记录题目来自哪个巡检问题，同一个问题在同一个评测集里只加一次。
-eval_set_items = Table("eval_set_items", metadata,
+eval_set_items = Table(
+    "eval_set_items",
+    metadata,
     Column("id", String(36), primary_key=True),
     Column("set_id", String(36), nullable=False, index=True),
     Column("question", Text, nullable=False),
@@ -400,7 +477,9 @@ eval_set_items = Table("eval_set_items", metadata,
     Column("created", String(32), nullable=False),
 )
 # 巡检复测集的每次运行。kind：retrieval 只检索，generation 完整问一遍再判断；results 是逐题结果。
-eval_set_runs = Table("eval_set_runs", metadata,
+eval_set_runs = Table(
+    "eval_set_runs",
+    metadata,
     Column("id", String(36), primary_key=True),
     Column("set_id", String(36), nullable=False, index=True),
     Column("kind", String(16), nullable=False),
@@ -417,7 +496,9 @@ eval_set_runs = Table("eval_set_runs", metadata,
 # 以前放在 eval/dataset.jsonl 里随代码提交；现在存数据库，在页面上增删改、审核都不用改文件，
 # 首次启动时从 eval/seed/dataset.jsonl 导入（见 app/evaluation/dataset.py 的 seed_eval_data）。
 # 题目字段（问题、题型、证据、标准答案、追问历史、同义改写题对……）整体放在 data 里，id 是 q01、u01 这样的编号。
-eval_items = Table("eval_items", metadata,
+eval_items = Table(
+    "eval_items",
+    metadata,
     Column("id", String(16), primary_key=True),
     Column("position", Integer, nullable=False),
     Column("data", JSON, nullable=False),
@@ -426,7 +507,9 @@ eval_items = Table("eval_items", metadata,
 )
 # 专项评测集：管理员自建，每个专项针对一个方向（例如分片超长被截断、多轮对话记忆），题目只属于这个专项，
 # 不计入调参分数。method 是评测方式：retrieval 只检索，answer 完整回答再评审，dialogue 按顺序问完一段对话。
-eval_suites = Table("eval_suites", metadata,
+eval_suites = Table(
+    "eval_suites",
+    metadata,
     Column("id", String(36), primary_key=True),
     Column("name", String(64), nullable=False, unique=True),
     Column("description", String(500)),
@@ -439,7 +522,9 @@ eval_suites = Table("eval_suites", metadata,
 )
 # 专项的题目，字段随评测方式不同放在 data 里：
 #   retrieval：question、evidence；answer：再加 reference_answer；dialogue：turns、question、reference_answer。
-eval_suite_items = Table("eval_suite_items", metadata,
+eval_suite_items = Table(
+    "eval_suite_items",
+    metadata,
     Column("id", String(36), primary_key=True),
     Column("suite_id", String(36), nullable=False, index=True),
     Column("position", Integer, nullable=False),
@@ -451,7 +536,9 @@ eval_suite_items = Table("eval_suite_items", metadata,
 
 # 评测记录（调参评测和专项评测）：编号是"日期时间_提交号"；brief 是列表要用的概要（配置、总览指标、进度），
 # data 是完整结果（含逐题明细，可能有几兆）。以前存成 eval/results 下的 JSON 文件，首次启动时导入。
-eval_runs = Table("eval_runs", metadata,
+eval_runs = Table(
+    "eval_runs",
+    metadata,
     Column("id", String(64), primary_key=True),
     Column("kind", String(16), nullable=False),
     Column("status", String(16), nullable=False),
@@ -464,7 +551,9 @@ eval_runs = Table("eval_runs", metadata,
 # 评测用的查询改写缓存：评测的固定流程和线上一样先让大模型改写（补全问题、生成检索词），
 # 但每次改写结果可能不同，两次评测的第一次检索就没法比。这里按"题目 + 追问历史 + 意图提示词版本 + 模型"存下第一次改写，
 # 以后同样的键直接复用；改了提示词或换了模型，键就变了，自动重新改写。只缓存大模型的改写（规则和小模型本来就稳定）。
-eval_query_cache = Table("eval_query_cache", metadata,
+eval_query_cache = Table(
+    "eval_query_cache",
+    metadata,
     Column("cache_key", String(64), primary_key=True),
     Column("question", Text, nullable=False),
     Column("prompt_tag", String(64), nullable=False),
@@ -478,7 +567,9 @@ eval_query_cache = Table("eval_query_cache", metadata,
 
 # 评测语料库（见 app/evaluation/corpus.py）：评测检索的文档。上传的 Markdown / 文本存上传目录的 eval_corpus 下，
 # 初始语料（eval/seed/corpus）第一次用到时也复制进来，和上传的一样。评测开跑时勾选用哪几份，只导入、只检索勾选的。
-eval_corpus = Table("eval_corpus", metadata,
+eval_corpus = Table(
+    "eval_corpus",
+    metadata,
     Column("id", String(36), primary_key=True),
     # 标题用文件名（去掉扩展名），也是导入评测账号后的文档标题，所以不能重名
     Column("title", String(200), nullable=False, unique=True),
@@ -493,7 +584,9 @@ eval_corpus = Table("eval_corpus", metadata,
 
 # 提示词版本（见 app/prompts.py）：每次在「提示词」页保存生成一个新版本，只增不改；
 # 当前使用哪个版本存在 settings 表（key = prompts），回滚只改那里。内置版本（v0）在代码里，不存这张表。
-prompt_versions = Table("prompt_versions", metadata,
+prompt_versions = Table(
+    "prompt_versions",
+    metadata,
     Column("prompt_id", String(32), primary_key=True),
     Column("version", Integer, primary_key=True, autoincrement=False),
     Column("text", Text, nullable=False),
@@ -505,7 +598,9 @@ prompt_versions = Table("prompt_versions", metadata,
 # Agent 模式的执行记录（见 app/agentic）。一次问答在 runs 里照样有一行（会话历史、记忆、反馈都靠它），
 # 这里另外记 Agent 自己的统计和每一轮的细节：runs.response 只放答案和步骤摘要，每轮的原始响应、工具结果很大，
 # 放进 response 会让读会话历史变慢，所以拆到 agent_rounds，执行链展开时再按 run_id 读取。
-agent_runs = Table("agent_runs", metadata,
+agent_runs = Table(
+    "agent_runs",
+    metadata,
     # 和 runs.id 相同（request_id）；失败的问答在 runs 里没有记录，这里仍然有，已经跑完的轮次可以查看。
     Column("id", String(36), primary_key=True),
     Column("session_id", String(36), nullable=False),
@@ -530,7 +625,9 @@ agent_runs = Table("agent_runs", metadata,
     Index("ix_agent_runs_owner_created", "owner", "created"),
 )
 # 每一轮一行：record 是 app/agentic/loop.py 整理的整轮记录（本轮新增消息、原始响应、推理过程、工具调用和返回、引用检查）。
-agent_rounds = Table("agent_rounds", metadata,
+agent_rounds = Table(
+    "agent_rounds",
+    metadata,
     Column("run_id", String(36), primary_key=True),
     Column("round", Integer, primary_key=True, autoincrement=False),
     Column("kind", String(16), nullable=False),
@@ -542,7 +639,9 @@ agent_rounds = Table("agent_rounds", metadata,
 # 两个库没法放进同一个事务。做法是写 runs 时在同一个 MySQL 事务里插入一条“待写入会话记忆”的任务，
 # 提交后立刻写会话记忆并标记完成；写失败就留着 pending，下次这个会话提问前先补写。
 # 这样 runs 有的问答，会话记忆最终一定有；runs 没写成，会话记忆也一定没有。写入按 request_id 幂等，重试不会重复。
-memory_outbox = Table("memory_outbox", metadata,
+memory_outbox = Table(
+    "memory_outbox",
+    metadata,
     # 和 runs.id 相同（request_id）。
     Column("request_id", String(36), primary_key=True),
     Column("owner", String(32), nullable=False),
@@ -562,7 +661,9 @@ memory_outbox = Table("memory_outbox", metadata,
 # 抽取和归属分开存：graph_chunk_extractions、graph_mentions 的原名、graph_relations 只在建图时写入；
 # 「这个名字归到哪个实体」只记在 graph_mentions.entity_id，合并、拆分只改这一列，关系表不动、也不用重新调用模型。
 # 清单：抽哪些实体类型、关系分为哪几类。内置的默认清单由代码写入（app/graph/schemas.py）。
-graph_schemas = Table("graph_schemas", metadata,
+graph_schemas = Table(
+    "graph_schemas",
+    metadata,
     Column("id", String(36), primary_key=True),
     Column("name", String(100), nullable=False),
     # default：内置；recommended：模型推荐；custom：自定义（后两种第 4 期才有）
@@ -577,7 +678,9 @@ graph_schemas = Table("graph_schemas", metadata,
 )
 # 一次建图：给某个文档版本按某份清单、某个模型、某个提示词版本抽一遍。同一份文档在同一个图谱空间里只有一次是 active，
 # 查询只用 active 的；旧的建图记录和结果保留，方便对比。space 是图谱空间：线上是 online，评测以后各用各的。
-graph_builds = Table("graph_builds", metadata,
+graph_builds = Table(
+    "graph_builds",
+    metadata,
     Column("id", String(36), primary_key=True),
     Column("space", String(64), nullable=False),
     Column("document_id", String(36), nullable=False),
@@ -611,7 +714,9 @@ graph_builds = Table("graph_builds", metadata,
     Index("ix_graph_builds_doc_key", "space", "doc_key"),
 )
 # 每个分片的抽取结果：发给模型的完整内容、原始输出、解析后的实体和关系。cache_key 相同（分片文字、清单、模型、提示词都一样）时直接复用。
-graph_chunk_extractions = Table("graph_chunk_extractions", metadata,
+graph_chunk_extractions = Table(
+    "graph_chunk_extractions",
+    metadata,
     Column("id", String(36), primary_key=True),
     Column("build_id", String(36), nullable=False),
     Column("document_id", String(36), nullable=False),
@@ -636,7 +741,9 @@ graph_chunk_extractions = Table("graph_chunk_extractions", metadata,
     Index("ix_graph_extractions_cache", "cache_key"),
 )
 # 合并后的实体。merge_key = 类型|规范化后的标准名，同一个空间里唯一。
-graph_entities = Table("graph_entities", metadata,
+graph_entities = Table(
+    "graph_entities",
+    metadata,
     Column("id", String(36), primary_key=True),
     Column("space", String(64), nullable=False),
     Column("name", String(200), nullable=False),
@@ -650,7 +757,9 @@ graph_entities = Table("graph_entities", metadata,
     UniqueConstraint("space", "merge_key", name="uq_graph_entities_space_key"),
 )
 # 名字的每一次出现：原文里的写法、模型给的标准名、类型、描述，以及归到哪个实体（entity_id，可以重新计算）。
-graph_mentions = Table("graph_mentions", metadata,
+graph_mentions = Table(
+    "graph_mentions",
+    metadata,
     Column("id", String(36), primary_key=True),
     Column("build_id", String(36), nullable=False),
     Column("extraction_id", String(36), nullable=False),
@@ -669,7 +778,9 @@ graph_mentions = Table("graph_mentions", metadata,
     Index("ix_graph_mentions_chunk", "chunk_id"),
 )
 # 关系：起点、终点都指向名字（graph_mentions），不直接指向实体。
-graph_relations = Table("graph_relations", metadata,
+graph_relations = Table(
+    "graph_relations",
+    metadata,
     Column("id", String(36), primary_key=True),
     Column("build_id", String(36), nullable=False),
     Column("extraction_id", String(36), nullable=False),
@@ -688,7 +799,9 @@ graph_relations = Table("graph_relations", metadata,
     Index("ix_graph_relations_target", "target_mention_id"),
 )
 # 合并记录：每个名字归到了哪个实体、用的什么方法、是新建还是并入已有实体。
-graph_merges = Table("graph_merges", metadata,
+graph_merges = Table(
+    "graph_merges",
+    metadata,
     Column("id", String(36), primary_key=True),
     Column("space", String(64), nullable=False),
     Column("build_id", String(36)),
@@ -705,7 +818,9 @@ graph_merges = Table("graph_merges", metadata,
     Index("ix_graph_merges_entity", "entity_id"),
 )
 # 别名表：确认过的规则（别名 → 实体）。第 1 期只建表，维护界面在第 3 期。
-graph_aliases = Table("graph_aliases", metadata,
+graph_aliases = Table(
+    "graph_aliases",
+    metadata,
     Column("id", String(36), primary_key=True),
     Column("space", String(64), nullable=False),
     Column("alias", String(200), nullable=False),
@@ -720,7 +835,9 @@ graph_aliases = Table("graph_aliases", metadata,
 )
 
 # 建图开始时固定输入配置，后续批次和重试均读取同一份快照。
-graph_build_inputs = Table("graph_build_inputs", metadata,
+graph_build_inputs = Table(
+    "graph_build_inputs",
+    metadata,
     Column("build_id", String(36), primary_key=True),
     Column("system_prompt", Text, nullable=False),
     Column("schema_snapshot", JSON, nullable=False),
@@ -729,7 +846,9 @@ graph_build_inputs = Table("graph_build_inputs", metadata,
 # 图谱版本：每次写入图谱（建图、补跑、图谱检查确认写入）都存成一个版本。
 # 名字、关系、合并记录三张表的 build_id 列存的是版本 id；一次建图的第一个版本 id 和建图 id 相同。
 # active：这份文档（doc_key）在检索里生效的版本，同一 doc_key 只有一个；检查写入的版本要手动设为生效。
-graph_versions = Table("graph_versions", metadata,
+graph_versions = Table(
+    "graph_versions",
+    metadata,
     Column("id", String(36), primary_key=True),
     Column("build_id", String(36), nullable=False),
     Column("space", String(64), nullable=False),
@@ -747,4 +866,26 @@ graph_versions = Table("graph_versions", metadata,
     Index("ix_graph_versions_document", "document_id"),
     Index("ix_graph_versions_doc_key", "space", "doc_key"),
     Index("ix_graph_versions_build", "build_id"),
+)
+# 图谱检查各步（补抽、关系核对、类型核对、拆分、检查漏合并）的 AI 判断，每项一行。
+# 以前整份判断（连同每条的 prompt 和模型原始输出）存在 document_steps.result 这一个 JSON 里，
+# 每判断完一项就把整份重写一遍：几百项后一行好几 MB，每次 COMMIT 都很慢，排在后面的登录等小事务也会超时。
+# 现在每判断完一项只写这一行；document_steps.result 里不再存 judgments，读报告时再拼回去。
+# 和 document_steps 一样每份文档每步只保留一份（最近一次建图的），换了建图就删掉旧的。
+graph_step_judgments = Table(
+    "graph_step_judgments",
+    metadata,
+    Column("document_id", String(36), primary_key=True),
+    Column("step_id", String(32), primary_key=True),
+    Column("item_id", String(128), primary_key=True),
+    Column("build_id", String(36), nullable=False),
+    # 在报告里的顺序（检查漏合并的判断是列表）
+    Column("position", Integer, nullable=False),
+    # 这一行内容的哈希：保存报告时只写变了的行
+    Column("digest", String(64), nullable=False),
+    # 判断结果（状态、决定、用量、耗时……），不含 prompt 和模型原始输出
+    Column("data", JSON, nullable=False),
+    # prompt 和模型原始输出：只在打开详情时读
+    Column("trace", JSON),
+    Column("updated", String(40), nullable=False),
 )
