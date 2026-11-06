@@ -317,7 +317,7 @@ def test_review_runs_after_write_then_rewrites_with_decisions(monkeypatch):
     )
     # 开了自动检查（GRAPH_REVIEW_AUTO=1）时：建图写入后排队二次检查，不改建图状态。
     monkeypatch.setattr(build, "REVIEW_AUTO", True)
-    build.after_write(store, row, None, None)
+    build.auto_review(store, row)
     assert queue == ["b1"]
     build.run_review_job(store, fake_models, "b1")
     report = build.review_report(db, row)

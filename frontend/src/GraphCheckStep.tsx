@@ -3,7 +3,9 @@ import {
   checkAction,
   decideCheck,
   getCheckDetail,
+  getLLMSettings,
   startCheck,
+  type LLMProfile,
   type CheckJudgment,
   type CheckReport,
   type CheckStepName,
@@ -112,6 +114,14 @@ export function GraphCheckStep({
   const [filter, setFilter] = useState<"pending" | "all">("pending");
   const [scope, setScope] = useState<"few" | "all">("few");
   const [sample, setSample] = useState(0);
+  // 检查用的模型：空 = 和建图时一样。
+  const [profiles, setProfiles] = useState<LLMProfile[]>([]);
+  const [provider, setProvider] = useState("");
+  useEffect(() => {
+    getLLMSettings()
+      .then((value) => setProfiles(value?.profiles ?? []))
+      .catch(() => undefined);
+  }, []);
   const [now, setNow] = useState(() => Date.now());
   const busy = action !== null;
   const report = data?.report ?? null;
@@ -170,9 +180,13 @@ export function GraphCheckStep({
     run(
       "start",
       async () => {
+        const profile = profiles.find((item) => item.provider === provider);
         await startCheck(documentId, step, buildId, {
           ...(step === "glean" ? { scope } : {}),
           ...(step === "relation" && sample > 0 ? { sample } : {}),
+          ...(profile
+            ? { llm: { provider: profile.provider, model: profile.model } }
+            : {}),
         });
         setSub(1);
       },
@@ -248,6 +262,23 @@ export function GraphCheckStep({
             {[0, 5, 10, 20, 50, 100].map((value) => (
               <option key={value} value={value}>
                 {value === 0 ? "不抽查" : `${value}%`}
+              </option>
+            ))}
+          </select>
+        </p>
+      )}
+      {profiles.length > 0 && (
+        <p className="gc-options">
+          AI 判断用的模型：
+          <select
+            value={provider}
+            onChange={(event) => setProvider(event.target.value)}
+          >
+            <option value="">和建图时一样</option>
+            {profiles.map((item) => (
+              <option key={item.provider} value={item.provider}>
+                {item.provider} · {item.model}
+                {item.is_active ? "（当前启用）" : ""}
               </option>
             ))}
           </select>

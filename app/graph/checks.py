@@ -846,6 +846,8 @@ def run(store, models, build, step, value):
             else "没有发现可疑项",
             "pending" if todo else "completed",
         )
+        if not total:
+            auto_next(store, build, step)
         return
     value["status"] = "running"
     for item in todo[:BATCH]:
@@ -872,6 +874,8 @@ def run(store, models, build, step, value):
         return
     value["status"] = "ready"
     save_progress(store, build, step, value, f"AI 判断完成：{total} 项", "completed")
+    if not total:
+        auto_next(store, build, step)
 
 
 # ---------- 人的操作 ----------
@@ -887,7 +891,7 @@ def load(store, build_id, step, states=None):
     return build, value
 
 
-def start(store, build_id, step, params, username):
+def start(store, build_id, step, params, username, phase="scan"):
     build, value = load(store, build_id, step)
     if (value or {}).get("status") in ("queued", "running", "rewriting"):
         raise CheckError("这一步正在检查，不能重复开始")
@@ -907,7 +911,7 @@ def start(store, build_id, step, params, username):
         "build_id": build_id,
         "step": step,
         "status": "queued",
-        "phase": "scan",
+        "phase": phase,
         "params": params,
         "started_by": username,
         **kept,
@@ -1072,7 +1076,30 @@ def skip(store, build_id, step, username):
         "skipped_by": username,
     }
     write(store, build, step, value, "completed", "已跳过")
+    auto_next(store, build, step)
     return value
+
+
+# 开了自动检查（GRAPH_REVIEW_AUTO=1）：一步写入、跳过或没有可疑项后，自动开始下一步的找可疑项和 AI 判断。
+def auto_next(store, build, step):
+    if not graph_build.REVIEW_AUTO:
+        return
+    index = ORDER.index(step) + 1
+    if index >= len(ORDER):
+        return
+    following = ORDER[index]
+    if following == "merge":
+        graph_build.auto_review(
+            store, build, graph_build.review_report(store.engine, build)
+        )
+        return
+    if (report(store.engine, build, following) or {}).get("status") in (
+        "queued",
+        "running",
+        "rewriting",
+    ):
+        return
+    start(store, build["id"], following, {}, "system", phase="judge")
 
 
 # 写入图谱之后：正在写入的步骤回到可以决定；依赖它的后续步骤标成「需要重新检查」。
@@ -1098,6 +1125,9 @@ def after_write(store, build, merge_report=None):
             changed = True
         if changed:
             write(store, build, step, value, "completed", progress_text(value))
+    for step in written:
+        if step != "merge":
+            auto_next(store, build, step)
     return "merge" in stale
 
 

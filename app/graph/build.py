@@ -1179,15 +1179,28 @@ def after_write(store, build, report, records):
             "未开始：在「图谱检查」里点开始检查（不影响已写入的图谱）",
         )
         return
-    # 保留原报告（模型判断、人工决定）：抽取结果没变时直接沿用，不重复调用模型。
+    # 自动检查：从第 1 步（补抽）开始，每一步找完可疑项直接让 AI 判断，停下等人决定；
+    # 人确认写入或跳过一步后，自动开始下一步（checks.auto_next）。
+    # （建图开始时只写了一个占位的 {"build_id"}，没有 status，也算没检查过。）
+    if not (report or {}).get("status") and not any(
+        checks.reports(store.engine, build).values()
+    ):
+        checks.start(store, build["id"], "glean", {}, "system", phase="judge")
+        return
+    auto_review(store, build, report)
+
+
+# 自动开始合并这一步：保留原报告（模型判断、人工决定），抽取结果没变时直接沿用，不重复调用模型。
+def auto_review(store, build, report=None):
     queued = {
         **(report or {}),
         "build_id": build["id"],
         "status": "queued",
         "phase": "judge",
+        "stale": False,
     }
     _review_step(
-        store, build, queued, "pending", "排队等待二次检查（不影响已写入的图谱）"
+        store, build, queued, "pending", "排队等待检查合并（不影响已写入的图谱）"
     )
     enqueue(store, build["id"], "review")
 

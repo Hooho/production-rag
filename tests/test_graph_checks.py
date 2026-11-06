@@ -255,3 +255,20 @@ def test_relation_check_end_to_end(setup, monkeypatch):
     )
     assert response.status_code == 200
     assert graph_build.checking_document  # 函数存在
+
+
+# 自动检查：建图写入后从第 1 步开始，没有可疑项的步骤自动进入下一步。
+def test_auto_check_starts_from_first_step(setup, monkeypatch):
+    client, store = setup
+    models = enable_model(client)
+    monkeypatch.setattr(graph_build, "REVIEW_AUTO", True)
+    document_id = add_document(client)
+    assert build(client, document_id).status_code == 202
+    run_graph_jobs(store, models)
+    steps = client.get(
+        f"/documents/{document_id}/graph/check", headers=headers()
+    ).json()["steps"]
+    # 每片都抽出了两个以上的实体：补抽没有可疑项；关系引用都在原文里：关系核对也没有；都自动往下走了。
+    assert steps["glean"]["status"] == "ready" and steps["glean"]["count"] == 0
+    assert steps["relation"]["status"] == "ready" and steps["relation"]["count"] == 0
+    assert steps["type"]["status"] != "idle"
