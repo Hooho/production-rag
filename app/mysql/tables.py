@@ -725,3 +725,26 @@ graph_build_inputs = Table("graph_build_inputs", metadata,
     Column("system_prompt", Text, nullable=False),
     Column("schema_snapshot", JSON, nullable=False),
 )
+
+# 图谱版本：每次写入图谱（建图、补跑、图谱检查确认写入）都存成一个版本。
+# 名字、关系、合并记录三张表的 build_id 列存的是版本 id；一次建图的第一个版本 id 和建图 id 相同。
+# active：这份文档（doc_key）在检索里生效的版本，同一 doc_key 只有一个；检查写入的版本要手动设为生效。
+graph_versions = Table("graph_versions", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("build_id", String(36), nullable=False),
+    Column("space", String(64), nullable=False),
+    Column("document_id", String(36), nullable=False),
+    Column("doc_key", String(36), nullable=False),
+    Column("number", Integer, nullable=False),
+    Column("active", Boolean, nullable=False, default=False),
+    # build：建图写入；retry：补跑分片后写入；check：图谱检查确认写入
+    Column("origin", String(16), nullable=False),
+    # 实体数、关系数、名字数，以及这次写入改了什么（changes）
+    Column("summary", JSON),
+    Column("note", String(500)),
+    Column("created_by", String(32), nullable=False),
+    Column("created", String(40), nullable=False),
+    Index("ix_graph_versions_document", "document_id"),
+    Index("ix_graph_versions_doc_key", "space", "doc_key"),
+    Index("ix_graph_versions_build", "build_id"),
+)

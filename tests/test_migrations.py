@@ -18,7 +18,7 @@ NEW_TABLES = {"users", "user_groups", "user_group_members", "refresh_tokens", "d
     "eval_sets", "eval_set_items", "eval_set_runs", "eval_items", "eval_suites", "eval_suite_items", "eval_runs", "prompt_versions",
     "document_reviews", "agent_runs", "agent_rounds", "memory_outbox", "eval_query_cache", "eval_corpus",
     "graph_schemas", "graph_builds", "graph_chunk_extractions", "graph_entities", "graph_mentions", "graph_relations",
-    "graph_merges", "graph_aliases", "graph_build_inputs"}
+    "graph_merges", "graph_aliases", "graph_build_inputs", "graph_versions"}
 
 
 # 指向临时 SQLite 库的 Alembic 配置。

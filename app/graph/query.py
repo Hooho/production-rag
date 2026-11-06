@@ -16,8 +16,10 @@ from ..mysql.tables import (
     graph_merges,
     graph_relations,
     graph_schemas,
+    graph_versions,
     users,
 )
+from . import versions
 from .build import build_view
 from .schemas import ONLINE_SPACE
 
@@ -54,6 +56,20 @@ def latest_build(connection, document_id, space=ONLINE_SPACE):
         if row["active"]:
             return dict(row)
     return dict(newest)
+
+
+def version_view(row):
+    return {
+        "id": row["id"],
+        "build_id": row["build_id"],
+        "number": row["number"],
+        "active": bool(row["active"]),
+        "origin": row["origin"],
+        "summary": row["summary"] or {},
+        "note": row["note"],
+        "created_by": row["created_by"],
+        "created": row["created"],
+    }
 
 
 def schema_name(connection, schema_id):
@@ -353,6 +369,7 @@ def document_graph(
     focus=None,
     center=None,
     limit=NETWORK_LIMIT,
+    version_id=None,
 ):
     with engine.connect() as connection:
         build = latest_build(connection, document_id)
@@ -369,7 +386,15 @@ def document_graph(
         ]
         summary = build_summary(connection, build)
         if build is None:
-            return {"build": None, "history": history}
+            return {"build": None, "history": history, "versions": []}
+        # 名字、关系、合并记录按版本读：默认显示生效版本，也可以指定一个版本查看。
+        shown = versions.display(connection, build, version_id)
+        if version_id and shown is None:
+            raise ValueError("版本不存在")
+        read_id = shown["id"] if shown else build["id"]
+        version_list = [
+            version_view(row) for row in versions.listing(connection, document_id)
+        ]
         status_counts = dict(
             connection.execute(
                 select(graph_chunk_extractions.c.status, func.count())
@@ -385,14 +410,14 @@ def document_graph(
                 graph_chunk_extractions.c.status.in_(("extracted", "reused")),
                 ~graph_chunk_extractions.c.id.in_(
                     select(graph_mentions.c.extraction_id).where(
-                        graph_mentions.c.build_id == build["id"]
+                        graph_mentions.c.build_id == read_id
                     )
                 ),
             )
         ).scalar_one()
-        entities = entity_rows(connection, [build["id"]])
-        relations = relation_rows(connection, [build["id"]])
-        merges = merge_rows(connection, build["id"]) if view == "merges" else None
+        entities = entity_rows(connection, [read_id])
+        relations = relation_rows(connection, [read_id])
+        merges = merge_rows(connection, read_id) if view == "merges" else None
     type_counts = {}
     for row in entities:
         type_counts[row["type"]] = type_counts.get(row["type"], 0) + 1
@@ -402,6 +427,8 @@ def document_graph(
     result = {
         "build": summary,
         "history": history,
+        "version": version_view(shown) if shown else None,
+        "versions": version_list,
         "stats": {
             "entity_count": len(entities),
             "relation_count": len(relations),
@@ -639,7 +666,7 @@ def chunk_graph(engine, document_id, chunk_ids):
                     )
                 )
                 .where(
-                    graph_mentions.c.build_id == build["id"],
+                    graph_mentions.c.build_id == versions.read_id(connection, build),
                     graph_mentions.c.chunk_id.in_(chunk_ids),
                 )
             )
@@ -744,20 +771,23 @@ def chunk_status_filter(engine, document_id, status):
     return (groups.get(status) if status else None), counts
 
 
-# 全局可见的建图：每份文档当前版本上生效的那一次（下架的也算，管理员要能维护）。
+# 全局可见的图谱：每份文档当前版本上生效的那个图谱版本（下架的也算，管理员要能维护）。
+# 返回的 id 是版本 id，名字、关系按它读。
 def visible_builds(connection, space=ONLINE_SPACE, document_id=None):
     query = (
-        select(graph_builds.c.id, graph_builds.c.document_id, document_heads.c.title)
+        select(
+            graph_versions.c.id, graph_versions.c.document_id, document_heads.c.title
+        )
         .select_from(
-            graph_builds.join(
+            graph_versions.join(
                 document_heads,
-                document_heads.c.current_document_id == graph_builds.c.document_id,
+                document_heads.c.current_document_id == graph_versions.c.document_id,
             )
         )
-        .where(graph_builds.c.space == space, graph_builds.c.active.is_(True))
+        .where(graph_versions.c.space == space, graph_versions.c.active.is_(True))
     )
     if document_id:
-        query = query.where(graph_builds.c.document_id == document_id)
+        query = query.where(graph_versions.c.document_id == document_id)
     return [dict(row._mapping) for row in connection.execute(query).all()]
 
 
@@ -817,7 +847,7 @@ def count_by(rows, key):
 
 
 # 实体详情：所有名字（各自出自哪片、怎么合并的）、出现在哪些文档、全部关系。document_id 给了就只看这份文档。
-def entity_detail(engine, entity_id, document_id=None):
+def entity_detail(engine, entity_id, document_id=None, version_id=None):
     with engine.connect() as connection:
         entity = (
             connection.execute(
@@ -831,7 +861,13 @@ def entity_detail(engine, entity_id, document_id=None):
         if document_id:
             build = latest_build(connection, document_id)
             builds = (
-                [{"id": build["id"], "document_id": document_id, "title": None}]
+                [
+                    {
+                        "id": versions.read_id(connection, build, version_id),
+                        "document_id": document_id,
+                        "title": None,
+                    }
+                ]
                 if build
                 else []
             )
@@ -1038,11 +1074,15 @@ def tasks(engine, space=ONLINE_SPACE):
     return result
 
 
-def edge_relations(engine, source_id, target_id, document_id=None, category=None):
+def edge_relations(
+    engine, source_id, target_id, document_id=None, category=None, version_id=None
+):
     with engine.connect() as connection:
         if document_id:
             build = latest_build(connection, document_id)
-            build_ids = [build["id"]] if build else []
+            build_ids = (
+                [versions.read_id(connection, build, version_id)] if build else []
+            )
         else:
             build_ids = [row["id"] for row in visible_builds(connection)]
         rows = [

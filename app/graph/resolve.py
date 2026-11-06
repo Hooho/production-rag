@@ -6,11 +6,11 @@ from sqlalchemy import and_, delete, exists, or_, select
 from ..mysql.tables import (
     graph_aliases,
     documents,
-    graph_builds,
     graph_entities,
     graph_mentions,
     graph_merges,
     graph_relations,
+    graph_versions,
 )
 from .schemas import now
 
@@ -187,13 +187,13 @@ def prepare_build(connection, space, build_id, extractions, created_by="system")
                                     documents,
                                     documents.c.id == graph_mentions.c.document_id,
                                 ).join(
-                                    graph_builds,
-                                    graph_builds.c.id == graph_mentions.c.build_id,
+                                    graph_versions,
+                                    graph_versions.c.id == graph_mentions.c.build_id,
                                 )
                             )
                             .where(
                                 graph_mentions.c.entity_id == entity_id,
-                                graph_builds.c.active.is_(True),
+                                graph_versions.c.active.is_(True),
                                 ~graph_mentions.c.document_id.in_(document_ids),
                                 or_(
                                     documents.c.doc_key.is_(None),
@@ -291,6 +291,7 @@ def prepare_build(connection, space, build_id, extractions, created_by="system")
     }
 
 
+# build_id 是要写入的版本 id（见 versions.py）：名字、关系、合并记录都记在这个版本下；实体是空间里共用的。
 def write_build(connection, space, build_id, plan):
     clear_build(connection, build_id)
     for table, key in (
@@ -299,8 +300,13 @@ def write_build(connection, space, build_id, plan):
         (graph_merges, "merges"),
         (graph_relations, "relations"),
     ):
-        for start in range(0, len(plan[key]), 500):
-            connection.execute(table.insert(), plan[key][start : start + 500])
+        rows = (
+            plan[key]
+            if table is graph_entities
+            else [{**row, "build_id": build_id} for row in plan[key]]
+        )
+        for start in range(0, len(rows), 500):
+            connection.execute(table.insert(), rows[start : start + 500])
     remove_orphans(connection, space)
     return plan["summary"]
 

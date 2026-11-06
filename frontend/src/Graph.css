@@ -1285,3 +1285,42 @@
 .graph-switch-skeleton { padding: 8px 0; }
 .graph-switch-skeleton-canvas { display: block; height: 420px; border-radius: 8px; }
 .graph-switch-skeleton-row { display: block; height: 44px; border-radius: 6px; }
+
+/* 图谱版本条：切换查看的版本、设为生效、备注。查看未生效的版本时整条用警告色提示。 */
+.graph-version-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  font-size: 13px;
+}
+.graph-version-bar.is-inactive {
+  border-color: var(--tone-warning-border);
+  background: var(--tone-warning-bg);
+}
+.graph-version-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font: inherit;
+  letter-spacing: normal;
+}
+.graph-version-select select {
+  width: auto;
+  max-width: min(520px, 100%);
+}
+.graph-version-note {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.graph-version-note input {
+  width: 280px;
+  max-width: 100%;
+}

@@ -3798,10 +3798,31 @@ export type GraphPage<T> = {
   page_size: number;
 };
 export type GraphView = "network" | "entities" | "relations" | "merges";
+// 图谱版本：每次写入图谱存成一个版本，检索和全局图谱只用生效（active）的那个。
+export type GraphVersion = {
+  id: string;
+  build_id: string;
+  number: number;
+  active: boolean;
+  // build 建图写入；retry 补跑分片后写入；check 图谱检查确认写入
+  origin: "build" | "retry" | "check";
+  summary: {
+    entity_count?: number;
+    relation_count?: number;
+    mention_count?: number;
+    changes?: string;
+  };
+  note: string | null;
+  created_by: string;
+  created: string;
+};
 export type DocumentGraphData = {
   matches?: { id: string; name: string; type: string }[];
   build: GraphBuild | null;
   history: GraphBuild[];
+  // 正在显示的版本（默认是生效版本），以及这份文档保留的全部版本（新的在前）。
+  version?: GraphVersion | null;
+  versions?: GraphVersion[];
   can_build: boolean;
   processed: boolean;
   settings: UploadGraphOption | null;
@@ -3972,6 +3993,7 @@ export function getDocumentGraph(
     focus?: string[];
     center?: string | null;
     limit?: number;
+    version?: string | null;
   },
 ) {
   return request<DocumentGraphData>(
@@ -3984,13 +4006,40 @@ export function getDocumentGraph(
       focus: params.focus?.join(","),
       center: params.center,
       limit: params.limit,
+      version: params.version,
     })}`,
   );
 }
 
-export function getGraphEntity(entityId: string, documentId?: string | null) {
+export function activateGraphVersion(documentId: string, versionId: string) {
+  return request<{ versions: GraphVersion[] }>(
+    `/documents/${documentId}/graph/versions/${versionId}/activate`,
+    { method: "POST" },
+  );
+}
+
+export function noteGraphVersion(
+  documentId: string,
+  versionId: string,
+  note: string,
+) {
+  return request<{ ok: boolean }>(
+    `/documents/${documentId}/graph/versions/${versionId}/note`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ note }),
+    },
+  );
+}
+
+export function getGraphEntity(
+  entityId: string,
+  documentId?: string | null,
+  version?: string | null,
+) {
   return request<GraphEntityDetail>(
-    `/graph/entities/${entityId}${query({ document_id: documentId })}`,
+    `/graph/entities/${entityId}${query({ document_id: documentId, version: documentId ? version : null })}`,
   );
 }
 
@@ -4001,9 +4050,10 @@ export function getGraphRelations(
   targetId: string,
   documentId?: string | null,
   category?: string | null,
+  version?: string | null,
 ) {
   return request<{ items: GraphRelationDetail[] }>(
-    `/graph/relations${query({ source_id: sourceId, target_id: targetId, document_id: documentId, category })}`,
+    `/graph/relations${query({ source_id: sourceId, target_id: targetId, document_id: documentId, category, version: documentId ? version : null })}`,
   );
 }
 

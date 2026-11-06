@@ -10,12 +10,15 @@ import { Tag } from "./Tag";
 export function GraphRelationPanel({
   edge,
   documentId,
+  version,
   category,
   onClose,
   onOpenChunk,
 }: {
   edge: GraphEdge;
   documentId?: string | null;
+  // 文档页签正在查看的图谱版本（不传就是生效版本）。
+  version?: string | null;
   category?: string | null;
   onClose: () => void;
   onOpenChunk?: (chunkId: string, position: number, documentId: string) => void;
@@ -28,7 +31,7 @@ export function GraphRelationPanel({
     setItems(null);
     setOriginal(null);
     setError("");
-    getGraphRelations(edge.source, edge.target, documentId, category)
+    getGraphRelations(edge.source, edge.target, documentId, category, version)
       .then((data) => {
         if (!cancelled) setItems(data.items);
       })
@@ -38,7 +41,7 @@ export function GraphRelationPanel({
     return () => {
       cancelled = true;
     };
-  }, [edge.source, edge.target, documentId, category]);
+  }, [edge.source, edge.target, documentId, category, version]);
   return (
     <aside className="graph-side">
       <div className="graph-side-heading">

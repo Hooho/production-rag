@@ -7,6 +7,7 @@ import { DocumentChunkDialog, type ChunkTarget } from "./DocumentChunkDialog";
 import { GraphBuildTimer } from "./GraphBuildTimer";
 import { GraphChunkDetails } from "./GraphChunkDetails";
 import { GraphRelationPanel } from "./GraphRelationPanel";
+import { GraphVersionBar } from "./GraphVersionBar";
 import type { GraphEdge, GraphRelationRow } from "./api";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
@@ -131,6 +132,9 @@ export function DocumentGraph({
   const [tick, setTick] = useState(0);
   const [stopping, setStopping] = useState(false);
   const documentId = document.document_id;
+  // 正在查看的图谱版本；null 表示生效版本（默认）。
+  const [versionId, setVersionId] = useState<string | null>(null);
+  useEffect(() => setVersionId(null), [documentId]);
   // 合并记录里标记撤销：只改二次检查的决定，攒起来到第 4 步一起确认、写入图谱。
   const [review, setReview] = useState<GraphReviewReport | null>(null);
   const [canDecide, setCanDecide] = useState(false);
@@ -206,8 +210,8 @@ export function DocumentGraph({
   // 图视图里展开邻居、换中心不显示骨架（画布会整块闪掉），只在切到图时显示一次。
   const requestKey = JSON.stringify(
     view === "network"
-      ? [documentId, view]
-      : [documentId, view, page, search, entityType, category],
+      ? [documentId, view, versionId]
+      : [documentId, view, page, search, entityType, category, versionId],
   );
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const switching = loadedKey !== requestKey;
@@ -222,6 +226,7 @@ export function DocumentGraph({
       focus,
       center,
       limit,
+      version: versionId,
     })
       .then((value) => {
         if (!cancelled) {
@@ -232,6 +237,12 @@ export function DocumentGraph({
       })
       .catch((reason: Error) => {
         if (cancelled) return;
+        // 查看的版本被清理掉了（只保留最近几个）：回到生效版本。
+        if (versionId) {
+          onToast("error", `${reason.message}，已回到生效版本`);
+          setVersionId(null);
+          return;
+        }
         setLoadedKey(requestKey);
         setError(reason.message);
       });
@@ -249,6 +260,7 @@ export function DocumentGraph({
     center,
     limit,
     explorer.search,
+    versionId,
     tick,
   ]);
   for (const node of data?.network?.nodes ?? [])
@@ -332,6 +344,18 @@ export function DocumentGraph({
   const processedCount = build.extracted + build.reused + build.failed;
   return (
     <div className="graph-panel">
+      {data.version && (data.versions?.length ?? 0) > 0 && (
+        <GraphVersionBar
+          documentId={documentId}
+          versions={data.versions ?? []}
+          shown={data.version}
+          canManage={data.can_build}
+          busy={busy}
+          onSelect={setVersionId}
+          onChanged={() => setTick((value) => value + 1)}
+          onToast={onToast}
+        />
+      )}
       <div className="graph-summary">
         <div className="graph-summary-main">
           <div className="graph-summary-heading">
@@ -956,6 +980,7 @@ export function DocumentGraph({
             <GraphRelationPanel
               edge={selectedEdge}
               documentId={documentId}
+              version={versionId}
               category={selectedEdge.categories[0]}
               onClose={() => setSelectedEdge(null)}
               onOpenChunk={(chunkId, position) =>
@@ -1001,6 +1026,7 @@ export function DocumentGraph({
                 )
               }
               documentId={documentId}
+              version={versionId}
               onClose={() => setSelected(null)}
               onOpenChunk={(chunkId, position) =>
                 onOpenChunk(chunkId, position)

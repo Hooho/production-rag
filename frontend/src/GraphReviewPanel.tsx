@@ -1811,7 +1811,10 @@ export function GraphReviewBody({
           .map((group) => [group.key, choices[group.key]]),
       );
       await rewriteGraphReview(documentId, live.build_id, resolutions);
-      toast("success", `已提交：按 ${groups.length} 个合并结果写入图谱`);
+      toast(
+        "success",
+        `已提交：按 ${groups.length} 个合并结果写入，完成后存为新版本（不自动生效，在「图谱版本」里设为生效）`,
+      );
       setData(await getGraphReview(documentId));
       setStep(5);
       onChanged?.();
@@ -1920,7 +1923,7 @@ export function GraphReviewBody({
             </span>
           )}
           <ConfirmPopover
-            message={`写入 ${changes} 处变化？写入后图谱上共 ${groups.length} 个合并，从已保存的抽取结果重新写一遍，不调用模型。${pending > 0 ? `还有 ${pending} 条未处理，保持分开。` : ""}`}
+            message={`写入 ${changes} 处变化？写入后图谱上共 ${groups.length} 个合并，从已保存的抽取结果重新写一遍，不调用模型。写入结果存为一个新版本，不会马上生效，要在「图谱版本」里设为生效。${pending > 0 ? `还有 ${pending} 条未处理，保持分开。` : ""}`}
             confirmText="写入图谱"
             onConfirm={rewrite}
           >

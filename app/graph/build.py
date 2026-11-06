@@ -21,8 +21,9 @@ from ..mysql.tables import (
     graph_merges,
     graph_mentions,
     graph_relations,
+    graph_versions,
 )
-from . import resolve, review
+from . import resolve, review, versions
 from .extract import PROMPT_ID, cache_key, extract_chunk
 from .schemas import DEFAULT_SCHEMA_ID, ONLINE_SPACE, get_schema, now, type_names
 
@@ -783,32 +784,48 @@ def finalize(store, build, models=None):
         status = (
             ("completed" if not value["failed"] else "partial") if rows else "failed"
         )
+        # 每次写入都存成一个新版本。建图、补跑分片写入的版本直接生效（和以前一样）；
+        # 图谱检查确认写入的版本不生效，要在版本列表里手动设为生效。
+        checking = (
+            bool(report and report.get("status") == "rewriting") if rows else False
+        )
+        version = None
         with store.engine.begin() as connection:
             require_running(connection, build["id"])
             if rows:
-                resolve.write_build(connection, build["space"], build["id"], plan)
-                connection.execute(
-                    graph_builds.update()
-                    .where(
-                        graph_builds.c.space == build["space"],
-                        graph_builds.c.doc_key == build["doc_key"],
-                        graph_builds.c.id != build["id"],
+                retried = connection.execute(
+                    select(graph_versions.c.id).where(
+                        graph_versions.c.build_id == build["id"]
                     )
-                    .values(active=False)
+                ).first()
+                version = versions.create(
+                    connection,
+                    build,
+                    "check" if checking else ("retry" if retried else "build"),
+                    version_summary(summary, report if checking else None),
+                    (report["applied"]["by"] if checking else build["created_by"]),
+                )
+                resolve.write_build(connection, build["space"], version["id"], plan)
+                if not checking:
+                    versions.activate(connection, version["id"])
+                versions.prune(connection, build["document_id"])
+            values = {
+                **value,
+                "status": status,
+                "error": None if rows else "全部分片都抽取失败",
+                "updated": now(),
+                "finished": now(),
+            }
+            if not checking:
+                values.update(
+                    active=summary is not None,
+                    entity_count=summary["entity_count"] if summary else 0,
+                    relation_count=summary["relation_count"] if summary else 0,
                 )
             connection.execute(
                 graph_builds.update()
                 .where(graph_builds.c.id == build["id"])
-                .values(
-                    **value,
-                    status=status,
-                    active=summary is not None,
-                    entity_count=summary["entity_count"] if summary else 0,
-                    relation_count=summary["relation_count"] if summary else 0,
-                    error=None if rows else "全部分片都抽取失败",
-                    updated=now(),
-                    finished=now(),
-                )
+                .values(**values)
             )
         if summary is not None:
             write_step(
@@ -816,8 +833,13 @@ def finalize(store, build, models=None):
                 build["document_id"],
                 "graph_write",
                 "completed",
-                f"已保存 {summary['entity_count']} 个实体的归属、{summary['mention_count']} 条名字出处、{summary['relation_count']} 条关系，建图已生效",
-                {"build_id": build["id"], **summary},
+                f"已保存 {summary['entity_count']} 个实体的归属、{summary['mention_count']} 条名字出处、{summary['relation_count']} 条关系，"
+                + (
+                    f"存为 v{version['number']}，未生效（在版本列表里设为生效）"
+                    if checking
+                    else f"存为 v{version['number']}，已生效"
+                ),
+                {"build_id": build["id"], "version_id": version["id"], **summary},
                 round((time.monotonic() - started) * 1000),
             )
             after_write(store, build, report, records)
@@ -889,6 +911,36 @@ def retry(store, build_id, chunk_id=None):
     return get_build(store.engine, build_id)
 
 
+# 把一个图谱版本设为生效：检索、全局图谱从此用这个版本。建图进行中不能切换。
+def activate_version(store, document_id, version_id):
+    with store.engine.begin() as connection:
+        version = versions.get(connection, version_id)
+        if version is None or version["document_id"] != document_id:
+            raise BuildError("版本不存在")
+        busy = connection.execute(
+            select(graph_builds.c.id).where(
+                graph_builds.c.document_id == document_id,
+                graph_builds.c.status.in_(BUSY),
+            )
+        ).first()
+        if busy is not None:
+            raise BuildError("正在建图或写入图谱，完成后再切换版本")
+        versions.activate(connection, version_id)
+        return versions.listing(connection, document_id)
+
+
+def note_version(store, document_id, version_id, note):
+    with store.engine.begin() as connection:
+        version = versions.get(connection, version_id)
+        if version is None or version["document_id"] != document_id:
+            raise BuildError("版本不存在")
+        connection.execute(
+            graph_versions.update()
+            .where(graph_versions.c.id == version_id)
+            .values(note=(note or "").strip()[:500] or None)
+        )
+
+
 # worker 启动时把被中断的建图任务重新放回队列（和 recover_jobs 一样以 MySQL 状态为准）。
 def recover(store):
     queued = set()
@@ -945,6 +997,16 @@ def remove_documents(connection, document_ids):
         )
     ).all()
     build_ids = [row[0] for row in rows]
+    version_ids = (
+        connection.execute(
+            select(graph_versions.c.id).where(
+                graph_versions.c.document_id.in_(document_ids)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    versions.remove(connection, version_ids)
     if build_ids:
         for table in (graph_relations, graph_mentions, graph_merges):
             connection.execute(delete(table).where(table.c.build_id.in_(build_ids)))
@@ -1079,6 +1141,22 @@ def after_write(store, build, report, records):
         store, build, queued, "pending", "排队等待二次检查（不影响已写入的图谱）"
     )
     enqueue(store, build["id"], "review")
+
+
+# 版本上记的摘要：数量，以及（图谱检查写入时）这次按哪些合并结果写入。
+def version_summary(summary, report=None):
+    value = {
+        key: summary.get(key)
+        for key in ("entity_count", "relation_count", "mention_count")
+    }
+    if report and report.get("applied"):
+        groups = report["applied"].get("groups") or []
+        value["changes"] = f"按 {len(groups)} 个合并结果写入"
+        value["applied"] = [
+            {key: group.get(key) for key in ("ids", "name", "type", "proposal_ids")}
+            for group in groups
+        ]
+    return value
 
 
 def extraction_rows(engine, build_id):

@@ -24,6 +24,7 @@ export function GraphEntityPanel({
   hopInfo,
   entityId,
   documentId,
+  version,
   onClose,
   onOpenChunk,
   onFocus,
@@ -44,6 +45,8 @@ export function GraphEntityPanel({
   onOpenDocument?: (documentId: string) => void;
   entityId: string;
   documentId?: string | null;
+  // 文档页签正在查看的图谱版本（不传就是生效版本）。
+  version?: string | null;
   onClose: () => void;
   onOpenChunk?: (chunkId: string, position: number, documentId: string) => void;
   onFocus?: (entityId: string) => void;
@@ -85,13 +88,13 @@ export function GraphEntityPanel({
     setError("");
     setCategory(selectedCategory ?? null);
     setScope(selectedScope ?? "visible");
-    getGraphEntity(entityId, documentId)
+    getGraphEntity(entityId, documentId, version)
       .then((value) => !cancelled && setDetail(value))
       .catch((reason: Error) => !cancelled && setError(reason.message));
     return () => {
       cancelled = true;
     };
-  }, [entityId, documentId]);
+  }, [entityId, documentId, version]);
   useLayoutEffect(() => {
     const element = header.current;
     const container = panel.current;

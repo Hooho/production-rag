@@ -67,6 +67,10 @@ class StopInput(BaseModel):
     build_id: UUID
 
 
+class VersionNoteInput(BaseModel):
+    note: str = Field("", max_length=500)
+
+
 EXAMPLE_CHUNK = {
     "content": "<待抽取的分片原文>",
     "document_title": "<当前文档标题>",
@@ -404,23 +408,28 @@ def build_router(current_user, identity, require_admin):
         focus: str | None = Query(None, max_length=12000),
         center: UUID | None = Query(None),
         limit: int = Query(graph_query.NETWORK_LIMIT, ge=5, le=300),
+        version: UUID | None = Query(None),
         user=Depends(current_user),
     ):
         state = request.app.state
         row = readable(state, user["username"], document_id)
-        result = graph_query.document_graph(
-            state.store.engine,
-            str(document_id),
-            view,
-            page,
-            page_size,
-            q or None,
-            entity_type or None,
-            category or None,
-            [item for item in (focus or "").split(",") if item][:300],
-            str(center) if center else None,
-            limit,
-        )
+        try:
+            result = graph_query.document_graph(
+                state.store.engine,
+                str(document_id),
+                view,
+                page,
+                page_size,
+                q or None,
+                entity_type or None,
+                category or None,
+                [item for item in (focus or "").split(",") if item][:300],
+                str(center) if center else None,
+                limit,
+                str(version) if version else None,
+            )
+        except ValueError as error:
+            raise HTTPException(404, str(error)) from None
         result["can_build"] = row["owner"] == user["username"] or bool(user["is_admin"])
         result["processed"] = graph_build.is_processed(row["status"])
         result["settings"] = (row["document_metadata"] or {}).get("graph")
@@ -432,6 +441,7 @@ def build_router(current_user, identity, require_admin):
         request: Request,
         entity_id: str,
         document_id: UUID | None = Query(None),
+        version: UUID | None = Query(None),
         user=Depends(current_user),
     ):
         state = request.app.state
@@ -440,7 +450,10 @@ def build_router(current_user, identity, require_admin):
         elif not user["is_admin"]:
             raise HTTPException(403, "需要管理员权限")
         result = graph_query.entity_detail(
-            state.store.engine, entity_id, str(document_id) if document_id else None
+            state.store.engine,
+            entity_id,
+            str(document_id) if document_id else None,
+            str(version) if version and document_id else None,
         )
         if result is None:
             raise HTTPException(404, "实体不存在")
@@ -453,6 +466,7 @@ def build_router(current_user, identity, require_admin):
         target_id: str = Query(..., min_length=1, max_length=36),
         document_id: UUID | None = Query(None),
         category: str | None = Query(None, max_length=32),
+        version: UUID | None = Query(None),
         user=Depends(current_user),
     ):
         state = request.app.state
@@ -467,8 +481,47 @@ def build_router(current_user, identity, require_admin):
                 target_id,
                 str(document_id) if document_id else None,
                 category,
+                str(version) if version and document_id else None,
             )
         }
+
+    # 把一个图谱版本设为生效：检索和全局图谱从此用这个版本。只有上传者和管理员可以。
+    @router.post("/documents/{document_id}/graph/versions/{version_id}/activate")
+    def activate_version(
+        request: Request,
+        document_id: UUID,
+        version_id: UUID,
+        user=Depends(current_user),
+    ):
+        state = request.app.state
+        row = readable(state, user["username"], document_id)
+        check_can_build(user, row)
+        try:
+            items = graph_build.activate_version(
+                state.store, str(document_id), str(version_id)
+            )
+        except graph_build.BuildError as error:
+            raise HTTPException(409, str(error)) from None
+        return {"versions": [graph_query.version_view(item) for item in items]}
+
+    @router.post("/documents/{document_id}/graph/versions/{version_id}/note")
+    def note_version(
+        request: Request,
+        document_id: UUID,
+        version_id: UUID,
+        body: VersionNoteInput,
+        user=Depends(current_user),
+    ):
+        state = request.app.state
+        row = readable(state, user["username"], document_id)
+        check_can_build(user, row)
+        try:
+            graph_build.note_version(
+                state.store, str(document_id), str(version_id), body.note
+            )
+        except graph_build.BuildError as error:
+            raise HTTPException(404, str(error)) from None
+        return {"ok": True}
 
     @router.get("/graph/overview")
     def overview(
