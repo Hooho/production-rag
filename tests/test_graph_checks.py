@@ -303,6 +303,16 @@ def test_relation_check_end_to_end(setup, monkeypatch):
     assert viewed["stats"]["relation_count"] == 1
     detail = client.get(url, headers=headers()).json()["report"]
     assert detail["status"] == "ready" and detail["applied"]["items"] == suggested
+    # 全部重新判断：每项都重新调用模型，人工决定清空，已写入的不动。
+    response = client.post(
+        f"{url}/rejudge", headers=headers(), json={"build_id": build_id}
+    )
+    assert response.status_code == 200, response.text
+    run_graph_jobs(store, models)
+    detail = client.get(url, headers=headers()).json()["report"]
+    assert detail["status"] == "ready" and len(calls) == len(detail["items"]) * 2
+    assert not detail.get("decisions")
+    assert detail["applied"]["items"] == suggested
     # 跳过另一步。
     response = client.post(
         f"/documents/{document_id}/graph/check/glean/skip",

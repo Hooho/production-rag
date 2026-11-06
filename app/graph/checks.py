@@ -1027,6 +1027,26 @@ def retry_failed(store, build_id, step):
     return value
 
 
+# 全部重新判断：清掉这一步所有 AI 判断和还没写入的人工决定，用当前提示词、当前过滤规则重新判断每一项。
+# 已经写入的（applied）不动。signature 清空，任务会重新找可疑项、重新记下提示词快照。
+def rejudge(store, build_id, step):
+    build, _ = load(store, build_id, step, ("scanned", "ready", "stopped"))
+    with store.engine.begin() as connection:
+        lock(connection, build)
+        value = report_in(connection, build, step)
+        value.update(
+            judgments={},
+            decisions={},
+            signature=None,
+            status="queued",
+            phase="judge",
+            started=now(),
+        )
+        save_in(connection, build, step, value, "pending", "排队全部重新判断")
+    graph_build.enqueue(store, build_id, f"check:{step}")
+    return value
+
+
 DECIDE_STATES = ("ready", "stopped", "scanned", "queued", "running")
 
 

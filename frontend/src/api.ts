@@ -4394,7 +4394,7 @@ export function startCheck(
 export function checkAction(
   documentId: string,
   step: CheckStepName,
-  action: "judge" | "stop" | "write" | "skip" | "retry-failed",
+  action: "judge" | "stop" | "write" | "skip" | "retry-failed" | "rejudge",
   buildId: string,
 ) {
   return request<CheckReport>(

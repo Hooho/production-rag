@@ -494,7 +494,7 @@ def build_router(current_user, identity, require_admin):
         request: Request,
         document_id: UUID,
         step: CheckStep,
-        action: Literal["judge", "stop", "write", "skip", "retry-failed"],
+        action: Literal["judge", "stop", "write", "skip", "retry-failed", "rejudge"],
         body: CheckInput,
         user=Depends(current_user),
     ):
@@ -513,6 +513,7 @@ def build_router(current_user, identity, require_admin):
             "retry-failed": lambda: graph_checks.retry_failed(
                 state.store, build_id, step
             ),
+            "rejudge": lambda: graph_checks.rejudge(state.store, build_id, step),
         }
         return check_call(operations[action])
 

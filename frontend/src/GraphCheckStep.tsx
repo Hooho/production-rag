@@ -218,7 +218,7 @@ export function GraphCheckStep({
       "已开始找可疑项（不调用模型），找完会列出来",
     );
   const act = (
-    name: "judge" | "stop" | "write" | "skip" | "retry-failed",
+    name: "judge" | "stop" | "write" | "skip" | "retry-failed" | "rejudge",
     done: string,
   ) => run(name, () => checkAction(documentId, step, name, buildId), done);
   const decide = (
@@ -566,7 +566,8 @@ export function GraphCheckStep({
               {report.prompt_tag && (
                 <p className="gr-small">
                   用的提示词：<code>{report.prompt_tag}</code>
-                  （在「提示词管理 · 知识图谱」里修改，改完重新检查生效）
+                  （在「提示词管理 ·
+                  知识图谱」里修改，改完点「全部重新判断」生效）
                 </p>
               )}
               {canEdit && (
@@ -597,6 +598,26 @@ export function GraphCheckStep({
                       重试失败的 {failed} 项
                     </button>
                   )}
+                  {["ready", "stopped"].includes(status) &&
+                    finished.length > 0 && (
+                      <ConfirmPopover
+                        message={`用当前提示词把 ${items.length} 项全部重新判断（约 ${items.length} 次调用）？现有的 AI 判断和还没写入的采纳 / 不采纳都会清掉；已写入图谱的不受影响。`}
+                        confirmText="全部重新判断"
+                        onConfirm={() =>
+                          act("rejudge", "已开始全部重新判断").then(() =>
+                            setSub(2),
+                          )
+                        }
+                      >
+                        <button
+                          type="button"
+                          className={`secondary-button${loadingClass(action === "rejudge")}`}
+                          disabled={busy}
+                        >
+                          全部重新判断
+                        </button>
+                      </ConfirmPopover>
+                    )}
                 </div>
               )}
             </div>
@@ -1137,7 +1158,10 @@ function judgmentBody(
                   </strong>
                   ：{row.description ?? ""}
                   {row.evidence && (
-                    <small className="gc-quote"> 原文引用：「{row.evidence}」</small>
+                    <small className="gc-quote">
+                      {" "}
+                      原文引用：「{row.evidence}」
+                    </small>
                   )}
                 </li>
               ))}
