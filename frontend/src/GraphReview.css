@@ -1105,3 +1105,36 @@
   color: #475569;
   font-size: 13px;
 }
+/* 补抽结果：补实体、补关系各一行，标签在左，内容在右；关系逐条列出。 */
+.gc-glean {
+  display: grid;
+  gap: 8px;
+}
+.gc-glean-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+.gc-label {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 22px;
+}
+.gc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+.gc-relations {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+  color: #1f2937;
+  font-size: 13px;
+}
+.gc-relations strong {
+  font-weight: 600;
+}

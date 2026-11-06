@@ -1097,27 +1097,40 @@ function judgmentBody(
       }[]) ?? [];
     if (!entities.length && !relations.length)
       return <p>AI 没有找到漏掉的。</p>;
+    // 和关系表一样：起点 → 终点、AI 基于原文的总结用正常文字，只有原文引用是灰色小字。
     return (
-      <>
+      <div className="gc-glean">
         {entities.length > 0 && (
-          <p>
-            补实体：
-            {entities.map((row) => (
-              <Tag key={row.name} size="sm" plain hue>
-                {row.name}（{row.type}）
-              </Tag>
-            ))}
-          </p>
+          <div className="gc-glean-row">
+            <span className="gc-label">补实体</span>
+            <span className="gc-chips">
+              {entities.map((row) => (
+                <Tag key={row.name} size="sm" plain hue>
+                  {row.name}（{row.type}）
+                </Tag>
+              ))}
+            </span>
+          </div>
         )}
-        {relations.map((row, index) => (
-          <p key={index} className="gr-small">
-            补关系：{row.source} → {row.target}：{row.description ?? ""}
-            {row.evidence && (
-              <span className="gc-quote">「{row.evidence}」</span>
-            )}
-          </p>
-        ))}
-      </>
+        {relations.length > 0 && (
+          <div className="gc-glean-row">
+            <span className="gc-label">补关系</span>
+            <ul className="gc-relations">
+              {relations.map((row, index) => (
+                <li key={index}>
+                  <strong>
+                    {row.source} → {row.target}
+                  </strong>
+                  ：{row.description ?? ""}
+                  {row.evidence && (
+                    <small className="gc-quote">「{row.evidence}」</small>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
     );
   }
   if (step === "relation") {
