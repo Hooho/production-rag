@@ -876,3 +876,11 @@
   color: #475569;
   font-variant-numeric: tabular-nums;
 }
+.gc-progress.is-confirm {
+  border-color: #c3d5fb;
+  background: #f5f9ff;
+}
+.gc-progress.is-confirm p {
+  margin: 0;
+  color: #334155;
+}

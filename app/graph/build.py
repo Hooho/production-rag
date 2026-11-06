@@ -1138,7 +1138,12 @@ def after_write(store, build, report, records):
         )
         return
     # 保留原报告（模型判断、人工决定）：抽取结果没变时直接沿用，不重复调用模型。
-    queued = {**(report or {}), "build_id": build["id"], "status": "queued"}
+    queued = {
+        **(report or {}),
+        "build_id": build["id"],
+        "status": "queued",
+        "phase": "judge",
+    }
     _review_step(
         store, build, queued, "pending", "排队等待二次检查（不影响已写入的图谱）"
     )
@@ -1262,6 +1267,7 @@ def run_review(store, models, build, report):
             },
             "judgments": [],
             "started": now(),
+            "phase": report.get("phase"),
             **_carry(report),
         }
     report["status"] = "running"
@@ -1271,6 +1277,17 @@ def run_review(store, models, build, report):
         row["candidate_id"] for row in report["judgments"] if row["status"] != "running"
     }
     todo = [row for row in candidates if row["id"] not in done]
+    # 分两段：「开始检查」只找可疑项（不调用模型），找完停下，显示要调用模型几次，等人确认后再判断。
+    if report.get("phase") == "scan" and todo:
+        report["status"] = "scanned"
+        _save_progress(
+            store,
+            build,
+            report,
+            f"找出 {len(candidates)} 组可疑，{len(todo)} 组要让模型判断（约 {len(todo)} 次调用），等确认",
+            "pending",
+        )
+        return report
     run_models = models_for(store, models, build) if todo else None
     # 先存一次：页面马上能看到候选数和进度条。
     if _save_progress(
@@ -1375,7 +1392,7 @@ def _save_progress(store, build, report, detail, step_status="running"):
 
 
 # 能操作的检查状态：判断完（ready）、停止了（stopped）都能决定、写入；模型判断进行中也能先决定已经判断完的。
-def _ready_report(store, build_id, states=("ready", "stopped")):
+def _ready_report(store, build_id, states=("ready", "stopped", "scanned")):
     build = get_build(store.engine, build_id)
     if build is None:
         raise BuildError("建图记录不存在")
@@ -1385,7 +1402,7 @@ def _ready_report(store, build_id, states=("ready", "stopped")):
     return build, report
 
 
-DECIDE_STATES = ("ready", "stopped", "queued", "running")
+DECIDE_STATES = ("ready", "stopped", "scanned", "queued", "running")
 
 
 # 停止检查：已经判断完的保留，没判断的留到「继续检查」。
@@ -1412,12 +1429,15 @@ def stop_review(store, build_id):
 
 
 # 继续检查：只判断还没判断的，已经判断的和人工决定都保留。
+# 找完可疑项后确认「让模型判断」也走这里。
 def continue_review(store, build_id):
-    build, _ = _ready_report(store, build_id, ("stopped",))
+    build, _ = _ready_report(store, build_id, ("stopped", "scanned"))
     with store.engine.begin() as connection:
         _lock_build(connection, build_id)
         report = _report_in(connection, build)
         report["status"] = "queued"
+        report["phase"] = "judge"
+        report["started"] = now()
         _save_report(connection, build, report, status="pending", detail="排队继续检查")
     enqueue(store, build_id, "review")
     return report
@@ -1616,6 +1636,7 @@ def retry_failed_review(store, build_id):
         row for row in report["judgments"] if row["status"] != "failed"
     ]
     report["status"] = "queued"
+    report["phase"] = "judge"
     with store.engine.begin() as connection:
         _lock_build(connection, build_id)
         _save_report(
@@ -1639,9 +1660,14 @@ def retry_review(store, build_id):
         raise BuildError("二次检查正在进行，不能重复开始")
     # 未开始、但之前判断过（补跑分片、重建后保留下来的）：整份沿用，抽取结果没变就不再调用模型。
     if report and report.get("status") == "idle" and report.get("signature"):
-        fresh = {**report, "status": "queued"}
+        fresh = {**report, "status": "queued", "phase": "scan"}
     else:
-        fresh = {"build_id": build_id, "status": "queued", **_carry(report)}
+        fresh = {
+            "build_id": build_id,
+            "status": "queued",
+            "phase": "scan",
+            **_carry(report),
+        }
     with store.engine.begin() as connection:
         current = _lock_build(connection, build_id)
         # 旧流程停在「等待人工确认」的建图还没写入图谱：先写入，写完自动开始检查。

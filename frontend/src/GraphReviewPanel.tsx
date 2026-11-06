@@ -1698,6 +1698,7 @@ function CheckProgress({
   onContinue: () => void;
 }) {
   const running = report.status === "queued" || report.status === "running";
+  const scannedOnly = report.status === "scanned";
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!running) return;
@@ -1707,6 +1708,41 @@ function CheckProgress({
   const value = checkProgress(report, now);
   const scanned = !!report.scan;
   const percent = value.total ? (value.done / value.total) * 100 : 0;
+  // 找完可疑项、还没让模型判断：先给人看数量和要调用几次，确认后才花钱。
+  if (scannedOnly) {
+    const todo = value.total - value.done;
+    return (
+      <div className="gc-progress is-confirm">
+        <div className="gc-progress-head">
+          <span className="gc-progress-phases">
+            <span>
+              ① 找可疑项：{value.total} 组（
+              {((report.scan?.duration_ms ?? 0) / 1000).toFixed(1)} 秒）
+            </span>
+            <span className="is-active">② 模型判断：等你确认</span>
+          </span>
+        </div>
+        <p>
+          找出 <strong>{value.total}</strong> 组可疑
+          {value.done > 0 ? `，其中 ${value.done} 组之前判断过` : ""}
+          。让模型逐组判断还要调用 <strong>约 {todo} 次</strong>。
+          可以先在下面「找出候选」里看看是哪些组，再决定要不要判断。
+        </p>
+        {canControl && (
+          <div className="gr-actions">
+            <button
+              type="button"
+              className={`primary-button${loadingClass(action === "continue")}`}
+              disabled={busy}
+              onClick={onContinue}
+            >
+              让模型判断（约 {todo} 次调用）
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
   return (
     <div className={`gc-progress${running ? "" : " is-stopped"}`}>
       <div className="gc-progress-head">
@@ -1850,10 +1886,14 @@ export function GraphReviewBody({
   // 判断进行中、停止后也能先决定已经判断完的；写入（和人工合并）要等判断完或停止。
   const canDecide =
     !!live &&
-    ["ready", "stopped", "running", "queued"].includes(live.status) &&
+    ["ready", "stopped", "scanned", "running", "queued"].includes(
+      live.status,
+    ) &&
     !!data?.can_confirm;
   const canWrite =
-    !!live && ["ready", "stopped"].includes(live.status) && !!data?.can_confirm;
+    !!live &&
+    ["ready", "stopped", "scanned"].includes(live.status) &&
+    !!data?.can_confirm;
   const decisions = report ? decisionsOf(report) : {};
   const approved = Object.keys(decisions)
     .filter((id) => decisions[id] === "approved")
@@ -1948,9 +1988,9 @@ export function GraphReviewBody({
   async function retry() {
     await run("retry", async () => {
       await retryGraphReview(documentId);
-      toast("success", "已开始重新检查");
+      toast("success", "已开始找可疑项，找完会先告诉你要调用模型几次");
       setData(await getGraphReview(documentId));
-      setStep(2);
+      setStep(1);
       onChanged?.();
     });
   }
@@ -1966,7 +2006,7 @@ export function GraphReviewBody({
   async function resume() {
     await run("continue", async () => {
       await continueGraphReview(documentId);
-      toast("success", "已继续检查：只判断还没判断的");
+      toast("success", "已开始让模型判断：只判断还没判断的组");
       setData(await getGraphReview(documentId));
     });
   }
@@ -1983,7 +2023,8 @@ export function GraphReviewBody({
   const showRetry =
     canRetry &&
     !!data?.can_confirm &&
-    (!live || ["ready", "failed", "idle", "stopped"].includes(live.status));
+    (!live ||
+      ["ready", "failed", "idle", "stopped", "scanned"].includes(live.status));
 
   // 已经有人工决定时，重新检查会把它们清掉，先在按钮旁边确认。
   const retryButton = showRetry && (
@@ -2132,7 +2173,7 @@ export function GraphReviewBody({
         </p>
       )}
       {live &&
-        ["queued", "running", "stopped"].includes(live.status) &&
+        ["queued", "running", "stopped", "scanned"].includes(live.status) &&
         (live.status !== "stopped" || live.scan) && (
           <CheckProgress
             report={live}
@@ -2245,7 +2286,9 @@ export function GraphReviewPanel({
           ? `图谱检查 · 待处理 ${pending}`
           : report && ACTIVE.includes(report.status)
             ? "图谱检查 · 进行中"
-            : "图谱检查"}
+            : report?.status === "scanned"
+              ? "图谱检查 · 待确认判断"
+              : "图谱检查"}
       </button>
       {open && (
         <DetailDialog
@@ -2331,6 +2374,12 @@ function mergeStep(
         ? `模型判断 ${value.done}/${value.total}`
         : "找可疑项中",
       elapsed: value.elapsed !== null ? formatClock(value.elapsed) : undefined,
+    };
+  if (report.status === "scanned")
+    return {
+      ...base,
+      state: "current",
+      text: `找出 ${value.total} 组，待确认判断`,
     };
   if (report.status === "stopped")
     return {

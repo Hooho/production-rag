@@ -968,3 +968,21 @@ def test_review_starts_manually_can_stop_continue_and_decide_while_running(
     build.run_review_job(store, fake_models, "b1")
     again = build.review_report(db, row)
     assert again["status"] == "ready" and len(calls) == 1
+
+
+def test_start_only_scans_then_judges_after_confirm(monkeypatch):
+    db, store, row, queue, calls = review_env(monkeypatch)
+    build.after_write(store, row, None, None)
+    # 点「开始检查」：只找可疑项，不调用模型，停在「找完待确认」，能看到要调用几次。
+    build.retry_review(store, "b1")
+    build.run_review_job(store, fake_models, "b1")
+    scanned = build.review_report(db, row)
+    assert scanned["status"] == "scanned" and calls == []
+    assert len(scanned["scan"]["candidates"]) == 1 and scanned["judgments"] == []
+    # 确认后才让模型判断。
+    queue.clear()
+    build.continue_review(store, "b1")
+    assert queue == ["b1"]
+    build.run_review_job(store, fake_models, "b1")
+    judged = build.review_report(db, row)
+    assert judged["status"] == "ready" and len(calls) == 1
