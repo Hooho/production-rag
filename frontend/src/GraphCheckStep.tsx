@@ -11,6 +11,7 @@ import {
   type CheckStepName,
 } from "./api";
 import { ConfirmPopover } from "./ConfirmPopover";
+import { DetailDialog } from "./DetailDialog";
 import { VerticalSteps, type CheckStep } from "./GraphCheckSteps";
 import { Tag } from "./Tag";
 import { errorText, useToast } from "./Toast";
@@ -19,6 +20,8 @@ import { errorText, useToast } from "./Toast";
 // 左边竖直小步骤：找出可疑项 → AI 判断 → 逐条决定 → 确认写入；右边是这一小步的内容。
 
 type Item = Record<string, unknown> & { id: string };
+type ShowOriginal = (title: string, body: string) => void;
+const PAGE_SIZE = 20;
 type Decision = NonNullable<CheckReport["decisions"]>[string];
 
 export const CHECK_INFO: Record<
@@ -112,6 +115,13 @@ export function GraphCheckStep({
   const [action, setAction] = useState<string | null>(null);
   const [sub, setSub] = useState<number | null>(null);
   const [filter, setFilter] = useState<"pending" | "all">("pending");
+  const [page, setPage] = useState(1);
+  const [original, setOriginal] = useState<{
+    title: string;
+    body: string;
+  } | null>(null);
+  const showOriginal: ShowOriginal = (title, body) =>
+    setOriginal({ title, body });
   const [scope, setScope] = useState<"few" | "all">("few");
   const [sample, setSample] = useState(0);
   // 检查用的模型：空 = 和建图时一样。
@@ -147,6 +157,7 @@ export function GraphCheckStep({
     return () => window.clearInterval(timer);
   }, [active]);
   useEffect(() => setSub(null), [step]);
+  useEffect(() => setPage(1), [sub, filter]);
   useEffect(() => {
     if (sub === null && data) setSub(defaultSub(report));
   }, [data, sub, report]);
@@ -376,6 +387,8 @@ export function GraphCheckStep({
   ];
   const shown = sub ?? 1;
   const list = shown === 3 && filter === "pending" ? pending : items;
+  const pageCount = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+  const current = Math.min(page, pageCount);
   const started = report.started ? Date.parse(report.started) : NaN;
   const durations = finished
     .map((row) => row.duration_ms ?? 0)
@@ -681,26 +694,63 @@ export function GraphCheckStep({
                   : "没有可疑项。"}
               </p>
             )}
-            {list.slice(0, 200).map((item) => (
-              <ItemCard
-                key={item.id}
-                step={step}
-                item={item}
-                judgment={shown >= 2 ? judgments[item.id] : undefined}
-                decision={decisions[item.id]}
-                editable={shown === 3 && canDecide}
-                busy={busy}
-                onDecide={(decision, edit) =>
-                  void decide([item.id], decision, edit)
-                }
-              />
-            ))}
-            {list.length > 200 && (
-              <p className="graph-note">
-                只显示前 200 项，处理完一些后再看剩下的。
-              </p>
+            {list
+              .slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE)
+              .map((item) => (
+                <ItemCard
+                  key={item.id}
+                  step={step}
+                  item={item}
+                  judgment={shown >= 2 ? judgments[item.id] : undefined}
+                  decision={decisions[item.id]}
+                  editable={shown === 3 && canDecide}
+                  busy={busy}
+                  onOriginal={showOriginal}
+                  onDecide={(decision, edit) =>
+                    void decide([item.id], decision, edit)
+                  }
+                />
+              ))}
+            {list.length > PAGE_SIZE && (
+              <nav className="gr-pager" aria-label="分页">
+                <span>
+                  第 {(current - 1) * PAGE_SIZE + 1}–
+                  {Math.min(current * PAGE_SIZE, list.length)} 项，共{" "}
+                  {list.length} 项
+                </span>
+                <span className="gr-pager-controls">
+                  <button
+                    type="button"
+                    className="secondary-button button-sm"
+                    disabled={current === 1}
+                    onClick={() => setPage(current - 1)}
+                  >
+                    上一页
+                  </button>
+                  <span>
+                    {current} / {pageCount}
+                  </span>
+                  <button
+                    type="button"
+                    className="secondary-button button-sm"
+                    disabled={current === pageCount}
+                    onClick={() => setPage(current + 1)}
+                  >
+                    下一页
+                  </button>
+                </span>
+              </nav>
             )}
           </div>
+        )}
+        {original && (
+          <DetailDialog
+            open
+            title={original.title}
+            onClose={() => setOriginal(null)}
+          >
+            <p className="graph-chunk-text">{original.body}</p>
+          </DetailDialog>
         )}
       </div>
     </div>
@@ -753,6 +803,7 @@ function ItemCard({
   decision,
   editable,
   busy,
+  onOriginal,
   onDecide,
 }: {
   step: CheckStepName;
@@ -761,6 +812,7 @@ function ItemCard({
   decision?: Decision;
   editable: boolean;
   busy: boolean;
+  onOriginal: ShowOriginal;
   onDecide: (
     decision: "accept" | "reject" | null,
     edit?: Record<string, unknown> | null,
@@ -772,7 +824,7 @@ function ItemCard({
     decision?.edit ?? null,
   );
   return (
-    <article className={`gr-card${value.suggest ? " is-merge" : ""}`}>
+    <article className={`gr-card gc-card${value.suggest ? " is-merge" : ""}`}>
       <header className="gr-card-head">
         {itemTitle(step, item)}
         {judgment?.status === "failed" && (
@@ -788,7 +840,7 @@ function ItemCard({
           </Tag>
         )}
       </header>
-      {itemBody(step, item)}
+      {itemBody(step, item, onOriginal)}
       {judgment?.status === "completed" && (
         <div className="gc-judgment">
           {judgmentBody(step, item, value, edit, setEdit, editable)}
@@ -880,20 +932,37 @@ function itemTitle(step: CheckStepName, item: Item): ReactNode {
   );
 }
 
-function itemBody(step: CheckStepName, item: Item): ReactNode {
+function originalButton(
+  label: string,
+  title: string,
+  body: string,
+  onOriginal: ShowOriginal,
+) {
+  return (
+    <button
+      type="button"
+      className="link-button gc-original"
+      onClick={() => onOriginal(title, body)}
+    >
+      {label}
+    </button>
+  );
+}
+
+function itemBody(
+  step: CheckStepName,
+  item: Item,
+  onOriginal: ShowOriginal,
+): ReactNode {
+  const chunkTitle = `第 ${Number(item.position) + 1} 片 · 原文`;
   if (step === "glean")
     return (
-      <>
-        {(item.names as string[]).length > 0 && (
-          <p className="gr-small">
-            已有：{(item.names as string[]).join("、")}
-          </p>
-        )}
-        <details>
-          <summary>原文</summary>
-          <p className="graph-chunk-text">{text(item.excerpt)}</p>
-        </details>
-      </>
+      <p className="gr-small">
+        {(item.names as string[]).length > 0
+          ? `已有：${(item.names as string[]).join("、")}`
+          : "还没抽出实体"}
+        {originalButton("原文", chunkTitle, text(item.excerpt), onOriginal)}
+      </p>
     );
   if (step === "relation")
     return (
@@ -919,11 +988,8 @@ function itemBody(step: CheckStepName, item: Item): ReactNode {
             </Tag>
           ))}
           <span className="gr-small">第 {Number(item.position) + 1} 片</span>
+          {originalButton("原文", chunkTitle, text(item.excerpt), onOriginal)}
         </p>
-        <details>
-          <summary>分片原文</summary>
-          <p className="graph-chunk-text">{text(item.excerpt)}</p>
-        </details>
       </>
     );
   if (step === "type")
@@ -948,9 +1014,12 @@ function itemBody(step: CheckStepName, item: Item): ReactNode {
             {row.samples.map((sample, index) => (
               <p key={index} className="gr-small">
                 第 {sample.position + 1} 片：{sample.description ?? ""}
-                <span className="gc-quote">
-                  「{sample.excerpt.slice(0, 120)}」
-                </span>
+                {originalButton(
+                  "原文",
+                  `第 ${sample.position + 1} 片 · 原文`,
+                  sample.excerpt,
+                  onOriginal,
+                )}
               </p>
             ))}
           </li>
@@ -958,7 +1027,7 @@ function itemBody(step: CheckStepName, item: Item): ReactNode {
       </ul>
     );
   return (
-    <details>
+    <details className="gc-mentions">
       <summary>{(item.mentions as unknown[]).length} 处出现</summary>
       <ul className="gc-types">
         {(
@@ -972,7 +1041,12 @@ function itemBody(step: CheckStepName, item: Item): ReactNode {
         ).map((row) => (
           <li key={row.key} className="gr-small">
             第 {row.position + 1} 片「{row.name}」：{row.description ?? ""}
-            <span className="gc-quote">「{row.excerpt.slice(0, 120)}」</span>
+            {originalButton(
+              "原文",
+              `第 ${row.position + 1} 片 · 原文`,
+              row.excerpt,
+              onOriginal,
+            )}
           </li>
         ))}
       </ul>

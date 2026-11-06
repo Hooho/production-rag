@@ -1064,3 +1064,25 @@
   max-width: 100%;
   margin-right: 6px;
 }
+/* 检查卡片：紧凑一些，一页能看更多项。 */
+.gc-card {
+  padding: 8px 12px;
+  gap: 4px;
+  font-size: 13px;
+}
+.gc-card .gr-card-head strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+.gc-card p {
+  margin: 0;
+}
+.gc-original {
+  margin-left: 8px;
+  font-size: 12px;
+}
+.gc-mentions summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #64748b;
+}
