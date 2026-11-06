@@ -978,7 +978,7 @@ function itemBody(
     return (
       <p className="gr-small">
         {(item.names as string[]).length > 0
-          ? `建图时从这片抽出了 ${(item.names as string[]).length} 个实体：${(item.names as string[]).join("、")}`
+          ? `之前建图时从这片已经抽出了 ${(item.names as string[]).length} 个实体：${(item.names as string[]).join("、")}`
           : "建图时没从这片抽出任何实体"}
         {originalButton("原文", chunkTitle, text(item.excerpt), onOriginal)}
       </p>
