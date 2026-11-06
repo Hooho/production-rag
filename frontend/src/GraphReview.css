@@ -658,3 +658,20 @@
   display: grid;
   gap: 6px;
 }
+.gr-picker-results {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #eef2f6;
+}
+.gr-picker-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #eef2f6;
+}
+.gr-picker-search input {
+  height: 32px;
+  box-sizing: border-box;
+}
