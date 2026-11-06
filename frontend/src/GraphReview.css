@@ -668,3 +668,12 @@
 .gr-picker-search input {
   box-sizing: border-box;
 }
+/* 置灰的实体卡片（已在组内、已选）：内容变淡，「原文」仍可点。 */
+.gr-entities li.is-muted {
+  background: #f8fafc;
+}
+.gr-entities li.is-muted strong,
+.gr-entities li.is-muted .gr-desc,
+.gr-entities li.is-muted .gr-entity-name > .tag {
+  opacity: 0.5;
+}

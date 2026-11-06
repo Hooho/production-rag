@@ -188,16 +188,19 @@ function EntityItem({
   onEvidence,
   actions,
   note,
+  muted = false,
 }: {
   entity: Entity;
   code?: string;
   onEvidence?: (entity: Entity) => void;
   actions?: ReactNode;
   note?: ReactNode;
+  // 置灰：例如搜索结果里已经在组内、不能再加的实体。
+  muted?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <li>
+    <li className={muted ? "is-muted" : undefined}>
       <div className="gr-entity-name">
         {code && (
           <span
@@ -1168,10 +1171,12 @@ function EntitySearch({
   documentId,
   action,
   note,
+  muted,
 }: {
   documentId: string;
   action: (entity: Entity) => ReactNode;
   note?: (entity: Entity) => ReactNode;
+  muted?: (entity: Entity) => boolean;
 }) {
   const toast = useToast();
   const [query, setQuery] = useState("");
@@ -1226,6 +1231,7 @@ function EntitySearch({
               entity={entity}
               actions={action(entity)}
               note={note?.(entity)}
+              muted={muted?.(entity)}
             />
           ))}
         </ul>
@@ -1354,6 +1360,7 @@ function JoinEntities({
 
       <EntitySearch
         documentId={documentId}
+        muted={(entity) => inGroup(entity.id)}
         action={(entity) =>
           inGroup(entity.id) ? (
             <Tag size="sm" tone="neutral">
@@ -1495,6 +1502,7 @@ function NewMerge({
 
       <EntitySearch
         documentId={documentId}
+        muted={(entity) => isPicked(entity.id)}
         action={(entity) =>
           isPicked(entity.id) ? (
             <Tag size="sm" tone="neutral">
