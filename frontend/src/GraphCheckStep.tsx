@@ -40,7 +40,7 @@ export const CHECK_INFO: Record<
     example:
       "原文「段永平 2002 年买入了网易的股票」，建图时只抽出了「段永平」。AI 补抽后补上实体「网易」，和关系「段永平 → 买入 → 网易」。",
     accept: "采纳补抽",
-    reject: "我不",
+    reject: "不补",
   },
   relation: {
     title: "关系核对",
@@ -56,7 +56,7 @@ export const CHECK_INFO: Record<
     example:
       "「腾讯」在 1 片里被抽成「产品」，在另外 5 片里是「组织」。AI 看原文后建议统一成「组织」。",
     accept: "改类型",
-    reject: "我不",
+    reject: "不改",
   },
   split: {
     title: "拆分",
@@ -64,7 +64,7 @@ export const CHECK_INFO: Record<
     example:
       "「苹果」下面，有几处说的是「段永平长期持有的公司」，有几处说的是「一种水果，用来打比方」。AI 建议把水果那几处拆出去，改名「苹果（水果）」。",
     accept: "按建议拆分",
-    reject: "我不",
+    reject: "不拆",
   },
 };
 
@@ -1087,8 +1087,6 @@ function judgmentBody(
         name: string;
         type: string;
         description?: string;
-        // 程序按字面判断可能是这一片已有的哪个实体（只是提示，人来决定）
-        same_as?: string;
       }[]) ?? [];
     const relations =
       (value.relations as {
@@ -1109,11 +1107,7 @@ function judgmentBody(
     if (!entities.length && !relations.length)
       return (
         <>
-          <p>
-            {dropped.length
-              ? "AI 补的都被程序去掉了，没有可采纳的。"
-              : "AI 没有找到漏掉的。"}
-          </p>
+          <p>AI 没有找到漏掉的。</p>
           {droppedNote}
         </>
       );
@@ -1125,22 +1119,9 @@ function judgmentBody(
             <span className="gc-label">补实体</span>
             <span className="gc-chips">
               {entities.map((row) => (
-                <span
-                  key={row.name}
-                  className="gc-chip"
-                  title={
-                    row.same_as
-                      ? `名字是已有「${row.same_as}」的一部分，可能是同一个；采纳后会作为单独的实体，第 5 步检查漏合并会再查`
-                      : undefined
-                  }
-                >
-                  <Tag size="sm" plain hue>
-                    {row.name}（{row.type}）
-                  </Tag>
-                  {row.same_as && (
-                    <em className="gc-same">可能就是已有的「{row.same_as}」</em>
-                  )}
-                </span>
+                <Tag key={row.name} size="sm" plain hue>
+                  {row.name}（{row.type}）
+                </Tag>
               ))}
             </span>
           </div>
@@ -1156,10 +1137,7 @@ function judgmentBody(
                   </strong>
                   ：{row.description ?? ""}
                   {row.evidence && (
-                    <small className="gc-quote">
-                      {" "}
-                      原文引用：「{row.evidence}」
-                    </small>
+                    <small className="gc-quote"> 原文引用：「{row.evidence}」</small>
                   )}
                 </li>
               ))}
