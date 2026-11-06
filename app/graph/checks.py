@@ -19,7 +19,6 @@ import hashlib
 import json
 import re
 import time
-import unicodedata
 
 import numpy
 from sqlalchemy import select
@@ -72,7 +71,7 @@ class CheckError(Exception):
 
 
 def norm(text):
-    return "".join(unicodedata.normalize("NFKC", text or "").split())
+    return "".join(resolve.fold(text).split())
 
 
 def short_id(*parts):

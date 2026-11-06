@@ -59,6 +59,23 @@ def test_normalize():
     assert resolve.normalize("公司", "组织") == "公司"
     assert resolve.normalize("《穷查理宝典》", "作品") == "穷查理宝典"
     assert resolve.normalize("苹果公司", "产品") == "苹果公司"
+    # PDF 原文里的部首字（⻛ U+2EDB）NFKC 不转，规范化时转成常用字，和「风险」是同一个键。
+    assert resolve.normalize("系统性\u2edb险", "概念") == "系统性风险"
+    key = resolve.merge_key("概念", "投资风格")
+    assert resolve.merge_key("概念", "投资\u2edb格") == key
+
+
+# 同一次建图里「系统性⻛险」和「系统性风险」并成一个实体（之前程序当成两个，写入 MySQL 时唯一键重复）。
+def test_radical_variants_merge_into_one_entity():
+    db = engine()
+    rows = [
+        extraction("e1", "c1", [entity("系统性\u2edb险", "概念")]),
+        extraction("e2", "c2", [entity("系统性风险", "概念")]),
+    ]
+    with db.connect() as connection:
+        plan = resolve.prepare_build(connection, "online", "b1", rows)
+    assert len({row["entity_id"] for row in plan["mentions"]}) == 1
+    assert len(plan["entities"]) == 1
 
 
 # 第 1 期的合并规则：模型给的标准名、规范化后相同、名字相同才合并；类型不同不合并；模型没认出来的别名单独成实体。

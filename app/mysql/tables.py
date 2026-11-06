@@ -12,9 +12,13 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects import mysql
 
 
 metadata = MetaData()
+# 程序算出来的键（合并键、别名键）按字节比较：MySQL 默认的比较规则会把程序认为不同的两个键当成相同，
+# 写入时报唯一键重复。SQLite（测试）不认这个排序规则，只在 MySQL 上生效。
+BinaryKey = String(255).with_variant(mysql.VARCHAR(255, collation="utf8mb4_bin"), "mysql")
 sessions = Table(
     "sessions",
     metadata,
@@ -748,7 +752,7 @@ graph_entities = Table(
     Column("space", String(64), nullable=False),
     Column("name", String(200), nullable=False),
     Column("type", String(32), nullable=False),
-    Column("merge_key", String(255), nullable=False),
+    Column("merge_key", BinaryKey, nullable=False),
     Column("description", Text),
     # extracted：建图时生成；manual：手动建的（第 3 期）
     Column("origin", String(16), nullable=False),
@@ -825,7 +829,7 @@ graph_aliases = Table(
     Column("space", String(64), nullable=False),
     Column("alias", String(200), nullable=False),
     # 类型|规范化后的别名
-    Column("alias_key", String(255), nullable=False),
+    Column("alias_key", BinaryKey, nullable=False),
     Column("entity_id", String(36), nullable=False),
     # manual / confirmed / merged / renamed
     Column("source", String(16), nullable=False),
