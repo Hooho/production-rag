@@ -1095,8 +1095,26 @@ function judgmentBody(
         description?: string;
         evidence?: string;
       }[]) ?? [];
+    const dropped =
+      (value.dropped as { name: string; reason: string }[] | undefined) ?? [];
+    // 程序去掉的：原文找不到、和已有重复的，灰色小字列出来，人能看到为什么没给建议。
+    const droppedNote = dropped.length > 0 && (
+      <small className="gc-dropped">
+        程序去掉了 {dropped.length} 个：
+        {dropped.map((row) => `${row.name}（${row.reason}）`).join("、")}
+      </small>
+    );
     if (!entities.length && !relations.length)
-      return <p>AI 没有找到漏掉的。</p>;
+      return (
+        <>
+          <p>
+            {dropped.length
+              ? "AI 补的都被程序去掉了，没有可采纳的。"
+              : "AI 没有找到漏掉的。"}
+          </p>
+          {droppedNote}
+        </>
+      );
     // 和关系表一样：起点 → 终点、AI 基于原文的总结用正常文字，只有原文引用是灰色小字。
     return (
       <div className="gc-glean">
@@ -1123,13 +1141,17 @@ function judgmentBody(
                   </strong>
                   ：{row.description ?? ""}
                   {row.evidence && (
-                    <small className="gc-quote"> 原文引用：「{row.evidence}」</small>
+                    <small className="gc-quote">
+                      {" "}
+                      原文引用：「{row.evidence}」
+                    </small>
                   )}
                 </li>
               ))}
             </ul>
           </div>
         )}
+        {droppedNote}
       </div>
     );
   }

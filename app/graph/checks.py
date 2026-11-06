@@ -560,8 +560,18 @@ def user_glean(item, chunk, schema, plan):
     )
 
 
-def decide_glean(text, item, schema, plan):
+def glean_key(text):
+    return norm(text).strip("《》「」“”\"'")
+
+
+# 补抽结果先由程序过滤，模型给的不直接当建议：
+# 名字在这一片原文里找不到的（模型自己概括的词、只在上下文说明里出现的）去掉；
+# 是已有实体的另一种写法（「巴菲特」之于已有的「沃伦·巴菲特」）的去掉，关系改挂到已有实体上；
+# 关系的原文引用在这一片里找不到、或这两个实体之间已经有关系的去掉。去掉的记在 dropped 里给人看。
+def decide_glean(text, item, schema, plan, chunk=None):
     value = parse_json(text)
+    content = norm((chunk or {}).get("content") or item.get("excerpt"))
+    rows = [row for row in plan["mentions"] if row["chunk_id"] == item["chunk_id"]]
     existing = [
         {
             "name": row["name"],
@@ -569,24 +579,72 @@ def decide_glean(text, item, schema, plan):
             "type": row["type"],
             "description": row.get("description") or "",
         }
-        for row in plan["mentions"]
-        if row["chunk_id"] == item["chunk_id"]
+        for row in rows
     ]
     known = {row["name"] for row in existing}
-    new_entities = [
-        row
-        for row in (value.get("entities") or [])
-        if isinstance(row, dict) and row.get("name") not in known
-    ]
-    combined = {
-        "entities": existing + new_entities,
-        "relations": value.get("relations") or [],
+    keys = {}
+    for row in existing:
+        for name in (row["name"], row["canonical"]):
+            if glean_key(name):
+                keys.setdefault(glean_key(name), row["name"])
+    dropped, alias, fresh = [], {}, []
+    for row in value.get("entities") or []:
+        if not isinstance(row, dict) or not str(row.get("name") or "").strip():
+            continue
+        name = str(row["name"]).strip()
+        if name in known:
+            continue
+        key = glean_key(name)
+        # 新名字是已有名字的一部分：当成同一个的简写（新名字更长的不算，「股市大跌」不是「股市」）。
+        same = next(
+            (keys[other] for other in keys if len(key) >= 2 and key in other), None
+        )
+        if same:
+            alias[name] = same
+            dropped.append({"name": name, "reason": f"和已有的「{same}」重复"})
+        elif not key or key not in content:
+            dropped.append({"name": name, "reason": "原文里找不到"})
+        else:
+            fresh.append(row)
+    names = known | {str(row["name"]).strip() for row in fresh}
+    mentions = {row["id"]: row for row in plan["mentions"]}
+    pairs = {
+        frozenset(
+            (
+                (mentions.get(row["source_mention_id"]) or {}).get("name"),
+                (mentions.get(row["target_mention_id"]) or {}).get("name"),
+            )
+        )
+        for row in plan["relations"]
+        if row["chunk_id"] == item["chunk_id"]
     }
+    relations = []
+    for row in value.get("relations") or []:
+        if not isinstance(row, dict):
+            continue
+        source = alias.get(row.get("source"), row.get("source"))
+        target = alias.get(row.get("target"), row.get("target"))
+        label = f"{source} → {target}"
+        parts = [norm(part) for part in str(row.get("evidence") or "").split("||")]
+        parts = [part for part in parts if part]
+        if source not in names or target not in names:
+            reason = "起点或终点不是这一片的实体"
+        elif frozenset((source, target)) in pairs:
+            reason = "这两个实体之间已经有关系"
+        elif not parts or not all(part in content for part in parts):
+            reason = "原文引用在这一片里找不到"
+        else:
+            relations.append({**row, "source": source, "target": target})
+            pairs.add(frozenset((source, target)))
+            continue
+        dropped.append({"name": label, "reason": reason})
+    combined = {"entities": existing + fresh, "relations": relations}
     parsed = extract.parse_output(json.dumps(combined, ensure_ascii=False), schema)
     entities = [row for row in parsed["entities"] if row["name"] not in known]
     return {
         "entities": entities,
         "relations": parsed["relations"],
+        "dropped": dropped[:50],
         "suggest": bool(entities or parsed["relations"]),
     }
 
@@ -604,7 +662,7 @@ def user_relation(item, chunk, schema, plan):
     )
 
 
-def decide_relation(text, item, schema, plan):
+def decide_relation(text, item, schema, plan, chunk=None):
     value = parse_json(text)
     verdict = value.get("verdict")
     if verdict not in ("supported", "partial", "unsupported"):
@@ -633,7 +691,7 @@ def user_type(item, chunk, schema, plan):
     )
 
 
-def decide_type(text, item, schema, plan):
+def decide_type(text, item, schema, plan, chunk=None):
     value = parse_json(text)
     kind = value.get("type")
     if kind is not None and kind not in type_names(schema):
@@ -664,7 +722,7 @@ def user_split(item, chunk, schema, plan):
     )
 
 
-def decide_split(text, item, schema, plan):
+def decide_split(text, item, schema, plan, chunk=None):
     value = parse_json(text)
     codes = {f"m{index + 1}": row["key"] for index, row in enumerate(item["mentions"])}
     groups = []
@@ -725,7 +783,9 @@ def judge(step, models, item, chunk, schema, plan, system_prompt):
         result.update(raw_output=raw, input_tokens=incoming, output_tokens=outgoing)
         if finish == "length":
             raise ValueError("模型输出被截断")
-        result.update(decision=decide(text, item, schema, plan), status="completed")
+        result.update(
+            decision=decide(text, item, schema, plan, chunk), status="completed"
+        )
     except Exception as error:
         result.update(status="failed", error=str(error)[:1000])
     result["duration_ms"] = round((time.monotonic() - started) * 1000)

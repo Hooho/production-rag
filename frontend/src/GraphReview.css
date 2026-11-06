@@ -1138,3 +1138,11 @@
 .gc-relations strong {
   font-weight: 600;
 }
+
+.gc-dropped {
+  display: block;
+  margin-top: 8px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
+}

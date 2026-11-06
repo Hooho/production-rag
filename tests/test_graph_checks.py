@@ -4,6 +4,7 @@ import numpy
 
 from app.graph import build as graph_build
 from app.graph import checks, resolve
+from app.graph.schemas import DEFAULT_SCHEMA
 from test_app import headers, setup  # noqa: F401
 from test_graph_build import add_document, build, enable_model, run_graph_jobs
 from test_graph_resolve import engine, entity, extraction
@@ -116,6 +117,54 @@ def test_apply_relation_type_split_and_glean():
     names = [row["name"] for row in rows[0]["result"]["entities"]]
     assert names == ["苹果", "腾讯", "网易"]
     assert len(rows[0]["result"]["relations"]) == 1
+
+
+def test_glean_decision_drops_names_not_in_chunk_and_duplicates():
+    rows = [
+        extraction(
+            "e1",
+            "c1",
+            [
+                entity("沃伦·巴菲特", "人物"),
+                entity("段永平", "人物"),
+                entity("股市", "概念"),
+            ],
+            [relation("段永平", "沃伦·巴菲特", "段永平学习沃伦·巴菲特")],
+        )
+    ]
+    _, plan = plan_of(rows)
+    chunk = {
+        "content": "段永平学习沃伦·巴菲特，也读芒格。二、存在银行或买国债。股市大跌时他没卖。"
+    }
+    output = {
+        "entities": [
+            {"name": "《富爸爸穷爸爸》", "type": "作品"},  # 原文没有
+            {"name": "巴菲特", "type": "人物"},  # 已有「沃伦·巴菲特」
+            {"name": "芒格", "type": "人物"},
+            {"name": "国债", "type": "产品"},
+            {"name": "股市大跌", "type": "事件"},  # 比已有的长，不算重复
+        ],
+        "relations": [
+            relation("段永平", "芒格", "也读芒格"),
+            relation("段永平", "巴菲特", "段永平很佩服巴菲特"),  # 已有这两个之间的关系
+            relation("段永平", "国债", "他买了国债"),  # 引用找不到
+            relation("段永平", "《富爸爸穷爸爸》", "读了这本书"),  # 终点被去掉
+        ],
+    }
+    item = {"chunk_id": "c1", "excerpt": ""}
+    decision = checks.decide_glean(
+        json.dumps(output, ensure_ascii=False), item, DEFAULT_SCHEMA, plan, chunk
+    )
+    assert [row["name"] for row in decision["entities"]] == ["芒格", "国债", "股市大跌"]
+    assert [(row["source"], row["target"]) for row in decision["relations"]] == [
+        ("段永平", "芒格")
+    ]
+    reasons = {row["name"]: row["reason"] for row in decision["dropped"]}
+    assert reasons["《富爸爸穷爸爸》"] == "原文里找不到"
+    assert reasons["巴菲特"] == "和已有的「沃伦·巴菲特」重复"
+    assert reasons["段永平 → 沃伦·巴菲特"] == "这两个实体之间已经有关系"
+    assert reasons["段永平 → 国债"] == "原文引用在这一片里找不到"
+    assert reasons["段永平 → 《富爸爸穷爸爸》"] == "起点或终点不是这一片的实体"
 
 
 def test_split_scan_uses_vectors_to_find_mixed_entity():
