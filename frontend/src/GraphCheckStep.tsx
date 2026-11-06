@@ -1123,7 +1123,7 @@ function judgmentBody(
                   </strong>
                   ：{row.description ?? ""}
                   {row.evidence && (
-                    <small className="gc-quote">「{row.evidence}」</small>
+                    <small className="gc-quote"> 原文引用：「{row.evidence}」</small>
                   )}
                 </li>
               ))}
