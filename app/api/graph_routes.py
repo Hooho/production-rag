@@ -13,6 +13,7 @@ from sqlalchemy import select
 
 from .. import prompts
 from ..graph import build as graph_build
+from ..graph import checks as graph_checks
 from ..graph import query as graph_query
 from ..graph.extract import PROMPT_ID, build_messages
 from ..graph.schemas import DEFAULT_SCHEMA_ID, MATCHING_RULES, get_schema, list_schemas
@@ -69,6 +70,29 @@ class StopInput(BaseModel):
 
 class VersionNoteInput(BaseModel):
     note: str = Field("", max_length=500)
+
+
+CheckStep = Literal["glean", "relation", "type", "split"]
+
+
+class CheckInput(BaseModel):
+    build_id: UUID
+
+
+class CheckStartInput(BaseModel):
+    build_id: UUID
+    # scope：补抽范围（few 抽出很少的分片 / all 全部）；sample：关系核对另外抽查通过的百分比；
+    # llm：检查用的模型 {provider, model}，不传用建图时的模型。
+    params: dict = Field(default_factory=dict)
+
+
+class CheckDecideInput(BaseModel):
+    build_id: UUID
+    item_ids: list[str] = Field(min_length=1, max_length=10000)
+    # accept 采纳建议、reject 不采纳、null 撤销
+    decision: Literal["accept", "reject"] | None = None
+    # 改了模型的建议：类型核对 {"type"}；拆分 {"groups": [{"mentions", "name"}]}
+    edit: dict | None = None
 
 
 EXAMPLE_CHUNK = {
@@ -377,6 +401,120 @@ def build_router(current_user, identity, require_admin):
             return graph_build.retry_failed_review(state.store, latest["id"])
         except graph_build.BuildError as error:
             raise HTTPException(409, str(error)) from None
+
+    def check_target(state, user, document_id, build_id):
+        row = readable(state, user["username"], document_id)
+        check_can_build(user, row)
+        with state.store.engine.connect() as connection:
+            latest = graph_query.latest_build(connection, str(document_id))
+        if not latest or latest["id"] != str(build_id):
+            raise HTTPException(409, "建图记录已切换，请刷新")
+        return latest
+
+    def check_call(operation):
+        try:
+            return operation()
+        except (graph_checks.CheckError, graph_build.BuildError) as error:
+            raise HTTPException(409, str(error)) from None
+
+    # 图谱检查前 4 步的状态（步骤条用，不带明细）。
+    @router.get("/documents/{document_id}/graph/check")
+    def check_summary(request: Request, document_id: UUID, user=Depends(current_user)):
+        state = request.app.state
+        row = readable(state, user["username"], document_id)
+        with state.store.engine.connect() as connection:
+            build = graph_query.latest_build(connection, str(document_id))
+        if not build:
+            return {"build_id": None, "steps": {}}
+        items = graph_checks.reports(state.store.engine, build)
+        return {
+            "build_id": build["id"],
+            "can_confirm": row["owner"] == user["username"] or bool(user["is_admin"]),
+            "steps": {
+                step: graph_checks.summary(value) for step, value in items.items()
+            },
+        }
+
+    @router.get("/documents/{document_id}/graph/check/{step}")
+    def check_detail(
+        request: Request, document_id: UUID, step: CheckStep, user=Depends(current_user)
+    ):
+        state = request.app.state
+        row = readable(state, user["username"], document_id)
+        with state.store.engine.connect() as connection:
+            build = graph_query.latest_build(connection, str(document_id))
+        return {
+            "report": graph_checks.report(state.store.engine, build, step)
+            if build
+            else None,
+            "build_id": build["id"] if build else None,
+            "can_confirm": row["owner"] == user["username"] or bool(user["is_admin"]),
+        }
+
+    @router.post("/documents/{document_id}/graph/check/{step}/start", status_code=202)
+    def check_start(
+        request: Request,
+        document_id: UUID,
+        step: CheckStep,
+        body: CheckStartInput,
+        user=Depends(current_user),
+    ):
+        state = request.app.state
+        check_target(state, user, document_id, body.build_id)
+        return check_call(
+            lambda: graph_checks.start(
+                state.store, str(body.build_id), step, body.params, user["username"]
+            )
+        )
+
+    @router.post("/documents/{document_id}/graph/check/{step}/decide")
+    def check_decide(
+        request: Request,
+        document_id: UUID,
+        step: CheckStep,
+        body: CheckDecideInput,
+        user=Depends(current_user),
+    ):
+        state = request.app.state
+        check_target(state, user, document_id, body.build_id)
+        return check_call(
+            lambda: graph_checks.decide(
+                state.store,
+                str(body.build_id),
+                step,
+                body.item_ids,
+                body.decision,
+                body.edit,
+                user["username"],
+            )
+        )
+
+    @router.post("/documents/{document_id}/graph/check/{step}/{action}")
+    def check_action(
+        request: Request,
+        document_id: UUID,
+        step: CheckStep,
+        action: Literal["judge", "stop", "write", "skip", "retry-failed"],
+        body: CheckInput,
+        user=Depends(current_user),
+    ):
+        state = request.app.state
+        check_target(state, user, document_id, body.build_id)
+        build_id = str(body.build_id)
+        operations = {
+            "judge": lambda: graph_checks.judge_now(state.store, build_id, step),
+            "stop": lambda: graph_checks.stop(state.store, build_id, step),
+            "write": lambda: graph_checks.write_step_result(
+                state.store, build_id, step, user["username"]
+            ),
+            "skip": lambda: graph_checks.skip(
+                state.store, build_id, step, user["username"]
+            ),
+            "retry-failed": lambda: graph_checks.retry_failed(
+                state.store, build_id, step
+            ),
+        }
+        return check_call(operations[action])
 
     # 停止检查（已经判断完的保留）/ 继续检查（只判断还没判断的）。
     @router.post("/documents/{document_id}/graph/review/stop")

@@ -23,7 +23,7 @@ from ..mysql.tables import (
     graph_relations,
     graph_versions,
 )
-from . import resolve, review, versions
+from . import checks, resolve, review, versions
 from .extract import PROMPT_ID, cache_key, extract_chunk
 from .schemas import DEFAULT_SCHEMA_ID, ONLINE_SPACE, get_schema, now, type_names
 
@@ -41,8 +41,13 @@ STEPS = {
     "graph_extract": (10, "抽取实体关系"),
     "graph_merge": (11, "合并实体"),
     "graph_write": (12, "写入图谱"),
-    "graph_review": (13, "二次检查合并"),
-    "graph_rewrite": (14, "按确认结果重写图谱"),
+    # 图谱检查：① 补抽 ② 关系核对 ③ 类型核对 ④ 拆分 ⑤ 合并（checks.py、review.py）
+    "graph_check_glean": (13, "图谱检查 · 补抽"),
+    "graph_check_relation": (14, "图谱检查 · 关系核对"),
+    "graph_check_type": (15, "图谱检查 · 类型核对"),
+    "graph_check_split": (16, "图谱检查 · 拆分"),
+    "graph_review": (17, "图谱检查 · 合并"),
+    "graph_rewrite": (18, "按确认结果重写图谱"),
 }
 # 写入图谱后自动在后台跑二次检查；设为 0 则需要手动点「开始二次检查」。
 # 写入图谱后要不要自动开始检查。默认不自动：图谱检查的每一步都由人点「开始检查」。
@@ -397,6 +402,8 @@ def start_build(
         ).first()
         if busy is not None:
             raise BuildError("这份文档正在建图，完成后再试")
+        if checking_document(connection, document_id):
+            raise BuildError("这份文档的图谱检查正在进行，请先完成或停止检查")
         connection.execute(
             graph_builds.insert().values(
                 id=build_id,
@@ -531,6 +538,9 @@ def mark_failed(store, build, message, step_id="graph_extract", duration_ms=None
 def run_job(store, models, payload):
     if payload.get("stage") == "review":
         run_review_job(store, models, payload["build_id"])
+        return
+    if str(payload.get("stage") or "").startswith("check:"):
+        checks.run_job(store, models, payload["build_id"], payload["stage"][6:])
         return
     build = get_build(store.engine, payload["build_id"])
     if (
@@ -731,14 +741,8 @@ def finalize(store, build, models=None):
                 "正在计算名字归属",
                 {"build_id": build["id"]},
             )
-            with store.engine.connect() as connection:
-                plan = resolve.prepare_build(
-                    connection,
-                    build["space"],
-                    build["id"],
-                    [dict(row) for row in rows],
-                    build["created_by"],
-                )
+            # 抽取结果 + 图谱检查前 4 步已写入的决定（补抽、删关系、改类型、拆分）；合并在下面套用。
+            plan = check_plan(store, build, [dict(row) for row in rows])
             summary = plan["summary"]
             labels = {
                 "new": "新建",
@@ -788,9 +792,13 @@ def finalize(store, build, models=None):
         # 每次写入都存成一个新版本。建图、补跑分片写入的版本直接生效（和以前一样）；
         # 图谱检查确认写入的版本不生效，要在版本列表里手动设为生效。
         checking = (
-            bool(report and report.get("status") == "rewriting") if rows else False
+            bool(report and report.get("status") == "rewriting")
+            or checks.checking(store.engine, build)
+            if rows
+            else False
         )
         version = None
+        activated = False
         with store.engine.begin() as connection:
             require_running(connection, build["id"])
             if rows:
@@ -803,12 +811,21 @@ def finalize(store, build, models=None):
                     connection,
                     build,
                     "check" if checking else ("retry" if retried else "build"),
-                    version_summary(summary, report if checking else None),
-                    (report["applied"]["by"] if checking else build["created_by"]),
+                    version_summary(
+                        summary,
+                        report
+                        if report and report.get("status") == "rewriting"
+                        else None,
+                        checks.writing(store.engine, build) if checking else None,
+                    ),
+                    checks.writer(store.engine, build, report)
+                    if checking
+                    else build["created_by"],
                 )
                 resolve.write_build(connection, build["space"], version["id"], plan)
-                if not checking:
+                if not checking and should_activate(connection, build, retried):
                     versions.activate(connection, version["id"])
+                    activated = True
                 versions.prune(connection, build["document_id"])
             values = {
                 **value,
@@ -817,12 +834,14 @@ def finalize(store, build, models=None):
                 "updated": now(),
                 "finished": now(),
             }
-            if not checking:
+            # 建图记录上的生效标记、数量跟着生效版本走（versions.activate 已经设好）；没生效的写入不改。
+            if activated:
                 values.update(
-                    active=summary is not None,
-                    entity_count=summary["entity_count"] if summary else 0,
-                    relation_count=summary["relation_count"] if summary else 0,
+                    entity_count=summary["entity_count"],
+                    relation_count=summary["relation_count"],
                 )
+            elif not rows:
+                values.update(active=False, entity_count=0, relation_count=0)
             connection.execute(
                 graph_builds.update()
                 .where(graph_builds.c.id == build["id"])
@@ -836,14 +855,22 @@ def finalize(store, build, models=None):
                 "completed",
                 f"已保存 {summary['entity_count']} 个实体的归属、{summary['mention_count']} 条名字出处、{summary['relation_count']} 条关系，"
                 + (
-                    f"存为 v{version['number']}，未生效（在版本列表里设为生效）"
-                    if checking
-                    else f"存为 v{version['number']}，已生效"
+                    f"存为 v{version['number']}，已生效"
+                    if activated
+                    else f"存为 v{version['number']}，未生效（在版本列表里设为生效）"
                 ),
                 {"build_id": build["id"], "version_id": version["id"], **summary},
                 round((time.monotonic() - started) * 1000),
             )
+            merge_stale = checks.after_write(store, build, report)
             after_write(store, build, report, records)
+            if merge_stale:
+                stale = review_report(store.engine, build)
+                if stale and stale.get("status") not in ("idle", None):
+                    stale["stale"] = True
+                    _review_step(
+                        store, build, stale, "completed", "图已变化，需要重新检查"
+                    )
         else:
             for pending in ("graph_merge", "graph_write", "graph_review"):
                 write_step(
@@ -910,6 +937,21 @@ def retry(store, build_id, chunk_id=None):
         )
     enqueue(store, build_id)
     return get_build(store.engine, build_id)
+
+
+# 这份文档有没有正在进行的图谱检查（排队、判断中、写入中）。
+def checking_document(connection, document_id):
+    rows = connection.execute(
+        select(document_steps.c.result).where(
+            document_steps.c.document_id == document_id,
+            document_steps.c.step_id.in_(["graph_review", *checks.STEP_IDS.values()]),
+        )
+    ).scalars()
+    return any(
+        isinstance(row, dict)
+        and row.get("status") in ("queued", "running", "rewriting")
+        for row in rows
+    )
 
 
 # 把一个图谱版本设为生效：检索、全局图谱从此用这个版本。建图进行中不能切换。
@@ -1150,12 +1192,32 @@ def after_write(store, build, report, records):
     enqueue(store, build["id"], "review")
 
 
+# 建图写入的版本要不要直接生效：第一次建图、上传或新版本自动建图、补跑正在生效的建图 → 生效；
+# 手动 / 批量重建、而这份文档已经有生效的版本 → 不生效，在版本列表里手动设为生效。
+def should_activate(connection, build, retried):
+    active = connection.execute(
+        select(graph_versions.c.build_id).where(
+            graph_versions.c.space == build["space"],
+            graph_versions.c.doc_key == build["doc_key"],
+            graph_versions.c.active.is_(True),
+        )
+    ).first()
+    trigger = build.get("trigger") or build.get("trigger_kind")
+    if active is None or trigger in ("upload", "version"):
+        return True
+    if retried:
+        return active[0] == build["id"]
+    return trigger not in ("manual", "batch")
+
+
 # 版本上记的摘要：数量，以及（图谱检查写入时）这次按哪些合并结果写入。
-def version_summary(summary, report=None):
+def version_summary(summary, report=None, steps=None):
     value = {
         key: summary.get(key)
         for key in ("entity_count", "relation_count", "mention_count")
     }
+    if steps:
+        value["changes"] = "；".join(steps)
     if report and report.get("applied"):
         groups = report["applied"].get("groups") or []
         value["changes"] = f"按 {len(groups)} 个合并结果写入"
@@ -1215,14 +1277,8 @@ def run_review(store, models, build, report):
         for item in chunk_rows(store.engine, build["document_id"])
     }
     scan_started = time.monotonic()
-    with store.engine.connect() as connection:
-        plan = resolve.prepare_build(
-            connection,
-            build["space"],
-            build["id"],
-            extraction_rows(store.engine, build["id"]),
-            build["created_by"],
-        )
+    # 在最新写入的结果上找候选：抽取结果 + 前 4 步已写入的决定。
+    plan = check_plan(store, build)
     items, _ = review.inventory(plan, evidence)
     method = review.method_info(models)
     signature = hashlib.sha256(
@@ -1503,16 +1559,18 @@ def _inventory(store, build):
         item["chunk_id"]: item["content"]
         for item in chunk_rows(store.engine, build["document_id"])
     }
-    with store.engine.connect() as connection:
-        plan = resolve.prepare_build(
-            connection,
-            build["space"],
-            build["id"],
-            extraction_rows(store.engine, build["id"]),
-            build["created_by"],
-        )
+    plan = check_plan(store, build)
     items, _ = review.inventory(plan, evidence)
     return items
+
+
+# 写入方案：抽取结果 + 图谱检查前 4 步已写入的决定（合并由 review.apply 另外套用）。
+def check_plan(store, build, rows=None):
+    rows = rows if rows is not None else extraction_rows(store.engine, build["id"])
+    with store.engine.connect() as connection:
+        return checks.plan_for(
+            connection, build, rows, checks.applied_of(store.engine, build), "merge"
+        )
 
 
 # 人工合并时搜这份文档的全部实体（不只是候选组里的），按名字或描述匹配；ids 有值时按编号取。
@@ -1660,7 +1718,7 @@ def retry_review(store, build_id):
         raise BuildError("二次检查正在进行，不能重复开始")
     # 未开始、但之前判断过（补跑分片、重建后保留下来的）：整份沿用，抽取结果没变就不再调用模型。
     if report and report.get("status") == "idle" and report.get("signature"):
-        fresh = {**report, "status": "queued", "phase": "scan"}
+        fresh = {**report, "status": "queued", "phase": "scan", "stale": False}
     else:
         fresh = {
             "build_id": build_id,

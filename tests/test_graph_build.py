@@ -268,6 +268,18 @@ def test_rebuild_reuses_extractions(setup):
     build(client, document_id)
     run_graph_jobs(store, models)
     assert models.chat_model.calls == calls
+    # 手动重建、这份文档已经有生效的版本：新结果存成版本但不生效，手动设为生效后才换。
+    graph = client.get(f"/documents/{document_id}/graph", headers=headers()).json()
+    assert graph["version"]["number"] == 1
+    rebuilt = next(row for row in graph["versions"] if row["number"] == 2)
+    assert rebuilt["active"] is False and rebuilt["origin"] == "build"
+    assert (
+        client.post(
+            f"/documents/{document_id}/graph/versions/{rebuilt['id']}/activate",
+            headers=headers(),
+        ).status_code
+        == 200
+    )
     graph = client.get(f"/documents/{document_id}/graph", headers=headers()).json()
     assert (
         graph["build"]["reused"] == graph["build"]["total"]
@@ -834,11 +846,16 @@ def test_merge_records_distinguish_document_and_global_scope(setup):
     assert "new" in {row["scope"] for row in first_merges}
     assert "document" in {row["scope"] for row in first_merges}
     assert "global" not in {row["scope"] for row in first_merges}
-    # 同一份文档重建，沿用自己的实体不算跨文档。
+    # 同一份文档重建，沿用自己的实体不算跨文档（重建的版本不自动生效，指定版本查看）。
     assert build(client, first).status_code == 202
     run_graph_jobs(store, models)
+    versions = client.get(f"/documents/{first}/graph", headers=headers()).json()[
+        "versions"
+    ]
+    second_version = next(row["id"] for row in versions if row["number"] == 2)
     rebuilt = client.get(
-        f"/documents/{first}/graph?view=merges", headers=headers()
+        f"/documents/{first}/graph?view=merges&version={second_version}",
+        headers=headers(),
     ).json()["merges"]["items"]
     assert {row["scope"] for row in rebuilt} == {"document"}
     second = add_document(
