@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import re
 import time
 
@@ -11,8 +12,9 @@ from ..models import TruncatedOutput, strip_think
 from .schemas import OTHER_TYPE, category_names, render, type_names
 
 PROMPT_ID = "graph_extract"
-# 推理模型先写思考过程再写 JSON，额度给少了会在写完 JSON 之前被截断。
-MAX_TOKENS = 16384
+# 输出上限（含思考过程）。正常一片的输出在 3000 token 以内；模型偶尔会复读停不下来，
+# 上限太高时要白跑满上限（16384 约 30 秒）才失败，所以设 6000。推理模型思考很长时可以用环境变量调高。
+MAX_TOKENS = int(os.getenv("GRAPH_EXTRACT_MAX_TOKENS", "6000"))
 # 图谱抽取输出较长，使用独立请求超时，不修改问答模型的默认配置。
 REQUEST_TIMEOUT = 120
 NAME_LENGTH = 200

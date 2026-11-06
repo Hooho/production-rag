@@ -314,10 +314,10 @@ def test_truncated_output_preserves_raw_text_and_token_usage():
         models = FakeModels(reply(text, finish_reason="length"))
         result = extract.extract_chunk(models, DEFAULT_SCHEMA, CHUNK)
         assert result["status"] == "failed" and "输出被截断" in result["error"]
-        assert "16384" in result["error"]
+        assert str(extract.MAX_TOKENS) in result["error"]
         assert result["raw_output"] == text
         assert result["input_tokens"] == 120 and result["output_tokens"] == 30
-        assert models.chat_model.bound["max_tokens"] == 16384
+        assert models.chat_model.bound["max_tokens"] == extract.MAX_TOKENS == 6000
         assert result["result"] is None
 
 
