@@ -8,8 +8,10 @@ import {
 } from "react";
 import {
   addGraphReviewManual,
+  continueGraphReview,
   decideGraphReview,
   getGraphReview,
+  stopGraphReview,
   searchGraphReviewEntities,
   retryFailedGraphReview,
   retryGraphReview,
@@ -26,6 +28,7 @@ import { Tag } from "./Tag";
 import { errorText, useToast } from "./Toast";
 import type { Tone } from "./tags";
 import { diffPlan, type PlanDiff } from "./graphReviewDiff";
+import { GraphCheckSteps, type CheckStep } from "./GraphCheckSteps";
 import "./GraphReview.css";
 
 const PAGE_SIZE = 10;
@@ -1643,6 +1646,125 @@ function NewMerge({
 
 const ACTIVE = ["queued", "running", "rewriting"];
 
+export function formatClock(ms: number) {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return hours > 0
+    ? `${hours}:${pad(minutes)}:${pad(seconds)}`
+    : `${pad(minutes)}:${pad(seconds)}`;
+}
+
+// 检查进行到哪了：已判断几组、失败几组、token；用时从开始检查算起，按已判断的平均耗时估算剩余。
+export function checkProgress(report: GraphReviewReport, now = Date.now()) {
+  const total = report.scan?.candidates.length ?? 0;
+  const finished = report.judgments.filter((row) => row.status !== "running");
+  const failed = finished.filter((row) => row.status === "failed").length;
+  const durations = finished
+    .map((row) => row.duration_ms ?? 0)
+    .filter((value) => value > 0);
+  const average = durations.length
+    ? durations.reduce((sum, value) => sum + value, 0) / durations.length
+    : 0;
+  const started = report.started ? Date.parse(report.started) : NaN;
+  return {
+    total,
+    done: finished.length,
+    failed,
+    elapsed: Number.isNaN(started) ? null : now - started,
+    remaining: average ? average * Math.max(0, total - finished.length) : null,
+    tokens: finished.reduce(
+      (sum, row) => sum + (row.input_tokens ?? 0) + (row.output_tokens ?? 0),
+      0,
+    ),
+  };
+}
+
+function CheckProgress({
+  report,
+  canControl,
+  busy,
+  action,
+  onStop,
+  onContinue,
+}: {
+  report: GraphReviewReport;
+  canControl: boolean;
+  busy: boolean;
+  action: string | null;
+  onStop: () => void;
+  onContinue: () => void;
+}) {
+  const running = report.status === "queued" || report.status === "running";
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [running]);
+  const value = checkProgress(report, now);
+  const scanned = !!report.scan;
+  const percent = value.total ? (value.done / value.total) * 100 : 0;
+  return (
+    <div className={`gc-progress${running ? "" : " is-stopped"}`}>
+      <div className="gc-progress-head">
+        <span className="gc-progress-phases">
+          <span className={scanned ? "" : "is-active"}>
+            ① 找可疑项
+            {scanned
+              ? `：${value.total} 组（${((report.scan?.duration_ms ?? 0) / 1000).toFixed(1)} 秒）`
+              : "…"}
+          </span>
+          <span className={scanned && running ? "is-active" : ""}>
+            ② 模型判断{scanned ? `：${value.done} / ${value.total}` : ""}
+          </span>
+        </span>
+        {canControl &&
+          (running ? (
+            <button
+              type="button"
+              className={`secondary-button button-sm${loadingClass(action === "stop")}`}
+              disabled={busy}
+              title="判断完的保留，没判断的留到「继续检查」"
+              onClick={onStop}
+            >
+              停止
+            </button>
+          ) : (
+            <button
+              type="button"
+              className={`primary-button button-sm${loadingClass(action === "continue")}`}
+              disabled={busy}
+              title="只判断还没判断的，已经判断的和你的决定都保留"
+              onClick={onContinue}
+            >
+              继续检查
+            </button>
+          ))}
+      </div>
+      <div className="gc-progress-bar">
+        <span style={{ width: `${percent}%` }} />
+      </div>
+      <div className="gc-progress-stats">
+        <span>
+          {running ? "检查中" : "已停止"} · 已判断 {value.done} / {value.total}
+        </span>
+        {value.failed > 0 && <span>失败 {value.failed}</span>}
+        {value.elapsed !== null && running && (
+          <span>已用时 {formatClock(value.elapsed)}</span>
+        )}
+        {value.remaining !== null && running && (
+          <span>预计还要 {formatClock(value.remaining)}</span>
+        )}
+        <span>token {value.tokens.toLocaleString()}</span>
+        {running && <span>判断完的会先出现在下面，可以先处理</span>}
+      </div>
+    </div>
+  );
+}
+
 // 弹窗正文：读取最新报告；排队、判断、写入时自动刷新。图谱已经写好，这里的合并是可选的。
 // 两处入口（实体关系、处理过程）共用。
 export function GraphReviewBody({
@@ -1725,7 +1847,13 @@ export function GraphReviewBody({
     if (report?.scan && step === null)
       setStep(initialStep ?? defaultStep(report));
   }, [report, step]);
-  const canDecide = !!live && live.status === "ready" && !!data?.can_confirm;
+  // 判断进行中、停止后也能先决定已经判断完的；写入（和人工合并）要等判断完或停止。
+  const canDecide =
+    !!live &&
+    ["ready", "stopped", "running", "queued"].includes(live.status) &&
+    !!data?.can_confirm;
+  const canWrite =
+    !!live && ["ready", "stopped"].includes(live.status) && !!data?.can_confirm;
   const decisions = report ? decisionsOf(report) : {};
   const approved = Object.keys(decisions)
     .filter((id) => decisions[id] === "approved")
@@ -1739,7 +1867,7 @@ export function GraphReviewBody({
     ? planChanges(report, approved, choices).changes
     : 0;
   // 和上次写入相比有变化才需要写入；第一次写入时每条都算新增。
-  const canRewrite = canDecide && changes > 0;
+  const canRewrite = canWrite && changes > 0;
   const failedCount = (live?.judgments ?? []).filter(
     (item) => item.status === "failed",
   ).length;
@@ -1771,9 +1899,7 @@ export function GraphReviewBody({
         ids,
         decision ?? null,
       );
-      setData((value) =>
-        value ? { ...value, report: { ...next, status: "ready" } } : value,
-      );
+      setData((value) => (value ? { ...value, report: next } : value));
     });
   }
 
@@ -1791,9 +1917,7 @@ export function GraphReviewBody({
         choice.name,
         choice.type,
       );
-      setData((value) =>
-        value ? { ...value, report: { ...next, status: "ready" } } : value,
-      );
+      setData((value) => (value ? { ...value, report: next } : value));
     });
   }
   const pickerGroup =
@@ -1831,6 +1955,22 @@ export function GraphReviewBody({
     });
   }
 
+  async function stop() {
+    await run("stop", async () => {
+      await stopGraphReview(documentId);
+      toast("success", "已停止：判断完的保留，可以继续检查");
+      setData(await getGraphReview(documentId));
+    });
+  }
+
+  async function resume() {
+    await run("continue", async () => {
+      await continueGraphReview(documentId);
+      toast("success", "已继续检查：只判断还没判断的");
+      setData(await getGraphReview(documentId));
+    });
+  }
+
   async function retryFailed() {
     await run("retryFailed", async () => {
       await retryFailedGraphReview(documentId);
@@ -1843,12 +1983,16 @@ export function GraphReviewBody({
   const showRetry =
     canRetry &&
     !!data?.can_confirm &&
-    (!live || ["ready", "failed", "idle"].includes(live.status));
+    (!live || ["ready", "failed", "idle", "stopped"].includes(live.status));
 
   // 已经有人工决定时，重新检查会把它们清掉，先在按钮旁边确认。
   const retryButton = showRetry && (
     <ConfirmPopover
-      when={!!live?.decisions && Object.keys(live.decisions).length > 0}
+      when={
+        live?.status !== "idle" &&
+        !!live?.decisions &&
+        Object.keys(live.decisions).length > 0
+      }
       message="重新检查会清掉模型判断和你的决定（图谱上已写入的合并保留，直到下次写入）。"
       confirmText="重新检查"
       onConfirm={retry}
@@ -1858,7 +2002,7 @@ export function GraphReviewBody({
         className={`secondary-button${loadingClass(action === "retry")}`}
         disabled={busy}
       >
-        {live?.status === "idle" || !report ? "开始二次检查" : "重新检查"}
+        {live?.status === "idle" || !report ? "开始检查" : "重新检查"}
       </button>
     </ConfirmPopover>
   );
@@ -1882,7 +2026,12 @@ export function GraphReviewBody({
     ) : null;
 
   const confirmPanel =
-    report?.scan && canDecide ? (
+    report?.scan && canDecide && !canWrite ? (
+      <p className="graph-note">
+        模型还在判断，判断完或停止后才能确认写入；已经判断出的建议可以先在第 3
+        步决定。
+      </p>
+    ) : report?.scan && canWrite ? (
       <div className="gr-confirm">
         <p className="gr-small">
           下面是这次写入会改变的合并：根据第 3
@@ -1942,7 +2091,7 @@ export function GraphReviewBody({
 
   return (
     <div className="gr-body">
-      {picker && report?.scan && canDecide && (
+      {picker && report?.scan && canWrite && (
         <DetailDialog
           open
           title={picker.mode === "group" ? "加入新实体" : "新建人工合并"}
@@ -1982,6 +2131,18 @@ export function GraphReviewBody({
           二次检查失败：{live.error ?? "未知原因"}，可以点「重新检查」再跑一次。
         </p>
       )}
+      {live &&
+        ["queued", "running", "stopped"].includes(live.status) &&
+        (live.status !== "stopped" || live.scan) && (
+          <CheckProgress
+            report={live}
+            canControl={!!data?.can_confirm}
+            busy={busy}
+            action={action}
+            onStop={() => void stop()}
+            onContinue={() => void resume()}
+          />
+        )}
       {report?.scan && step ? (
         <GraphReviewDetails
           report={report}
@@ -1997,7 +2158,7 @@ export function GraphReviewBody({
         <>
           <p className="graph-note">
             {report?.status === "idle"
-              ? "还没开始二次检查。图谱已经写好，不检查也能用。"
+              ? "还没开始检查。图谱已经写好，不检查也能用；点「开始检查」后才会找候选、调用模型。"
               : !data
                 ? "正在读取…"
                 : report || live
@@ -2049,7 +2210,27 @@ export function GraphReviewPanel({
       cancelled = true;
     };
   }, [documentId, buildId, tick, open]);
-  const pending = report?.status === "ready" ? pendingCount(report) : 0;
+  const pending =
+    report && ["ready", "stopped", "running"].includes(report.status)
+      ? pendingCount(report)
+      : 0;
+  // 图谱检查的 5 步；①～④ 还在开发，先显示「暂未开放」，现有的合并检查是第 ⑤ 步。
+  const [selected, setSelected] = useState(5);
+  const [now, setNow] = useState(() => Date.now());
+  const running = !!report && ["queued", "running"].includes(report.status);
+  useEffect(() => {
+    if (!open || !running) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [open, running]);
+  const steps: CheckStep[] = [
+    ...CHECK_STEPS.map((item) => ({
+      ...item,
+      state: "locked" as const,
+      text: "暂未开放",
+    })),
+    mergeStep(report, pending, now),
+  ];
   return (
     <>
       <button
@@ -2061,28 +2242,109 @@ export function GraphReviewPanel({
         }}
       >
         {pending > 0
-          ? `二次检查 · 待处理 ${pending}`
+          ? `图谱检查 · 待处理 ${pending}`
           : report && ACTIVE.includes(report.status)
-            ? "二次检查 · 进行中"
-            : "二次检查合并"}
+            ? "图谱检查 · 进行中"
+            : "图谱检查"}
       </button>
       {open && (
         <DetailDialog
           open
-          title="二次检查合并"
+          title="图谱检查"
           className="gr-dialog"
           onClose={() => setOpen(false)}
         >
-          <GraphReviewBody
-            documentId={documentId}
-            buildId={buildId}
-            tick={tick}
-            canRetry={canRetry}
-            onChanged={onChanged}
-            initialStep={startStep}
+          <GraphCheckSteps
+            steps={steps}
+            selected={selected}
+            onSelect={setSelected}
           />
+          {selected === 5 ? (
+            <GraphReviewBody
+              documentId={documentId}
+              buildId={buildId}
+              tick={tick}
+              canRetry={canRetry}
+              onChanged={onChanged}
+              initialStep={startStep}
+            />
+          ) : (
+            <div className="gc-placeholder">
+              {CHECK_STEPS.find((item) => item.key === selected)?.hint}
+              <br />
+              这一步还在开发，暂未开放。
+            </div>
+          )}
         </DetailDialog>
       )}
     </>
   );
+}
+
+// 图谱检查前 4 步（开发中）：名字和这一步查什么。
+const CHECK_STEPS = [
+  {
+    key: 1,
+    title: "补抽",
+    hint: "补抽漏掉的实体和关系：把原文和已经抽出的交给模型，让它只补漏掉的。",
+  },
+  {
+    key: 2,
+    title: "关系核对",
+    hint: "核对关系：原文引用能不能在分片里找到，原文是否支持这条关系。",
+  },
+  {
+    key: 3,
+    title: "类型核对",
+    hint: "核对类型：同一个实体的名字类型不一致，或者类型不在清单里。",
+  },
+  {
+    key: 4,
+    title: "拆分",
+    hint: "拆开错误的合并：同一个实体下的名字其实指不同的东西，改名拆开。",
+  },
+];
+
+// 第 ⑤ 步（合并漏掉的）在步骤条上的状态。
+function mergeStep(
+  report: GraphReviewReport | null,
+  pending: number,
+  now: number,
+): CheckStep {
+  const base = {
+    key: 5,
+    title: "合并",
+    hint: "合并漏掉的：向量相似的实体分组，让模型判断是不是同一个，你逐条决定。",
+  };
+  if (!report || report.status === "idle")
+    return { ...base, state: "current", text: "未开始" };
+  if (report.status === "failed")
+    return { ...base, state: "failed", text: "检查失败" };
+  if (report.status === "rewriting")
+    return { ...base, state: "current", text: "正在写入图谱" };
+  const value = checkProgress(report, now);
+  if (report.status === "queued" || report.status === "running")
+    return {
+      ...base,
+      state: "current",
+      text: report.scan
+        ? `模型判断 ${value.done}/${value.total}`
+        : "找可疑项中",
+      elapsed: value.elapsed !== null ? formatClock(value.elapsed) : undefined,
+    };
+  if (report.status === "stopped")
+    return {
+      ...base,
+      state: "current",
+      text: `已停止 ${value.done}/${value.total}`,
+    };
+  if (value.failed > 0)
+    return { ...base, state: "failed", text: `${value.failed} 组判断失败` };
+  if (pending > 0)
+    return { ...base, state: "current", text: `待处理 ${pending}` };
+  return {
+    ...base,
+    state: "done",
+    text: report.applied ? "已写入" : "已处理完，待写入",
+  };
 }

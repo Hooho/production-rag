@@ -4077,8 +4077,10 @@ export function getGraphTasks() {
 
 export type GraphReviewReport = {
   build_id: string;
-  // queued 排队 / running 模型判断中 / ready 可以逐条决定 / rewriting 正在重写图谱 / failed / idle 未开始
+  // queued 排队 / running 模型判断中 / stopped 已停止（可以继续）/ ready 可以逐条决定 / rewriting 正在重写图谱 / failed / idle 未开始
   status: string;
+  // 这次检查开始的时间（进度条算已用时间）。
+  started?: string;
   error?: string;
   // 这次检查用的提示词版本（graph_review@v2）和全文；检查开始时定下，之后改提示词要「重新检查」才用新版本。
   prompt_tag?: string;
@@ -4233,6 +4235,19 @@ export function decideGraphReview(
         decision,
       }),
     },
+  );
+}
+// 停止检查：已经判断完的保留；继续检查：只判断还没判断的。
+export function stopGraphReview(documentId: string) {
+  return request<GraphReviewReport>(
+    `/documents/${documentId}/graph/review/stop`,
+    { method: "POST" },
+  );
+}
+export function continueGraphReview(documentId: string) {
+  return request<GraphReviewReport>(
+    `/documents/${documentId}/graph/review/continue`,
+    { method: "POST" },
   );
 }
 // 只重试判断失败的组，其他组的判断和人工决定保留。

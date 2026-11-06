@@ -315,7 +315,8 @@ def test_review_runs_after_write_then_rewrites_with_decisions(monkeypatch):
     monkeypatch.setattr(
         build.resolve, "prepare_build", lambda *_: copy.deepcopy(base_plan)
     )
-    # 建图写入后：排队二次检查，不改建图状态。
+    # 开了自动检查（GRAPH_REVIEW_AUTO=1）时：建图写入后排队二次检查，不改建图状态。
+    monkeypatch.setattr(build, "REVIEW_AUTO", True)
     build.after_write(store, row, None, None)
     assert queue == ["b1"]
     build.run_review_job(store, fake_models, "b1")
@@ -837,3 +838,133 @@ def test_rename_moves_only_chosen_mentions_and_updates_name_and_type():
         # 改成和已有实体同样的名字和类型：并进那个实体，不新建。
         back, _ = review.rename(connection, plan, "online", fruit, "苹果", "组织")
         assert back in apple
+
+
+def review_env(monkeypatch):
+    """一份已写入图谱的建图记录 + 记录到 document_steps 的检查报告 + 假的模型判断。"""
+    db = engine()
+    row = {
+        "id": "b1",
+        "space": "online",
+        "document_id": "doc-a",
+        "doc_key": "key",
+        "schema_id": "default-v1",
+        "provider": "test",
+        "model": "test",
+        "prompt_tag": "test",
+        "prompt_identity": "test",
+        "trigger_kind": "manual",
+        "status": "completed",
+        "active": True,
+        "created_by": "alice",
+        "created": "t",
+        "updated": "t",
+    }
+    with db.begin() as connection:
+        connection.execute(graph_builds.insert().values(**row))
+    store = SimpleNamespace(engine=db)
+
+    def save(
+        _store, document_id, step_id, status, detail, result=None, duration_ms=None
+    ):
+        with db.begin() as connection:
+            connection.execute(
+                document_steps.delete().where(
+                    document_steps.c.document_id == document_id,
+                    document_steps.c.step_id == step_id,
+                )
+            )
+            connection.execute(
+                document_steps.insert().values(
+                    document_id=document_id,
+                    step_id=step_id,
+                    step_order=12,
+                    stage=step_id,
+                    title="图谱检查",
+                    status=status,
+                    detail=detail,
+                    result=copy.deepcopy(result),
+                    updated="t",
+                )
+            )
+
+    monkeypatch.setattr(build, "write_step", save)
+    monkeypatch.setattr(
+        build, "build_inputs", lambda *_: {"schema_snapshot": DEFAULT_SCHEMA}
+    )
+    monkeypatch.setattr(
+        build,
+        "chunk_rows",
+        lambda *_: [{"chunk_id": "c1", "content": "腾讯与腾讯控股为公司简称。"}],
+    )
+    monkeypatch.setattr(build, "models_for", lambda *_: None)
+    queue = []
+    monkeypatch.setattr(build, "enqueue", lambda _, key, stage=None: queue.append(key))
+    calls = []
+
+    def judge(_, schema, candidate, system_prompt=None):
+        calls.append(candidate["id"])
+        ids = [
+            item["id"] for item in candidate["entities"] if item["types"] == ["组织"]
+        ]
+        return {
+            "candidate_id": candidate["id"],
+            "status": "completed",
+            "decision": {
+                "groups": [
+                    {"ids": ids, "name": "腾讯控股", "type": "组织", "reason": "简称"}
+                ]
+            },
+        }
+
+    monkeypatch.setattr(review, "judge", judge)
+    monkeypatch.setattr(build, "extraction_rows", lambda *_: [])
+    base_plan = plan_for(db)
+    monkeypatch.setattr(
+        build.resolve, "prepare_build", lambda *_: copy.deepcopy(base_plan)
+    )
+    return db, store, row, queue, calls
+
+
+def test_review_starts_manually_can_stop_continue_and_decide_while_running(
+    monkeypatch,
+):
+    db, store, row, queue, calls = review_env(monkeypatch)
+    # 默认不自动开始：写入后报告是「未开始」，不排队。
+    assert build.REVIEW_AUTO is False
+    build.after_write(store, row, None, None)
+    assert queue == [] and build.review_report(db, row)["status"] == "idle"
+    # 点开始检查后排队；排队中可以停止，停止后任务不再判断。
+    build.retry_review(store, "b1")
+    assert queue == ["b1"]
+    build.stop_review(store, "b1")
+    assert build.review_report(db, row)["status"] == "stopped"
+    with pytest.raises(build.BuildError, match="没有在进行"):
+        build.stop_review(store, "b1")
+    build.run_review_job(store, fake_models, "b1")
+    assert calls == []
+    # 继续检查：只判断还没判断的。
+    queue.clear()
+    build.continue_review(store, "b1")
+    assert queue == ["b1"]
+    build.run_review_job(store, fake_models, "b1")
+    report = build.review_report(db, row)
+    assert report["status"] == "ready" and len(calls) == 1 and report["started"]
+    # 模型判断进行中也能先决定；检查任务保存进度时不会把决定冲掉。
+    with db.begin() as connection:
+        build._save_report(connection, row, {**report, "status": "running"})
+    build.decide_review(store, "b1", ["1:0"], "approved", "alice")
+    stale = copy.deepcopy(report)
+    stale["status"] = "running"
+    assert build._save_progress(store, row, stale, "进度") is False
+    assert build.review_report(db, row)["decisions"]["1:0"]["decision"] == "approved"
+    # 写入后（例如补跑分片）再次变成「未开始」，但模型判断和决定保留；再点开始检查时抽取结果没变，不再调用模型。
+    with db.begin() as connection:
+        build._save_report(connection, row, {**report, "status": "ready"})
+    build.after_write(store, row, build.review_report(db, row), None)
+    idle = build.review_report(db, row)
+    assert idle["status"] == "idle" and idle["judgments"]
+    build.retry_review(store, "b1")
+    build.run_review_job(store, fake_models, "b1")
+    again = build.review_report(db, row)
+    assert again["status"] == "ready" and len(calls) == 1

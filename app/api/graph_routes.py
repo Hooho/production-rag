@@ -378,6 +378,33 @@ def build_router(current_user, identity, require_admin):
         except graph_build.BuildError as error:
             raise HTTPException(409, str(error)) from None
 
+    # 停止检查（已经判断完的保留）/ 继续检查（只判断还没判断的）。
+    @router.post("/documents/{document_id}/graph/review/stop")
+    def review_stop(request: Request, document_id: UUID, user=Depends(current_user)):
+        return review_stop_or_continue(request, document_id, "stop", user)
+
+    @router.post("/documents/{document_id}/graph/review/continue", status_code=202)
+    def review_continue(
+        request: Request, document_id: UUID, user=Depends(current_user)
+    ):
+        return review_stop_or_continue(request, document_id, "continue", user)
+
+    def review_stop_or_continue(request, document_id, action, user):
+        state = request.app.state
+        row = readable(state, user["username"], document_id)
+        check_can_build(user, row)
+        with state.store.engine.connect() as connection:
+            latest = graph_query.latest_build(connection, str(document_id))
+        if not latest:
+            raise HTTPException(409, "这份文档还没有建过图")
+        operation = (
+            graph_build.stop_review if action == "stop" else graph_build.continue_review
+        )
+        try:
+            return operation(state.store, latest["id"])
+        except graph_build.BuildError as error:
+            raise HTTPException(409, str(error)) from None
+
     @router.post("/documents/{document_id}/graph/review/retry", status_code=202)
     def review_retry(request: Request, document_id: UUID, user=Depends(current_user)):
         state = request.app.state

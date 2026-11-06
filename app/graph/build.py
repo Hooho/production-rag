@@ -45,7 +45,8 @@ STEPS = {
     "graph_rewrite": (14, "按确认结果重写图谱"),
 }
 # 写入图谱后自动在后台跑二次检查；设为 0 则需要手动点「开始二次检查」。
-REVIEW_AUTO = os.getenv("GRAPH_REVIEW_AUTO", "1") != "0"
+# 写入图谱后要不要自动开始检查。默认不自动：图谱检查的每一步都由人点「开始检查」。
+REVIEW_AUTO = os.getenv("GRAPH_REVIEW_AUTO", "0") != "0"
 # 二次检查每个任务最多判断多少组，判断完剩下的重新排队（和抽取一样，不长时间占住 worker）。
 REVIEW_BATCH = 20
 # 处理完成、有分片的版本才能建图。
@@ -1126,13 +1127,14 @@ def after_write(store, build, report, records):
         )
         _review_step(store, build, report, "completed", review_progress(report))
         return
-    if not REVIEW_AUTO and not report:
+    if not REVIEW_AUTO:
+        # 不自动检查：保留原报告（模型判断、人工决定），标成未开始；点「开始检查」时抽取结果没变就直接沿用。
         _review_step(
             store,
             build,
-            {"build_id": build["id"], "status": "idle"},
+            {**(report or {}), "build_id": build["id"], "status": "idle"},
             "pending",
-            "未开始：可在「实体关系」页签手动开始二次检查（不影响已写入的图谱）",
+            "未开始：在「图谱检查」里点开始检查（不影响已写入的图谱）",
         )
         return
     # 保留原报告（模型判断、人工决定）：抽取结果没变时直接沿用，不重复调用模型。
@@ -1259,61 +1261,166 @@ def run_review(store, models, build, report):
                 "stats": stats,
             },
             "judgments": [],
+            "started": now(),
             **_carry(report),
         }
     report["status"] = "running"
+    report.setdefault("started", now())
     candidates = report["scan"]["candidates"]
     done = {
         row["candidate_id"] for row in report["judgments"] if row["status"] != "running"
     }
     todo = [row for row in candidates if row["id"] not in done]
     run_models = models_for(store, models, build) if todo else None
+    # 先存一次：页面马上能看到候选数和进度条。
+    if _save_progress(
+        store,
+        build,
+        report,
+        f"模型判断：{len(report['judgments'])}/{len(candidates)} 组（不影响已写入的图谱）",
+    ):
+        raise BuildStopped()
     for candidate in todo[:REVIEW_BATCH]:
         latest = review_report(store.engine, build)
         if review_state(latest, build) not in ("queued", "running"):
             raise BuildStopped()
+        result = review.judge(
+            run_models,
+            inputs["schema_snapshot"],
+            candidate,
+            report.get("system_prompt"),
+        )
         report["judgments"] = [
             row for row in report["judgments"] if row["candidate_id"] != candidate["id"]
-        ]
-        report["judgments"].append(
-            review.judge(
-                run_models,
-                inputs["schema_snapshot"],
-                candidate,
-                report.get("system_prompt"),
-            )
-        )
-        _review_step(
+        ] + [result]
+        if _save_progress(
             store,
             build,
             report,
-            "running",
             f"模型判断：{len(report['judgments'])}/{len(candidates)} 组（不影响已写入的图谱）",
-        )
+        ):
+            raise BuildStopped()
     if len(todo) > REVIEW_BATCH:
         enqueue(store, build["id"], "review")
         return report
     report["status"] = "ready"
-    _review_step(
+    _save_progress(
         store,
         build,
         report,
-        "completed",
         review_progress(report)
         if candidates
         else "没有疑似重复或类型冲突的候选，无需合并",
+        "completed",
     )
     return report
 
 
-def _ready_report(store, build_id):
+# 人在检查过程中做的事（决定、人工合并、已写入的结果）只由接口改；检查任务保存进度时以库里最新的为准。
+HUMAN_KEYS = ("decisions", "manual", "manual_entities", "applied")
+
+
+def _report_in(connection, build):
+    result = connection.execute(
+        select(document_steps.c.result).where(
+            document_steps.c.document_id == build["document_id"],
+            document_steps.c.step_id == "graph_review",
+        )
+    ).scalar_one_or_none()
+    return (
+        result
+        if isinstance(result, dict) and result.get("build_id") == build["id"]
+        else None
+    )
+
+
+# 检查任务保存进度：锁住建图记录（和人工决定串行），把最新的人工内容合进来再存。
+# 已经被停止（或重新开始、重写）时不改状态，返回 True 让任务停下。
+def _save_progress(store, build, report, detail, step_status="running"):
+    with store.engine.begin() as connection:
+        connection.execute(
+            select(graph_builds.c.id)
+            .where(graph_builds.c.id == build["id"])
+            .with_for_update()
+        )
+        latest = _report_in(connection, build)
+        for key in HUMAN_KEYS:
+            if latest and key in latest:
+                report[key] = latest[key]
+            else:
+                report.pop(key, None)
+        stopped = latest is None or review_state(latest, build) not in (
+            "queued",
+            "running",
+        )
+        if stopped:
+            if latest is None or latest.get("signature") not in (
+                None,
+                report.get("signature"),
+            ):
+                return True
+            report["status"] = latest["status"]
+            done = sum(row["status"] != "running" for row in report["judgments"])
+            total = len(report["scan"]["candidates"])
+            _save_report(
+                connection,
+                build,
+                report,
+                status="pending",
+                detail=f"已停止：模型判断了 {done}/{total} 组，可以继续检查",
+            )
+            return True
+        _save_report(connection, build, report, status=step_status, detail=detail)
+    return False
+
+
+# 能操作的检查状态：判断完（ready）、停止了（stopped）都能决定、写入；模型判断进行中也能先决定已经判断完的。
+def _ready_report(store, build_id, states=("ready", "stopped")):
     build = get_build(store.engine, build_id)
     if build is None:
         raise BuildError("建图记录不存在")
     report = review_report(store.engine, build)
-    if review_state(report, build) != "ready":
-        raise BuildError("二次检查还没完成，或正在重写图谱，请稍后再试")
+    if review_state(report, build) not in states:
+        raise BuildError("检查还没完成，或正在写入图谱，请稍后再试")
     return build, report
+
+
+DECIDE_STATES = ("ready", "stopped", "queued", "running")
+
+
+# 停止检查：已经判断完的保留，没判断的留到「继续检查」。
+def stop_review(store, build_id):
+    build = get_build(store.engine, build_id)
+    if build is None:
+        raise BuildError("建图记录不存在")
+    with store.engine.begin() as connection:
+        _lock_build(connection, build_id)
+        report = _report_in(connection, build)
+        if review_state(report, build) not in ("queued", "running"):
+            raise BuildError("检查没有在进行")
+        report["status"] = "stopped"
+        done = sum(row["status"] != "running" for row in report.get("judgments") or [])
+        total = len(((report.get("scan") or {}).get("candidates")) or [])
+        _save_report(
+            connection,
+            build,
+            report,
+            status="pending",
+            detail=f"已停止：模型判断了 {done}/{total} 组，可以继续检查",
+        )
+    return report
+
+
+# 继续检查：只判断还没判断的，已经判断的和人工决定都保留。
+def continue_review(store, build_id):
+    build, _ = _ready_report(store, build_id, ("stopped",))
+    with store.engine.begin() as connection:
+        _lock_build(connection, build_id)
+        report = _report_in(connection, build)
+        report["status"] = "queued"
+        _save_report(connection, build, report, status="pending", detail="排队继续检查")
+    enqueue(store, build_id, "review")
+    return report
 
 
 def _lock_build(connection, build_id):
@@ -1340,13 +1447,13 @@ def _save_report(connection, build, report, **values):
 
 # 单独或批量记录人工决定（批准 / 否决 / 撤销），只保存，不改图谱；「按确认结果重写图谱」时统一执行。
 def decide_review(store, build_id, proposal_ids, decision, username):
-    build, report = _ready_report(store, build_id)
+    build, report = _ready_report(store, build_id, DECIDE_STATES)
     valid = review.proposals(report)
     if not proposal_ids or not set(proposal_ids) <= set(valid):
         raise BuildError("包含无效的合并建议")
     with store.engine.begin() as connection:
         _lock_build(connection, build_id)
-        build, report = _ready_report(store, build_id)
+        build, report = _ready_report(store, build_id, DECIDE_STATES)
         decisions = report.setdefault("decisions", {})
         for proposal_id in proposal_ids:
             # 人工添加的建议：撤销或否决就直接删掉这条建议。
@@ -1530,7 +1637,11 @@ def retry_review(store, build_id):
     report = review_report(store.engine, build)
     if review_state(report, build) in ("queued", "running", "rewriting"):
         raise BuildError("二次检查正在进行，不能重复开始")
-    fresh = {"build_id": build_id, "status": "queued", **_carry(report)}
+    # 未开始、但之前判断过（补跑分片、重建后保留下来的）：整份沿用，抽取结果没变就不再调用模型。
+    if report and report.get("status") == "idle" and report.get("signature"):
+        fresh = {**report, "status": "queued"}
+    else:
+        fresh = {"build_id": build_id, "status": "queued", **_carry(report)}
     with store.engine.begin() as connection:
         current = _lock_build(connection, build_id)
         # 旧流程停在「等待人工确认」的建图还没写入图谱：先写入，写完自动开始检查。
