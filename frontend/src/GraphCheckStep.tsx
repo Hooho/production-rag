@@ -40,7 +40,7 @@ export const CHECK_INFO: Record<
     example:
       "原文「段永平 2002 年买入了网易的股票」，建图时只抽出了「段永平」。AI 补抽后补上实体「网易」，和关系「段永平 → 买入 → 网易」。",
     accept: "采纳补抽",
-    reject: "不要",
+    reject: "我不",
   },
   relation: {
     title: "关系核对",
@@ -56,7 +56,7 @@ export const CHECK_INFO: Record<
     example:
       "「腾讯」在 1 片里被抽成「产品」，在另外 5 片里是「组织」。AI 看原文后建议统一成「组织」。",
     accept: "改类型",
-    reject: "不改",
+    reject: "我不",
   },
   split: {
     title: "拆分",
@@ -64,7 +64,7 @@ export const CHECK_INFO: Record<
     example:
       "「苹果」下面，有几处说的是「段永平长期持有的公司」，有几处说的是「一种水果，用来打比方」。AI 建议把水果那几处拆出去，改名「苹果（水果）」。",
     accept: "按建议拆分",
-    reject: "不拆",
+    reject: "我不",
   },
 };
 
