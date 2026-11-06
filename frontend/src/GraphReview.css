@@ -876,11 +876,13 @@
   color: #475569;
   font-variant-numeric: tabular-nums;
 }
-.gc-progress.is-confirm {
-  border-color: #c3d5fb;
-  background: #f5f9ff;
+/* 合并这一步里面的小步骤条：和外层同样的箭头样式，矮一些。 */
+.gc-steps.is-compact .gc-step {
+  flex-basis: 150px;
+  min-height: 48px;
+  padding-top: 6px;
+  padding-bottom: 6px;
 }
-.gc-progress.is-confirm p {
-  margin: 0;
-  color: #334155;
+.gc-steps.is-compact .gc-step strong {
+  font-size: 13px;
 }

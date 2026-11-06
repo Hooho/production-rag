@@ -27,10 +27,13 @@ export function GraphCheckSteps({
   steps,
   selected,
   onSelect,
+  compact = false,
 }: {
   steps: CheckStep[];
   selected: number;
   onSelect: (key: number) => void;
+  // 嵌在某一步里面的小步骤条：矮一些。
+  compact?: boolean;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const [shadow, setShadow] = useState({ left: false, right: false });
@@ -63,7 +66,7 @@ export function GraphCheckSteps({
 
   return (
     <div
-      className={`gc-steps${shadow.left ? " has-left" : ""}${shadow.right ? " has-right" : ""}`}
+      className={`gc-steps${compact ? " is-compact" : ""}${shadow.left ? " has-left" : ""}${shadow.right ? " has-right" : ""}`}
     >
       <div
         className="gc-steps-scroll"

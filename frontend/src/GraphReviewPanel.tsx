@@ -266,7 +266,7 @@ export type ReviewStep = 1 | 2 | 3 | 4 | 5;
 
 // 打开时停在哪一步：判断中 → 2；还有待处理 → 3；有批准、还没写入 → 4；写入中或都处理完 → 5。
 export function defaultStep(report: GraphReviewReport): ReviewStep {
-  if (!report.scan) return 1;
+  if (!report.scan || report.status === "scanned") return 1;
   if (["queued", "running"].includes(report.status)) return 2;
   if (report.status === "rewriting") return 5;
   if (pendingCount(report) > 0) return 3;
@@ -296,6 +296,8 @@ export function GraphReviewDetails({
   loading = null,
   judgeActions,
   confirmPanel,
+  progress,
+  onStartJudge,
 }: {
   report: GraphReviewReport;
   step: ReviewStep;
@@ -305,6 +307,10 @@ export function GraphReviewDetails({
   loading?: string | null;
   judgeActions?: ReactNode;
   confirmPanel?: ReactNode;
+  // 第 2 步：判断中、停止后的进度条（外面传进来，带停止 / 继续按钮）。
+  progress?: ReactNode;
+  // 找完可疑项、还没判断时，第 2 步的「开始 AI 判断」。不传就不能开始（没有权限或只读）。
+  onStartJudge?: () => void;
 }) {
   const editable = Boolean(onDecide);
   const scan = report.scan!;
@@ -498,6 +504,9 @@ export function GraphReviewDetails({
     [...approvedIds, ...manualApproved].sort(),
   );
   const judging = ["queued", "running"].includes(report.status);
+  // 找完可疑项、还没让模型判断（等人确认）。
+  const scannedOnly = report.status === "scanned";
+  const toJudge = scan.candidate_count - judged;
   const method = scan.method;
 
   const steps: {
@@ -509,17 +518,26 @@ export function GraphReviewDetails({
   }[] = [
     {
       step: 1,
-      label: "找出候选",
+      label: "找出可疑项",
       by: "系统",
       value: `${scan.candidate_count} 组`,
       state: scan.status === "failed" ? "failed" : "done",
     },
     {
       step: 2,
-      label: "模型判断",
+      label: "AI 判断",
       by: "大模型",
-      value: `${judged}/${scan.candidate_count}${failed ? ` · 失败 ${failed}` : ""}`,
-      state: judging ? "active" : failed ? "failed" : "done",
+      value: scannedOnly
+        ? `待开始 · 约 ${toJudge} 次调用`
+        : report.status === "stopped"
+          ? `已停止 ${judged}/${scan.candidate_count}`
+          : `${judged}/${scan.candidate_count}${failed ? ` · 失败 ${failed}` : ""}`,
+      state:
+        judging || scannedOnly || report.status === "stopped"
+          ? "active"
+          : failed
+            ? "failed"
+            : "done",
     },
     {
       step: 3,
@@ -528,7 +546,7 @@ export function GraphReviewDetails({
       value: `待处理 ${pending} · 批准 ${approvedIds.length} · 否决 ${rejectedCount}`,
       state:
         allProposals.length === 0 || pending === 0
-          ? judging
+          ? judging || scannedOnly
             ? "todo"
             : "done"
           : "active",
@@ -864,39 +882,25 @@ export function GraphReviewDetails({
 
   return (
     <div className="gr" ref={root}>
-      <ol className="gr-steps" role="tablist">
-        {steps.map((item) => (
-          <li
-            key={item.step}
-            role="tab"
-            aria-selected={step === item.step}
-            tabIndex={0}
-            className={`is-${item.state} is-link${step === item.step ? " is-selected" : ""}`}
-            onClick={() => onStep(item.step)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                onStep(item.step);
-              }
-            }}
-          >
-            <span className="gr-step-dot">
-              {item.state === "done"
-                ? "✓"
+      <GraphCheckSteps
+        compact
+        steps={steps.map((item) => ({
+          key: item.step,
+          title: item.label,
+          text: item.value,
+          hint: `${item.label}（${item.by}）：${item.value}`,
+          state:
+            item.state === "done"
+              ? "done"
+              : item.state === "active"
+                ? "current"
                 : item.state === "failed"
-                  ? "!"
-                  : item.step}
-            </span>
-            <span>
-              <strong>
-                {item.label}
-                <em className="gr-by">{item.by}</em>
-              </strong>
-              <small title={item.value}>{item.value}</small>
-            </span>
-          </li>
-        ))}
-      </ol>
+                  ? "failed"
+                  : "waiting",
+        }))}
+        selected={step}
+        onSelect={(key) => onStep(key as ReviewStep)}
+      />
 
       {step === 1 && (
         <div className="gr-method">
@@ -933,19 +937,57 @@ export function GraphReviewDetails({
               步的「重新检查」会按新规则重跑。
             </p>
           )}
+          {scannedOnly && (
+            <div className="gr-actions">
+              <span className="graph-note">
+                下面列出了全部 {scan.candidate_count}{" "}
+                组可疑项，看完点确认，到下一步让 AI 判断。
+              </span>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => onStep(2)}
+              >
+                确认，进入下一步
+              </button>
+            </div>
+          )}
         </div>
       )}
 
+      {step === 2 && progress}
       {step === 2 && (
         <div className="gr-method">
-          <p>
-            每组调用一次模型，判断组里哪些是同一个东西、统一叫什么。已判断{" "}
-            <strong>
-              {judged}/{scan.candidate_count}
-            </strong>{" "}
-            组{failed ? `，失败 ${failed} 组` : ""}
-            {judging ? "，正在判断…" : "。"}
-          </p>
+          {scannedOnly ? (
+            <p>
+              每组调用一次模型，判断组里哪些是同一个东西、统一叫什么。共{" "}
+              {scan.candidate_count} 组
+              {judged > 0 ? `，其中 ${judged} 组之前判断过` : ""}，还要判断{" "}
+              <strong>{toJudge}</strong> 组，约 <strong>{toJudge} 次</strong>
+              模型调用。
+            </p>
+          ) : (
+            <p>
+              每组调用一次模型，判断组里哪些是同一个东西、统一叫什么。已判断{" "}
+              <strong>
+                {judged}/{scan.candidate_count}
+              </strong>{" "}
+              组{failed ? `，失败 ${failed} 组` : ""}
+              {judging ? "，正在判断…" : "。"}
+            </p>
+          )}
+          {scannedOnly && onStartJudge && (
+            <div className="gr-actions">
+              <button
+                type="button"
+                className={`primary-button${loadingClass(loading === "continue")}`}
+                disabled={busy}
+                onClick={onStartJudge}
+              >
+                开始 AI 判断（约 {toJudge} 次调用）
+              </button>
+            </div>
+          )}
           {report.prompt_tag && (
             <p className="gr-small">
               用的提示词：<code>{report.prompt_tag}</code>{" "}
@@ -1698,7 +1740,6 @@ function CheckProgress({
   onContinue: () => void;
 }) {
   const running = report.status === "queued" || report.status === "running";
-  const scannedOnly = report.status === "scanned";
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!running) return;
@@ -1708,41 +1749,6 @@ function CheckProgress({
   const value = checkProgress(report, now);
   const scanned = !!report.scan;
   const percent = value.total ? (value.done / value.total) * 100 : 0;
-  // 找完可疑项、还没让模型判断：先给人看数量和要调用几次，确认后才花钱。
-  if (scannedOnly) {
-    const todo = value.total - value.done;
-    return (
-      <div className="gc-progress is-confirm">
-        <div className="gc-progress-head">
-          <span className="gc-progress-phases">
-            <span>
-              ① 找可疑项：{value.total} 组（
-              {((report.scan?.duration_ms ?? 0) / 1000).toFixed(1)} 秒）
-            </span>
-            <span className="is-active">② 模型判断：等你确认</span>
-          </span>
-        </div>
-        <p>
-          找出 <strong>{value.total}</strong> 组可疑
-          {value.done > 0 ? `，其中 ${value.done} 组之前判断过` : ""}
-          。让模型逐组判断还要调用 <strong>约 {todo} 次</strong>。
-          可以先在下面「找出候选」里看看是哪些组，再决定要不要判断。
-        </p>
-        {canControl && (
-          <div className="gr-actions">
-            <button
-              type="button"
-              className={`primary-button${loadingClass(action === "continue")}`}
-              disabled={busy}
-              onClick={onContinue}
-            >
-              让模型判断（约 {todo} 次调用）
-            </button>
-          </div>
-        )}
-      </div>
-    );
-  }
   return (
     <div className={`gc-progress${running ? "" : " is-stopped"}`}>
       <div className="gc-progress-head">
@@ -2172,18 +2178,6 @@ export function GraphReviewBody({
           二次检查失败：{live.error ?? "未知原因"}，可以点「重新检查」再跑一次。
         </p>
       )}
-      {live &&
-        ["queued", "running", "stopped", "scanned"].includes(live.status) &&
-        (live.status !== "stopped" || live.scan) && (
-          <CheckProgress
-            report={live}
-            canControl={!!data?.can_confirm}
-            busy={busy}
-            action={action}
-            onStop={() => void stop()}
-            onContinue={() => void resume()}
-          />
-        )}
       {report?.scan && step ? (
         <GraphReviewDetails
           report={report}
@@ -2194,6 +2188,23 @@ export function GraphReviewBody({
           loading={action}
           judgeActions={judgeActions}
           confirmPanel={confirmPanel}
+          progress={
+            live && ["queued", "running", "stopped"].includes(live.status) ? (
+              <CheckProgress
+                report={live}
+                canControl={!!data?.can_confirm}
+                busy={busy}
+                action={action}
+                onStop={() => void stop()}
+                onContinue={() => void resume()}
+              />
+            ) : undefined
+          }
+          onStartJudge={
+            live?.status === "scanned" && data?.can_confirm
+              ? () => void resume()
+              : undefined
+          }
         />
       ) : (
         <>
@@ -2203,7 +2214,7 @@ export function GraphReviewBody({
               : !data
                 ? "正在读取…"
                 : report || live
-                  ? "排队等待二次检查，找出候选后自动显示过程…"
+                  ? "正在找可疑项（不调用模型），找完会列出来，确认后再让 AI 判断…"
                   : "这次建图还没有二次检查记录。"}
           </p>
           {retryButton && <div className="gr-actions">{retryButton}</div>}
