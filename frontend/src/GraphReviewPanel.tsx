@@ -2531,14 +2531,26 @@ function checkStep(
     };
   }
   if (status === "scanned")
-    return { ...base, state: "current", text: `找出 ${count} 项，待确认判断` };
+    return {
+      ...base,
+      state: "current",
+      text:
+        step === "glean"
+          ? `选出 ${count} 片，待确认补抽`
+          : `找出 ${count} 项，待确认判断`,
+    };
   if (status === "stopped")
     return { ...base, state: "current", text: `已停止 ${judged}/${count}` };
   if (value?.failed)
     return { ...base, state: "failed", text: `${value.failed} 项判断失败` };
   if (value?.pending)
     return { ...base, state: "current", text: `待处理 ${value.pending}` };
-  if (!count) return { ...base, state: "done", text: "没有发现可疑项" };
+  if (!count)
+    return {
+      ...base,
+      state: "done",
+      text: step === "glean" ? "没有要补抽的分片" : "没有发现可疑项",
+    };
   return {
     ...base,
     state: "done",

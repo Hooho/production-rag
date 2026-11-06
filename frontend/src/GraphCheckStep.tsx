@@ -30,7 +30,7 @@ export const CHECK_INFO: Record<
 > = {
   glean: {
     title: "补抽",
-    hint: "补抽漏掉的实体和关系：把分片原文和已经抽出的一起交给 AI，让它只补漏掉的。",
+    hint: "补抽漏掉的实体和关系：把【分片原文和已经抽出的】一起交给 AI，让它只补漏掉的。",
     accept: "采纳补抽",
     reject: "不要",
   },
@@ -340,8 +340,8 @@ export function GraphCheckStep({
   const steps: CheckStep[] = [
     {
       key: 1,
-      title: "找出可疑项",
-      text: `${items.length} 项`,
+      title: step === "glean" ? "选出要补抽的分片" : "找出可疑项",
+      text: step === "glean" ? `${items.length} 片` : `${items.length} 项`,
       state: "done",
     },
     {
@@ -431,21 +431,29 @@ export function GraphCheckStep({
 
         {shown === 1 && (
           <div className="gr-method">
-            <p>
-              {info.hint} 找出 <strong>{items.length}</strong> 项可疑
-              {report.scan ? `（${report.scan.duration_ms} 毫秒）` : ""}。
-            </p>
+            {step === "glean" ? (
+              <p>
+                按开始时选的范围（
+                {report.params?.scope === "all"
+                  ? "全部分片"
+                  : "抽出很少的分片：0～1 个实体"}
+                ），选出 <strong>{items.length}</strong> 片要让 AI 补抽。下一步
+                AI 会逐片看原文和这片已经抽出的实体，只补漏掉的实体和关系。
+              </p>
+            ) : (
+              <p>
+                {info.hint} 找出 <strong>{items.length}</strong> 项可疑
+                {report.scan ? `（${report.scan.duration_ms} 毫秒）` : ""}。
+              </p>
+            )}
             {status === "scanned" && (
               <div className="gr-actions">
-                <span className="graph-note">
-                  下面列出了全部可疑项，看完点确认，到下一步让 AI 判断。
-                </span>
                 <button
                   type="button"
                   className="primary-button"
                   onClick={() => setSub(2)}
                 >
-                  确认，进入下一步
+                  确认，进入下一步，让 AI 判断
                 </button>
               </div>
             )}
@@ -907,12 +915,7 @@ function ItemCard({
 
 function itemTitle(step: CheckStepName, item: Item): ReactNode {
   if (step === "glean")
-    return (
-      <strong>
-        第 {Number(item.position) + 1} 片 · 已抽出 {text(item.entity_count)}{" "}
-        个实体
-      </strong>
-    );
+    return <strong>第 {Number(item.position) + 1} 片</strong>;
   if (step === "relation")
     return (
       <strong>
@@ -959,8 +962,8 @@ function itemBody(
     return (
       <p className="gr-small">
         {(item.names as string[]).length > 0
-          ? `已有：${(item.names as string[]).join("、")}`
-          : "还没抽出实体"}
+          ? `建图时从这片抽出了 ${(item.names as string[]).length} 个实体：${(item.names as string[]).join("、")}`
+          : "建图时没从这片抽出任何实体"}
         {originalButton("原文", chunkTitle, text(item.excerpt), onOriginal)}
       </p>
     );

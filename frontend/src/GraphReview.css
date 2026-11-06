@@ -889,6 +889,8 @@
   display: grid;
   gap: 12px;
   align-content: start;
+  /* 列表、翻页到底部时留出间距，不贴着弹窗边缘。 */
+  padding-bottom: 20px;
 }
 @media (max-width: 760px) {
   .gr-split {
@@ -992,9 +994,16 @@
 .gv-step.is-locked .gv-text strong {
   color: #6b7280;
 }
-/* 正在查看的那一小步：标题加粗、蓝色。 */
+/* 已完成的小步骤：标题和说明都是绿色。 */
+.gv-step.is-done .gv-text strong,
+.gv-step.is-done .gv-text small {
+  color: #15803d;
+}
+/* 正在查看的那一小步：标题加粗；没完成的用蓝色，已完成的保持绿色。 */
 .gv-step.is-selected .gv-text strong {
   font-weight: 600;
+}
+.gv-step.is-selected:not(.is-done) .gv-text strong {
   color: #1d6ff2;
 }
 
