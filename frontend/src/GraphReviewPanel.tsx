@@ -168,7 +168,7 @@ export function GraphReviewDetails({
   report: GraphReviewReport;
   step: ReviewStep;
   onStep: (step: ReviewStep) => void;
-  onDecide?: (ids: string[], decision: Decision | null) => Promise<void>;
+  onDecide?: (ids: string[], decision: Decision | null) => Promise<unknown>;
   busy?: boolean;
   judgeActions?: ReactNode;
   confirmPanel?: ReactNode;
@@ -954,11 +954,16 @@ function MergePlan({
   approved,
   choices,
   onChoose,
+  onRemove,
+  busy = false,
 }: {
   report: GraphReviewReport;
   approved: string[];
   choices: Record<string, GraphReviewChoice>;
   onChoose: (key: string, choice: GraphReviewChoice) => void;
+  // 移除一个合并结果：撤销它对应的批准，建议回到第 3 步「待处理」。
+  onRemove?: (proposalIds: string[]) => void;
+  busy?: boolean;
 }) {
   const scan = report.scan!;
   const names = new Map(
@@ -1017,6 +1022,17 @@ function MergePlan({
               <Tag size="sm" tone={kept ? "neutral" : "info"}>
                 {kept ? "已在图谱中" : "新增"}
               </Tag>
+              {onRemove && (
+                <button
+                  type="button"
+                  className="link-button gr-remove"
+                  disabled={busy}
+                  title="撤销对应建议的批准，回到第 3 步待处理；写入后不会合并"
+                  onClick={() => onRemove(group.proposalIds)}
+                >
+                  移除
+                </button>
+              )}
             </span>
             {group.proposalIds.length > 1 && (
               <small>
@@ -1137,13 +1153,16 @@ export function GraphReviewBody({
     (item) => item.status === "failed",
   ).length;
 
+  // 返回是否成功：失败已经用 Toast 提示过，调用方只在成功时接着做事。
   async function run(action: () => Promise<unknown>) {
-    if (busy) return;
+    if (busy) return false;
     setBusy(true);
     try {
       await action();
+      return true;
     } catch (reason) {
       toast("error", errorText(reason));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -1153,8 +1172,8 @@ export function GraphReviewBody({
     ids: string[],
     decision: "approved" | "rejected" | null | undefined,
   ) {
-    if (!live) return;
-    await run(async () => {
+    if (!live) return false;
+    return run(async () => {
       const next = await decideGraphReview(
         documentId,
         live.build_id,
@@ -1258,6 +1277,13 @@ export function GraphReviewBody({
           choices={choices}
           onChoose={(key, choice) =>
             setChoices((items) => ({ ...items, [key]: choice }))
+          }
+          busy={busy}
+          onRemove={(ids) =>
+            void decide(ids, null).then(
+              (ok) =>
+                ok && toast("success", "已移除，对应建议回到第 3 步待处理"),
+            )
           }
         />
         <div className="gr-actions">
