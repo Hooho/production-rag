@@ -1717,6 +1717,38 @@ input::placeholder {
    font-size: 12px;
 }
 
+/* 文字按钮：行内的「原文」「查看」「撤销」这类。字号固定，不随所在文字变大变小；
+   和 button-sm 或 12px 小字在一起时加 button-sm（12px），其余默认 13px。 */
+.link-button {
+   display: inline;
+   height: auto;
+   padding: 0;
+   border: 0;
+   background: transparent;
+   color: var(--t-2563eb);
+   font-size: 13px;
+   font-weight: 400;
+   line-height: inherit;
+   text-decoration: underline;
+   text-underline-offset: 2px;
+   cursor: pointer;
+}
+
+.link-button.button-sm {
+   height: auto;
+   padding: 0;
+   font-size: 12px;
+}
+
+.link-button:hover:not(:disabled) {
+   color: var(--t-1d4ed8);
+}
+
+.link-button:disabled {
+   color: var(--t-829bb3);
+   cursor: not-allowed;
+}
+
 .primary-button:focus-visible,
 .secondary-button:focus-visible,
 .delete-button:focus-visible {
@@ -3750,15 +3782,6 @@ label {
    color: #b1771b;
 }
 
-.link-button {
-   border: 0;
-   background: transparent;
-   color: var(--t-2563eb);
-   padding: 0;
-   font-size: inherit;
-   text-decoration: underline;
-   cursor: pointer;
-}
 
 .detail-actions {
    display: flex;
@@ -9060,7 +9083,7 @@ label {
 .ag-call.is-compact .ag-call-params .tag { padding: 0 5px; font-size: 10px; line-height: 1.6; }
 
 /* 二次确认气泡（ConfirmPopover）：出现在按钮旁边，不挡整个页面。 */
-.confirm-popover {
+.anchored-popover {
    position: fixed;
    inset: auto;
    margin: 0;
@@ -9108,7 +9131,7 @@ label {
    margin-top: 12px;
 }
 
-.confirm-popover-arrow {
+.anchored-popover-arrow {
    position: absolute;
    width: 10px;
    height: 10px;
@@ -9118,14 +9141,37 @@ label {
    transform: rotate(45deg);
 }
 
-.confirm-popover.is-top .confirm-popover-arrow {
+.anchored-popover.is-top .anchored-popover-arrow {
    bottom: -6px;
    border-top: 0;
    border-left: 0;
 }
 
-.confirm-popover.is-bottom .confirm-popover-arrow {
+.anchored-popover.is-bottom .anchored-popover-arrow {
    top: -6px;
    border-bottom: 0;
    border-right: 0;
+}
+
+/* 只读内容的跟随气泡（InfoPopover）：例如浮窗里卡片的「原文」。 */
+.info-popover {
+   width: min(480px, calc(100vw - 16px));
+   max-width: min(480px, calc(100vw - 16px));
+   padding: 10px 14px 12px;
+}
+
+.info-popover-head {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   gap: 12px;
+   margin-bottom: 8px;
+   font-size: 13px;
+}
+
+.info-popover-body {
+   max-height: min(50vh, 420px);
+   overflow: auto;
+   font-size: 13px;
+   line-height: 1.7;
 }

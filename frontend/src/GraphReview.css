@@ -232,10 +232,6 @@
 .gr-entity-name strong {
   overflow-wrap: anywhere;
 }
-.gr-source {
-  margin-left: auto;
-  font-size: 12px;
-}
 .gr-desc {
   margin-top: 4px !important;
   color: #475569;
@@ -281,10 +277,6 @@
 .gr-card-foot span {
   margin-right: auto;
 }
-.gr-card-foot .link-button {
-  font-size: 12px;
-}
-
 .gr-pager {
   display: flex;
   justify-content: space-between;
@@ -554,7 +546,6 @@
 }
 .gr-remove {
   margin-left: 4px;
-  font-size: 12px;
   color: #94a3b8;
 }
 .gr-remove:hover:not(:disabled) {
@@ -573,18 +564,14 @@
 }
 
 /* 人工合并：「查看组内实体」/「新建人工合并」浮窗 */
-.gr-entity-actions {
+.gr-entity-tools {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   margin-left: auto;
-}
-.gr-source + .gr-entity-actions {
-  margin-left: 4px;
 }
 .gr-view {
   margin-left: 4px;
-  font-size: 12px;
 }
 .gr-actions-start {
   margin-right: auto;
@@ -676,4 +663,17 @@
 .gr-entities li.is-muted .gr-desc,
 .gr-entities li.is-muted .gr-entity-name > .tag {
   opacity: 0.5;
+}
+/* 「原文」气泡里的分片：去掉浮窗里 section 的间距和分隔线。 */
+.info-popover .gr-evidence {
+  gap: 12px;
+}
+.info-popover .gr-evidence section {
+  margin: 0 !important;
+  padding: 0;
+  border: 0;
+}
+.info-popover .graph-chunk-text {
+  margin: 6px 0 0;
+  padding-top: 0;
 }

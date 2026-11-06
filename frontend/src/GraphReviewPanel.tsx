@@ -21,6 +21,7 @@ import {
 import { DetailDialog } from "./DetailDialog";
 import { ConfirmPopover } from "./ConfirmPopover";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
+import { InfoPopover } from "./Popover";
 import { Tag } from "./Tag";
 import { errorText, useToast } from "./Toast";
 import type { Tone } from "./tags";
@@ -181,7 +182,7 @@ function EvidenceList({ entity }: { entity: Entity }) {
 }
 
 // 一个实体的卡片：名字、类型、描述、原文。各步骤和人工合并的浮窗共用。
-// 有 onEvidence 时「原文」打开浮窗；没有时就地展开（浮窗里不再套浮窗，最多两层）。
+// 有 onEvidence 时「原文」打开浮窗；没有时（已经在浮窗里）用跟随按钮的气泡显示。
 function EntityItem({
   entity,
   code,
@@ -198,7 +199,7 @@ function EntityItem({
   // 置灰：例如搜索结果里已经在组内、不能再加的实体。
   muted?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const label = `原文 ${entity.evidence.length}`;
   return (
     <li className={muted ? "is-muted" : undefined}>
       <div className="gr-entity-name">
@@ -216,20 +217,35 @@ function EntityItem({
             {type}
           </Tag>
         ))}
-        {entity.evidence.length > 0 && (
-          <button
-            type="button"
-            className="link-button gr-source"
-            onClick={() =>
-              onEvidence ? onEvidence(entity) : setOpen((value) => !value)
-            }
-          >
-            {!onEvidence && open
-              ? "收起原文"
-              : `原文 ${entity.evidence.length}`}
-          </button>
+        {/* 右侧工具区：「原文」和卡片操作放在一起靠右，气泡打开时也不会挤乱布局。 */}
+        {(entity.evidence.length > 0 || actions) && (
+          <span className="gr-entity-tools">
+            {entity.evidence.length > 0 &&
+              (onEvidence ? (
+                <button
+                  type="button"
+                  className="link-button button-sm gr-source"
+                  onClick={() => onEvidence(entity)}
+                >
+                  {label}
+                </button>
+              ) : (
+                // 浮窗里不能再开浮窗（最多两层），原文用跟随按钮的气泡显示。
+                <InfoPopover
+                  title={`原文依据 · ${entity.names.join(" / ")}`}
+                  content={() => <EvidenceList entity={entity} />}
+                >
+                  <button
+                    type="button"
+                    className="link-button button-sm gr-source"
+                  >
+                    {label}
+                  </button>
+                </InfoPopover>
+              ))}
+            {actions}
+          </span>
         )}
-        {actions && <span className="gr-entity-actions">{actions}</span>}
       </div>
       {note}
       {entity.descriptions.length > 0 && (
@@ -237,7 +253,6 @@ function EntityItem({
           {entity.descriptions.join("；")}
         </p>
       )}
-      {!onEvidence && open && <EvidenceList entity={entity} />}
     </li>
   );
 }
@@ -658,7 +673,7 @@ export function GraphReviewDetails({
                 {judgment.prompt && (
                   <button
                     type="button"
-                    className="link-button"
+                    className="link-button button-sm"
                     onClick={() =>
                       openText(
                         `#${candidate.id} 完整提示词`,
@@ -676,7 +691,7 @@ export function GraphReviewDetails({
                 {judgment.raw_output != null && (
                   <button
                     type="button"
-                    className="link-button"
+                    className="link-button button-sm"
                     onClick={() =>
                       openText(
                         `#${candidate.id} 模型原始输出`,
@@ -725,7 +740,7 @@ export function GraphReviewDetails({
                     (state ? (
                       <button
                         type="button"
-                        className={`link-button${loadingClass(loading === decideKey([id], null))}`}
+                        className={`link-button button-sm${loadingClass(loading === decideKey([id], null))}`}
                         disabled={busy}
                         onClick={() => void decide([id], null)}
                       >
@@ -933,7 +948,7 @@ export function GraphReviewDetails({
               {report.system_prompt && (
                 <button
                   type="button"
-                  className="link-button"
+                  className="link-button button-sm"
                   onClick={() =>
                     openText("二次检查合并提示词", report.system_prompt!)
                   }
@@ -1343,7 +1358,7 @@ function JoinEntities({
                 {manualTag}
                 <button
                   type="button"
-                  className="link-button gr-remove"
+                  className="link-button button-sm gr-remove"
                   onClick={() =>
                     setAdded((items) =>
                       items.filter((item) => item.id !== entity.id),
@@ -1485,7 +1500,7 @@ function NewMerge({
               actions={
                 <button
                   type="button"
-                  className="link-button gr-remove"
+                  className="link-button button-sm gr-remove"
                   onClick={() =>
                     setPicked((items) =>
                       items.filter((item) => item.id !== entity.id),
