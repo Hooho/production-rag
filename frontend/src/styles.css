@@ -1654,13 +1654,13 @@ input::placeholder {
    content: "";
    display: inline-block;
    flex: none;
-   width: 12px;
-   height: 12px;
-   margin-right: 6px;
-   border: 2px solid currentColor;
+   width: 9px;
+   height: 9px;
+   margin-right: 5px;
+   border: 1.5px solid currentColor;
    border-right-color: transparent;
    border-radius: 50%;
-   vertical-align: -2px;
+   vertical-align: -1px;
    animation: button-spin .7s linear infinite;
 }
 
@@ -1672,8 +1672,8 @@ input::placeholder {
 
 .button-sm.is-loading::before,
 .link-button.is-loading::before {
-   width: 10px;
-   height: 10px;
+   width: 8px;
+   height: 8px;
 }
 
 .primary-button.is-loading:disabled,
