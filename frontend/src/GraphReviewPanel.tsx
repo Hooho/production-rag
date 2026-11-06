@@ -25,6 +25,7 @@ import { InfoPopover } from "./Popover";
 import { Tag } from "./Tag";
 import { errorText, useToast } from "./Toast";
 import type { Tone } from "./tags";
+import { diffPlan, type PlanDiff } from "./graphReviewDiff";
 import "./GraphReview.css";
 
 const PAGE_SIZE = 10;
@@ -1050,7 +1051,8 @@ export function GraphReviewDetails({
 }
 
 // 第 4 步「确认」的内容：已批准的建议按实际结果合起来；连在一起且名字不一致的，必须先选一个。
-// 和上次已写入的对比，列出这次会撤掉的合并（结果只取决于现在批准了哪些）。
+// 和上次已写入的对比（规则见 graphReviewDiff）：每条标出不变/新增/扩大/缩小/接成/拆出/改名，
+// 只有和现在任何一条都不重叠的旧结果才单独列为「撤掉」（结果只取决于现在批准了哪些）。
 function MergePlan({
   report,
   approved,
@@ -1076,23 +1078,55 @@ function MergePlan({
   const label = (ids: string[]) =>
     ids.map((id) => entities.get(id)?.names[0] ?? id).join("、");
   const groups = mergeComponents(report, approved);
-  const sameIds = (a: string[], b: string[]) =>
-    a.length === b.length &&
-    [...a].sort().join("|") === [...b].sort().join("|");
-  const dropped = (report.applied?.groups ?? []).filter(
-    (old) => !groups.some((group) => sameIds(group.entityIds, old.ids)),
+  const naming = (group: (typeof groups)[number]) =>
+    group.options.length === 1 ? group.options[0] : choices[group.key];
+  const { diffs, dropped } = diffPlan(
+    groups.map((group) => ({
+      entityIds: group.entityIds,
+      naming: naming(group),
+    })),
+    report.applied?.groups ?? [],
   );
+  const changeTag = ({ change, rename }: PlanDiff) => {
+    const tags: [string, Tone, string?][] = [];
+    if (change.kind === "new") tags.push(["新增", "info"]);
+    if (change.kind === "same") tags.push(["已在图谱中", "neutral"]);
+    if (change.kind === "grow")
+      tags.push([`扩大：+${label(change.added)}`, "info"]);
+    if (change.kind === "shrink")
+      tags.push([`缩小：−${label(change.removed)}（拆出）`, "warning"]);
+    if (change.kind === "adjust")
+      tags.push([
+        `调整：+${label(change.added)}，−${label(change.removed)}（拆出）`,
+        "warning",
+      ]);
+    if (change.kind === "join")
+      tags.push([
+        `合并了 ${change.sources.length} 个已有结果${change.added.length ? `，+${label(change.added)}` : ""}`,
+        "info",
+        change.sources.map(label).join(" ／ "),
+      ]);
+    if (change.kind === "split")
+      tags.push([`从 ${label(change.source)} 拆出`, "warning"]);
+    if (rename)
+      tags.push([
+        `改名：${rename.from.name}（${rename.from.type}）→ ${rename.to.name}（${rename.to.type}）`,
+        "accent",
+      ]);
+    return tags.map(([text, tone, title]) => (
+      <Tag key={text} size="sm" tone={tone} title={title}>
+        {text}
+      </Tag>
+    ));
+  };
   if (groups.length === 0 && dropped.length === 0)
     return (
       <p className="graph-note">还没有批准任何合并建议，去第 3 步决定。</p>
     );
   return (
     <ol className="gr-plan">
-      {groups.map((group) => {
+      {groups.map((group, index) => {
         const choice = choices[group.key];
-        const kept = (report.applied?.groups ?? []).some((old) =>
-          sameIds(group.entityIds, old.ids),
-        );
         return (
           <li key={group.key}>
             <span>
@@ -1121,9 +1155,7 @@ function MergePlan({
                   ))}
                 </span>
               )}
-              <Tag size="sm" tone={kept ? "neutral" : "info"}>
-                {kept ? "已在图谱中" : "新增"}
-              </Tag>
+              {changeTag(diffs[index])}
               {onView && (
                 <button
                   type="button"
@@ -1170,7 +1202,7 @@ function MergePlan({
               {old.name}（{old.type}）
             </s>
             <Tag size="sm" tone="warning">
-              撤掉（现在没有批准）
+              撤掉：写入后拆开
             </Tag>
           </span>
         </li>
@@ -1813,7 +1845,8 @@ export function GraphReviewBody({
         <p className="gr-small">
           下面是写入后图谱上会有的合并：根据第 3
           步批准的建议整理，相关的几条会接成一个结果。
-          和上次写入相比，「新增」会合并，「撤掉」会拆开。还有 {pending}{" "}
+          每条都标出和上次写入相比的变化（扩大、缩小、接成、拆出、改名等）；
+          只有整条都不再批准的才列为「撤掉」，写入后拆开。还有 {pending}{" "}
           条没处理，保持分开。
         </p>
         <MergePlan
