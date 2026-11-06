@@ -243,11 +243,6 @@
 .dr-actions textarea {
    width: 100%;
    box-sizing: border-box;
-   border: 1px solid var(--t-cedfec);
-   border-radius: 4px;
-   padding: 8px 10px;
-   font: inherit;
-   font-size: 13px;
    resize: vertical;
 }
 

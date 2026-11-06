@@ -786,7 +786,7 @@ export function GraphReviewDetails({
           </div>
           <input
             type="search"
-            className="gr-search"
+            className="gr-search input-sm"
             placeholder="搜实体名或组号"
             value={query}
             onChange={(event) => setQuery(event.target.value)}

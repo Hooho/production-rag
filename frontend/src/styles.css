@@ -21,10 +21,87 @@ body {
    background: var(--t-f7fbff);
 }
 
-button,
-input,
-textarea {
+button {
    font: inherit;
+}
+
+/* 表单控件规范（AGENTS.md「前端界面约定 · 表单控件」，参考 Ant Design）：输入框、下拉框、多行文本统一在这里定义，
+   和按钮同一套尺寸（默认 32px / 紧凑 26px）、圆角 4px、字号 13px；页面 CSS 只调宽度、外边距、对齐，不再覆盖边框、高度、内边距、字号、背景。 */
+:where(input:not([type="checkbox"], [type="radio"], [type="file"], [type="range"], [type="color"], [type="hidden"], [type="submit"], [type="button"], [type="reset"], [type="image"])),
+:where(select, textarea) {
+   box-sizing: border-box;
+   height: 32px;
+   padding: 4px 11px;
+   border: 1px solid var(--t-abc4dc);
+   border-radius: 4px;
+   background-color: #ffffff;
+   color: var(--t-173b5b);
+   font-family: inherit;
+   font-size: 13px;
+   line-height: 22px;
+   outline: 0;
+   transition: border-color .2s, box-shadow .2s;
+}
+
+:where(input:not([type="checkbox"], [type="radio"], [type="file"], [type="range"], [type="color"], [type="hidden"], [type="submit"], [type="button"], [type="reset"], [type="image"])) {
+   width: 100%;
+}
+
+:where(input[type="search"]) {
+   -webkit-appearance: none;
+   appearance: none;
+}
+
+:where(select) {
+   -webkit-appearance: none;
+   appearance: none;
+   padding-right: 28px;
+   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238ea2b8' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+   background-repeat: no-repeat;
+   background-position: right 10px center;
+   cursor: pointer;
+}
+
+:where(textarea) {
+   height: auto;
+   min-height: 64px;
+   line-height: 1.6;
+   resize: vertical;
+}
+
+:where(input, select, textarea):hover:not(:disabled, :focus) {
+   border-color: var(--t-93b4f5);
+}
+
+:where(input, select, textarea):focus,
+:where(input, select, textarea):focus-visible {
+   border-color: var(--t-2563eb);
+   box-shadow: 0 0 0 2px rgb(var(--t-2563eb-rgb) / .12);
+}
+
+:where(input, select, textarea):disabled {
+   background-color: var(--t-f4f8fc);
+   color: var(--t-829bb3);
+   cursor: not-allowed;
+}
+
+:where(input, textarea)::placeholder {
+   color: var(--t-829bb3);
+}
+
+/* 紧凑尺寸：和 button-sm 并排（表格行内、卡片内部、工具条）时用。 */
+:where(input, select).input-sm {
+   height: 26px;
+   padding-top: 0;
+   padding-bottom: 0;
+   padding-left: 7px;
+   font-size: 12px;
+   line-height: 24px;
+}
+
+:where(select).input-sm {
+   padding-right: 24px;
+   background-position: right 8px center;
 }
 
 button {
@@ -1553,6 +1630,11 @@ h2 {
    outline: 0;
    padding: 6px 7px 45px;
    font-size: 14px;
+   /* 聊天输入框是整块输入区的一部分，不用表单控件的边框、圆角和聚焦光圈。 */
+   border-radius: 0;
+   box-shadow: none;
+   min-height: 0;
+   line-height: normal;
 }
 
 .composer textarea::placeholder,
@@ -2021,19 +2103,6 @@ label {
    font-size: 10px;
    letter-spacing: .08em;
    margin: 17px 0;
-}
-
-input {
-   width: 100%;
-   border: 1px solid var(--t-abc4dc);
-   background: var(--t-eef5fb);
-   color: var(--t-173b5b);
-   padding: 12px;
-   outline: 0;
-}
-
-input:focus {
-   border-color: var(--t-2563eb);
 }
 
 .dropzone {
@@ -2884,7 +2953,6 @@ input:focus {
 
 .upload-title-field input {
    margin: 0;
-   border-radius: 7px;
 }
 
 .upload-modal-actions {
@@ -5746,26 +5814,12 @@ input:focus {
 .ev-form-field textarea {
    width: 100%;
    box-sizing: border-box;
-   border: 1px solid var(--t-abc4dc);
-   background: var(--t-f2f7fc);
    color: var(--ev-ink);
-   padding: 8px 9px;
-   font: inherit;
-   font-size: 12px;
 }
 
 .ev-form-field textarea {
    resize: vertical;
-   line-height: 1.5;
 }
-
-.ev-form-field input:focus,
-.ev-form-field select:focus,
-.ev-form-field textarea:focus {
-   border-color: var(--t-2563eb);
-   outline: none;
-}
-
 .ev-form-check {
    display: flex;
    align-items: center;

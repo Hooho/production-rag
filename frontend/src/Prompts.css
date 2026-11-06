@@ -173,19 +173,7 @@
    display: block;
    width: 100%;
    resize: vertical;
-   border: 1px solid var(--t-cedfec);
-   border-radius: 4px;
-   background: #fff;
-   padding: 10px 12px;
    color: var(--t-173b5b);
-   font-size: 14px;
-   line-height: 1.8;
-}
-
-.pr-textarea:focus,
-.pr-note-input:focus {
-   outline: 2px solid var(--t-93c5fd);
-   border-color: var(--t-2563eb);
 }
 
 .pr-editbar {
@@ -208,11 +196,6 @@
 .pr-note-input {
    flex: 1 1 220px;
    min-width: 0;
-   height: 32px;
-   border: 1px solid var(--t-cedfec);
-   border-radius: 4px;
-   padding: 0 10px;
-   font-size: 13px;
 }
 
 .pr-locked,

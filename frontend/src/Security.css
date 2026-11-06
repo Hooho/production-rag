@@ -85,20 +85,7 @@
    flex: 1;
    min-width: 0;
    resize: vertical;
-   border: 1px solid var(--t-cedfec);
-   border-radius: 4px;
-   padding: 8px 10px;
-   font: inherit;
-   font-size: 13px;
-   line-height: 1.6;
 }
-
-.sec-try textarea:focus,
-.sec-add input:focus {
-   outline: 2px solid var(--t-93c5fd);
-   border-color: var(--t-2563eb);
-}
-
 .sec-result {
    margin-top: 12px;
 }
@@ -234,28 +221,7 @@
 .sec-add input {
    flex: 1;
    min-width: 0;
-   height: 32px;
-   border: 1px solid var(--t-cedfec);
-   border-radius: 4px;
-   padding: 0 10px;
-   font-size: 13px;
 }
-
-.sec-add select,
-.sec-actions select {
-   height: 32px;
-   border: 1px solid var(--t-cedfec);
-   border-radius: 4px;
-   background: #fff;
-   padding: 0 6px;
-   font-size: 13px;
-}
-
-.sec-actions select {
-   height: 26px;
-   font-size: 12px;
-}
-
 .sec-group h3 {
    margin: 14px 0 4px;
    color: var(--t-5e7a95);

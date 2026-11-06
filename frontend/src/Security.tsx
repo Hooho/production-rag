@@ -207,7 +207,7 @@ function CandidateRow({ item, categories, busy, onConfirm, onIgnore }: { item: I
     <span className="sec-text">{item.text}</span>
     <span className="sec-meta">{formatTime(item.created)} · 来源：{(item.rules ?? []).map((rule) => CANDIDATE_RULES[rule] ?? categories[rule] ?? rule).join("、") || "—"}</span>
     <span className="sec-actions">
-      <select value={category} onChange={(event) => setCategory(event.target.value)}>
+      <select className="input-sm" value={category} onChange={(event) => setCategory(event.target.value)}>
         {Object.entries(categories).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
       </select>
       <button type="button" className="link-text" disabled={busy} onClick={() => onConfirm(category)}>加入样本库</button>

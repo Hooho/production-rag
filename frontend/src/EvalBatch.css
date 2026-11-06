@@ -117,12 +117,8 @@
 
 .evb-saved-card input {
   width: 100%;
-  border: 1px solid var(--t-abc4dc);
-  background: var(--t-eef5fb);
-  padding: 4px 8px;
   color: var(--ev-ink);
   font-weight: 600;
-  font-size: 13px;
 }
 
 .evb-saved-card ul {

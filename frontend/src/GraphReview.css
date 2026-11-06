@@ -155,11 +155,6 @@
 }
 .gr-search {
   width: 180px;
-  padding: 5px 10px;
-  border: 1px solid #dbe3ec;
-  border-radius: 6px;
-  font: inherit;
-  font-size: 12px;
 }
 
 .gr-list {
@@ -641,7 +636,6 @@
 }
 .gr-picker-form input,
 .gr-picker-form select {
-  height: 32px;
   box-sizing: border-box;
 }
 .gr-picker-form input {
@@ -672,6 +666,5 @@
   border-top: 1px solid #eef2f6;
 }
 .gr-picker-search input {
-  height: 32px;
   box-sizing: border-box;
 }

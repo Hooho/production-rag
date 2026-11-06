@@ -80,12 +80,7 @@
 .data-table td input,
 .data-table td select,
 .data-table td textarea {
-   border: 1px solid var(--t-cedfec);
-   background: #ffffff;
    color: var(--t-173b5b);
-   padding: 8px 10px;
-   font-size: 13px;
-   border-radius: 3px;
    font-family: inherit;
 }
 

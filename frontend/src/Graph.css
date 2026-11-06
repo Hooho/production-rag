@@ -297,23 +297,9 @@
   margin: 12px 0 0;
   line-height: 1.7;
 }
-.graph-filters select {
-  appearance: none;
-  padding-right: 34px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m2 4 4 4 4-4' fill='none' stroke='%235e7a95' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-position: right 12px center;
-  background-size: 12px;
-  background-repeat: no-repeat;
-}
 .graph-filters select,
 .graph-filters input {
-  border: 1px solid #d5dce6;
-  border-radius: 6px;
-  min-height: 34px;
-  padding: 6px 10px;
-  font-size: 13px;
   color: var(--t-475569);
-  background-color: #fff;
 }
 .graph-filters input {
   min-width: 180px;
@@ -496,11 +482,6 @@
 .graph-options-control select {
   flex: 1;
   min-width: 0;
-  border: 1px solid #d5dce6;
-  border-radius: 6px;
-  padding: 6px 8px;
-  font-size: 13px;
-  background: #fff;
 }
 .graph-options-links {
   display: flex;
@@ -891,12 +872,6 @@
 .graph-workspace .graph-filters > button,
 .graph-workspace .graph-filters .chunk-source-filter > button {
   box-sizing: border-box;
-  height: 28px;
-  min-height: 28px;
-  padding-top: 3px;
-  padding-bottom: 3px;
-  font-size: 12px;
-  line-height: 20px;
 }
 .graph-workspace > .graph-filters,
 .graph-explorer > .graph-filters {
@@ -1190,11 +1165,6 @@
   flex: 1 1 0;
   width: 0;
   min-width: 0;
-  height: 30px;
-  padding: 3px 8px;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  background: #fff;
   color: #24435c;
   box-sizing: border-box;
 }
