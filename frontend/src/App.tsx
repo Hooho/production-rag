@@ -1,5 +1,6 @@
 import { DetailDialog } from "./DetailDialog";
 import { GraphReviewBody, pendingCount } from "./GraphReviewPanel";
+import { useToast, type ShowToast, type ToastKind } from "./Toast";
 import type { GraphReviewReport } from "./api";
 import DataManagement from "./DataManagement";
 import Evaluation, { type EvaluationSection } from "./Evaluation";
@@ -122,9 +123,6 @@ type Route =
       reviewId?: string;
     }
   | { page: "settings" };
-type ToastKind = "success" | "error";
-type ToastMessage = { id: number; kind: ToastKind; message: string };
-type ShowToast = (kind: ToastKind, message: string) => void;
 type NavIconName =
   | "spark"
   | "library"
@@ -328,8 +326,8 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem(sidebarStorage) === "true",
   );
-  // 原先操作结果分散在页面正文和弹窗里；根层统一托管 Toast，保证评测和知识库使用同一套提示体验。
-  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  // 操作结果统一用 Toast（Toast.tsx 的 ToastProvider 托管）；子页面通过 onToast 属性或 useToast 拿到的是同一个函数。
+  const showToast = useToast();
   // 业务数据入口：只有对至少一类业务数据有查看权限时才显示；null 表示还在查询。
   // 评测入口只对管理员显示（后端评测接口也只允许管理员调用）。
   const [dataAllowed, setDataAllowed] = useState<boolean | null>(null);
@@ -362,7 +360,6 @@ function App() {
     )
       navigate("/chat");
   }, [route.page, user, dataAllowed]);
-  const toastIdRef = useRef(0);
 
   useEffect(() => {
     if (window.location.pathname === "/")
@@ -532,30 +529,12 @@ function App() {
     );
   }
 
-  // 成功提示短暂展示，失败提示多停留一会儿，避免用户来不及读完错误原因。
-  function showToast(kind: ToastKind, message: string) {
-    const id = toastIdRef.current + 1;
-    toastIdRef.current = id;
-    setToasts((items) => [...items.slice(-2), { id, kind, message }]);
-    window.setTimeout(
-      () => {
-        setToasts((items) => items.filter((item) => item.id !== id));
-      },
-      kind === "success" ? 3200 : 5200,
-    );
-  }
-
-  function dismissToast(id: number) {
-    setToasts((items) => items.filter((item) => item.id !== id));
-  }
-
   if (!user) {
     return <Login onLogin={handleLogin} />;
   }
 
   return (
     <>
-      <ToastHost messages={toasts} onDismiss={dismissToast} />
       <div className={`shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
         <aside className="sidebar">
           <div className="sidebar-heading">
@@ -800,39 +779,6 @@ function App() {
   );
 }
 
-// 统一承载用户主动操作的结果，避免成功或失败信息占用页面内容区。
-function ToastHost({
-  messages,
-  onDismiss,
-}: {
-  messages: ToastMessage[];
-  onDismiss: (id: number) => void;
-}) {
-  return (
-    <div className="app-toast-host" aria-live="polite" aria-atomic="false">
-      {messages.map((toast) => (
-        <div
-          className={`app-toast is-${toast.kind}`}
-          role={toast.kind === "error" ? "alert" : "status"}
-          key={toast.id}
-        >
-          <span className="app-toast-icon" aria-hidden="true">
-            {toast.kind === "success" ? "✓" : "!"}
-          </span>
-          <span className="app-toast-message">{toast.message}</span>
-          <button
-            className="app-toast-close"
-            type="button"
-            aria-label="关闭提示"
-            onClick={() => onDismiss(toast.id)}
-          >
-            ×
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 // 用户名密码登录。原来粘贴一个永不过期的访问密钥；现在登录后拿到会自动续期的短期令牌。
 function Login({ onLogin }: { onLogin: (user: AuthUser) => void }) {

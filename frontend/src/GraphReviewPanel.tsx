@@ -10,6 +10,7 @@ import {
 } from "./api";
 import { DetailDialog } from "./DetailDialog";
 import { Tag } from "./Tag";
+import { errorText, useToast } from "./Toast";
 import type { Tone } from "./tags";
 import "./GraphReview.css";
 
@@ -1068,7 +1069,9 @@ export function GraphReviewBody({
     ReturnType<typeof getGraphReview>
   > | null>(null);
   const [choices, setChoices] = useState<Record<string, GraphReviewChoice>>({});
-  const [error, setError] = useState("");
+  // 操作反馈统一走 Toast（AGENTS.md「前端交互约束 · 操作反馈」），弹窗里不再放错误横幅。
+  const toast = useToast();
+  const loadFailed = useRef(false);
   const [busy, setBusy] = useState(false);
   const [poll, setPoll] = useState(0);
   const [step, setStep] = useState<ReviewStep | null>(null);
@@ -1078,10 +1081,15 @@ export function GraphReviewBody({
       .then((value) => {
         if (!cancelled) {
           setData(value);
-          setError("");
+          loadFailed.current = false;
         }
       })
-      .catch((reason: Error) => !cancelled && setError(reason.message));
+      .catch((reason) => {
+        // 轮询时连续失败只提示一次。
+        if (cancelled || loadFailed.current) return;
+        loadFailed.current = true;
+        toast("error", `读取二次检查失败：${errorText(reason)}`);
+      });
     return () => {
       cancelled = true;
     };
@@ -1131,11 +1139,10 @@ export function GraphReviewBody({
   async function run(action: () => Promise<unknown>) {
     if (busy) return;
     setBusy(true);
-    setError("");
     try {
       await action();
     } catch (reason) {
-      setError((reason as Error).message);
+      toast("error", errorText(reason));
     } finally {
       setBusy(false);
     }
@@ -1174,6 +1181,7 @@ export function GraphReviewBody({
           .map((group) => [group.key, choices[group.key]]),
       );
       await rewriteGraphReview(documentId, live.build_id, resolutions);
+      toast("success", `已提交：按 ${groups.length} 个合并结果写入图谱`);
       setData(await getGraphReview(documentId));
       setStep(5);
       onChanged?.();
@@ -1191,6 +1199,7 @@ export function GraphReviewBody({
       return;
     await run(async () => {
       await retryGraphReview(documentId);
+      toast("success", "已开始重新检查");
       setData(await getGraphReview(documentId));
       setStep(2);
       onChanged?.();
@@ -1200,6 +1209,7 @@ export function GraphReviewBody({
   async function retryFailed() {
     await run(async () => {
       await retryFailedGraphReview(documentId);
+      toast("success", `已排队重试 ${failedCount} 组`);
       setData(await getGraphReview(documentId));
       onChanged?.();
     });
@@ -1281,13 +1291,11 @@ export function GraphReviewBody({
 
   return (
     <div className="gr-body">
-      {error && (
-        <p className="field-error" role="alert">
-          {error}
-        </p>
-      )}
+      {/* 后台检查任务本身失败是状态，不是这次操作的反馈，留在弹窗里说明。 */}
       {live?.status === "failed" && (
-        <p className="field-error">二次检查失败：{live.error ?? "未知原因"}</p>
+        <p className="gr-warn">
+          二次检查失败：{live.error ?? "未知原因"}，可以点「重新检查」再跑一次。
+        </p>
       )}
       {report?.scan && step ? (
         <GraphReviewDetails
