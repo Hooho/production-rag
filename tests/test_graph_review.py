@@ -679,3 +679,82 @@ def test_merge_record_keeps_review_proposals_for_undo():
     info = query.review_info(detail)
     assert info["proposal_ids"] == ["41:0", "108:0"] and info["approved_by"] == "alice"
     assert query.review_info({"scope": "new"}) is None
+
+
+def test_merge_record_label_tells_model_and_manual_apart():
+    from app.graph import query
+
+    def label(via, proposal_ids=("41:0", "m1:0")):
+        return query.review_label(
+            {"review": {"proposal_ids": list(proposal_ids), "via": via}}
+        )
+
+    assert label(["41:0"]) == "二次检查合并（人工确认）"
+    assert label(["m1:0"]) == "二次检查合并（人工添加）"
+    assert label(["41:0", "m1:0"]) == "二次检查合并（人工确认 + 人工添加）"
+    # 旧记录没有 via：按整组的建议来源算
+    assert label(None) == "二次检查合并（人工确认 + 人工添加）"
+    assert query.review_source({"review": {"proposal_ids": ["m1:0"]}}) == "manual"
+    assert label(None, ["m2:0"]) == "二次检查合并（人工添加）"
+
+
+def test_apply_records_which_proposals_brought_each_name():
+    report = {
+        "judgments": [
+            {
+                "candidate_id": 41,
+                "status": "completed",
+                "decision": {
+                    "groups": [
+                        {
+                            "ids": ["a", "b"],
+                            "name": "X",
+                            "type": "产品",
+                            "reason": "模型",
+                        }
+                    ]
+                },
+            }
+        ],
+        "manual": [
+            {
+                "id": "m1",
+                "ids": ["b", "c"],
+                "name": "X",
+                "type": "产品",
+                "reason": "人工",
+            }
+        ],
+    }
+    groups = review.resolve_groups(report, ["41:0", "m1:0"])
+    assert groups[0]["members"] == {"41:0": ["a", "b"], "m1:0": ["b", "c"]}
+    plan = {
+        "entities": [],
+        "mentions": [
+            {
+                "id": f"m-{key}",
+                "entity_id": f"e-{key}",
+                "name": key,
+                "type": "产品",
+                "resolve_method": "exact",
+            }
+            for key in "abc"
+        ],
+        "merges": [{"mention_id": f"m-{key}", "detail": {}} for key in "abc"],
+        "relations": [],
+        "summary": {},
+    }
+    ids = {key: f"e-{key}" for key in "abc"}
+    db = engine()
+    with db.begin() as connection:
+        review.apply(
+            connection,
+            plan,
+            {"document_id": "doc-a", "space": "online"},
+            groups,
+            ids,
+            "alice",
+        )
+    via = {row["mention_id"]: row["detail"]["review"]["via"] for row in plan["merges"]}
+    assert via == {"m-a": ["41:0"], "m-b": ["41:0", "m1:0"], "m-c": ["m1:0"]}
+    assert "members" not in plan["merges"][0]["detail"]["review"]

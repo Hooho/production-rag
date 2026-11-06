@@ -392,6 +392,8 @@ def components(report, approved):
                 ),
                 "options": options,
                 "reasons": [chosen[pid]["reason"] for pid in proposal_ids],
+                # 每条建议各自涉及的实体：写入时用来标出每个名字是哪几条建议带进来的。
+                "members": {pid: chosen[pid]["ids"] for pid in proposal_ids},
             }
         )
     return sorted(result, key=lambda item: item["key"])
@@ -418,6 +420,7 @@ def resolve_groups(report, approved, resolutions=None):
                 "name": choice["name"],
                 "type": choice["type"],
                 "reason": "；".join(dict.fromkeys(component["reasons"])),
+                "members": component["members"],
             }
         )
     return groups
@@ -433,7 +436,7 @@ def apply(connection, plan, build, groups, ids, approved_by):
         if any(key not in ids for key in group["ids"]):
             records.append(
                 {
-                    **group,
+                    **{key: value for key, value in group.items() if key != "members"},
                     "id": proposal_id,
                     "status": "skipped",
                     "reason": "抽取结果已变化，找不到其中的实体，未合并",
@@ -441,6 +444,16 @@ def apply(connection, plan, build, groups, ids, approved_by):
             )
             continue
         sources = {ids[key] for key in group["ids"]}
+        summary = {key: value for key, value in group.items() if key != "members"}
+        # 每个实体是哪几条建议带进来的（模型建议「12:0」、人工添加「m1:0」）；
+        # 旧的已写入结果没有 members，via 为空，合并记录就按整组的建议来源显示。
+        members = group.get("members") or {}
+        via = {}
+        for pid, keys in members.items():
+            for key in keys:
+                if key in ids:
+                    via.setdefault(ids[key], set()).add(pid)
+        via_of = {}
         merge_key = (
             "review|"
             + build["document_id"]
@@ -479,6 +492,8 @@ def apply(connection, plan, build, groups, ids, approved_by):
         for mention in plan["mentions"]:
             if mention["entity_id"] in sources:
                 affected.append(mention["id"])
+                if mention["entity_id"] in via:
+                    via_of[mention["id"]] = sorted(via[mention["entity_id"]])
                 from_names.add(mention["name"])
                 type_corrections += int(mention["type"] != group["type"])
                 mention["entity_id"] = target
@@ -490,13 +505,17 @@ def apply(connection, plan, build, groups, ids, approved_by):
                     method="review",
                     detail={
                         **merge["detail"],
-                        "review": {"proposal_id": proposal_id, **group},
+                        "review": {
+                            "proposal_id": proposal_id,
+                            **summary,
+                            "via": via_of.get(merge["mention_id"]),
+                        },
                         "approved_by": approved_by,
                     },
                 )
         records.append(
             {
-                **group,
+                **summary,
                 "id": proposal_id,
                 "status": "completed",
                 "entity_id": target,

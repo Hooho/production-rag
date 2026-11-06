@@ -31,6 +31,13 @@ import { GraphView, typeColor } from "./GraphView";
 import { Tag } from "./Tag";
 import type { Tone } from "./tags";
 
+// 二次检查合并按来源配色：人工确认（模型建议）蓝色、人工添加紫色、两者都有金色。
+const REVIEW_SOURCE_TONES: Record<"confirmed" | "manual" | "mixed", Tone> = {
+  confirmed: "info",
+  manual: "accent",
+  mixed: "gold",
+};
+
 type ShowToast = (kind: "success" | "error", message: string) => void;
 
 export const BUILD_STATUS: Record<string, { label: string; tone: Tone }> = {
@@ -805,7 +812,7 @@ export function DocumentGraph({
               >
                 <p className="graph-note">
                   合并范围区分新建实体、文档内合并和跨文档合并。同一次建图中，首次关联其他文档的实体记为跨文档合并，后续重复归属记为文档内合并。历史记录未保存范围时显示「历史未记录」。
-                  建图时按规则合并（名字相同、规范化后相同、模型给的标准名相同）；之后可以用「二次检查合并」补充，方法显示为「二次检查合并（人工确认）」，这类合并可以在这里标记撤销，到确认页一起确认后重新写入图谱。
+                  建图时按规则合并（名字相同、规范化后相同、模型给的标准名相同）；之后可以用「二次检查合并」补充，方法按来源显示为「二次检查合并（人工确认）」（模型建议、人工批准）、「（人工添加）」（新建人工合并）或两者都有，用不同颜色区分，这类合并可以在这里标记撤销，到确认页一起确认后重新写入图谱。
                 </p>
                 {undoCount > 0 && (
                   <div className="graph-undo-bar">
@@ -870,9 +877,19 @@ export function DocumentGraph({
                         </td>
                         <td>
                           <div className="graph-merge-method">
-                            <Tag size="sm" plain hue>
-                              {row.method_label}
-                            </Tag>
+                            {row.review_source ? (
+                              <Tag
+                                size="sm"
+                                plain
+                                tone={REVIEW_SOURCE_TONES[row.review_source]}
+                              >
+                                {row.method_label}
+                              </Tag>
+                            ) : (
+                              <Tag size="sm" plain hue>
+                                {row.method_label}
+                              </Tag>
+                            )}
                             {undoState(row) === "marked" && (
                               <span className="graph-undo-cell">
                                 <Tag size="sm" tone="warning">

@@ -488,7 +488,32 @@ def review_info(detail):
         "type": review.get("type"),
         "reason": review.get("reason"),
         "approved_by": (detail or {}).get("approved_by"),
+        # 这个名字是哪几条建议带进来的；旧记录没有，就按整组的建议算。
+        "via": review.get("via"),
     }
+
+
+# 二次检查合并按来源区分：人工确认（模型建议、人工批准的）、人工添加（「新建人工合并」，编号 m 开头）、两者都有。
+REVIEW_SOURCE_LABELS = {
+    "confirmed": "二次检查合并（人工确认）",
+    "manual": "二次检查合并（人工添加）",
+    "mixed": "二次检查合并（人工确认 + 人工添加）",
+}
+
+
+def review_source(detail):
+    info = review_info(detail)
+    if not info:
+        return "confirmed"
+    sources = info["via"] or info["proposal_ids"]
+    manual = [pid for pid in sources if str(pid).startswith("m")]
+    if not manual:
+        return "confirmed"
+    return "manual" if len(manual) == len(sources) else "mixed"
+
+
+def review_label(detail):
+    return REVIEW_SOURCE_LABELS[review_source(detail)]
 
 
 # 合并记录：同一个名字归到同一个实体、用同一种方法的合成一行，列出出现在第几片。
@@ -545,11 +570,15 @@ def merge_rows(connection, build_id):
                 "entity_id": row["entity_id"],
                 "entity_name": row["entity_name"],
                 "method": row["resolve_method"],
-                "method_label": METHOD_LABELS.get(
-                    row["resolve_method"], row["resolve_method"]
-                ),
+                "method_label": review_label(row["merge_detail"])
+                if row["resolve_method"] == "review"
+                else METHOD_LABELS.get(row["resolve_method"], row["resolve_method"]),
                 "positions": [],
                 "chunk_ids": [],
+                # 二次检查合并的来源：confirmed 人工确认 / manual 人工添加 / mixed 两者都有，前端按它配色。
+                "review_source": review_source(row["merge_detail"])
+                if row["resolve_method"] == "review"
+                else None,
                 # 二次检查人工确认的合并：记下来自哪几条建议，合并记录里可以标记撤销。
                 "review": review_info(row["merge_detail"])
                 if row["resolve_method"] == "review"

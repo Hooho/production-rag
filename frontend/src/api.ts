@@ -3776,6 +3776,8 @@ export type GraphMergeRow = {
   entity_name: string;
   method: GraphMethod;
   method_label: string;
+  // 二次检查合并的来源：人工确认（模型建议）/ 人工添加 / 两者都有；其他方法为空。
+  review_source?: "confirmed" | "manual" | "mixed" | null;
   positions: number[];
   chunk_ids: string[];
   // 二次检查人工确认的合并：来自哪几条建议（可以在合并记录里标记撤销）。
@@ -3785,6 +3787,8 @@ export type GraphMergeRow = {
     type: string;
     reason: string;
     approved_by?: string;
+    // 这个名字是哪几条建议带进来的（人工添加的编号 m 开头）；旧记录为空。
+    via?: string[] | null;
   } | null;
 };
 export type GraphPage<T> = {
