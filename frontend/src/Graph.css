@@ -1307,3 +1307,7 @@
 .graph-undo-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 0; padding: 8px 12px; border: 1px solid var(--tone-warning-border); border-radius: 6px; background: var(--tone-warning-bg); color: var(--tone-warning-text); font-size: 13px; }
 .graph-undo-cell { display: inline-flex; align-items: center; gap: 6px; }
 .graph-undo-link { font-size: 12px; }
+/* 切换页签 / 翻页 / 搜索时的占位骨架。 */
+.graph-switch-skeleton { padding: 8px 0; }
+.graph-switch-skeleton-canvas { display: block; height: 420px; border-radius: 8px; }
+.graph-switch-skeleton-row { display: block; height: 44px; border-radius: 6px; }

@@ -1,4 +1,5 @@
 import { graphHops } from "./graphHops";
+import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import { GraphReviewPanel, type ReviewStep } from "./GraphReviewPanel";
 import { errorText } from "./Toast";
 import { GraphHistoryControls, useGraphHistory } from "./GraphHistory";
@@ -194,6 +195,15 @@ export function DocumentGraph({
       setUndoing(null);
     }
   }
+  // 切换页签、翻页、搜索时，新数据回来之前显示占位骨架；建图进度轮询（tick）不算，避免每 3 秒闪一次。
+  // 图视图里展开邻居、换中心不显示骨架（画布会整块闪掉），只在切到图时显示一次。
+  const requestKey = JSON.stringify(
+    view === "network"
+      ? [documentId, view]
+      : [documentId, view, page, search, entityType, category],
+  );
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const switching = loadedKey !== requestKey;
   useEffect(() => {
     let cancelled = false;
     getDocumentGraph(documentId, {
@@ -209,10 +219,15 @@ export function DocumentGraph({
       .then((value) => {
         if (!cancelled) {
           setData(value);
+          setLoadedKey(requestKey);
           setError("");
         }
       })
-      .catch((reason: Error) => !cancelled && setError(reason.message));
+      .catch((reason: Error) => {
+        if (cancelled) return;
+        setLoadedKey(requestKey);
+        setError(reason.message);
+      });
     return () => {
       cancelled = true;
     };
@@ -586,7 +601,24 @@ export function DocumentGraph({
           className={`graph-workspace-body${selected || selectedEdge ? " graph-body" : ""}`}
         >
           <div>
-            {view === "network" && data.network && (
+            {switching && (
+              <LoadingSkeleton
+                className="graph-switch-skeleton"
+                label="正在加载"
+              >
+                {view === "network" ? (
+                  <SkeletonBlock className="graph-switch-skeleton-canvas" />
+                ) : (
+                  Array.from({ length: 6 }, (_, index) => (
+                    <SkeletonBlock
+                      key={index}
+                      className="graph-switch-skeleton-row"
+                    />
+                  ))
+                )}
+              </LoadingSkeleton>
+            )}
+            {!switching && view === "network" && data.network && (
               <>
                 <GraphView
                   hopInfo={hopInfo}
@@ -645,7 +677,7 @@ export function DocumentGraph({
                 </p>
               </>
             )}
-            {view === "entities" && data.entities && (
+            {!switching && view === "entities" && data.entities && (
               <Paged
                 page={data.entities.page}
                 total={data.entities.total}
@@ -690,7 +722,7 @@ export function DocumentGraph({
                 </table>
               </Paged>
             )}
-            {view === "relations" && data.relations && (
+            {!switching && view === "relations" && data.relations && (
               <Paged
                 page={data.relations.page}
                 total={data.relations.total}
@@ -764,7 +796,7 @@ export function DocumentGraph({
                 </table>
               </Paged>
             )}
-            {view === "merges" && data.merges && (
+            {!switching && view === "merges" && data.merges && (
               <Paged
                 page={data.merges.page}
                 total={data.merges.total}
