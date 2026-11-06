@@ -690,51 +690,24 @@
   padding-top: 0;
 }
 
-/* 图谱检查的箭头步骤条：每步一个色块，右边是箭头尖角，嵌进下一步左边的缺口。 */
+/* 图谱检查的箭头步骤条：每步一个色块，右边是箭头尖角，嵌进下一步左边的缺口。
+   5 步始终排成一行、平分宽度，不横向滚动；放不下的文字省略号截断，悬停看完整说明。 */
 .gc-steps {
-  position: relative;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 .gc-steps-scroll {
   display: flex;
-  overflow-x: auto;
-  scrollbar-width: thin;
-  padding-bottom: 2px;
-}
-/* 横向滚动时，还有内容的那一侧边缘显示渐变阴影。 */
-.gc-steps::before,
-.gc-steps::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 2px;
-  width: 28px;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.15s;
-  z-index: 1;
-}
-.gc-steps::before {
-  left: 0;
-  background: linear-gradient(to right, rgba(15, 23, 42, 0.18), transparent);
-}
-.gc-steps::after {
-  right: 0;
-  background: linear-gradient(to left, rgba(15, 23, 42, 0.18), transparent);
-}
-.gc-steps.has-left::before,
-.gc-steps.has-right::after {
-  opacity: 1;
 }
 .gc-step {
-  flex: 1 0 180px;
+  flex: 1 1 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
-  min-height: 64px;
-  margin: 0 0 0 -12px;
-  padding: 10px 30px 10px 30px;
+  gap: 1px;
+  min-height: 48px;
+  margin: 0 0 0 -8px;
+  padding: 6px 16px 6px 22px;
   border: 0;
   border-radius: 0;
   font: inherit;
@@ -742,45 +715,48 @@
   cursor: pointer;
   clip-path: polygon(
     0 0,
-    calc(100% - 16px) 0,
+    calc(100% - 12px) 0,
     100% 50%,
-    calc(100% - 16px) 100%,
+    calc(100% - 12px) 100%,
     0 100%,
-    16px 50%
+    12px 50%
   );
 }
 .gc-step:first-child {
   margin-left: 0;
-  padding-left: 18px;
-  border-radius: 8px 0 0 8px;
+  padding-left: 12px;
+  border-radius: 6px 0 0 6px;
   clip-path: polygon(
     0 0,
-    calc(100% - 16px) 0,
+    calc(100% - 12px) 0,
     100% 50%,
-    calc(100% - 16px) 100%,
+    calc(100% - 12px) 100%,
     0 100%
   );
 }
 .gc-step:last-child {
-  border-radius: 0 8px 8px 0;
-  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 16px 50%);
+  padding-right: 10px;
+  border-radius: 0 6px 6px 0;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 12px 50%);
 }
 .gc-step strong {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  font-size: 15px;
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .gc-step strong em {
+  margin-left: 6px;
   font-style: normal;
   font-weight: 500;
-  font-size: 13px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 .gc-step small {
-  font-size: 12px;
+  font-size: 11px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

@@ -1,7 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-
 // 箭头式步骤条（图谱检查的 5 步）：每步一个色块，右边箭头嵌进下一步。
-// 窄屏时横向滚动：还有内容没显示的那一侧边缘显示渐变阴影；打开或切换步骤时把当前步骤滚到可见区域。
+// 5 步始终一行、平分宽度，不滚动；文字放不下时省略号截断，悬停看完整标题、状态和说明。
 export type CheckStepState =
   | "current" // 当前步骤（未开始 / 待处理 / 检查中）：实心蓝
   | "done" // 已完成：浅绿
@@ -32,45 +30,9 @@ export function GraphCheckSteps({
   selected: number;
   onSelect: (key: number) => void;
 }) {
-  const scroller = useRef<HTMLDivElement>(null);
-  const [shadow, setShadow] = useState({ left: false, right: false });
-
-  function measure() {
-    const node = scroller.current;
-    if (!node) return;
-    setShadow({
-      left: node.scrollLeft > 2,
-      right: node.scrollLeft + node.clientWidth < node.scrollWidth - 2,
-    });
-  }
-
-  useLayoutEffect(() => {
-    measure();
-  }, [steps]);
-  useEffect(() => {
-    const node = scroller.current;
-    if (!node) return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
-  useEffect(() => {
-    const item = scroller.current?.querySelector<HTMLElement>(
-      `[data-step="${selected}"]`,
-    );
-    item?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [selected]);
-
   return (
-    <div
-      className={`gc-steps${shadow.left ? " has-left" : ""}${shadow.right ? " has-right" : ""}`}
-    >
-      <div
-        className="gc-steps-scroll"
-        ref={scroller}
-        onScroll={measure}
-        role="tablist"
-      >
+    <div className="gc-steps">
+      <div className="gc-steps-scroll" role="tablist">
         {steps.map((item) => {
           const locked = item.state === "locked";
           return (
@@ -81,7 +43,9 @@ export function GraphCheckSteps({
               data-step={item.key}
               aria-selected={selected === item.key}
               disabled={locked}
-              title={item.hint}
+              title={[`${item.key}. ${item.title}`, item.text, item.hint]
+                .filter(Boolean)
+                .join("\n")}
               className={`gc-step is-${item.state}${selected === item.key ? " is-selected" : ""}`}
               onClick={() => onSelect(item.key)}
             >
