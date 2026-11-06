@@ -26,29 +26,43 @@ type Decision = NonNullable<CheckReport["decisions"]>[string];
 
 export const CHECK_INFO: Record<
   CheckStepName,
-  { title: string; hint: string; accept: string; reject: string }
+  {
+    title: string;
+    hint: string;
+    example: string;
+    accept: string;
+    reject: string;
+  }
 > = {
   glean: {
     title: "补抽",
     hint: "补抽漏掉的实体和关系：把【分片原文和已经抽出的】一起交给 AI，让它只补漏掉的。",
+    example:
+      "原文「段永平 2002 年买入了网易的股票」，建图时只抽出了「段永平」。AI 补抽后补上实体「网易」，和关系「段永平 → 买入 → 网易」。",
     accept: "采纳补抽",
     reject: "不要",
   },
   relation: {
     title: "关系核对",
     hint: "核对关系：原文引用能不能在分片里找到；可疑的交给 AI 看整片原文，判断原文是否支持这条关系。",
+    example:
+      "关系「段永平 → 投资 → 腾讯」的原文引用是「腾讯的用户黏性很强」：这句话在原文里找得到，但没说段永平投资腾讯。AI 判断「原文不支持」，建议删除。",
     accept: "删除这条关系",
     reject: "保留",
   },
   type: {
     title: "类型核对",
     hint: "核对类型：同一个名字被抽成了不同类型，或者类型不在清单里。",
+    example:
+      "「腾讯」在 1 片里被抽成「产品」，在另外 5 片里是「组织」。AI 看原文后建议统一成「组织」。",
     accept: "改类型",
     reject: "不改",
   },
   split: {
     title: "拆分",
     hint: "拆开错误的合并：同一个实体下的名字其实指不同的东西（用向量找出），改名拆开。",
+    example:
+      "「苹果」下面，有几处说的是「段永平长期持有的公司」，有几处说的是「一种水果，用来打比方」。AI 建议把水果那几处拆出去，改名「苹果（水果）」。",
     accept: "按建议拆分",
     reject: "不拆",
   },
@@ -242,6 +256,7 @@ export function GraphCheckStep({
   const startPanel = (
     <div className="gr-method">
       <p>{info.hint}</p>
+      <p className="gc-example">例如：{info.example}</p>
       {step === "glean" && (
         <p className="gc-options">
           补抽范围：
@@ -446,6 +461,7 @@ export function GraphCheckStep({
                 {report.scan ? `（${report.scan.duration_ms} 毫秒）` : ""}。
               </p>
             )}
+            <p className="gc-example">例如：{info.example}</p>
             {status === "scanned" && (
               <div className="gr-actions">
                 <button

@@ -46,7 +46,7 @@ STEPS = {
     "graph_check_relation": (14, "图谱检查 · 关系核对"),
     "graph_check_type": (15, "图谱检查 · 类型核对"),
     "graph_check_split": (16, "图谱检查 · 拆分"),
-    "graph_review": (17, "图谱检查 · 合并"),
+    "graph_review": (17, "图谱检查 · 检查漏合并"),
     "graph_rewrite": (18, "按确认结果重写图谱"),
 }
 # 写入图谱后自动在后台跑二次检查；设为 0 则需要手动点「开始二次检查」。
