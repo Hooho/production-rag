@@ -1277,7 +1277,7 @@ def run_review_job(store, models, build_id):
         current.update(status="failed", error=str(error)[:1000])
         try:
             _review_step(
-                store, build, current, "failed", f"二次检查失败：{str(error)[:300]}"
+                store, build, current, "failed", f"检查漏合并失败：{str(error)[:300]}"
             )
         except BuildStopped:
             pass
@@ -1728,7 +1728,7 @@ def retry_review(store, build_id):
         raise BuildError("建图记录不存在")
     report = review_report(store.engine, build)
     if review_state(report, build) in ("queued", "running", "rewriting"):
-        raise BuildError("二次检查正在进行，不能重复开始")
+        raise BuildError("检查漏合并正在进行，不能重复开始")
     # 未开始、但之前判断过（补跑分片、重建后保留下来的）：整份沿用，抽取结果没变就不再调用模型。
     if report and report.get("status") == "idle" and report.get("signature"):
         fresh = {**report, "status": "queued", "phase": "scan", "stale": False}

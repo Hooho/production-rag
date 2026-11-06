@@ -1004,7 +1004,7 @@ export function GraphReviewDetails({
                     type="button"
                     className="link-button button-sm"
                     onClick={() =>
-                      openText("二次检查合并提示词", report.system_prompt!)
+                      openText("检查漏合并提示词", report.system_prompt!)
                     }
                   >
                     查看
@@ -1867,7 +1867,7 @@ export function GraphReviewBody({
         // 轮询时连续失败只提示一次。
         if (cancelled || loadFailed.current) return;
         loadFailed.current = true;
-        toast("error", `读取二次检查失败：${errorText(reason)}`);
+        toast("error", `读取检查漏合并失败：${errorText(reason)}`);
       });
     return () => {
       cancelled = true;
@@ -2191,7 +2191,8 @@ export function GraphReviewBody({
       {/* 后台检查任务本身失败是状态，不是这次操作的反馈，留在弹窗里说明。 */}
       {live?.status === "failed" && (
         <p className="gr-warn">
-          二次检查失败：{live.error ?? "未知原因"}，可以点「重新检查」再跑一次。
+          检查漏合并失败：{live.error ?? "未知原因"}
+          ，可以点「重新检查」再跑一次。
         </p>
       )}
       {report?.scan && step ? (
@@ -2231,7 +2232,7 @@ export function GraphReviewBody({
                 ? "正在读取…"
                 : report || live
                   ? "正在找可疑项（不调用模型），找完会列出来，确认后再让 AI 判断…"
-                  : "这次建图还没有二次检查记录。"}
+                  : "这次建图还没有检查漏合并的记录。"}
           </p>
           {retryButton && <div className="gr-actions">{retryButton}</div>}
         </>

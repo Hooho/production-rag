@@ -25,7 +25,7 @@ from .schemas import ONLINE_SPACE
 
 NETWORK_LIMIT = 20
 METHOD_LABELS = {
-    "review": "二次检查合并（人工确认）",
+    "review": "检查漏合并（人工确认）",
     "new": "新建实体",
     "exact": "名字相同",
     "normalized": "规范化后相同",
@@ -522,9 +522,9 @@ def review_info(detail):
 
 # 二次检查合并按来源区分：人工确认（模型建议、人工批准的）、人工添加（「新建人工合并」，编号 m 开头）、两者都有。
 REVIEW_SOURCE_LABELS = {
-    "confirmed": "二次检查合并（人工确认）",
-    "manual": "二次检查合并（人工添加）",
-    "mixed": "二次检查合并（人工确认 + 人工添加）",
+    "confirmed": "检查漏合并（人工确认）",
+    "manual": "检查漏合并（人工添加）",
+    "mixed": "检查漏合并（人工确认 + 人工添加）",
 }
 
 

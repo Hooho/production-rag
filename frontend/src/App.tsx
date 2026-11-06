@@ -5553,7 +5553,7 @@ function Knowledge({
               try {
                 await retryGraphReview(selected.document_id);
                 setDetail(await getDocument(selected.document_id));
-                onToast("success", "二次检查已重新排队，将复用已有抽取结果。");
+                onToast("success", "检查漏合并已重新排队，将复用已有抽取结果。");
               } catch (reason) {
                 onToast("error", (reason as Error).message);
               }
@@ -7476,7 +7476,7 @@ function DocumentTrace({
       {reviewDetail && (
         <DetailDialog
           open
-          title="二次检查合并 · 过程和结果"
+          title="检查漏合并 · 过程和结果"
           className="gr-dialog"
           onClose={() => setReviewDetail(null)}
         >

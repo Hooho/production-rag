@@ -690,13 +690,13 @@ def test_merge_record_label_tells_model_and_manual_apart():
             {"review": {"proposal_ids": list(proposal_ids), "via": via}}
         )
 
-    assert label(["41:0"]) == "二次检查合并（人工确认）"
-    assert label(["m1:0"]) == "二次检查合并（人工添加）"
-    assert label(["41:0", "m1:0"]) == "二次检查合并（人工确认 + 人工添加）"
+    assert label(["41:0"]) == "检查漏合并（人工确认）"
+    assert label(["m1:0"]) == "检查漏合并（人工添加）"
+    assert label(["41:0", "m1:0"]) == "检查漏合并（人工确认 + 人工添加）"
     # 旧记录没有 via：按整组的建议来源算
-    assert label(None) == "二次检查合并（人工确认 + 人工添加）"
+    assert label(None) == "检查漏合并（人工确认 + 人工添加）"
     assert query.review_source({"review": {"proposal_ids": ["m1:0"]}}) == "manual"
-    assert label(None, ["m2:0"]) == "二次检查合并（人工添加）"
+    assert label(None, ["m2:0"]) == "检查漏合并（人工添加）"
 
 
 def test_apply_records_which_proposals_brought_each_name():
