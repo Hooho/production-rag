@@ -22,7 +22,14 @@ function counts(version: GraphVersion) {
     : `${entities} 个实体 · ${relations ?? 0} 条关系`;
 }
 
+// 下拉框里的名字：有备注就显示备注（生效的后面标「生效」），没有备注按版本号、来源、时间、数量显示。
 function label(version: GraphVersion) {
+  const note = version.note?.trim();
+  if (note) return version.active ? `${note} · 生效` : note;
+  return details(version);
+}
+
+function details(version: GraphVersion) {
   return [
     `v${version.number}`,
     version.active ? "生效" : null,
@@ -103,7 +110,7 @@ export function GraphVersionBar({
           }}
         >
           {versions.map((item) => (
-            <option key={item.id} value={item.id}>
+            <option key={item.id} value={item.id} title={details(item)}>
               {label(item)}
             </option>
           ))}
