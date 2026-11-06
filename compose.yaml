@@ -20,6 +20,8 @@ services:
         NLTK_DATA_BASE_URL: ${NLTK_DATA_BASE_URL:-https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages}
         # pip 下载慢或超时时，在 .env 里设 PIP_MIRROR 换成镜像源；不设就用 PyPI。
         PIP_MIRROR: ${PIP_MIRROR:-}
+        # pip 走代理（只给这一步用，apt 仍直连）：.env 里设 PIP_PROXY，例如和 HTTPS_PROXY 一样。
+        PIP_PROXY: ${PIP_PROXY:-}
     command: ["alembic", "upgrade", "head"]
     env_file: .env
     environment:
@@ -40,6 +42,8 @@ services:
         NLTK_DATA_BASE_URL: ${NLTK_DATA_BASE_URL:-https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages}
         # pip 下载慢或超时时，在 .env 里设 PIP_MIRROR 换成镜像源；不设就用 PyPI。
         PIP_MIRROR: ${PIP_MIRROR:-}
+        # pip 走代理（只给这一步用，apt 仍直连）：.env 里设 PIP_PROXY，例如和 HTTPS_PROXY 一样。
+        PIP_PROXY: ${PIP_PROXY:-}
     env_file: .env
     environment:
       MYSQL_HOST: mysql
@@ -106,6 +110,8 @@ services:
         NLTK_DATA_BASE_URL: ${NLTK_DATA_BASE_URL:-https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages}
         # pip 下载慢或超时时，在 .env 里设 PIP_MIRROR 换成镜像源；不设就用 PyPI。
         PIP_MIRROR: ${PIP_MIRROR:-}
+        # pip 走代理（只给这一步用，apt 仍直连）：.env 里设 PIP_PROXY，例如和 HTTPS_PROXY 一样。
+        PIP_PROXY: ${PIP_PROXY:-}
     command: ["python", "-m", "scripts.worker"]
     env_file: .env
     environment:

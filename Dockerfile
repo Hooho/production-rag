@@ -5,8 +5,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 # PIP_MIRROR 留空用 PyPI；国内网络从 PyPI 下载超时时，在 .env 里设成镜像源（如阿里云、清华）。
+# PIP_PROXY：pip 走代理下载（只给这一步用，apt 仍直连）。
 ARG PIP_MIRROR=
-RUN pip install --no-cache-dir --timeout 300 --retries 10 ${PIP_MIRROR:+--index-url "$PIP_MIRROR"} -r requirements.txt
+ARG PIP_PROXY=
+RUN pip install --no-cache-dir --timeout 300 --retries 10 ${PIP_MIRROR:+--index-url "$PIP_MIRROR"} ${PIP_PROXY:+--proxy "$PIP_PROXY"} -r requirements.txt
 RUN useradd --create-home app \
     && mkdir -p uploads /home/app/.cache \
     && chown -R app:app /app /home/app
