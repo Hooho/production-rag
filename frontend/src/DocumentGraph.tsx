@@ -837,44 +837,46 @@ export function DocumentGraph({
                           </Tag>
                         </td>
                         <td>
-                          <Tag size="sm" plain hue>
-                            {row.method_label}
-                          </Tag>
-                          {undoState(row) === "marked" && (
-                            <span className="graph-undo-cell">
-                              <Tag size="sm" tone="warning">
-                                已标记撤销
-                              </Tag>
+                          <div className="graph-merge-method">
+                            <Tag size="sm" plain hue>
+                              {row.method_label}
+                            </Tag>
+                            {undoState(row) === "marked" && (
+                              <span className="graph-undo-cell">
+                                <Tag size="sm" tone="warning">
+                                  已标记撤销
+                                </Tag>
+                                <button
+                                  type="button"
+                                  className={`link-button${undoing === `${row.review?.proposal_ids.join(",")}:false` ? " is-loading" : ""}`}
+                                  disabled={!!undoing}
+                                  onClick={() => void setUndo(row, false)}
+                                >
+                                  取消
+                                </button>
+                              </span>
+                            )}
+                            {undoState(row) === "available" && (
                               <button
                                 type="button"
-                                className={`link-button${undoing === `${row.review?.proposal_ids.join(",")}:false` ? " is-loading" : ""}`}
+                                className={`link-button graph-undo-link${undoing === `${row.review?.proposal_ids.join(",")}:true` ? " is-loading" : ""}`}
                                 disabled={!!undoing}
-                                onClick={() => void setUndo(row, false)}
+                                title={
+                                  row.review?.reason
+                                    ? `合并理由：${row.review.reason}`
+                                    : undefined
+                                }
+                                onClick={() => void setUndo(row, true)}
                               >
-                                取消
+                                撤销
                               </button>
-                            </span>
-                          )}
-                          {undoState(row) === "available" && (
-                            <button
-                              type="button"
-                              className={`link-button graph-undo-link${undoing === `${row.review?.proposal_ids.join(",")}:true` ? " is-loading" : ""}`}
-                              disabled={!!undoing}
-                              title={
-                                row.review?.reason
-                                  ? `合并理由：${row.review.reason}`
-                                  : undefined
-                              }
-                              onClick={() => void setUndo(row, true)}
-                            >
-                              撤销
-                            </button>
-                          )}
-                          {undoState(row) === "unavailable" && (
-                            <small title="二次检查已重新检查或正在进行，请在二次检查里处理">
-                              （检查结果已更新）
-                            </small>
-                          )}
+                            )}
+                            {undoState(row) === "unavailable" && (
+                              <small title="二次检查已重新检查或正在进行，请在二次检查里处理">
+                                （检查结果已更新）
+                              </small>
+                            )}
+                          </div>
                         </td>
                         <td>
                           {row.positions.slice(0, 6).map((position, index) => (
