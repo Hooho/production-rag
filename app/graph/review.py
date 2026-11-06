@@ -316,12 +316,40 @@ def judge(models, schema, candidate, system_prompt=None):
 
 
 def proposals(report):
-    return {
+    """所有合并建议：模型给的（组号:序号）和人工添加的（m1:0、m2:0……）。"""
+    result = {
         f"{row['candidate_id']}:{index}": group
-        for row in report["judgments"]
+        for row in report.get("judgments") or []
         if row["status"] == "completed"
         for index, group in enumerate(row["decision"]["groups"])
     }
+    for item in report.get("manual") or []:
+        result[f"{item['id']}:0"] = {
+            key: item[key] for key in ("ids", "name", "type", "reason")
+        }
+    return result
+
+
+def search_entities(items, query="", ids=None, limit=30):
+    """按名字或描述搜实体（人工合并时用）；ids 有值时按编号取。"""
+    if ids:
+        wanted = set(ids)
+        return [item for item in items if item["id"] in wanted]
+    keyword = normalize(query)
+    if not keyword:
+        return []
+    hits = []
+    for item in items:
+        names = [normalize(name) for name in item["names"]]
+        if any(keyword in name for name in names):
+            rank = 0 if keyword in names else 1
+        elif any(keyword in normalize(text) for text in item["descriptions"]):
+            rank = 2
+        else:
+            continue
+        hits.append((rank, min(len(name) for name in names), item))
+    hits.sort(key=lambda row: (row[0], row[1]))
+    return [item for _, _, item in hits[:limit]]
 
 
 def components(report, approved):

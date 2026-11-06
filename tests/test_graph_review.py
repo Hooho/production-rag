@@ -403,11 +403,29 @@ def test_review_runs_after_write_then_rewrites_with_decisions(monkeypatch):
     assert retried["status"] == "ready" and len(calls) == 2
     assert retried["judgments"][0]["status"] == "completed"
     assert retried["decisions"]["1:0"]["decision"] == "approved"
-    # 重新检查：清掉判断和决定，保留已应用的合并。
+    # 人工合并：搜全部实体，加一条人工建议（默认批准），撤销即删除。
+    hits = build.review_entities(store, "b1", "腾讯控股")
+    assert hits[0]["names"] == ["腾讯控股"]
+    keys = {
+        item["names"][0]: item["id"]
+        for item in build.review_entities(store, "b1", "腾讯")
+    }
+    pair = [keys["腾讯"], keys["腾讯股票"]]
+    with pytest.raises(build.BuildError, match="至少"):
+        build.add_manual_review(store, "b1", pair[:1], "腾讯", "组织", "", "alice")
+    with pytest.raises(build.BuildError, match="类型"):
+        build.add_manual_review(store, "b1", pair, "腾讯", "未知", "", "alice")
+    manual = build.add_manual_review(store, "b1", pair, "腾讯", "组织", "", "alice")
+    assert manual["decisions"]["m1:0"]["decision"] == "approved"
+    assert "m1:0" in review.proposals(manual) and len(manual["manual_entities"]) == 2
+    removed = build.decide_review(store, "b1", ["m1:0"], None, "alice")
+    assert not removed["manual"] and "m1:0" not in removed["decisions"]
+    build.add_manual_review(store, "b1", pair, "腾讯", "组织", "人工", "alice")
+    # 重新检查：清掉模型判断和对它的决定，保留已应用的合并和人工添加的建议。
     build.retry_review(store, "b1")
     fresh = build.review_report(db, row)
     assert fresh["status"] == "queued" and fresh["applied"]["groups"]
-    assert "decisions" not in fresh
+    assert list(fresh["decisions"]) == ["m1:0"] and fresh["manual"][0]["id"] == "m1"
 
 
 def test_review_api_permissions_and_build_identity(monkeypatch):

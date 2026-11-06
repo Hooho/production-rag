@@ -24,7 +24,7 @@ from ..mysql.tables import (
 )
 from . import resolve, review
 from .extract import PROMPT_ID, cache_key, extract_chunk
-from .schemas import DEFAULT_SCHEMA_ID, ONLINE_SPACE, get_schema, now
+from .schemas import DEFAULT_SCHEMA_ID, ONLINE_SPACE, get_schema, now, type_names
 
 logger = logging.getLogger(__name__)
 
@@ -1027,8 +1027,22 @@ def _review_step(store, build, report, status, detail):
     write_step(store, build["document_id"], "graph_review", status, detail, report)
 
 
+# 重新检查时保留的人工内容：已写入图谱的合并，以及人工添加的合并建议（连同它们的决定）。
 def _carry(report):
-    return {"applied": report["applied"]} if report and report.get("applied") else {}
+    if not report:
+        return {}
+    kept = {}
+    if report.get("applied"):
+        kept["applied"] = report["applied"]
+    if report.get("manual"):
+        kept["manual"] = report["manual"]
+        kept["manual_entities"] = report.get("manual_entities") or {}
+        kept["decisions"] = {
+            key: value
+            for key, value in (report.get("decisions") or {}).items()
+            if key.startswith("m")
+        }
+    return kept
 
 
 # 写入图谱之后：如果这次是「按确认结果重写」，记下结果；否则（新建图、补跑分片）开始或排队二次检查。
@@ -1257,6 +1271,16 @@ def decide_review(store, build_id, proposal_ids, decision, username):
         build, report = _ready_report(store, build_id)
         decisions = report.setdefault("decisions", {})
         for proposal_id in proposal_ids:
+            # 人工添加的建议：撤销或否决就直接删掉这条建议。
+            if proposal_id.startswith("m") and decision != "approved":
+                manual_id = proposal_id.split(":")[0]
+                report["manual"] = [
+                    item
+                    for item in report.get("manual") or []
+                    if item["id"] != manual_id
+                ]
+                decisions.pop(proposal_id, None)
+                continue
             if decision is None:
                 decisions.pop(proposal_id, None)
             else:
@@ -1265,6 +1289,80 @@ def decide_review(store, build_id, proposal_ids, decision, username):
                     "by": username,
                     "at": now(),
                 }
+        _save_report(connection, build, report, detail=review_progress(report))
+    return report
+
+
+def _inventory(store, build):
+    evidence = {
+        item["chunk_id"]: item["content"]
+        for item in chunk_rows(store.engine, build["document_id"])
+    }
+    with store.engine.connect() as connection:
+        plan = resolve.prepare_build(
+            connection,
+            build["space"],
+            build["id"],
+            extraction_rows(store.engine, build["id"]),
+            build["created_by"],
+        )
+    items, _ = review.inventory(plan, evidence)
+    return items
+
+
+# 人工合并时搜这份文档的全部实体（不只是候选组里的），按名字或描述匹配；ids 有值时按编号取。
+def review_entities(store, build_id, query="", ids=None):
+    build = get_build(store.engine, build_id)
+    if build is None:
+        raise BuildError("建图记录不存在")
+    return review.search_entities(_inventory(store, build), query, ids)
+
+
+# 人工添加一条合并建议（默认已批准），和模型建议一样到第 4 步确认、写入图谱。
+# 往已有合并结果里加实体时，ids 里带上结果里的一个实体，确认时会按共享实体接到那个结果上。
+def add_manual_review(store, build_id, ids, name, entity_type, reason, username):
+    build, report = _ready_report(store, build_id)
+    ids = list(dict.fromkeys(ids))
+    if len(ids) < 2:
+        raise BuildError("人工合并至少要选 2 个实体")
+    allowed_types = set(
+        type_names(build_inputs(store.engine, build_id)["schema_snapshot"])
+    )
+    if entity_type not in allowed_types:
+        raise BuildError(f"类型不在清单里：{entity_type}")
+    name = (name or "").strip()
+    if not name or len(name) > 200:
+        raise BuildError("请填写合并后的名字（不超过 200 字）")
+    found = {
+        item["id"]: item
+        for item in review.search_entities(_inventory(store, build), ids=ids)
+    }
+    missing = [key for key in ids if key not in found]
+    if missing:
+        raise BuildError("有实体在抽取结果里找不到了，请刷新后重试")
+    with store.engine.begin() as connection:
+        _lock_build(connection, build_id)
+        build, report = _ready_report(store, build_id)
+        manual = report.setdefault("manual", [])
+        number = max([int(item["id"][1:]) for item in manual] or [0]) + 1
+        manual_id = f"m{number}"
+        manual.append(
+            {
+                "id": manual_id,
+                "ids": ids,
+                "name": name,
+                "type": entity_type,
+                "reason": (reason or "").strip() or "人工合并",
+                "by": username,
+                "at": now(),
+            }
+        )
+        report.setdefault("manual_entities", {}).update(found)
+        report.setdefault("decisions", {})[f"{manual_id}:0"] = {
+            "decision": "approved",
+            "by": username,
+            "at": now(),
+        }
         _save_report(connection, build, report, detail=review_progress(report))
     return report
 

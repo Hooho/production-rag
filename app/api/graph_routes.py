@@ -48,6 +48,14 @@ class ReviewRewriteInput(BaseModel):
     resolutions: dict[str, ReviewChoice] = Field(default_factory=dict)
 
 
+class ReviewManualInput(BaseModel):
+    build_id: UUID
+    ids: list[str] = Field(min_length=2, max_length=50)
+    name: str = Field(min_length=1, max_length=200)
+    type: str = Field(min_length=1, max_length=100)
+    reason: str = Field(default="", max_length=1000)
+
+
 class ReviewDecideInput(BaseModel):
     build_id: UUID
     proposal_ids: list[str] = Field(min_length=1, max_length=10000)
@@ -266,6 +274,60 @@ def build_router(current_user, identity, require_admin):
                 str(body.build_id),
                 user["username"],
                 {key: value.model_dump() for key, value in body.resolutions.items()},
+            )
+        except graph_build.BuildError as error:
+            raise HTTPException(409, str(error)) from None
+
+    # 人工合并：搜这份文档的全部实体（q 按名字或描述；ids 按编号，逗号分隔）。
+    @router.get("/documents/{document_id}/graph/review/entities")
+    def review_entities(
+        request: Request,
+        document_id: UUID,
+        q: str = Query("", max_length=100),
+        ids: str = Query("", max_length=5000),
+        user=Depends(current_user),
+    ):
+        state = request.app.state
+        readable(state, user["username"], document_id)
+        with state.store.engine.connect() as connection:
+            latest = graph_query.latest_build(connection, str(document_id))
+        if not latest:
+            raise HTTPException(409, "这份文档还没有建过图")
+        try:
+            items = graph_build.review_entities(
+                state.store,
+                latest["id"],
+                q,
+                [key for key in ids.split(",") if key] or None,
+            )
+        except graph_build.BuildError as error:
+            raise HTTPException(409, str(error)) from None
+        return {"items": items}
+
+    # 人工添加一条合并建议（默认已批准），到第 4 步确认后写入图谱。
+    @router.post("/documents/{document_id}/graph/review/manual")
+    def review_manual(
+        request: Request,
+        document_id: UUID,
+        body: ReviewManualInput,
+        user=Depends(current_user),
+    ):
+        state = request.app.state
+        row = readable(state, user["username"], document_id)
+        check_can_build(user, row)
+        with state.store.engine.connect() as connection:
+            latest = graph_query.latest_build(connection, str(document_id))
+        if not latest or latest["id"] != str(body.build_id):
+            raise HTTPException(409, "建图记录已切换，请刷新")
+        try:
+            return graph_build.add_manual_review(
+                state.store,
+                str(body.build_id),
+                body.ids,
+                body.name,
+                body.type,
+                body.reason,
+                user["username"],
             )
         except graph_build.BuildError as error:
             raise HTTPException(409, str(error)) from None
