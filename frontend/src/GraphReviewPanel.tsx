@@ -316,7 +316,9 @@ export function GraphReviewDetails({
 
   function openSimilarity(candidate: Candidate) {
     const method = scan.method;
-    const names = candidate.entities.map((entity) => entityLabel(entity, ""));
+    const names = candidate.entities.map(
+      (entity, index) => `e${index + 1} ${entityLabel(entity, "")}`,
+    );
     setDialog({
       title: `语义相似 ${similarityLabel(candidate)}`,
       body: (
@@ -483,9 +485,16 @@ export function GraphReviewDetails({
         </header>
 
         <ul className="gr-entities">
-          {candidate.entities.map((item) => (
+          {candidate.entities.map((item, index) => (
             <li key={item.id}>
               <div className="gr-entity-name">
+                {/* 发给模型时用的编号（e1、e2……），模型的理由里会引用它。 */}
+                <span
+                  className="gr-code"
+                  title="发给模型时的编号，模型的理由里会用它指代这个实体"
+                >
+                  e{index + 1}
+                </span>
                 <strong>{item.names.join(" / ")}</strong>
                 {item.types.map((type) => (
                   <Tag key={type} size="sm" hue>

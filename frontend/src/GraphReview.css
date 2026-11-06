@@ -565,3 +565,14 @@
 .gr-remove:hover:not(:disabled) {
   color: #c44e5e;
 }
+.gr-code {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: #e2e8f0;
+  color: #334155;
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+}
