@@ -24,7 +24,7 @@
 
 .grt-step h5 small {
   color: var(--diag-muted, #6f8ba4);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
 }
 
@@ -129,7 +129,7 @@
   padding: 6px 8px;
   border: 1px solid var(--diag-line, #d6e2ee);
   background: #f8fafc;
-  font-size: 11px;
+  font-size: 12px;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -232,7 +232,7 @@
   flex-wrap: wrap;
   gap: 4px 14px;
   color: var(--diag-muted, #6f8ba4);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .grt-map-legend span {
@@ -299,5 +299,11 @@
   border: 1px solid #b7d0f7;
   border-radius: 3px;
   color: #1d6ff2;
-  font-size: 11px;
+  font-size: 12px;
+}
+
+/* 明细抽屉里的文字统一 14px（步骤里是 12px，抽屉空间大，放大好读）。按钮按规范，不改。 */
+.ag-delivery-dialog.grt-dialog .diag :not(button),
+.ag-delivery-dialog.grt-dialog .grt-chip {
+  font-size: 14px;
 }

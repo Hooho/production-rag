@@ -1442,7 +1442,7 @@ h2 {
   gap: 9px;
   padding: 14px 0;
   color: var(--t-718daa);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .result-grid {
@@ -1450,12 +1450,13 @@ h2 {
   gap: 6px;
 }
 
+/* 步骤展开后的内容（本步结果、检索过程等）统一 12px；以前 9~11px 混用，太小。 */
 .result-grid > div {
   display: grid;
   grid-template-columns: 115px minmax(0, 1fr);
   gap: 8px;
   font-family: "DM Mono", monospace;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -1481,7 +1482,7 @@ h2 {
   display: block;
   color: var(--t-738ea8);
   font-family: inherit;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.55;
   white-space: normal;
 }
@@ -3421,7 +3422,7 @@ label {
 .diag-funnel-dropped {
   color: var(--diag-muted);
   /* 步骤结果的正文是 10px，右侧说明再小一号。 */
-  font-size: 9px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -3433,7 +3434,7 @@ label {
 /* 表头：说明右边两列分别是"剩下多少"和"这一步去掉多少"。 */
 .diag-funnel-head span {
   color: var(--diag-muted);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .diag-funnel-head span:nth-child(3) {
@@ -3614,7 +3615,7 @@ label {
   border: 1px solid #b7e1c8;
   background: #ecf8f1;
   color: var(--diag-graph);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .scope-list .scope-graph {
@@ -3644,7 +3645,7 @@ label {
 .diag-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .diag-table th {
@@ -3690,7 +3691,7 @@ label {
   padding: 8px 0 2px;
   border-top: 1px solid var(--diag-line);
   color: var(--diag-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .diag-pagination-controls {
@@ -3749,7 +3750,7 @@ label {
   height: 14px;
   border-radius: 50%;
   font-weight: 400;
-  font-size: 9px;
+  font-size: 12px;
   color: var(--t-f7fbff);
   background: var(--diag-muted);
 }
@@ -3788,7 +3789,7 @@ label {
 
 .diag-table code {
   color: var(--t-5c7893);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .diag-contribs {

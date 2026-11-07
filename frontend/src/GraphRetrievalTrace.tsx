@@ -334,7 +334,8 @@ function useDetailList<T extends { kept: boolean }>(
 ) {
   const [dimKey, setDimKey] = useState(initialDim ?? dims[0]?.key ?? "");
   const [value, setValue] = useState<string | null>(initialValue ?? null);
-  const [dropped, setDropped] = useState(false);
+  // 默认列出全部（包括去掉的，排在留下的后面），能看到匹配到的每一项和去掉的原因；可以取消勾选只看留下的。
+  const [dropped, setDropped] = useState(true);
   const [page, setPage] = useState(1);
   const dim = dims.find((item) => item.key === dimKey);
   const pool = dropped ? items : items.filter((item) => item.kept);
