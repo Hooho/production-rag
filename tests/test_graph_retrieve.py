@@ -128,3 +128,45 @@ def test_keywords_fallback(graph):
     models.mode = "demo"
     words = graph_retrieve.keywords(models, "段永平")
     assert words["source"] == "fallback" and words["entities"] == ["段永平"]
+
+
+# 接入混合检索：设置页打开图检索后，两张图排名表进入 RRF，候选记下通过哪些关系找到；诊断里有图检索明细和每一路耗时。
+def test_search_tool_with_graph(graph, runtime):
+    from app.tools.search import DocumentSearchTool
+
+    client, store, models, document_id = graph
+    tool = DocumentSearchTool()
+    runtime(graph_retrieval=False)
+    off = tool.execute(store, models, "alice", ["段永平投资"], "段永平投资了什么")
+    assert "graph" not in off["diagnostics"] and off["diagnostics"]["config"]["methods"] == ["dense", "keyword"]
+    runtime(graph_retrieval=True, graph_name_min_score=0.3, graph_relation_min_score=0.3)
+    result = tool.execute(store, models, "alice", ["段永平投资"], "段永平投资了什么",
+        graph_keywords={"entities": ["段永平"], "themes": ["投资"]})
+    diagnostics = result["diagnostics"]
+    assert diagnostics["config"]["methods"] == ["dense", "keyword", "graph"]
+    assert diagnostics["graph"]["status"] == "ok" and "sources" not in diagnostics["graph"]
+    assert diagnostics["scope"]["graph_versions"][0]["document_id"] == document_id
+    graph_lists = [item for item in diagnostics["lists"] if item["method"] == "graph"]
+    assert [item["query"] for item in graph_lists] == ["图 · 实体", "图 · 关系"]
+    assert graph_lists[0]["hits"][0]["relation_ids"]
+    with_graph = [row for row in diagnostics["candidates"] if "graph" in row["retrieval_methods"]]
+    assert with_graph and all(row["graph_relation_ids"] for row in with_graph)
+    stats = result["stats"]
+    assert stats["graph_hits"] >= 1 and stats["graph_ms"] is not None and "dense_ms" in stats
+
+
+# 图检索出错不影响向量、关键词两路，诊断里写明原因。
+def test_search_tool_graph_failure(graph, runtime, monkeypatch):
+    from app.tools.search import DocumentSearchTool
+
+    client, store, models, document_id = graph
+    runtime(graph_retrieval=True)
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("milvus down")
+
+    monkeypatch.setattr(graph_retrieve, "retrieve", broken)
+    result = DocumentSearchTool().execute(store, models, "alice", ["段永平"], "段永平")
+    assert result["diagnostics"]["graph"]["status"] == "failed"
+    assert "milvus down" in result["diagnostics"]["graph"]["reason"]
+    assert result["stats"]["dense_hits"] > 0

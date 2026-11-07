@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 import logging
 import math
@@ -5,6 +6,7 @@ import os
 import threading
 import time
 
+from ..graph import retrieve as graph_retrieve
 from ..security import sanitize_source
 from ..models import RerankError
 from ..runtime_config import BY_KEY, snapshot as runtime_snapshot
@@ -66,7 +68,7 @@ class DocumentSearchTool:
         owner,
         queries,
         rerank_query,
-        methods=("dense", "keyword"),
+        methods=None,
         pool_size=None,
         fusion="sum",
         rerank=True,
@@ -75,9 +77,18 @@ class DocumentSearchTool:
         scope=None,
         return_limit=None,
         excellent_score=None,
+        graph_keywords=None,
+        graph_question=None,
     ):
         # 一次检索只读一次参数，整条检索用同一份；实际用到的值写进诊断配置，事后能查到这次用的是哪组参数。
         config = runtime_snapshot()
+        # 召回方式：不传就是向量 + 关键词，设置页打开了图检索再加上图（固定流程、Agent 的 hybrid 都走这里）。
+        # 调用方明确传了 methods（Agent 的 vector / keyword 模式、评测的消融）时，只有里面有 graph 才走图。
+        if methods is None:
+            methods = ("dense", "keyword") + (
+                ("graph",) if config.get("graph_retrieval") else ()
+            )
+        methods = tuple(methods)
         if pool_size is None:
             pool_size = config["rerank_candidates"]
         candidates = {}
@@ -103,9 +114,27 @@ class DocumentSearchTool:
                 "documents": kept,
             }
         scoped = {"versions": scope["versions"]} if scope else {}
+        # 图检索（提关键词要调用模型，最慢）放到另一个线程，和向量、关键词两路同时进行。
+        graph_future = None
+        graph_executor = None
+        if "graph" in methods:
+            graph_executor = ThreadPoolExecutor(max_workers=1)
+            graph_future = graph_executor.submit(
+                self.graph_recall,
+                store,
+                models,
+                graph_question or rerank_query,
+                scope,
+                config,
+                graph_keywords,
+            )
+        dense_ms = 0
+        keyword_ms = 0
         for query in queries:
             if "dense" in methods:
+                started = time.monotonic()
                 dense = store.search(owner, query, models, limit=12, **scoped)
+                dense_ms += round((time.monotonic() - started) * 1000)
                 dense_hits += len(dense)
                 lists.append(
                     self.add_candidates(
@@ -113,13 +142,36 @@ class DocumentSearchTool:
                     )
                 )
             if "keyword" in methods:
+                started = time.monotonic()
                 keyword = store.search_keyword(owner, query, limit=30, **scoped)
+                keyword_ms += round((time.monotonic() - started) * 1000)
                 keyword_hits += len(keyword)
                 lists.append(
                     self.add_candidates(
                         candidates, keyword, "keyword", query, config["rrf_k"]
                     )
                 )
+        graph = None
+        graph_hits = 0
+        if graph_future is not None:
+            graph = graph_future.result()
+            graph_executor.shutdown(wait=False)
+            for table, label in (("entity", "图 · 实体"), ("relation", "图 · 关系")):
+                rows = graph.get("sources", {}).get(table) or []
+                graph_hits += len(rows)
+                listing = self.add_candidates(
+                    candidates, rows, "graph", label, config["rrf_k"]
+                )
+                listing["table"] = table
+                for row, hit in zip(rows, listing["hits"]):
+                    hit["relation_ids"] = row.get("relation_ids") or []
+                    item = candidates[hit["chunk_id"]]
+                    linked = item.setdefault("graph_relation_ids", [])
+                    for relation_id in hit["relation_ids"]:
+                        if relation_id not in linked:
+                            linked.append(relation_id)
+                if graph.get("status") == "ok":
+                    lists.append(listing)
         recall_ms = round((time.monotonic() - recall_started) * 1000)
         ranked = []
         for candidate in candidates.values():
@@ -288,6 +340,10 @@ class DocumentSearchTool:
             "queries": len(queries),
             "dense_hits": dense_hits,
             "keyword_hits": keyword_hits,
+            "graph_hits": graph_hits,
+            "dense_ms": dense_ms,
+            "keyword_ms": keyword_ms,
+            "graph_ms": (graph or {}).get("timings", {}).get("total_ms"),
             "fused_candidates": len(candidates),
             "rerank_query": rerank_query,
             "reranked": rerank_count,
@@ -337,7 +393,34 @@ class DocumentSearchTool:
         )
         if scope:
             diagnostics["scope"] = self.scope_summary(scope["documents"])
+        if graph is not None:
+            # 两张图排名表的来源正文已经在候选里，诊断里不再重复存。
+            diagnostics["graph"] = {
+                key: value for key, value in graph.items() if key != "sources"
+            }
+            if scope:
+                diagnostics["scope"]["graph_versions"] = graph.get("scope") or []
         return {"sources": sources, "stats": stats, "diagnostics": diagnostics}
+
+    # 图检索这一路：失败不影响向量、关键词两路，诊断里写明原因。
+    @staticmethod
+    def graph_recall(store, models, question, scope, config, keywords=None):
+        if scope is None:
+            return graph_retrieve.empty("skipped", "这次检索没有权限范围（测试替身），不走图检索")
+        keywords = keywords or {}
+        try:
+            return graph_retrieve.retrieve(
+                store,
+                models,
+                question,
+                scope,
+                config,
+                entities=keywords.get("entities"),
+                themes=keywords.get("themes"),
+            )
+        except Exception as error:
+            logger.exception("graph_recall_failed")
+            return graph_retrieve.empty("failed", f"图检索失败：{str(error)[:300]}")
 
     # 权限范围的摘要：按自己上传 / 共享给我 / 公开分别计数，文档列表最多保留 50 份，避免追踪记录过大。
     @staticmethod
@@ -447,8 +530,14 @@ class DocumentSearchTool:
             retry_queries = list(queries)
             retry_queries.append(rewrite)
             retry_started = time.monotonic()
+            # 图检索用补充检索词重新提关键词：原问题的关键词第一次已经用过了。
             retry = self.execute(
-                store, models, owner, retry_queries, rerank_query, **options
+                store,
+                models,
+                owner,
+                retry_queries,
+                rerank_query,
+                **{"graph_question": rewrite, **options},
             )
             result["retry_ms"] = round((time.monotonic() - retry_started) * 1000)
             result.update(
@@ -571,6 +660,7 @@ class DocumentSearchTool:
         methods=("dense", "keyword"),
         settings=None,
     ):
+        methods = methods or ("dense", "keyword")
         settings = settings or runtime_snapshot()
         status_order = {
             "returned": 0,
@@ -612,6 +702,7 @@ class DocumentSearchTool:
                     if "rerank_probability" in item
                     else None,
                     "rerank_rank": item.get("rerank_rank"),
+                    "graph_relation_ids": item.get("graph_relation_ids") or [],
                 }
             )
         # 候选池、融合方式和召回方式写进诊断配置，评测对比不同参数时能看出每次实际用的是哪一组。

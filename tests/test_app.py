@@ -2168,7 +2168,7 @@ class ScriptedSearch:
         self.results = results
         self.calls = []
 
-    def execute(self, store, models, owner, queries, rerank_query):
+    def execute(self, store, models, owner, queries, rerank_query, **options):
         self.calls.append(list(queries))
         return {
             "sources": self.results[len(self.calls) - 1],
