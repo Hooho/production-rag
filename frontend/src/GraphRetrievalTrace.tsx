@@ -289,8 +289,18 @@ function Pager({
 type NameMatch = GraphTrace["name_matches"][number];
 type Dim<T> = { key: string; label: string; value: (item: T) => string };
 
+const MATCH_LABELS = {
+  exact: "字面相同",
+  contains: "字面包含",
+  vector: "向量",
+};
 const NAME_DIMS: Dim<NameMatch>[] = [
   { key: "keyword", label: "按关键词", value: (item) => item.keyword },
+  {
+    key: "match",
+    label: "按匹配方式",
+    value: (item) => MATCH_LABELS[item.match ?? "vector"],
+  },
   {
     key: "entity",
     label: "按实体",
@@ -517,7 +527,7 @@ function NamesDetail({
               <th>具体关键词</th>
               <th>匹配到的名字</th>
               <th>出自</th>
-              <th>相似度</th>
+              <th>匹配方式</th>
               <th>归到实体</th>
               <th>结果</th>
             </tr>
@@ -536,7 +546,13 @@ function NamesDetail({
                     <em className="grt-v">图 v{match.version_number}</em>
                   ) : null}
                 </td>
-                <td className="num">{score(match.score)}</td>
+                <td className="num">
+                  {match.match === "exact"
+                    ? "字面相同"
+                    : match.match === "contains"
+                      ? "字面包含"
+                      : `向量 ${score(match.score)}`}
+                </td>
                 <td>
                   {match.entity_name ?? "—"}
                   {match.entity_type ? (
@@ -695,10 +711,11 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
         <h5>
           ② 找实体
           <small>
-            具体关键词 → 名字向量（相似度 ≥{" "}
+            具体关键词 → 字面匹配（名字相同或互相包含）+ 名字向量（相似度 ≥{" "}
             {settings.graph_name_min_score ?? 0.5}
-            ，每个关键词前 {settings.graph_name_top_k ?? 10} 个）→
-            按归属合并成实体
+            ，前 {settings.graph_name_top_k ?? 10} 个）→
+            按归属合并成实体，每个关键词最多 {settings.graph_entity_top_k ?? 6}{" "}
+            个（字面命中的排最前）
           </small>
           <DetailButton
             count={graph.name_matches.length}

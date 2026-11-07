@@ -187,6 +187,16 @@ SPECS = [
         "max": 50,
         "advanced": True,
     },
+    # 每个具体关键词最多留几个实体（字面命中的排最前）。参考 RAGFlow 只留前 6 个实体（ent_topn=6）。
+    {
+        "key": "graph_entity_top_k",
+        "group": "retrieval",
+        "type": "int",
+        "default": 6,
+        "min": 1,
+        "max": 50,
+        "advanced": True,
+    },
     {
         "key": "graph_entity_relation_limit",
         "group": "retrieval",

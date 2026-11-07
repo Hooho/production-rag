@@ -28,7 +28,9 @@ def graph(setup, monkeypatch):
     client, store = setup
     models = enable_model(client)
     monkeypatch.setattr(models, "embed", char_embed)
-    store.graph_vectors = GraphVectorStore(FakeGraphClient(), models.collection, len(CHARS) + 1)
+    store.graph_vectors = GraphVectorStore(
+        FakeGraphClient(), models.collection, len(CHARS) + 1
+    )
     document_id = add_document(client)
     build(client, document_id)
     run_graph_jobs(store, models)
@@ -40,57 +42,179 @@ def graph(setup, monkeypatch):
 def test_retrieve_with_given_keywords(graph):
     client, store, models, document_id = graph
     scope = store.readable_scope("alice")
-    result = graph_retrieve.retrieve(store, models, "段永平投资了什么", scope,
-        {"graph_name_min_score": 0.3, "graph_relation_min_score": 0.3}, entities=["段永平"], themes=["投资"])
+    result = graph_retrieve.retrieve(
+        store,
+        models,
+        "段永平投资了什么",
+        scope,
+        {"graph_name_min_score": 0.3, "graph_relation_min_score": 0.3},
+        entities=["段永平"],
+        themes=["投资"],
+    )
     assert result["status"] == "ok"
-    assert result["keywords"]["source"] == "agent" and result["keywords"]["entities"] == ["段永平"]
+    assert result["keywords"]["source"] == "agent" and result["keywords"][
+        "entities"
+    ] == ["段永平"]
     assert [item["document_id"] for item in result["scope"]] == [document_id]
     assert [entity["name"] for entity in result["entities"]] == ["段永平"]
     kept_names = {match["name"] for match in result["name_matches"] if match["kept"]}
     assert "段永平" in kept_names
-    relations = {(item["source"], item["target"]) for item in result["entity_relations"] if item["kept"]}
+    relations = {
+        (item["source"], item["target"])
+        for item in result["entity_relations"]
+        if item["kept"]
+    }
     assert relations == {("段永平", "步步高"), ("阿段", "苹果公司")}
     top = result["relation_matches"][0]
-    assert (top["source"], top["target"], top["keyword"]) == ("阿段", "苹果公司", "投资")
+    assert (top["source"], top["target"], top["keyword"]) == (
+        "阿段",
+        "苹果公司",
+        "投资",
+    )
     assert top["source_entity"] == "段永平" and top["also_entity"] is True
     assert result["sources"]["entity"] and result["sources"]["relation"]
     first = result["sources"]["entity"][0]
-    assert first["document_id"] == document_id and first["text"] and first["relation_ids"]
+    assert (
+        first["document_id"] == document_id and first["text"] and first["relation_ids"]
+    )
     assert result["tables"]["entity"][0]["rank"] == 1
 
 
 # 低于阈值的名字留在诊断里，标明原因，不参与找实体。
 def test_name_threshold(graph):
     client, store, models, document_id = graph
-    result = graph_retrieve.retrieve(store, models, "段", store.readable_scope("alice"),
-        {"graph_name_min_score": 0.6}, entities=["段"])
+    result = graph_retrieve.retrieve(
+        store,
+        models,
+        "段",
+        store.readable_scope("alice"),
+        {"graph_name_min_score": 0.6},
+        entities=["段"],
+    )
     assert result["entities"] == [] and result["entity_relations"] == []
-    assert result["name_matches"] and not any(match["kept"] for match in result["name_matches"])
+    assert result["name_matches"] and not any(
+        match["kept"] for match in result["name_matches"]
+    )
     assert {match["reason"] for match in result["name_matches"]} == {"相似度低于 0.6"}
 
 
 # 每个实体最多留几条关系，多的标「超过每个实体 N 条」。
 def test_entity_relation_limit(graph):
     client, store, models, document_id = graph
-    result = graph_retrieve.retrieve(store, models, "段永平", store.readable_scope("alice"),
-        {"graph_name_min_score": 0.3, "graph_entity_relation_limit": 1}, entities=["段永平"])
+    result = graph_retrieve.retrieve(
+        store,
+        models,
+        "段永平",
+        store.readable_scope("alice"),
+        {"graph_name_min_score": 0.3, "graph_entity_relation_limit": 1},
+        entities=["段永平"],
+    )
     kept = [item for item in result["entity_relations"] if item["kept"]]
     dropped = [item for item in result["entity_relations"] if not item["kept"]]
-    assert len(kept) == 1 and len(dropped) == 1 and dropped[0]["reason"] == "超过每个实体 1 条"
+    assert (
+        len(kept) == 1
+        and len(dropped) == 1
+        and dropped[0]["reason"] == "超过每个实体 1 条"
+    )
 
 
 # 范围写进查询条件：看不到这份文档的人什么都查不到（不是先查出来再过滤）；已删除的关系也查不到。
 def test_scope_and_deleted_relations(graph):
     client, store, models, document_id = graph
-    other = graph_retrieve.retrieve(store, models, "段永平", store.readable_scope("bob"), entities=["段永平"])
+    other = graph_retrieve.retrieve(
+        store, models, "段永平", store.readable_scope("bob"), entities=["段永平"]
+    )
     assert other["status"] == "skipped" and other["reason"] == "范围内没有建了图的文档"
     searches = store.graph_vectors.client.searches
     assert all("version_id in" in item["filter"] for item in searches)
     with store.engine.begin() as connection:
-        connection.execute(update(graph_relations).where(graph_relations.c.category == "创办").values(status="deleted"))
-    result = graph_retrieve.retrieve(store, models, "段永平", store.readable_scope("alice"),
-        {"graph_name_min_score": 0.3}, entities=["段永平"])
+        connection.execute(
+            update(graph_relations)
+            .where(graph_relations.c.category == "创办")
+            .values(status="deleted")
+        )
+    result = graph_retrieve.retrieve(
+        store,
+        models,
+        "段永平",
+        store.readable_scope("alice"),
+        {"graph_name_min_score": 0.3},
+        entities=["段永平"],
+    )
     assert {item["target"] for item in result["entity_relations"]} == {"苹果公司"}
+
+
+# 字面匹配：名字或模型给的标准名和关键词相同就直接命中，不看向量阈值；「阿段」的标准名是段永平，也算相同。
+def test_literal_exact_match(graph):
+    client, store, models, document_id = graph
+    result = graph_retrieve.retrieve(
+        store,
+        models,
+        "段永平",
+        store.readable_scope("alice"),
+        {"graph_name_min_score": 0.99},
+        entities=["段永平"],
+    )
+    literal = {
+        match["name"]: match
+        for match in result["name_matches"]
+        if match["match"] != "vector"
+    }
+    assert set(literal) == {"段永平", "阿段"}
+    assert all(
+        item["match"] == "exact" and item["kept"] and item["score"] == 1.0
+        for item in literal.values()
+    )
+    assert [entity["name"] for entity in result["entities"]] == ["段永平"]
+    # 字面命中过的名字不再从向量里重复列出。
+    names = [(match["name"], match["entity_id"]) for match in result["name_matches"]]
+    assert len(names) == len(set(names))
+
+
+# 互相包含也算字面命中（「段永平先生」包含「段永平」）；单字不算包含，避免「段」把一堆名字都匹配上。
+def test_literal_contains(graph):
+    client, store, models, document_id = graph
+    result = graph_retrieve.retrieve(
+        store,
+        models,
+        "段永平先生",
+        store.readable_scope("alice"),
+        {"graph_name_min_score": 0.99},
+        entities=["段永平先生"],
+    )
+    assert {
+        match["name"]
+        for match in result["name_matches"]
+        if match["match"] == "contains"
+    } == {"段永平", "阿段"}
+    assert [entity["name"] for entity in result["entities"]] == ["段永平"]
+    with store.engine.connect() as connection:
+        version_ids = [
+            row["version_id"]
+            for row in graph_retrieve.scope_versions(
+                store.engine, store.readable_scope("alice")
+            )
+        ]
+        assert graph_retrieve.literal_names(connection, "段", version_ids) == []
+
+
+# 每个关键词最多留几个实体：字面命中的排最前，多的标原因。
+def test_entity_top_k(graph):
+    client, store, models, document_id = graph
+    result = graph_retrieve.retrieve(
+        store,
+        models,
+        "段永平",
+        store.readable_scope("alice"),
+        {"graph_name_min_score": 0, "graph_entity_top_k": 1},
+        entities=["段永平"],
+    )
+    assert [entity["name"] for entity in result["entities"]] == ["段永平"]
+    dropped = [match for match in result["name_matches"] if not match["kept"]]
+    assert dropped and {match["reason"] for match in dropped} == {
+        "超过每个关键词 1 个实体"
+    }
+    assert result["settings"]["graph_entity_top_k"] == 1
 
 
 class KeywordModel:
@@ -103,15 +227,28 @@ class KeywordModel:
 
     def invoke(self, messages):
         self.messages = messages
-        return AIMessage(content=self.reply, usage_metadata={"input_tokens": 50, "output_tokens": 10, "total_tokens": 60})
+        return AIMessage(
+            content=self.reply,
+            usage_metadata={
+                "input_tokens": 50,
+                "output_tokens": 10,
+                "total_tokens": 60,
+            },
+        )
 
 
 # 没给关键词：用 graph_keywords 提取，记下提示词、原始输出和 token。
 def test_keywords_from_model(graph):
     client, store, models, document_id = graph
-    models.chat_model = KeywordModel('<think>想一想</think>{"entities": ["段永平", "段永平"], "themes": ["投资经历"]}')
+    models.chat_model = KeywordModel(
+        '<think>想一想</think>{"entities": ["段永平", "段永平"], "themes": ["投资经历"]}'
+    )
     words = graph_retrieve.keywords(models, "段永平厉害吗")
-    assert words["source"] == "model" and words["entities"] == ["段永平"] and words["themes"] == ["投资经历"]
+    assert (
+        words["source"] == "model"
+        and words["entities"] == ["段永平"]
+        and words["themes"] == ["投资经历"]
+    )
     assert words["input_tokens"] == 50 and words["prompt_tag"] == "graph_keywords@内置"
     assert json.loads(words["prompt"][1]["content"]) == {"question": "段永平厉害吗"}
 
@@ -121,10 +258,18 @@ def test_keywords_fallback(graph):
     client, store, models, document_id = graph
     models.chat_model = KeywordModel('{"entities": [], "themes": []}')
     words = graph_retrieve.keywords(models, "你好")
-    assert words["entities"] == ["你好"] and words["fallback"] and "没有提出关键词" in words["reason"]
+    assert (
+        words["entities"] == ["你好"]
+        and words["fallback"]
+        and "没有提出关键词" in words["reason"]
+    )
     models.chat_model = KeywordModel("不是 JSON")
     words = graph_retrieve.keywords(models, "段永平")
-    assert words["entities"] == ["段永平"] and "提关键词失败" in words["reason"] and words["error"]
+    assert (
+        words["entities"] == ["段永平"]
+        and "提关键词失败" in words["reason"]
+        and words["error"]
+    )
     models.mode = "demo"
     words = graph_retrieve.keywords(models, "段永平")
     assert words["source"] == "fallback" and words["entities"] == ["段永平"]
@@ -138,21 +283,39 @@ def test_search_tool_with_graph(graph, runtime):
     tool = DocumentSearchTool()
     runtime(graph_retrieval=False)
     off = tool.execute(store, models, "alice", ["段永平投资"], "段永平投资了什么")
-    assert "graph" not in off["diagnostics"] and off["diagnostics"]["config"]["methods"] == ["dense", "keyword"]
-    runtime(graph_retrieval=True, graph_name_min_score=0.3, graph_relation_min_score=0.3)
-    result = tool.execute(store, models, "alice", ["段永平投资"], "段永平投资了什么",
-        graph_keywords={"entities": ["段永平"], "themes": ["投资"]})
+    assert "graph" not in off["diagnostics"] and off["diagnostics"]["config"][
+        "methods"
+    ] == ["dense", "keyword"]
+    runtime(
+        graph_retrieval=True, graph_name_min_score=0.3, graph_relation_min_score=0.3
+    )
+    result = tool.execute(
+        store,
+        models,
+        "alice",
+        ["段永平投资"],
+        "段永平投资了什么",
+        graph_keywords={"entities": ["段永平"], "themes": ["投资"]},
+    )
     diagnostics = result["diagnostics"]
     assert diagnostics["config"]["methods"] == ["dense", "keyword", "graph"]
-    assert diagnostics["graph"]["status"] == "ok" and "sources" not in diagnostics["graph"]
+    assert (
+        diagnostics["graph"]["status"] == "ok" and "sources" not in diagnostics["graph"]
+    )
     assert diagnostics["scope"]["graph_versions"][0]["document_id"] == document_id
     graph_lists = [item for item in diagnostics["lists"] if item["method"] == "graph"]
     assert [item["query"] for item in graph_lists] == ["图 · 实体", "图 · 关系"]
     assert graph_lists[0]["hits"][0]["relation_ids"]
-    with_graph = [row for row in diagnostics["candidates"] if "graph" in row["retrieval_methods"]]
+    with_graph = [
+        row for row in diagnostics["candidates"] if "graph" in row["retrieval_methods"]
+    ]
     assert with_graph and all(row["graph_relation_ids"] for row in with_graph)
     stats = result["stats"]
-    assert stats["graph_hits"] >= 1 and stats["graph_ms"] is not None and "dense_ms" in stats
+    assert (
+        stats["graph_hits"] >= 1
+        and stats["graph_ms"] is not None
+        and "dense_ms" in stats
+    )
 
 
 # 图检索出错不影响向量、关键词两路，诊断里写明原因。
@@ -181,14 +344,20 @@ def test_agent_search_knowledge_graph(graph, runtime):
     ctx = agent_tools.AgentContext(store=store, models=models, owner="alice")
     runtime(graph_retrieval=False)
     before = agent_tools.tool_definitions(ctx)
-    runtime(graph_retrieval=True, graph_name_min_score=0.3, graph_relation_min_score=0.3)
+    runtime(
+        graph_retrieval=True, graph_name_min_score=0.3, graph_relation_min_score=0.3
+    )
     assert agent_tools.tool_definitions(ctx) == before
     models.chat_model = KeywordModel('{"entities": ["段永平"], "themes": ["投资"]}')
     outcome = agent_tools.search_knowledge(ctx, "段永平投资了什么")
     graph_diag = outcome["trace"]["retrieval"]["diagnostics"]["graph"]
     assert graph_diag["status"] == "ok" and graph_diag["keywords"]["source"] == "model"
-    assert json.loads(models.chat_model.messages[1].content) == {"question": "段永平投资了什么"}
+    assert json.loads(models.chat_model.messages[1].content) == {
+        "question": "段永平投资了什么"
+    }
     keyword_only = agent_tools.search_knowledge(ctx, "段永平", mode="keyword")
     assert "graph" not in keyword_only["trace"]["retrieval"]["diagnostics"]
-    rejected = agent_tools.execute_tool(ctx, "search_knowledge", json.dumps({"query": "段永平", "entities": ["段永平"]}))
+    rejected = agent_tools.execute_tool(
+        ctx, "search_knowledge", json.dumps({"query": "段永平", "entities": ["段永平"]})
+    )
     assert rejected["ok"] is False and "entities" in rejected["content"]
