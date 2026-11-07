@@ -1790,3 +1790,25 @@ details.agent-prog-item[open] {
 .agent-content-dialog .agent-more {
   display: none;
 }
+
+/* search_knowledge 的图检索明细（打开图检索时才有），默认收起。 */
+.agent-graph-trace {
+  margin-top: 8px;
+  border: 1px solid rgb(var(--t-80a4c7-rgb) / 0.42);
+}
+
+.agent-graph-trace > summary {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.agent-graph-trace > summary small {
+  color: var(--t-6f8ba4);
+}
+
+.agent-graph-trace > .diag {
+  padding: 0 10px 10px;
+}

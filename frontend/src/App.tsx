@@ -39,6 +39,7 @@ import { documentStatusTone, VISIBILITY_TONES, type Tone } from "./tags";
 import Settings from "./Settings";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import { AgentLiveRounds, AgentStepView } from "./AgentTrace";
+import { GraphRetrievalTrace } from "./GraphRetrievalTrace";
 import {
   durationTitle,
   formatDuration,
@@ -2430,10 +2431,10 @@ function TraceTimeline({
         <span className="panel-chevron">⌄</span>
       </summary>
       <div className="trace-body">
-        {steps.map((step, index) => (
+        {traceRows(steps).map(({ step, part, title, detail, duration }, index) => (
           <details
             className={`trace-step ${step.status}`}
-            key={step.id}
+            key={part ? `${step.id}-${part}` : step.id}
             open={live || undefined}
           >
             <summary>
@@ -2448,20 +2449,41 @@ function TraceTimeline({
                     : "✓"}
               </span>
               <span className="step-copy">
-                <strong>{step.title}</strong>
+                <strong>{part ? title : step.title}</strong>
                 <small>
-                  {(step.status !== "failed" && stepPurpose(step.result)) ||
-                    step.detail}
+                  {part
+                    ? PART_PURPOSES[part]
+                    : (step.status !== "failed" && stepPurpose(step.result)) ||
+                      step.detail}
                 </small>
               </span>
-              {step.duration_ms !== undefined && (
-                <time title={durationTitle(step.duration_ms)}>
-                  {formatDuration(step.duration_ms)}
+              {(part ? duration : step.duration_ms) !== undefined && (
+                <time title={durationTitle((part ? duration : step.duration_ms) ?? 0)}>
+                  {formatDuration((part ? duration : step.duration_ms) ?? 0)}
                 </time>
               )}
             </summary>
             <div className="step-result">
-              {step.id === "agent" ? (
+              {part ? (
+                <div className="result-grid">
+                  <div className="result-row result-step_detail">
+                    <span>{formatResultLabel("step_detail")}</span>
+                    <div className="result-value">{detail}</div>
+                  </div>
+                  <div className="result-row result-diagnostics">
+                    <span>{formatResultLabel("diagnostics")}</span>
+                    <div className="result-value">
+                      <RetrievalDiagnostics
+                        part={part}
+                        data={step.result?.diagnostics as RetrievalDiagnosticsData}
+                        embeddingModel={String(step.result?.model_called ?? "")
+                          .split("；")[0]
+                          .replace("（向量模型）", "")}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : step.id === "agent" ? (
                 <AgentStepView
                   step={step}
                   requestId={requestId}
@@ -2496,6 +2518,70 @@ function TraceTimeline({
       </div>
     </details>
   );
+}
+
+// 处理阶段里，一次检索（retrieval 步骤）拆成三步显示：权限范围 → 混合检索 → 重排与过滤。
+// 后端仍是一条 retrieval 记录（追踪摘要、知识巡检、评测都读它），这里按诊断里的数据拆开，耗时用诊断里记的每步耗时。
+// 正在进行、失败、没有诊断的检索照原样显示一步。
+type TraceRow = {
+  step: TraceStep;
+  part?: DiagnosticsPart;
+  title?: string;
+  detail?: ReactNode;
+  duration?: number;
+};
+const PART_PURPOSES: Record<DiagnosticsPart, string> = {
+  scope: "按登录身份查出可检索的文档和图谱，作为查询条件交给每一路检索",
+  recall: "向量、关键词、图检索各自召回，再用 RRF 按名次融合",
+  rerank: "重排候选，按相关性阈值和返回上限决定交给回答模型的资料",
+};
+
+function traceRows(steps: TraceStep[]): TraceRow[] {
+  const rows: TraceRow[] = [];
+  for (const step of steps) {
+    const data = step.result?.diagnostics as RetrievalDiagnosticsData | undefined;
+    if (step.id !== "retrieval" || step.status === "failed" || !data?.config) {
+      rows.push({ step });
+      continue;
+    }
+    const stats = (step.result?.stats ?? {}) as Record<string, number>;
+    const timings = data.timings ?? {};
+    const candidates = data.candidates ?? [];
+    let hits = 0;
+    for (const list of data.lists ?? []) hits += list.hits.length;
+    const returned = candidates.filter((item) => item.status === "returned").length;
+    const pooled = candidates.filter((item) => item.status !== "not_in_pool").length;
+    const methods = (data.config.methods ?? ["dense", "keyword"]).map(
+      (method) => METHOD_LABELS[method] ?? method,
+    );
+    if (data.scope)
+      rows.push({
+        step,
+        part: "scope",
+        title: "权限范围",
+        detail: `可检索 ${data.scope.total} 份文档${
+          data.scope.graph_versions
+            ? `，其中 ${data.scope.graph_versions.length} 份有生效图谱`
+            : ""
+        }`,
+        duration: timings.scope_ms,
+      });
+    rows.push({
+      step,
+      part: "recall",
+      title: "混合检索",
+      detail: `${methods.join(" + ")}，共返回 ${hits} 个分片，去重后 ${candidates.length} 个`,
+      duration: timings.recall_ms ?? stats.recall_ms,
+    });
+    rows.push({
+      step,
+      part: "rerank",
+      title: "重排与过滤",
+      detail: `${data.config.reranked ? pooled : candidates.length} 个候选 → 返回 ${returned} 个`,
+      duration: timings.rerank_ms ?? stats.rerank_ms,
+    });
+  }
+  return rows;
 }
 
 // 普通字段只保留名称和值，避免说明占满页面；这里只为需要排查的复杂字段提供解释。
@@ -4363,10 +4449,12 @@ function RetrievalSources({ items }: { items: unknown[] }) {
 const METHOD_LABELS: Record<string, string> = {
   dense: "向量",
   keyword: "关键词",
+  graph: "图检索",
 };
 const RAW_SCORE_LABELS: Record<string, string> = {
   dense: "余弦",
   keyword: "BM25",
+  graph: "关系相似度",
 };
 const STATUS_INFO: Record<
   string,
@@ -4423,16 +4511,30 @@ function shortChunkId(chunkId: string) {
 const DIAGNOSTICS_PAGE_SIZE = 3;
 
 // 检索诊断面板：把后端每一步的计算结果完整展示出来，便于理解一条来源为什么被返回或被丢弃。
+// 分三块（docs：claude/graph-retrieval-phase2-plan.md 第一部分第四节）：
+//   scope  权限范围：可检索的文档、图检索范围；
+//   recall 混合检索：向量 / 关键词 / 图检索三个模块，各自的排名表，再用 RRF 融合；
+//   rerank 重排与过滤：重排、阈值、返回上限、整体漏斗、候选明细。
+// 处理阶段里一次检索拆成三步显示，每步传自己的 part；补充检索、评测、Agent 里不传 part，三块依次显示。
+type DiagnosticsPart = "scope" | "recall" | "rerank";
+
+// 向量、关键词每个检索词各取前几个分片（app/storage.py search / search_keyword 的 limit）。
+const RECALL_LIMITS: Record<string, number> = { dense: 12, keyword: 30 };
+
 function RetrievalDiagnostics({
   data,
   embeddingModel,
+  part,
 }: {
   data: RetrievalDiagnosticsData;
   embeddingModel?: string;
+  part?: DiagnosticsPart;
 }) {
   const candidates = data.candidates ?? [];
   const lists = data.lists ?? [];
   const config = data.config;
+  const timings = data.timings ?? {};
+  const graph = data.graph;
   const [candidatePage, setCandidatePage] = useState(1);
   const candidatePageCount = Math.max(
     1,
@@ -4453,49 +4555,67 @@ function RetrievalDiagnostics({
     setCandidatePage(1);
   }, [candidates.length, config.rerank_query]);
   let totalHits = 0;
-  for (const list of lists) totalHits += list.hits.length;
+  const hitsByMethod: Record<string, number> = {};
+  for (const list of lists) {
+    totalHits += list.hits.length;
+    hitsByMethod[list.method] = (hitsByMethod[list.method] ?? 0) + list.hits.length;
+  }
   let pooled = 0;
   let passed = 0;
   let returned = 0;
   let filtered = 0;
+  let graphOnly = 0;
+  let graphOnlyOutOfPool = 0;
+  // 被哪几路找到：按召回方式的组合计数，融合那一段用。
+  const combos = new Map<string, number>();
   for (const item of candidates) {
     if (item.status !== "not_in_pool") pooled += 1;
     if (item.status === "returned" || item.status === "beyond_limit")
       passed += 1;
     if (item.status === "returned") returned += 1;
     if (item.status === "filtered_low_score") filtered += 1;
+    const methods = ["dense", "keyword", "graph"].filter((method) =>
+      item.retrieval_methods.includes(method),
+    );
+    const key = methods.join("+");
+    combos.set(key, (combos.get(key) ?? 0) + 1);
+    if (key === "graph") {
+      graphOnly += 1;
+      if (item.status === "not_in_pool") graphOnlyOutOfPool += 1;
+    }
   }
   // 漏斗每一行表示"这一步之后剩下多少"，名称里直接写出关键参数（RRF 前几名、阈值、返回上限），
-  // 右侧列出这一步淘汰了多少、为什么。以前名称是"进入重排""通过阈值"这类动作，看不出数字是动作前还是动作后，
-  // 参数也只能悬停查看；重排没执行时还把"进入重排"记成 0，看起来像候选全被丢掉了。
+  // 右侧列出这一步淘汰了多少、为什么。
   const rerankedCount = config.reranked ? pooled : candidates.length;
   const passedCount = config.reranked ? passed : candidates.length;
-  // 右侧两列：剩下多少条、这一步去掉多少条和原因。以前写成"−38 重复""—"，减号和破折号看不出意思，
-  // 现在直接写"去掉 38 条重复"，没有去掉的写明原因（"全部通过""未超过上限"），不再用破折号。
   const removed = (count: number, reason: string, none: string) =>
     count > 0 ? `去掉 ${count} 个${reason}` : none;
+  const byMethodText = ["dense", "keyword", "graph"]
+    .filter((method) => hitsByMethod[method] !== undefined)
+    .map((method) => `${METHOD_LABELS[method]} ${hitsByMethod[method]}`)
+    .join(" · ");
   const funnel = [
     {
-      label: "检索命中（含重复）",
+      label: "三路返回（含重复）",
       value: totalHits,
-      dropped: `${lists.length} 张排名表合计`,
-      hint: `${lists.length} 张排名表的命中总数（同一片段可被多张表命中）`,
+      dropped: byMethodText || `${lists.length} 张排名表合计`,
+      hint: `${lists.length} 张排名表的分片总数（同一分片可被多张表找到）`,
     },
     {
-      label: "去重后的片段",
+      label: "去重后的分片",
       value: candidates.length,
       dropped: removed(totalHits - candidates.length, "重复", "没有重复"),
-      hint: "按片段去重后参与 RRF 融合的候选数",
+      hint: "按分片去重后参与 RRF 融合的候选数",
     },
     config.reranked
       ? {
           label: `交给重排（RRF 前 ${config.rerank_candidates}）`,
           value: rerankedCount,
-          dropped: removed(
-            candidates.length - rerankedCount,
-            "排名靠后",
-            "全部交给重排",
-          ),
+          dropped:
+            removed(candidates.length - rerankedCount, "排名靠后", "全部交给重排") +
+            (graphOnlyOutOfPool > 0
+              ? `（其中只有图找到的 ${graphOnlyOutOfPool} 个）`
+              : ""),
           hint: `RRF 前 ${config.rerank_candidates} 名交给交叉编码器重新打分排序`,
         }
       : {
@@ -4510,12 +4630,8 @@ function RetrievalDiagnostics({
       ? {
           label: `相关性 ≥ ${formatNumber(config.min_score, 2)}`,
           value: passedCount,
-          dropped: removed(
-            rerankedCount - passedCount,
-            "相关性不足",
-            "全部通过",
-          ),
-          hint: `重排相关概率低于 ${config.min_score} 的片段被过滤`,
+          dropped: removed(rerankedCount - passedCount, "相关性不足", "全部通过"),
+          hint: `重排相关概率低于 ${config.min_score} 的分片被过滤`,
         }
       : {
           label: "未做相关性过滤",
@@ -4533,133 +4649,342 @@ function RetrievalDiagnostics({
     },
   ];
   const funnelMax = Math.max(1, ...funnel.map((stage) => stage.value));
-  // 多个检索词时用 Q1、Q2 标注每条召回贡献来自哪个检索词。
+  // 多个检索词时用 Q1、Q2 标注每条召回贡献来自哪个检索词；图检索的两张表不按检索词分，不算进去。
   const queries: string[] = [];
-  const methods: string[] = [];
-  for (const list of lists) {
-    if (!queries.includes(list.query)) queries.push(list.query);
-    if (!methods.includes(list.method)) methods.push(list.method);
-  }
-  const methodNames = methods.map((method) => METHOD_LABELS[method] ?? method);
-  // 有权限范围时它是第 1 环，后面的召回、融合……顺延一位；旧记录没有范围，从召回开始编号。
+  for (const list of lists)
+    if (list.method !== "graph" && !queries.includes(list.query))
+      queries.push(list.query);
+  const methods =
+    config.methods ??
+    [...new Set(lists.map((list) => list.method))];
+  const textLists = lists.filter((list) => list.method !== "graph");
+  const graphLists = lists.filter((list) => list.method === "graph");
+  // 图检索那一路的关系：候选明细悬停时说明这一片是通过哪几条关系找到的。
+  const graphRelations = new Map<string, string>();
+  for (const row of [...(graph?.entity_relations ?? []), ...(graph?.relation_matches ?? [])])
+    graphRelations.set(row.relation_id, `${row.source} → ${row.target}（${row.description || row.category}）`);
   const scope = data.scope;
-  const step = scope ? 1 : 0;
-  // 召回方式按类型各占一行；模型名用标签样式包起来，和普通文字区分开。
-  const recallLines: ReactNode[] = [];
-  if (methods.includes("dense"))
-    recallLines.push(
-      <small key="dense">
-        向量：
-        <StackTag kind="model" variant="embedding">
-          {embeddingModel || "向量模型"}
-        </StackTag>
-        按语义相似（embedding 服务 /v1/embeddings）
-      </small>,
-    );
-  if (methods.includes("keyword"))
-    recallLines.push(
-      <small key="keyword">
-        关键词：<StackTag kind="algo">BM25</StackTag>按字面匹配（
-        <StackTag kind="store">Milvus</StackTag>全文检索）
-      </small>,
-    );
-  // 诊断对象字段较多，先用可折叠说明解释处理链路，降低只看数字时的理解成本。
-  return (
-    <div className="diag">
-      {/* 检索过程：召回 → 融合 → 重排 → 过滤 → 返回，一环接一环写明做了什么、剩下多少。
-        以前参数是一排卡片（重排问题、RRF k、候选池……），解释藏在折叠的"这份诊断是什么"里，模型和调用方式又单独两行，
-        看不出参数在哪一步起作用；现在都写进对应的环节。 */}
-      <ol className="intent-trace diag-process">
-        {scope && (
-          <li>
-            <span className="intent-trace-mark">
-              <b>1</b>
-            </span>
-            <div>
-              <strong>权限范围</strong>：可检索 {scope.total}{" "}
-              份文档（每份只取当前版本）
-              <small>
-                {[
-                  scope.own > 0 ? `自己上传 ${scope.own} 份` : "",
-                  scope.shared > 0
-                    ? `共享给我 ${scope.shared} 份${scope.groups.length > 0 ? `（${scope.groups.join("、")}）` : ""}`
-                    : "",
-                  scope.public > 0 ? `公开 ${scope.public} 份` : "",
-                ]
-                  .filter(Boolean)
-                  .join(" · ") || "没有可检索的文档"}
-              </small>
-              {scope.documents.length > 0 && (
-                <details className="mem-fold">
-                  <summary>查看文档列表</summary>
-                  <ul className="scope-list">
-                    {scope.documents.map((item) => (
-                      <li key={item.document_id}>
-                        {item.title}
-                        <em>v{item.version}</em>
-                        <span>
-                          {item.source === "own"
-                            ? "自己上传"
-                            : item.source === "public"
-                              ? `公开 · ${item.owner}`
-                              : `共享 · ${item.owner}${item.groups.length > 0 ? ` · ${item.groups.join("、")}` : ""}`}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                  {scope.total > scope.documents.length && (
-                    <small>只列出前 {scope.documents.length} 份</small>
-                  )}
-                </details>
-              )}
-              <small>
-                范围由服务端按登录身份从 <StackTag kind="store">MySQL</StackTag>
-                查出，作为过滤条件交给 <StackTag kind="store">Milvus</StackTag>
-                的向量和关键词检索，模型和前端都改不了
-              </small>
-            </div>
-          </li>
+
+  const scopeSection = scope ? (
+    <div className="diag-part">
+      <p className="diag-part-lead">
+        <span>
+          <strong>可检索 {scope.total} 份文档</strong>（每份只取当前版本）
+        </span>
+        <small>
+          {[
+            scope.own > 0 ? `自己上传 ${scope.own} 份` : "",
+            scope.shared > 0
+              ? `共享给我 ${scope.shared} 份${scope.groups.length > 0 ? `（${scope.groups.join("、")}）` : ""}`
+              : "",
+            scope.public > 0 ? `公开 ${scope.public} 份` : "",
+          ]
+            .filter(Boolean)
+            .join(" · ") || "没有可检索的文档"}
+        </small>
+        {scope.graph_versions && (
+          <small>
+            图检索范围：
+            {scope.graph_versions.length > 0
+              ? `${scope.graph_versions.length} 份文档的生效图谱（${scope.graph_versions
+                  .map((item) => `${item.title} v${item.number}`)
+                  .join(" · ")}）`
+              : "没有建了图的文档"}
+            {scope.total > scope.graph_versions.length
+              ? `，另 ${scope.total - scope.graph_versions.length} 份没有建图`
+              : ""}
+          </small>
         )}
-        <li>
-          <span className="intent-trace-mark">
-            <b>{step + 1}</b>
+      </p>
+      {scope.documents.length > 0 && (
+        <details className="mem-fold">
+          <summary>查看文档列表</summary>
+          <ul className="scope-list">
+            {scope.documents.map((item) => {
+              const graphVersion = scope.graph_versions?.find(
+                (version) => version.document_id === item.document_id,
+              );
+              return (
+                <li key={item.document_id}>
+                  {item.title}
+                  <em>v{item.version}</em>
+                  <span>
+                    {item.source === "own"
+                      ? "自己上传"
+                      : item.source === "public"
+                        ? `公开 · ${item.owner}`
+                        : `共享 · ${item.owner}${item.groups.length > 0 ? ` · ${item.groups.join("、")}` : ""}`}
+                  </span>
+                  {scope.graph_versions && (
+                    <span className="scope-graph">
+                      {graphVersion ? `图谱 v${graphVersion.number} 生效` : "没有建图"}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          {scope.total > scope.documents.length && (
+            <small>只列出前 {scope.documents.length} 份</small>
+          )}
+        </details>
+      )}
+      <small className="diag-part-note">
+        范围由服务端按登录身份从 <StackTag kind="store">MySQL</StackTag>
+        查出，作为查询条件交给向量、关键词{graph ? "、图检索三路" : "两路"}
+        ，模型和前端都改不了
+      </small>
+    </div>
+  ) : (
+    <p className="diag-part-lead">这条记录没有保存权限范围</p>
+  );
+
+  // 向量、关键词模块：每个检索词返回了几个分片、分数从第 1 名到最后一名。
+  const textModule = (method: "dense" | "keyword") => {
+    const own = textLists.filter((list) => list.method === method);
+    const limit = RECALL_LIMITS[method];
+    const time = method === "dense" ? timings.dense_ms : timings.keyword_ms;
+    return (
+      <section className={`diag-module method-${method}`} key={method}>
+        <header>
+          <i className={`diag-dot method-${method}`} />
+          <strong>{METHOD_LABELS[method]}</strong>
+          <span>
+            {hitsByMethod[method] ?? 0} 个分片
+            {time !== undefined ? ` · ${formatDuration(time)}` : ""}
           </span>
-          <div>
-            <strong>召回</strong>：{queries.length} 个检索词 ×{" "}
-            {methodNames.join(" + ")}，{lists.length} 张排名表，命中 {totalHits}{" "}
-            个 chunk（含重复）
-            {queries.map((query, index) => (
-              <small key={query} className="diag-process-query">
-                <em>Q{index + 1}</em>
-                {query}
-              </small>
+        </header>
+        <small className="diag-module-desc">
+          {method === "dense" ? (
+            <>
+              <StackTag kind="model" variant="embedding">
+                {embeddingModel || "向量模型"}
+              </StackTag>
+              按语义相似度取前 {limit} 个分片（不设相似度下限；embedding 服务
+              /v1/embeddings → <StackTag kind="store">Milvus</StackTag>向量检索）
+            </>
+          ) : (
+            <>
+              <StackTag kind="algo">BM25</StackTag>包含检索词中任意一个词的分片，按
+              BM25 分数取前 {limit} 个（<StackTag kind="store">Milvus</StackTag>
+              全文检索）
+            </>
+          )}
+        </small>
+        <table className="diag-table diag-table-compact">
+          <thead>
+            <tr>
+              <th>检索词</th>
+              <th>返回分片</th>
+              <th>{method === "dense" ? "相似度" : "BM25 分数"}（第 1 名 ~ 最后一名）</th>
+            </tr>
+          </thead>
+          <tbody>
+            {own.map((list) => (
+              <tr key={list.query}>
+                <td title={list.query}>
+                  <em className="diag-q">Q{queries.indexOf(list.query) + 1}</em>
+                </td>
+                <td className="num">
+                  {list.hits.length} / {method === "dense" ? limit : `最多 ${limit}`}
+                </td>
+                <td className="num">
+                  {list.hits.length
+                    ? `${formatNumber(list.hits[0].raw_score, 2)} ~ ${formatNumber(list.hits[list.hits.length - 1].raw_score, 2)}`
+                    : "没有找到"}
+                </td>
+              </tr>
             ))}
-            {recallLines}
-          </div>
-        </li>
-        <li>
-          <span className="intent-trace-mark">
-            <b>{step + 2}</b>
-          </span>
-          <div>
-            <strong>融合</strong>：去重后 {candidates.length} 个 chunk，用{" "}
-            <StackTag kind="algo">RRF</StackTag>（k={config.rrf_k}
-            ）按名次合并排序
-            <small>
-              得分 = Σ 1 / ({config.rrf_k} +
-              名次)，只看名次不看原始分数；被多路命中的片段更靠前
+          </tbody>
+        </table>
+        {method === "keyword" &&
+          own.some((list) => list.hits.length < limit) && (
+            <small className="diag-module-desc">
+              不满 {limit} 个：包含这些词的分片只有这么多
             </small>
-          </div>
-        </li>
+          )}
+      </section>
+    );
+  };
+
+  const rankingTables = (
+    <details className="diag-fold">
+      <summary>
+        原始排名表（{lists.length} 张）
+        <small>每个检索词 × 向量 / 关键词各一张{graphLists.length ? "，图检索按实体、关系各一张" : ""}</small>
+      </summary>
+      <div className="diag-lists">
+        {lists.map((list, index) => (
+          <details className="diag-list" key={`${list.method}-${index}`}>
+            <summary>
+              <i className={`diag-dot method-${list.method}`} />
+              {list.method === "graph"
+                ? list.query
+                : `${METHOD_LABELS[list.method] ?? list.method} · Q${queries.indexOf(list.query) + 1} ${list.query}`}
+              <small>{list.hits.length} 个分片</small>
+            </summary>
+            {list.hits.length === 0 ? (
+              <p className="diag-empty">没有找到分片</p>
+            ) : (
+              <table className="diag-table diag-table-compact">
+                <thead>
+                  <tr>
+                    <th>名次</th>
+                    <th>分片</th>
+                    <th>{RAW_SCORE_LABELS[list.method] ?? "原始分"}</th>
+                    <th>RRF 贡献</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {list.hits.map((hit) => (
+                    <tr key={hit.rank}>
+                      <td className="num">{hit.rank}</td>
+                      <td>
+                        <span className="diag-title">{hit.title}</span>
+                        <code title={hit.chunk_id}>
+                          {shortChunkId(hit.chunk_id)}
+                        </code>
+                        {hit.relation_ids?.length ? (
+                          <small className="diag-sub">
+                            通过关系：
+                            {hit.relation_ids
+                              .map((id) => graphRelations.get(id) ?? id)
+                              .join("；")}
+                          </small>
+                        ) : null}
+                      </td>
+                      <td className="num">{formatNumber(hit.raw_score)}</td>
+                      <td className="num">{formatNumber(hit.rrf, 5)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </details>
+        ))}
+      </div>
+    </details>
+  );
+
+  const comboLabel = (key: string) =>
+    key
+      .split("+")
+      .map((method) => METHOD_LABELS[method] ?? method)
+      .join(" + ");
+  const comboOrder = [
+    "dense+keyword+graph",
+    "dense+keyword",
+    "dense+graph",
+    "keyword+graph",
+    "dense",
+    "keyword",
+    "graph",
+  ];
+  const recallSection = (
+    <div className="diag-part">
+      <p className="diag-part-lead">
+        <strong>
+          {queries.length} 个检索词 × {textLists.length > 0 ? methods.filter((method) => method !== "graph").map((method) => METHOD_LABELS[method] ?? method).join(" + ") : "—"}{" "}
+          = {textLists.length} 张排名表
+          {graph ? `，图检索 ${graphLists.length} 张（实体 / 关系）` : ""}，共{" "}
+          {lists.length} 张
+        </strong>
+        <small>
+          {graph ? "三" : "两"}路共返回 {totalHits} 个分片（同一分片被多路或多个检索词找到时重复计数），去重后{" "}
+          {candidates.length} 个
+        </small>
+        {queries.map((query, index) => (
+          <small key={query} className="diag-process-query">
+            <em>Q{index + 1}</em>
+            {query}
+          </small>
+        ))}
+      </p>
+      <div className="diag-modules">
+        {methods.includes("dense") && textModule("dense")}
+        {methods.includes("keyword") && textModule("keyword")}
+        {graph && (
+          <section className="diag-module diag-module-wide method-graph">
+            <header>
+              <i className="diag-dot method-graph" />
+              <strong>图检索</strong>
+              <span>
+                {graph.status === "ok"
+                  ? `${graph.counts?.chunks ?? 0} 个分片`
+                  : graph.status === "skipped"
+                    ? "没有走图检索"
+                    : "失败"}
+                {timings.graph_ms ? ` · ${formatDuration(timings.graph_ms)}` : ""}
+              </span>
+            </header>
+            <small className="diag-module-desc">
+              提关键词 →{" "}
+              <StackTag kind="model" variant="embedding">
+                {embeddingModel || "向量模型"}
+              </StackTag>
+              按名字、关系描述找相似（<StackTag kind="store">Milvus</StackTag>
+              ）→ 取出处分片（一跳）
+              {graph.scope.length > 0
+                ? `；范围：${graph.scope.map((item) => `${item.title} v${item.number}`).join(" · ")}`
+                : ""}
+            </small>
+            <GraphRetrievalTrace graph={graph} />
+          </section>
+        )}
+      </div>
+      <div className="diag-fusion">
+        <p className="diag-part-lead">
+          <strong>
+            融合：<StackTag kind="algo">RRF</StackTag>（k={config.rrf_k}）按名次合并，
+            {candidates.length} 个分片，前 {config.rerank_candidates} 个进入重排
+          </strong>
+          <small>
+            得分 = Σ 1 / ({config.rrf_k} + 名次)，只看名次不看原始分数；被多路找到的分片更靠前
+          </small>
+        </p>
+        {combos.size > 0 && (
+          <table className="diag-table diag-table-compact diag-combo">
+            <thead>
+              <tr>
+                <th>被哪几路找到</th>
+                <th>分片</th>
+              </tr>
+            </thead>
+            <tbody>
+              {comboOrder
+                .filter((key) => combos.has(key))
+                .map((key) => (
+                  <tr key={key} className={key === "graph" ? "is-graph-only" : ""}>
+                    <td>
+                      {key.split("+").length === 3
+                        ? "三路都找到"
+                        : key.includes("+")
+                          ? comboLabel(key)
+                          : `只有${comboLabel(key)}`}
+                    </td>
+                    <td className="num">{combos.get(key)}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        )}
+        {rankingTables}
+      </div>
+    </div>
+  );
+
+  const rerankSection = (
+    <div className="diag-part">
+      <ol className="intent-trace diag-process">
         <li>
           <span className="intent-trace-mark">
-            <b>{step + 3}</b>
+            <b>1</b>
           </span>
           <div>
             <strong>重排</strong>：
             {config.reranked ? (
               <>
-                RRF 前 {config.rerank_candidates} 个 chunk 交给{" "}
+                RRF 前 {config.rerank_candidates} 个分片交给{" "}
                 <StackTag kind="model" variant="rerank">
                   {config.rerank_model}
                 </StackTag>
@@ -4672,7 +4997,7 @@ function RetrievalDiagnostics({
             )}
             {config.reranked && (
               <small>
-                交叉编码器把问题和片段放在一起逐条打分，重排概率 =
+                交叉编码器把问题和分片放在一起逐条打分，重排概率 =
                 sigmoid(logit)，最终顺序只看重排概率；调用 embedding 服务
                 /v1/rerank
               </small>
@@ -4681,14 +5006,14 @@ function RetrievalDiagnostics({
         </li>
         <li>
           <span className="intent-trace-mark">
-            <b>{step + 4}</b>
+            <b>2</b>
           </span>
           <div>
             <strong>过滤</strong>：
             {config.reranked && config.min_score !== null ? (
               <>
                 重排概率低于 {formatNumber(config.min_score, 2)} 的去掉{" "}
-                {filtered} 个，剩 {passed} 个 chunk
+                {filtered} 个，剩 {passed} 个分片
               </>
             ) : (
               <>
@@ -4703,11 +5028,11 @@ function RetrievalDiagnostics({
         </li>
         <li>
           <span className="intent-trace-mark">
-            <b>{step + 5}</b>
+            <b>3</b>
           </span>
           <div>
             <strong>返回</strong>：上限 {config.return_limit} 个，返回{" "}
-            {returned} 个 chunk，交给回答模型
+            {returned} 个分片，交给回答模型
             {passedCount - returned > 0 && (
               <small>另有 {passedCount - returned} 个超过上限，没有返回</small>
             )}
@@ -4741,11 +5066,14 @@ function RetrievalDiagnostics({
           </div>
         ))}
       </div>
-      {/* 候选明细和原始排名表只在排查时看，默认折叠。 */}
+      {/* 候选明细只在排查时看，默认折叠。 */}
       <details className="diag-fold">
         <summary>
           查看候选明细（{candidates.length} 个）
-          <small>按最终处理顺序排列；悬停查看说明</small>
+          <small>
+            按最终处理顺序排列；悬停查看说明
+            {graphOnly > 0 ? `；只有图找到的 ${graphOnly} 个` : ""}
+          </small>
         </summary>
         <div className="diag-legend">
           <span>
@@ -4756,6 +5084,12 @@ function RetrievalDiagnostics({
             <i className="diag-dot method-keyword" />
             关键词召回（BM25）
           </span>
+          {graph && (
+            <span>
+              <i className="diag-dot method-graph" />
+              图检索（实 = 图 · 实体，关 = 图 · 关系）
+            </span>
+          )}
           <span>
             <i className="diag-threshold-sample" />
             相关性阈值
@@ -4773,7 +5107,7 @@ function RetrievalDiagnostics({
               <tr>
                 <th>去向</th>
                 <th>来源</th>
-                <th>片段</th>
+                <th>分片</th>
                 <th title="每张排名表中的名次、原始分数，以及贡献的 RRF 分">
                   召回贡献
                 </th>
@@ -4788,6 +5122,7 @@ function RetrievalDiagnostics({
                   item={item}
                   minScore={config.min_score}
                   queries={queries}
+                  relations={graphRelations}
                   key={item.chunk_id + item.rrf_rank}
                 />
               ))}
@@ -4830,52 +5165,33 @@ function RetrievalDiagnostics({
           <p className="diag-page-summary">暂无候选明细</p>
         )}
       </details>
-      <details className="diag-fold">
-        <summary>
-          原始排名表（{lists.length} 张）
-          <small>每个检索词 × 每路召回各一张</small>
-        </summary>
-        <div className="diag-lists">
-          {lists.map((list, index) => (
-            <details className="diag-list" key={`${list.method}-${index}`}>
-              <summary>
-                <i className={`diag-dot method-${list.method}`} />
-                {METHOD_LABELS[list.method] ?? list.method} · {list.query}
-                <small>{list.hits.length} 条</small>
-              </summary>
-              {list.hits.length === 0 ? (
-                <p className="diag-empty">没有命中</p>
-              ) : (
-                <table className="diag-table diag-table-compact">
-                  <thead>
-                    <tr>
-                      <th>名次</th>
-                      <th>片段</th>
-                      <th>{RAW_SCORE_LABELS[list.method] ?? "原始分"}</th>
-                      <th>RRF 贡献</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {list.hits.map((hit) => (
-                      <tr key={hit.rank}>
-                        <td className="num">{hit.rank}</td>
-                        <td>
-                          <span className="diag-title">{hit.title}</span>
-                          <code title={hit.chunk_id}>
-                            {shortChunkId(hit.chunk_id)}
-                          </code>
-                        </td>
-                        <td className="num">{formatNumber(hit.raw_score)}</td>
-                        <td className="num">{formatNumber(hit.rrf, 5)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </details>
-          ))}
-        </div>
-      </details>
+    </div>
+  );
+
+  if (part === "scope") return <div className="diag">{scopeSection}</div>;
+  if (part === "recall") return <div className="diag">{recallSection}</div>;
+  if (part === "rerank") return <div className="diag">{rerankSection}</div>;
+  return (
+    <div className="diag">
+      {scope && (
+        <>
+          <div className="diag-part-title">
+            权限范围
+            {timings.scope_ms !== undefined && <small>{formatDuration(timings.scope_ms)}</small>}
+          </div>
+          {scopeSection}
+        </>
+      )}
+      <div className="diag-part-title">
+        混合检索
+        {timings.recall_ms !== undefined && <small>{formatDuration(timings.recall_ms)}</small>}
+      </div>
+      {recallSection}
+      <div className="diag-part-title">
+        重排与过滤
+        {timings.rerank_ms !== undefined && <small>{formatDuration(timings.rerank_ms)}</small>}
+      </div>
+      {rerankSection}
     </div>
   );
 }
@@ -4885,11 +5201,18 @@ function CandidateRow({
   item,
   minScore,
   queries,
+  relations,
 }: {
   item: RetrievalCandidate;
   minScore: number | null;
   queries: string[];
+  relations?: Map<string, string>;
 }) {
+  const graphOnly =
+    item.retrieval_methods.length === 1 && item.retrieval_methods[0] === "graph";
+  const linked = (item.graph_relation_ids ?? [])
+    .map((id) => relations?.get(id) ?? id)
+    .join("\n");
   const status = STATUS_INFO[item.status] ?? STATUS_INFO.in_pool;
   const probability = item.rerank_probability;
   const passes =
@@ -4917,6 +5240,11 @@ function CandidateRow({
           {item.preview}
         </span>
         <code title={item.chunk_id}>{shortChunkId(item.chunk_id)}</code>
+        {graphOnly && (
+          <span className="diag-graph-only" title={`通过关系找到：\n${linked}`}>
+            只有图找到
+          </span>
+        )}
       </td>
       <td>
         <div className="diag-contribs">
@@ -4925,10 +5253,12 @@ function CandidateRow({
             <span
               className={`diag-contrib method-${contribution.method}`}
               key={index}
-              title={`检索词：${contribution.query}\n${METHOD_LABELS[contribution.method] ?? contribution.method}第 ${contribution.rank} 名，${RAW_SCORE_LABELS[contribution.method] ?? "原始分"} ${formatNumber(contribution.raw_score)}\nRRF 贡献 1/(k+${contribution.rank}) = ${formatNumber(contribution.rrf, 5)}`}
+              title={`${contribution.method === "graph" ? "排名表" : "检索词"}：${contribution.query}\n${METHOD_LABELS[contribution.method] ?? contribution.method}第 ${contribution.rank} 名，${RAW_SCORE_LABELS[contribution.method] ?? "原始分"} ${formatNumber(contribution.raw_score)}\nRRF 贡献 1/(k+${contribution.rank}) = ${formatNumber(contribution.rrf, 5)}${contribution.method === "graph" && linked ? `\n通过关系：\n${linked}` : ""}`}
             >
               <i className={`diag-dot method-${contribution.method}`} />
-              {queries.length > 1 ? (
+              {contribution.method === "graph" ? (
+                <em>{contribution.query.includes("实体") ? "实" : "关"}</em>
+              ) : queries.length > 1 ? (
                 <em>Q{queries.indexOf(contribution.query) + 1}</em>
               ) : null}
               #{contribution.rank}

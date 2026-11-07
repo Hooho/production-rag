@@ -5,10 +5,13 @@ import { GraphRelationPanel } from "./GraphRelationPanel";
 import type { GraphEdge, GraphRelationRow } from "./api";
 import { useEffect, useRef, useState } from "react";
 import {
+  backfillGraphVectors,
   getGraphOverview,
   getGraphTasks,
+  getGraphVectors,
   type GraphOverview,
   type GraphTask,
+  type GraphVectorStatus,
 } from "./api";
 import { BUILD_STATUS, TRIGGER_LABELS } from "./DocumentGraph";
 import { formatShortTime } from "./format";
@@ -18,6 +21,7 @@ import { GraphWorkspace } from "./GraphWorkspace";
 import { GraphExplorerControls, useGraphExplorer } from "./GraphExplorer";
 import { GraphView } from "./GraphView";
 import { Tag } from "./Tag";
+import { errorText } from "./Toast";
 
 type ShowToast = (kind: "success" | "error", message: string) => void;
 export type KnowledgeGraphTab = "overview" | "tasks";
@@ -340,6 +344,35 @@ function Tasks({
       cancelled = true;
     };
   }, [tick]);
+  // 图检索向量：生效版本里多少已经算好、多少还缺；还缺时可以补算（排进建图队列）。
+  const [vectors, setVectors] = useState<GraphVectorStatus | null>(null);
+  const [backfilling, setBackfilling] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    getGraphVectors()
+      .then((value) => !cancelled && setVectors(value))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [tick]);
+  async function backfill() {
+    setBackfilling(true);
+    try {
+      const result = await backfillGraphVectors();
+      setVectors(result);
+      onToast(
+        "success",
+        result.queued > 0
+          ? `已排队补算 ${result.queued} 个图谱版本的向量`
+          : "没有缺向量的图谱版本",
+      );
+    } catch (reason) {
+      onToast("error", errorText(reason));
+    } finally {
+      setBackfilling(false);
+    }
+  }
   const busy = items?.some(
     (item) => item.state === "queued" || item.state === "running",
   );
@@ -370,8 +403,24 @@ function Tasks({
           }
           ，未建 {items.filter((item) => item.state === "none").length}，已过期{" "}
           {items.filter((item) => item.state === "outdated").length}
+          {vectors && (
+            <>
+              ；图检索向量：{vectors.indexed} / {vectors.active} 个生效版本已算
+              {vectors.failed > 0 ? `（${vectors.failed} 个失败）` : ""}
+            </>
+          )}
         </span>
         <div className="graph-actions">
+          {vectors && vectors.missing > 0 && (
+            <button
+              className={`secondary-button ${backfilling ? "is-loading" : ""}`}
+              disabled={backfilling}
+              onClick={() => void backfill()}
+              title="以前建的图谱没有名字、关系向量，图检索查不到；补算后才能用"
+            >
+              补算向量（{vectors.missing}）
+            </button>
+          )}
           <button
             className="secondary-button"
             disabled={notBuilt.length === 0}

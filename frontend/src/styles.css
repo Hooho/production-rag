@@ -3224,6 +3224,7 @@ label {
    --diag-dense: #2563eb;
    /* 关键词召回用琥珀黄，和向量召回的蓝色一眼区分；以前是两种相近的蓝色。 */
    --diag-keyword: #d97706;
+   --diag-graph: #16a34a;
    --diag-good: #178a63;
    --diag-warning: #c28a1b;
    --diag-critical: #c83f4e;
@@ -3441,6 +3442,144 @@ label {
    background: var(--diag-keyword);
 }
 
+/* 图检索用绿色，和向量（蓝）、关键词（琥珀黄）区分。 */
+.diag-dot.method-graph {
+   background: var(--diag-graph);
+}
+
+/* 检索过程拆成三块（权限范围 / 混合检索 / 重排与过滤）：不拆显示时每块前面一个小标题。 */
+.diag-part-title {
+   display: flex;
+   gap: 8px;
+   align-items: baseline;
+   padding-top: 6px;
+   border-top: 1px solid var(--diag-line);
+   color: var(--diag-strong);
+   font-weight: 600;
+}
+
+.diag-part-title:first-child {
+   padding-top: 0;
+   border-top: 0;
+}
+
+.diag-part-title small {
+   color: var(--diag-muted);
+   font-weight: 400;
+}
+
+.diag-part {
+   display: grid;
+   gap: 10px;
+   min-width: 0;
+}
+
+.diag-part-lead {
+   display: grid;
+   gap: 3px;
+   margin: 0;
+}
+
+.diag-part-lead strong {
+   color: var(--diag-strong);
+   font-weight: 600;
+}
+
+.diag-part-lead small,
+.diag-part-note {
+   color: var(--diag-muted);
+}
+
+/* 混合检索的三个模块：向量、关键词并排，图检索占满一行。 */
+.diag-modules {
+   display: grid;
+   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+   gap: 10px;
+}
+
+.diag-module {
+   display: grid;
+   gap: 6px;
+   align-content: start;
+   min-width: 0;
+   padding: 8px 10px;
+   border: 1px solid var(--diag-line);
+   border-top: 3px solid var(--diag-line);
+   background: #fff;
+}
+
+.diag-module.method-dense {
+   border-top-color: var(--diag-dense);
+}
+
+.diag-module.method-keyword {
+   border-top-color: var(--diag-keyword);
+}
+
+.diag-module.method-graph {
+   border-top-color: var(--diag-graph);
+}
+
+.diag-module-wide {
+   grid-column: 1 / -1;
+}
+
+.diag-module>header {
+   display: flex;
+   flex-wrap: wrap;
+   gap: 6px;
+   align-items: center;
+}
+
+.diag-module>header strong {
+   color: var(--diag-strong);
+}
+
+.diag-module>header span {
+   color: var(--diag-muted);
+}
+
+.diag-module-desc {
+   color: var(--diag-muted);
+   line-height: 1.7;
+}
+
+.diag-q {
+   color: var(--diag-muted);
+   font-style: normal;
+}
+
+.diag-fusion {
+   display: grid;
+   gap: 8px;
+}
+
+.diag-table.diag-combo {
+   width: auto;
+   min-width: 220px;
+   border: 1px solid var(--diag-line);
+}
+
+.diag-combo tr.is-graph-only td {
+   color: var(--diag-graph);
+   font-weight: 600;
+}
+
+.diag-graph-only {
+   display: inline-block;
+   width: fit-content;
+   margin-top: 2px;
+   padding: 0 5px;
+   border: 1px solid #b7e1c8;
+   background: #ecf8f1;
+   color: var(--diag-graph);
+   font-size: 9px;
+}
+
+.scope-list .scope-graph {
+   color: var(--diag-graph);
+}
+
 .diag-threshold-sample {
    display: inline-block;
    width: 2px;
@@ -3638,6 +3777,11 @@ label {
 .diag-contrib.method-keyword {
    border-color: #f1d29a;
    background: #fdf5e6;
+}
+
+.diag-contrib.method-graph {
+   border-color: #b7e1c8;
+   background: #ecf8f1;
 }
 
 .diag-contrib small {

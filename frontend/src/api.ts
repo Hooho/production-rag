@@ -36,11 +36,15 @@ export type RetrievalListHit = {
   title: string;
   raw_score: number;
   rrf: number;
+  // 图检索的排名表：这一片是通过哪几条关系找到的。
+  relation_ids?: string[];
 };
 export type RetrievalList = {
   query: string;
   method: string;
   hits: RetrievalListHit[];
+  // 图检索的两张表：entity（图 · 实体）、relation（图 · 关系）。
+  table?: "entity" | "relation";
 };
 export type RetrievalCandidate = {
   chunk_id: string;
@@ -64,9 +68,11 @@ export type RetrievalCandidate = {
   rerank_logit: number | null;
   rerank_probability: number | null;
   rerank_rank: number | null;
+  graph_relation_ids?: string[];
 };
 export type RetrievalDiagnosticsData = {
   config: {
+    methods?: string[];
     rrf_k: number;
     rerank_candidates: number;
     return_limit: number;
@@ -80,6 +86,114 @@ export type RetrievalDiagnosticsData = {
   candidates: RetrievalCandidate[];
   // 这次检索的权限范围：可检索的文档（当前版本）按自己上传 / 共享给我 / 公开计数；旧记录没有。
   scope?: RetrievalScope;
+  // 图检索每一步的明细；没打开图检索、旧记录没有。
+  graph?: GraphRetrievalTrace;
+  // 每一步、每一路的耗时（毫秒）；旧记录没有。
+  timings?: {
+    scope_ms?: number;
+    dense_ms?: number;
+    keyword_ms?: number;
+    graph_ms?: number | null;
+    recall_ms?: number;
+    rerank_ms?: number;
+  };
+};
+// 图检索范围里的一个图谱版本：文档（当前版本）和它生效的图谱版本。
+export type GraphScopeVersion = {
+  version_id: string;
+  document_id: string;
+  number: number;
+  title: string;
+  document_version?: number | null;
+};
+// 图检索找到的一条关系（起点、终点用抽取时的原名，*_entity 是归到的实体）。
+export type GraphRetrievalRelation = {
+  relation_id: string;
+  source: string;
+  source_entity_id: string;
+  source_entity: string | null;
+  source_type: string | null;
+  target: string;
+  target_entity_id: string;
+  target_entity: string | null;
+  target_type: string | null;
+  category: string;
+  description: string | null;
+  evidence: string | null;
+  chunk_id: string;
+  document_id: string;
+  title: string | null;
+  version_id: string;
+  version_number: number | null;
+  score: number | null;
+  kept: boolean;
+  reason: string | null;
+};
+export type GraphRetrievalTable = {
+  chunk_id: string;
+  score: number;
+  relation_ids: string[];
+  rank: number;
+  kept?: boolean;
+  reason?: string | null;
+  title?: string;
+  text?: string;
+  version?: number | null;
+  heading?: string | null;
+};
+export type GraphRetrievalTrace = {
+  status: "ok" | "skipped" | "failed";
+  reason: string | null;
+  scope: GraphScopeVersion[];
+  keywords: {
+    source: "agent" | "model" | "fallback";
+    entities: string[];
+    themes: string[];
+    reason?: string;
+    error?: string;
+    fallback?: boolean;
+    prompt?: { role: string; content: string }[];
+    raw_output?: string;
+    input_tokens?: number | null;
+    output_tokens?: number | null;
+    prompt_tag?: string;
+    model?: string | null;
+    duration_ms?: number;
+  } | null;
+  name_matches: {
+    keyword: string;
+    name: string;
+    entity_id: string;
+    entity_name: string | null;
+    entity_type: string | null;
+    version_id: string;
+    document_id: string;
+    title: string | null;
+    version_number: number | null;
+    score: number;
+    kept: boolean;
+    reason: string | null;
+  }[];
+  entities: {
+    entity_id: string;
+    name: string | null;
+    type: string | null;
+    names: string[];
+    score: number;
+  }[];
+  entity_relations: (GraphRetrievalRelation & {
+    entity_id: string;
+    entity_name: string | null;
+  })[];
+  relation_matches: (GraphRetrievalRelation & {
+    keyword: string;
+    also_entity: boolean;
+  })[];
+  tables: { entity: GraphRetrievalTable[]; relation: GraphRetrievalTable[] };
+  dropped_more: Record<string, number>;
+  counts?: { entity_chunks: number; relation_chunks: number; chunks: number };
+  settings?: Record<string, number>;
+  timings: Record<string, number>;
 };
 export type RetrievalScope = {
   total: number;
@@ -95,6 +209,8 @@ export type RetrievalScope = {
     owner: string;
     groups: string[];
   }>;
+  // 图检索范围：可检索文档里有生效图谱的版本；没打开图检索时没有。
+  graph_versions?: GraphScopeVersion[];
 };
 export type ChatResult = {
   answer: string;
@@ -4076,6 +4192,22 @@ export function getGraphOverview(params: {
   );
 }
 
+// 图检索向量：生效版本里多少已经算好、多少还缺。
+export type GraphVectorStatus = {
+  active: number;
+  indexed: number;
+  missing: number;
+  failed: number;
+};
+export function getGraphVectors() {
+  return request<GraphVectorStatus>("/graph/vectors");
+}
+export function backfillGraphVectors() {
+  return request<GraphVectorStatus & { queued: number }>(
+    "/graph/vectors/backfill",
+    { method: "POST" },
+  );
+}
 export function getGraphTasks() {
   return request<{ items: GraphTask[] }>("/graph/tasks");
 }

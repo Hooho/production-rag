@@ -23,6 +23,8 @@ import { formatDuration } from "./format";
 import { huePicker } from "./hues";
 import { Tag } from "./Tag";
 import { DetailDialog } from "./DetailDialog";
+import { GraphRetrievalTrace } from "./GraphRetrievalTrace";
+import type { GraphRetrievalTrace as GraphRetrievalTraceData } from "./api";
 import "./AgentTrace.css";
 
 const TOOL_LABELS: Record<string, string> = {
@@ -1323,8 +1325,12 @@ function RequestInput({
 function ProgramItem({ result }: { result: AgentToolResult }) {
   const trace = result.trace ?? {};
   const retrieval = trace.retrieval as
-    | { stats?: Record<string, unknown> }
+    | {
+        stats?: Record<string, unknown>;
+        diagnostics?: { graph?: GraphRetrievalTraceData };
+      }
     | undefined;
+  const graphTrace = retrieval?.diagnostics?.graph;
   const stats = retrieval?.stats ?? {};
   const ids = evidenceIds(result);
   // 每次工具调用一张可折叠的卡片，默认展开；标题行写工具、执行状态、耗时、剩余预算和返回了几条资料，收起后也能看个大概。
@@ -1380,6 +1386,22 @@ function ProgramItem({ result }: { result: AgentToolResult }) {
       </ul>
       {result.name === "search_knowledge" && retrieval && (
         <RetrievalFunnel stats={stats} topK={trace.top_k} given={ids.length} />
+      )}
+      {/* 打开图检索时：这次调用的图检索明细（关键词是 Agent 给的还是系统提取的、找到哪些实体和关系、带回哪些分片）。 */}
+      {result.name === "search_knowledge" && graphTrace && (
+        <details className="agent-graph-trace">
+          <summary>
+            图检索
+            <small>
+              {graphTrace.status === "ok"
+                ? `${graphTrace.counts?.chunks ?? 0} 个分片 · 关键词来源：${graphTrace.keywords?.source === "agent" ? "Agent 提供" : "系统提取"}`
+                : graphTrace.reason}
+            </small>
+          </summary>
+          <div className="diag">
+            <GraphRetrievalTrace graph={graphTrace} />
+          </div>
+        </details>
       )}
       {result.name === "query_data" && trace.plan != null && result.ok && (
         <>

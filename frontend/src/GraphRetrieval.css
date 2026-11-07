@@ -1,0 +1,225 @@
+/* 检索过程里的图检索模块（GraphRetrievalTrace.tsx）。颜色跟着 .diag 的变量走。 */
+.grt {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.grt-step {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.grt-step h5 {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  margin: 0;
+  color: var(--diag-strong, #173b5b);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.grt-step h5 small {
+  color: var(--diag-muted, #6f8ba4);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.grt-table td small {
+  display: block;
+  color: var(--diag-muted, #6f8ba4);
+}
+
+.grt-table tr.is-dropped td {
+  color: var(--diag-muted, #6f8ba4);
+  background: rgb(241 245 249 / 0.6);
+}
+
+.grt-rel {
+  display: inline;
+  line-height: 1.6;
+}
+
+.grt-rel b {
+  color: var(--diag-strong, #173b5b);
+  font-weight: 600;
+}
+
+.grt-arrow {
+  margin: 0 4px;
+  color: var(--diag-muted, #6f8ba4);
+}
+
+.grt-table td small.grt-entity-of,
+.grt-entity-of {
+  display: inline;
+  color: var(--diag-muted, #6f8ba4);
+}
+
+.grt-table td small.grt-category,
+.grt-category {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid var(--diag-line, #d6e2ee);
+  border-radius: 3px;
+  color: var(--diag-muted, #6f8ba4);
+}
+
+.grt-table td small.grt-evidence {
+  margin-top: 2px;
+  color: #8a6d1c;
+}
+
+.grt-kept {
+  color: var(--diag-good, #178a63);
+  white-space: nowrap;
+}
+
+.grt-dropped {
+  color: var(--diag-critical, #c83f4e);
+  white-space: nowrap;
+}
+
+.grt-origin {
+  display: block;
+}
+
+.grt-origin em,
+.grt-v {
+  margin-left: 4px;
+  color: var(--diag-muted, #6f8ba4);
+  font-style: normal;
+}
+
+.grt-summary {
+  margin: 0;
+  color: var(--diag-strong, #173b5b);
+}
+
+.grt-note {
+  margin: 0;
+  padding: 4px 8px;
+  border-left: 3px solid var(--diag-warning, #c28a1b);
+  background: #fdf8ec;
+}
+
+.grt-empty,
+.grt-hint {
+  margin: 0;
+  color: var(--diag-muted, #6f8ba4);
+}
+
+.grt-status {
+  margin: 0;
+  color: var(--diag-muted, #6f8ba4);
+}
+
+.grt-status.is-failed {
+  color: var(--diag-critical, #c83f4e);
+}
+
+.grt-pre {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--diag-line, #d6e2ee);
+  background: #f8fafc;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.grt-tables {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.grt-chunk-table {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  min-width: 0;
+}
+
+.grt-fold {
+  justify-self: start;
+}
+
+.grt-chunk-table > strong {
+  color: var(--diag-strong, #173b5b);
+  font-weight: 600;
+}
+
+.grt-linked {
+  margin: 0;
+  padding-left: 14px;
+}
+
+.grt-map {
+  display: grid;
+  gap: 6px;
+}
+
+.grt-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  color: var(--diag-muted, #6f8ba4);
+  font-size: 11px;
+}
+
+.grt-map-legend span {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.grt-map-legend i {
+  display: inline-block;
+  width: 18px;
+  height: 3px;
+}
+
+.grt-map-legend i.grt-node-found {
+  width: 14px;
+  height: 10px;
+  border: 3px solid #1d4ed8;
+  border-radius: 3px;
+  background: #eef4ff;
+}
+
+.grt-map-legend i.grt-edge-dropped {
+  height: 0;
+  border-top: 2px dashed #cbd5e1;
+}
+
+.grt-map-canvas {
+  height: 340px;
+  border: 1px solid var(--diag-line, #d6e2ee);
+  background: #fbfdff;
+}
+
+.grt-map-detail {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--diag-line, #d6e2ee);
+}
+
+.grt-map-detail blockquote,
+.grt-original-missing blockquote {
+  margin: 0;
+  padding: 4px 8px;
+  border-left: 3px solid #f2c94c;
+  background: #fffbea;
+}
+
+.grt-original-missing p {
+  margin: 0 0 6px;
+}
