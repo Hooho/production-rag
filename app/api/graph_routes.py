@@ -257,8 +257,9 @@ def build_router(current_user, identity, require_admin):
         state = request.app.state
         row = readable(state, user["username"], document_id)
         check_can_build(user, row)
+        # 补跑最近一次建图：它失败了的话，latest_build 返回的是生效中的另一次（没有失败分片），会补错。
         with state.store.engine.connect() as connection:
-            build = graph_query.latest_build(connection, str(document_id))
+            build = graph_query.newest_build(connection, str(document_id))
         if build is None:
             raise HTTPException(409, "这份文档还没有建过图")
         try:

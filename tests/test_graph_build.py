@@ -813,6 +813,45 @@ def test_finalize_failure_tracks_actual_step_and_preserves_previous_graph(
     assert steps["graph_write"]["status"] == "completed"
 
 
+# 最近一次建图写入失败、生效的是上一次时：「重试」补的是最近这次（不是生效的那次），
+# 没有失败分片也能重试：抽取结果都在，直接重新合并、写入。
+def test_retry_targets_newest_failed_build_even_without_failed_chunks(
+    setup, monkeypatch
+):
+    client, store = setup
+    models = enable_model(client)
+    document_id = add_document(client)
+    first = build(client, document_id).json()
+    run_graph_jobs(store, models)
+    second = build(client, document_id).json()
+    original = graph_build.resolve.write_build
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("模拟写入失败")
+
+    monkeypatch.setattr(graph_build.resolve, "write_build", fail)
+    run_graph_jobs(store, models)
+    assert graph_build.get_build(store.engine, second["id"])["status"] == "failed"
+    monkeypatch.setattr(graph_build.resolve, "write_build", original)
+    calls = models.chat_model.calls
+    retry = client.post(
+        f"/documents/{document_id}/graph/retry", headers=headers(), json={}
+    )
+    assert retry.status_code == 202, retry.text
+    assert retry.json()["id"] == second["id"]
+    run_graph_jobs(store, models)
+    assert graph_build.get_build(store.engine, second["id"])["status"] == "completed"
+    assert graph_build.get_build(store.engine, first["id"])["status"] == "completed"
+    assert models.chat_model.calls == calls  # 没有重新抽取
+    # 已经成功了，再重试就没有可补的。
+    assert (
+        client.post(
+            f"/documents/{document_id}/graph/retry", headers=headers(), json={}
+        ).status_code
+        == 409
+    )
+
+
 def test_all_extractions_failed_does_not_report_graph_write_success(setup):
     client, store = setup
     models = enable_model(client)

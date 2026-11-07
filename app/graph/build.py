@@ -911,7 +911,8 @@ def retry(store, build_id, chunk_id=None):
         removed = connection.execute(
             delete(graph_chunk_extractions).where(condition)
         ).rowcount
-        if not removed:
+        # 没有失败的分片、但建图失败了（例如写入图谱时出错）：不重新抽取，直接重新合并、写入。
+        if not removed and (chunk_id or build["status"] != "failed"):
             raise BuildError("没有需要补跑的分片")
         connection.execute(
             graph_builds.update()
@@ -923,7 +924,9 @@ def retry(store, build_id, chunk_id=None):
         build["document_id"],
         "graph_extract",
         "running",
-        f"排队中：补跑 {removed} 个失败的分片",
+        f"排队中：补跑 {removed} 个失败的分片"
+        if removed
+        else "排队中：抽取结果都在，重新合并、写入图谱",
         {"build_id": build_id},
     )
     # 二次检查的报告（含人工决定和已应用的合并）保留：补跑完写入时会继续应用已确认的合并。

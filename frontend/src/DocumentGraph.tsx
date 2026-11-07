@@ -373,7 +373,7 @@ export function DocumentGraph({
           <span>
             下面显示的还是生效中的建图。已抽取的分片结果都保存着（新抽取{" "}
             {newestFailed.extracted} · 失败 {newestFailed.failed}
-            ），修复后点「重新建图」会复用，只重抽失败的分片。
+            ）。到「处理流程」里点「抽取实体关系」旁边的「重试」，只补跑失败的分片，再重新写入。
           </span>
           {newestFailed.error && (
             <details>

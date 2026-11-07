@@ -5553,7 +5553,10 @@ function Knowledge({
               try {
                 await retryGraphReview(selected.document_id);
                 setDetail(await getDocument(selected.document_id));
-                onToast("success", "检查漏合并已重新排队，将复用已有抽取结果。");
+                onToast(
+                  "success",
+                  "检查漏合并已重新排队，将复用已有抽取结果。",
+                );
               } catch (reason) {
                 onToast("error", (reason as Error).message);
               }
@@ -5562,7 +5565,10 @@ function Knowledge({
               try {
                 await retryDocumentGraph(selected.document_id);
                 setDetail(await getDocument(selected.document_id));
-                onToast("success", "已开始补跑失败的分片。");
+                onToast(
+                  "success",
+                  "已开始重试：只补跑失败的分片，再重新合并、写入图谱。",
+                );
               } catch (reason) {
                 onToast("error", (reason as Error).message);
               }

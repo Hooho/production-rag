@@ -35,6 +35,23 @@ METHOD_LABELS = {
 
 
 # 这个文档版本最近的一次建图：优先用生效（active）的，没有就用最新的一次（正在建、失败的也能看到进度和原因）。
+# 最近一次建图（不管成没成功、生没生效）：处理流程里的「抽取实体关系」显示的是它，补跑也补它。
+def newest_build(connection, document_id, space=ONLINE_SPACE):
+    row = (
+        connection.execute(
+            select(graph_builds)
+            .where(
+                graph_builds.c.document_id == document_id, graph_builds.c.space == space
+            )
+            .order_by(graph_builds.c.created.desc())
+            .limit(1)
+        )
+        .mappings()
+        .first()
+    )
+    return dict(row) if row else None
+
+
 def latest_build(connection, document_id, space=ONLINE_SPACE):
     rows = (
         connection.execute(
