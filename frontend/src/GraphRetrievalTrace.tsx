@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import cytoscape, { type Core, type ElementDefinition } from "cytoscape";
 import type {
   GraphRetrievalRelation,
@@ -197,6 +197,7 @@ function CountTable({
   unit,
   distinctLabel,
   distinctUnit,
+  renderDistinct,
   onDetail,
 }: {
   first: string;
@@ -205,6 +206,8 @@ function CountTable({
   distinctLabel: string;
   // 给了单位就只显示有几种（例如「3 个」实体）；不给就列出每种各几条（例如「投资 5 · 创办 2」）。
   distinctUnit?: string;
+  // 自定义第二个维度的显示（例如直接列出留下的实体名字）；给了就不用上面两种。
+  renderDistinct?: (group: CountGroup) => ReactNode;
   onDetail: (key: string) => void;
 }) {
   return (
@@ -229,12 +232,14 @@ function CountTable({
             <td>
               {group.distinct.size === 0
                 ? "—"
-                : distinctUnit
-                  ? `${group.distinct.size} ${distinctUnit}`
-                  : [...group.distinct.entries()]
-                      .sort((a, b) => b[1] - a[1])
-                      .map(([name, count]) => `${name} ${count}`)
-                      .join(" · ")}
+                : renderDistinct
+                  ? renderDistinct(group)
+                  : distinctUnit
+                    ? `${group.distinct.size} ${distinctUnit}`
+                    : [...group.distinct.entries()]
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([name, count]) => `${name} ${count}`)
+                        .join(" · ")}
             </td>
             <td className="grt-count-action">
               <button
@@ -642,6 +647,18 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
     return map;
   }, [graph]);
   const [detail, setDetail] = useState<Detail | null>(null);
+  // 字面命中（名字相同或互相包含）的实体，按「关键词|实体名」记，数量表里给它们标「字面」。
+  const literalEntities = useMemo(
+    () =>
+      new Set(
+        graph.name_matches
+          .filter((item) => item.kept && item.match && item.match !== "vector")
+          .map(
+            (item) => `${item.keyword}|${item.entity_name ?? item.entity_id}`,
+          ),
+      ),
+    [graph],
+  );
   const words = graph.keywords;
   const settings = graph.settings ?? {};
   if (graph.status !== "ok")
@@ -730,11 +747,22 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
             groups={groupCounts(
               graph.name_matches,
               (item) => item.keyword,
-              (item) => item.entity_id,
+              (item) => item.entity_name ?? item.entity_id,
             )}
             unit="个名字"
-            distinctLabel="归到实体"
-            distinctUnit="个"
+            distinctLabel="留下的实体"
+            renderDistinct={(group) => (
+              <span className="grt-entity-list">
+                {[...group.distinct.keys()].map((name) => (
+                  <span key={name}>
+                    {name}
+                    {literalEntities.has(`${group.key}|${name}`) && (
+                      <small className="grt-literal">字面</small>
+                    )}
+                  </span>
+                ))}
+              </span>
+            )}
             onDetail={(key) =>
               setDetail({ kind: "names", dim: "keyword", value: key })
             }
@@ -742,7 +770,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
         )}
         <p className="grt-summary">
           {graph.entities.length
-            ? `找到 ${graph.entities.length} 个实体：${graph.entities.map((entity) => entity.name).join("、")}`
+            ? `合计找到 ${graph.entities.length} 个实体`
             : "没有找到实体"}
         </p>
       </section>

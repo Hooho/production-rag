@@ -284,3 +284,20 @@
 .grt-original-missing p {
   margin: 0 0 6px;
 }
+
+/* ② 留下的实体直接列出来（每个关键词最多几个），字面命中的标「字面」。 */
+.grt-entity-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.grt-entity-list small.grt-literal {
+  display: inline;
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 1px solid #b7d0f7;
+  border-radius: 3px;
+  color: #1d6ff2;
+  font-size: 11px;
+}
