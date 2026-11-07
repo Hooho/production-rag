@@ -134,26 +134,87 @@
   word-break: break-word;
 }
 
-.grt-tables {
+/* 每一步的数量表：只列数量和类型，明细点「详情」在抽屉里看。 */
+.grt-step h5 .grt-detail-button {
+  margin-left: auto;
+}
+
+.grt-count-table td.num small {
+  display: block;
+}
+
+.grt-count-action {
+  width: 1%;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* 明细抽屉：分类方式 → 分类值 → 是否带上去掉的；下面表格分页。 */
+.ag-delivery-dialog.grt-dialog {
+  width: min(960px, calc(100vw - 32px));
+}
+
+.grt-filters {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 
-.grt-chunk-table {
-  display: grid;
-  gap: 4px;
-  align-content: start;
-  min-width: 0;
+.grt-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
-.grt-fold {
-  justify-self: start;
+.grt-chip {
+  padding: 2px 10px;
+  border: 1px solid var(--diag-line, #d6e2ee);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--diag-text, #536d86);
+  font-size: 12px;
+  line-height: 20px;
+  cursor: pointer;
 }
 
-.grt-chunk-table > strong {
-  color: var(--diag-strong, #173b5b);
-  font-weight: 600;
+.grt-chip em {
+  margin-left: 2px;
+  color: var(--diag-muted, #6f8ba4);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.grt-chip:hover {
+  border-color: #1d6ff2;
+  color: #1d6ff2;
+}
+
+.grt-chip.is-active {
+  border-color: #1d6ff2;
+  background: #e8f1ff;
+  color: #1d6ff2;
+}
+
+.grt-chip.is-dim {
+  border-radius: 4px;
+}
+
+.grt-dropped-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--diag-muted, #6f8ba4);
+  font-size: 12px;
+}
+
+.grt-pager {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--diag-muted, #6f8ba4);
+  font-size: 12px;
 }
 
 .grt-linked {

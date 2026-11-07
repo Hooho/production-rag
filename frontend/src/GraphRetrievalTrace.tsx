@@ -5,6 +5,7 @@ import type {
   GraphRetrievalTable,
   GraphRetrievalTrace as GraphTrace,
 } from "./api";
+import { DetailDialog } from "./DetailDialog";
 import { typeColor } from "./GraphView";
 import { HighlightedText } from "./HighlightedText";
 import { InfoPopover } from "./Popover";
@@ -12,7 +13,8 @@ import "./GraphRetrieval.css";
 
 // 检索过程「混合检索」里的图检索模块（docs：claude/graph-retrieval-phase2-plan.md 第一部分第四节）：
 // ① 提关键词 → ② 找实体 → ③ 实体的关系 → ④ 找关系 → ⑤ 取分片 → ⑥ 关系图。
-// 每一步都列出留下的和去掉的（附原因）。权限、生效版本在查询条件里，没有「权限过滤掉多少条」。
+// 页面上每一步只列数量和类型，明细在「详情」抽屉里（分页、按实体 / 关系类型 / 关键词分类，可带上去掉的项和原因）。
+// 权限、生效版本在查询条件里，没有「权限过滤掉多少条」。
 
 const SOURCE_LABELS: Record<string, string> = {
   agent: "调用方提供",
@@ -120,41 +122,493 @@ function Origin({ relation }: { relation: GraphRetrievalRelation }) {
   );
 }
 
-// 去掉的项默认收起，只显示留下的；点开看去掉了哪些、为什么。
-function useFold<T extends { kept: boolean }>(items: T[]) {
-  const [open, setOpen] = useState(false);
-  const kept = items.filter((item) => item.kept);
-  const dropped = items.filter((item) => !item.kept);
-  return {
-    visible: open ? [...kept, ...dropped] : kept,
-    dropped: dropped.length,
-    open,
-    toggle: () => setOpen((value) => !value),
-  };
+// 页面上每一步只列数量和类型；明细（名字、关系、分片列表）点「详情」在抽屉里分页看，可以按实体、关系类型、关键词分类。
+type Detail =
+  | {
+      kind: "names" | "entityRelations" | "relationMatches";
+      dim?: string;
+      value?: string;
+    }
+  | { kind: "chunks"; table: "entity" | "relation" };
+
+const CHUNK_TABLES = {
+  entity: "图 · 实体（来自 ③）",
+  relation: "图 · 关系（来自 ④）",
+};
+const PAGE_SIZE = 20;
+
+type CountGroup = {
+  key: string;
+  total: number;
+  kept: number;
+  // 留下的项里，按第二个维度（实体、关系类型）各有几条
+  distinct: Map<string, number>;
+};
+
+// 按第一个维度分组计数（保持第一次出现的顺序）。
+function groupCounts<T extends { kept: boolean }>(
+  items: T[],
+  key: (item: T) => string,
+  distinct: (item: T) => string,
+): CountGroup[] {
+  const groups = new Map<string, CountGroup>();
+  for (const item of items) {
+    const name = key(item) || "—";
+    const group = groups.get(name) ?? {
+      key: name,
+      total: 0,
+      kept: 0,
+      distinct: new Map(),
+    };
+    group.total += 1;
+    if (item.kept) {
+      group.kept += 1;
+      const value = distinct(item) || "—";
+      group.distinct.set(value, (group.distinct.get(value) ?? 0) + 1);
+    }
+    groups.set(name, group);
+  }
+  return [...groups.values()];
 }
 
-function FoldButton({
+function DetailButton({
   count,
-  more,
-  open,
   onClick,
 }: {
   count: number;
-  more?: number;
-  open: boolean;
   onClick: () => void;
 }) {
-  if (count === 0 && !more) return null;
+  if (count === 0) return null;
   return (
     <button
       type="button"
-      className="link-button button-sm grt-fold"
+      className="link-button button-sm grt-detail-button"
       onClick={onClick}
     >
-      {open
-        ? "收起去掉的"
-        : `查看去掉的 ${count} 条${more ? `（另有 ${more} 条只记了数量）` : ""}`}
+      详情
     </button>
+  );
+}
+
+// 一步的数量表：每组一行，匹配多少、留下多少，第二个维度只给类型和数量（或个数），每行一个「详情」。
+function CountTable({
+  first,
+  groups,
+  unit,
+  distinctLabel,
+  distinctUnit,
+  onDetail,
+}: {
+  first: string;
+  groups: CountGroup[];
+  unit: string;
+  distinctLabel: string;
+  // 给了单位就只显示有几种（例如「3 个」实体）；不给就列出每种各几条（例如「投资 5 · 创办 2」）。
+  distinctUnit?: string;
+  onDetail: (key: string) => void;
+}) {
+  return (
+    <table className="diag-table grt-table grt-count-table">
+      <thead>
+        <tr>
+          <th>{first}</th>
+          <th>匹配到</th>
+          <th>留下</th>
+          <th>{distinctLabel}</th>
+          <th />
+        </tr>
+      </thead>
+      <tbody>
+        {groups.map((group) => (
+          <tr key={group.key}>
+            <td>{group.key}</td>
+            <td className="num">
+              {group.total} {unit}
+            </td>
+            <td className="num">{group.kept}</td>
+            <td>
+              {group.distinct.size === 0
+                ? "—"
+                : distinctUnit
+                  ? `${group.distinct.size} ${distinctUnit}`
+                  : [...group.distinct.entries()]
+                      .sort((a, b) => b[1] - a[1])
+                      .map(([name, count]) => `${name} ${count}`)
+                      .join(" · ")}
+            </td>
+            <td className="grt-count-action">
+              <button
+                type="button"
+                className="link-button button-sm"
+                onClick={() => onDetail(group.key)}
+              >
+                详情
+              </button>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function Pager({
+  page,
+  total,
+  onPage,
+}: {
+  page: number;
+  total: number;
+  onPage: (page: number) => void;
+}) {
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if (total <= PAGE_SIZE) return <p className="grt-pager">共 {total} 条</p>;
+  return (
+    <div className="grt-pager">
+      共 {total} 条 · 第 {page} / {pages} 页
+      <button
+        type="button"
+        className="secondary-button button-sm"
+        disabled={page <= 1}
+        onClick={() => onPage(page - 1)}
+      >
+        ‹
+      </button>
+      <button
+        type="button"
+        className="secondary-button button-sm"
+        disabled={page >= pages}
+        onClick={() => onPage(page + 1)}
+      >
+        ›
+      </button>
+    </div>
+  );
+}
+
+type NameMatch = GraphTrace["name_matches"][number];
+type Dim<T> = { key: string; label: string; value: (item: T) => string };
+
+const NAME_DIMS: Dim<NameMatch>[] = [
+  { key: "keyword", label: "按关键词", value: (item) => item.keyword },
+  {
+    key: "entity",
+    label: "按实体",
+    value: (item) => item.entity_name ?? "—",
+  },
+];
+const ENTITY_RELATION_DIMS: Dim<RelationRow>[] = [
+  {
+    key: "entity",
+    label: "按实体",
+    value: (item) => item.entity_name ?? "—",
+  },
+  { key: "category", label: "按关系类型", value: (item) => item.category },
+];
+const RELATION_MATCH_DIMS: Dim<RelationRow>[] = [
+  { key: "keyword", label: "按关键词", value: (item) => item.keyword ?? "—" },
+  { key: "category", label: "按关系类型", value: (item) => item.category },
+];
+
+// 明细列表：上面选分类方式和分类值，可以带上去掉的项，下面分页。
+function useDetailList<T extends { kept: boolean }>(
+  items: T[],
+  dims: Dim<T>[],
+  initialDim?: string,
+  initialValue?: string,
+) {
+  const [dimKey, setDimKey] = useState(initialDim ?? dims[0]?.key ?? "");
+  const [value, setValue] = useState<string | null>(initialValue ?? null);
+  const [dropped, setDropped] = useState(false);
+  const [page, setPage] = useState(1);
+  const dim = dims.find((item) => item.key === dimKey);
+  const pool = dropped ? items : items.filter((item) => item.kept);
+  const options = useMemo(() => {
+    const counts = new Map<string, number>();
+    if (dim)
+      for (const item of pool)
+        counts.set(dim.value(item), (counts.get(dim.value(item)) ?? 0) + 1);
+    return [...counts.entries()];
+  }, [pool, dim]);
+  const filtered =
+    dim && value !== null
+      ? pool.filter((item) => dim.value(item) === value)
+      : pool;
+  // 留下的在前，去掉的在后。
+  const ordered = [
+    ...filtered.filter((item) => item.kept),
+    ...filtered.filter((item) => !item.kept),
+  ];
+  const pages = Math.max(1, Math.ceil(ordered.length / PAGE_SIZE));
+  const current = Math.min(page, pages);
+  return {
+    dims,
+    dimKey,
+    setDim: (key: string) => {
+      setDimKey(key);
+      setValue(null);
+      setPage(1);
+    },
+    options,
+    value,
+    setValue: (next: string | null) => {
+      setValue(next);
+      setPage(1);
+    },
+    dropped,
+    droppedCount: items.filter((item) => !item.kept).length,
+    setDropped: (next: boolean) => {
+      setDropped(next);
+      setPage(1);
+    },
+    total: ordered.length,
+    poolTotal: pool.length,
+    page: current,
+    setPage,
+    rows: ordered.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE),
+  };
+}
+
+function DetailFilters<T extends { kept: boolean }>({
+  list,
+  more,
+}: {
+  list: ReturnType<typeof useDetailList<T>>;
+  more?: number;
+}) {
+  return (
+    <div className="grt-filters">
+      {list.dims.length > 1 && (
+        <div className="grt-chips" role="tablist">
+          {list.dims.map((dim) => (
+            <button
+              key={dim.key}
+              type="button"
+              role="tab"
+              aria-selected={list.dimKey === dim.key}
+              className={`grt-chip is-dim${list.dimKey === dim.key ? " is-active" : ""}`}
+              onClick={() => list.setDim(dim.key)}
+            >
+              {dim.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {list.dims.length > 0 && (
+        <div className="grt-chips">
+          <button
+            type="button"
+            className={`grt-chip${list.value === null ? " is-active" : ""}`}
+            onClick={() => list.setValue(null)}
+          >
+            全部 <em>{list.poolTotal}</em>
+          </button>
+          {list.options.map(([name, count]) => (
+            <button
+              key={name}
+              type="button"
+              className={`grt-chip${list.value === name ? " is-active" : ""}`}
+              onClick={() => list.setValue(name)}
+            >
+              {name} <em>{count}</em>
+            </button>
+          ))}
+        </div>
+      )}
+      {list.droppedCount > 0 && (
+        <label className="grt-dropped-toggle">
+          <input
+            type="checkbox"
+            checked={list.dropped}
+            onChange={(event) => list.setDropped(event.target.checked)}
+          />
+          包括去掉的 {list.droppedCount} 条
+          {more ? `（另有 ${more} 条只记了数量）` : ""}
+        </label>
+      )}
+    </div>
+  );
+}
+
+const DETAIL_TITLES = {
+  names: "② 找实体 · 匹配到的名字",
+  entityRelations: "③ 实体的关系",
+  relationMatches: "④ 找关系",
+};
+
+function TraceDetail({
+  graph,
+  detail,
+  chunks,
+  relations,
+  onClose,
+}: {
+  graph: GraphTrace;
+  detail: Detail;
+  chunks: Map<string, ChunkInfo>;
+  relations: Map<string, GraphRetrievalRelation>;
+  onClose: () => void;
+}) {
+  const title =
+    detail.kind === "chunks"
+      ? `⑤ 取分片 · ${CHUNK_TABLES[detail.table]}`
+      : DETAIL_TITLES[detail.kind];
+  return (
+    <DetailDialog open title={title} className="grt-dialog" onClose={onClose}>
+      {/* 抽屉可能挂在别的弹窗里，不在 .diag 下面：自己带上 .diag，表格颜色变量才对。 */}
+      <div className="diag grt">
+        {detail.kind === "names" && (
+          <NamesDetail graph={graph} detail={detail} />
+        )}
+        {detail.kind === "entityRelations" && (
+          <RelationsDetail
+            rows={graph.entity_relations}
+            dims={ENTITY_RELATION_DIMS}
+            detail={detail}
+            more={graph.dropped_more?.entity_relations}
+            first="实体"
+            firstValue={(row) => row.entity_name ?? ""}
+            chunks={chunks}
+          />
+        )}
+        {detail.kind === "relationMatches" && (
+          <RelationsDetail
+            rows={graph.relation_matches}
+            dims={RELATION_MATCH_DIMS}
+            detail={detail}
+            more={graph.dropped_more?.relation_matches}
+            first="概括关键词"
+            firstValue={(row) => row.keyword ?? ""}
+            chunks={chunks}
+            extra={(row) => (row.also_entity ? "和 ③ 重复" : undefined)}
+          />
+        )}
+        {detail.kind === "chunks" && (
+          <ChunksDetail
+            rows={graph.tables[detail.table]}
+            relations={relations}
+          />
+        )}
+      </div>
+    </DetailDialog>
+  );
+}
+
+function NamesDetail({
+  graph,
+  detail,
+}: {
+  graph: GraphTrace;
+  detail: { dim?: string; value?: string };
+}) {
+  const list = useDetailList(
+    graph.name_matches,
+    NAME_DIMS,
+    detail.dim,
+    detail.value,
+  );
+  return (
+    <>
+      <DetailFilters list={list} more={graph.dropped_more?.names} />
+      <div className="diag-table-wrap">
+        <table className="diag-table grt-table">
+          <thead>
+            <tr>
+              <th>具体关键词</th>
+              <th>匹配到的名字</th>
+              <th>出自</th>
+              <th>相似度</th>
+              <th>归到实体</th>
+              <th>结果</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.rows.map((match, index) => (
+              <tr
+                key={`${match.keyword}-${match.entity_id}-${match.name}-${index}`}
+                className={match.kept ? "" : "is-dropped"}
+              >
+                <td>{match.keyword}</td>
+                <td>{match.name}</td>
+                <td>
+                  {match.title ?? "—"}
+                  {match.version_number ? (
+                    <em className="grt-v">图 v{match.version_number}</em>
+                  ) : null}
+                </td>
+                <td className="num">{score(match.score)}</td>
+                <td>
+                  {match.entity_name ?? "—"}
+                  {match.entity_type ? (
+                    <small>（{match.entity_type}）</small>
+                  ) : null}
+                </td>
+                <td>
+                  <Result kept={match.kept} reason={match.reason} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Pager page={list.page} total={list.total} onPage={list.setPage} />
+    </>
+  );
+}
+
+function RelationsDetail({
+  rows,
+  dims,
+  detail,
+  more,
+  first,
+  firstValue,
+  chunks,
+  extra,
+}: {
+  rows: RelationRow[];
+  dims: Dim<RelationRow>[];
+  detail: { dim?: string; value?: string };
+  more?: number;
+  first: string;
+  firstValue: (row: RelationRow) => string;
+  chunks: Map<string, ChunkInfo>;
+  extra?: (row: RelationRow) => string | undefined;
+}) {
+  const list = useDetailList(rows, dims, detail.dim, detail.value);
+  return (
+    <>
+      <DetailFilters list={list} more={more} />
+      <RelationTable
+        rows={list.rows}
+        first={first}
+        firstValue={firstValue}
+        chunks={chunks}
+        extra={extra}
+      />
+      <Pager page={list.page} total={list.total} onPage={list.setPage} />
+    </>
+  );
+}
+
+function ChunksDetail({
+  rows,
+  relations,
+}: {
+  rows: GraphRetrievalTable[];
+  relations: Map<string, GraphRetrievalRelation>;
+}) {
+  const items = useMemo(
+    () => rows.map((row) => ({ ...row, kept: row.kept !== false })),
+    [rows],
+  );
+  const list = useDetailList(items, []);
+  return (
+    <>
+      <DetailFilters list={list} />
+      <ChunkTable rows={list.rows} relations={relations} />
+      <Pager page={list.page} total={list.total} onPage={list.setPage} />
+    </>
   );
 }
 
@@ -171,9 +625,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
       if (!map.has(row.relation_id)) map.set(row.relation_id, row);
     return map;
   }, [graph]);
-  const names = useFold(graph.name_matches);
-  const entityRelations = useFold(graph.entity_relations);
-  const relationMatches = useFold(graph.relation_matches);
+  const [detail, setDetail] = useState<Detail | null>(null);
   const words = graph.keywords;
   const settings = graph.settings ?? {};
   if (graph.status !== "ok")
@@ -248,57 +700,29 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
             ，每个关键词前 {settings.graph_name_top_k ?? 10} 个）→
             按归属合并成实体
           </small>
+          <DetailButton
+            count={graph.name_matches.length}
+            onClick={() => setDetail({ kind: "names" })}
+          />
         </h5>
         {graph.name_matches.length === 0 ? (
           <p className="grt-empty">没有匹配到名字</p>
         ) : (
-          <div className="diag-table-wrap">
-            <table className="diag-table grt-table">
-              <thead>
-                <tr>
-                  <th>具体关键词</th>
-                  <th>匹配到的名字</th>
-                  <th>出自</th>
-                  <th>相似度</th>
-                  <th>归到实体</th>
-                  <th>结果</th>
-                </tr>
-              </thead>
-              <tbody>
-                {names.visible.map((match, index) => (
-                  <tr
-                    key={`${match.keyword}-${match.entity_id}-${match.name}-${index}`}
-                  >
-                    <td>{match.keyword}</td>
-                    <td>{match.name}</td>
-                    <td>
-                      {match.title ?? "—"}
-                      {match.version_number ? (
-                        <em className="grt-v">图 v{match.version_number}</em>
-                      ) : null}
-                    </td>
-                    <td className="num">{score(match.score)}</td>
-                    <td>
-                      {match.entity_name ?? "—"}
-                      {match.entity_type ? (
-                        <small>（{match.entity_type}）</small>
-                      ) : null}
-                    </td>
-                    <td>
-                      <Result kept={match.kept} reason={match.reason} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <CountTable
+            first="具体关键词"
+            groups={groupCounts(
+              graph.name_matches,
+              (item) => item.keyword,
+              (item) => item.entity_id,
+            )}
+            unit="个名字"
+            distinctLabel="归到实体"
+            distinctUnit="个"
+            onDetail={(key) =>
+              setDetail({ kind: "names", dim: "keyword", value: key })
+            }
+          />
         )}
-        <FoldButton
-          count={names.dropped}
-          more={graph.dropped_more?.names}
-          open={names.open}
-          onClick={names.toggle}
-        />
         <p className="grt-summary">
           {graph.entities.length
             ? `找到 ${graph.entities.length} 个实体：${graph.entities.map((entity) => entity.name).join("、")}`
@@ -313,21 +737,28 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
             一跳：找到的实体直接相连的关系，按和问题的相似度排序，每个实体最多{" "}
             {settings.graph_entity_relation_limit ?? 10} 条
           </small>
+          <DetailButton
+            count={graph.entity_relations.length}
+            onClick={() => setDetail({ kind: "entityRelations" })}
+          />
         </h5>
-        <RelationTable
-          rows={entityRelations.visible}
-          first="实体"
-          firstValue={(row) =>
-            "entity_name" in row ? String(row.entity_name ?? "") : ""
-          }
-          chunks={chunks}
-        />
-        <FoldButton
-          count={entityRelations.dropped}
-          more={graph.dropped_more?.entity_relations}
-          open={entityRelations.open}
-          onClick={entityRelations.toggle}
-        />
+        {graph.entity_relations.length === 0 ? (
+          <p className="grt-empty">没有找到关系</p>
+        ) : (
+          <CountTable
+            first="实体"
+            groups={groupCounts(
+              graph.entity_relations,
+              (item) => item.entity_name ?? item.entity_id,
+              (item) => item.category,
+            )}
+            unit="条关系"
+            distinctLabel="关系类型"
+            onDetail={(key) =>
+              setDetail({ kind: "entityRelations", dim: "entity", value: key })
+            }
+          />
+        )}
       </section>
 
       <section className="grt-step">
@@ -338,22 +769,28 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
             {settings.graph_relation_min_score ?? 0.5}
             ，每个关键词前 {settings.graph_relation_top_k ?? 20} 条）
           </small>
+          <DetailButton
+            count={graph.relation_matches.length}
+            onClick={() => setDetail({ kind: "relationMatches" })}
+          />
         </h5>
-        <RelationTable
-          rows={relationMatches.visible}
-          first="概括关键词"
-          firstValue={(row) => ("keyword" in row ? String(row.keyword) : "")}
-          chunks={chunks}
-          extra={(row) =>
-            "also_entity" in row && row.also_entity ? "和 ③ 重复" : undefined
-          }
-        />
-        <FoldButton
-          count={relationMatches.dropped}
-          more={graph.dropped_more?.relation_matches}
-          open={relationMatches.open}
-          onClick={relationMatches.toggle}
-        />
+        {graph.relation_matches.length === 0 ? (
+          <p className="grt-empty">没有找到关系</p>
+        ) : (
+          <CountTable
+            first="概括关键词"
+            groups={groupCounts(
+              graph.relation_matches,
+              (item) => item.keyword,
+              (item) => item.category,
+            )}
+            unit="条关系"
+            distinctLabel="关系类型"
+            onDetail={(key) =>
+              setDetail({ kind: "relationMatches", dim: "keyword", value: key })
+            }
+          />
+        )}
       </section>
 
       <section className="grt-step">
@@ -363,20 +800,49 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
             关系的出处分片，同一片去重，名次按这一片对应的关系里相似度最高的那条
           </small>
         </h5>
-        <div className="grt-tables">
-          {(["entity", "relation"] as const).map((name) => (
-            <ChunkTable
-              key={name}
-              title={
-                name === "entity"
-                  ? "图 · 实体（来自 ③）"
-                  : "图 · 关系（来自 ④）"
-              }
-              rows={graph.tables[name]}
-              relations={relations}
-            />
-          ))}
-        </div>
+        <table className="diag-table grt-table grt-count-table">
+          <thead>
+            <tr>
+              <th>排名表</th>
+              <th>分片</th>
+              <th>来自关系</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {(["entity", "relation"] as const).map((name) => {
+              const rows = graph.tables[name];
+              const kept = rows.filter((row) => row.kept !== false).length;
+              const linked = new Set(rows.flatMap((row) => row.relation_ids))
+                .size;
+              return (
+                <tr key={name}>
+                  <td>{CHUNK_TABLES[name]}</td>
+                  <td className="num">
+                    {kept} 个
+                    {rows.length > kept ? (
+                      <small>另有 {rows.length - kept} 个不在当前版本</small>
+                    ) : null}
+                  </td>
+                  <td className="num">{linked} 条</td>
+                  <td className="grt-count-action">
+                    {rows.length > 0 && (
+                      <button
+                        type="button"
+                        className="link-button button-sm"
+                        onClick={() =>
+                          setDetail({ kind: "chunks", table: name })
+                        }
+                      >
+                        详情
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
         <p className="grt-summary">
           合计 {graph.counts?.chunks ?? 0} 个分片
           {graph.counts &&
@@ -394,6 +860,15 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
         </h5>
         <GraphRetrievalMap graph={graph} chunks={chunks} />
       </section>
+      {detail && (
+        <TraceDetail
+          graph={graph}
+          detail={detail}
+          chunks={chunks}
+          relations={relations}
+          onClose={() => setDetail(null)}
+        />
+      )}
     </div>
   );
 }
@@ -470,19 +945,14 @@ function RelationTable({
 }
 
 function ChunkTable({
-  title,
   rows,
   relations,
 }: {
-  title: string;
   rows: GraphRetrievalTable[];
   relations: Map<string, GraphRetrievalRelation>;
 }) {
   return (
-    <div className="grt-chunk-table">
-      <strong>
-        {title} · {rows.filter((row) => row.kept !== false).length} 个分片
-      </strong>
+    <div className="diag-table-wrap">
       {rows.length === 0 ? (
         <p className="grt-empty">没有分片</p>
       ) : (
