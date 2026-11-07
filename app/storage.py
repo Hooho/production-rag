@@ -35,6 +35,7 @@ from . import prompts
 from .ingestion.chunking import chunk_document_records, chunk_settings
 from .ingestion.parser import OCR_LANGUAGES
 from .ingestion.spreadsheet import TABLE_CHUNKING
+from .textnorm import TEXT_FOLD
 
 
 logger = logging.getLogger("production-rag")
@@ -714,6 +715,11 @@ class Storage:
             and (
                 metadata.get("parser") != "spreadsheet"
                 or metadata.get("table_chunking") == TABLE_CHUNKING
+            )
+            # PDF 在部首字换回汉字之前解析的（没有 text_fold）：重新上传同一个文件要按新规则重新切分。
+            and (
+                metadata.get("parse_strategy") != "hi_res"
+                or metadata.get("text_fold") == TEXT_FOLD
             )
         )
 

@@ -12,6 +12,9 @@
 import re
 import unicodedata
 
+# 记进文档元数据（text_fold）：PDF 没有这个标记的旧版本，重新上传同一个文件不算重复，会按新规则重新切分。
+TEXT_FOLD = 1
+
 SUPPLEMENT = {
     "⺟": "母",
     "⺠": "民",

@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 
-from ..textnorm import fold_sections
+from ..textnorm import TEXT_FOLD, fold_sections
 from .spreadsheet import SPREADSHEET_EXTENSIONS, TABLE_CHUNKING, spreadsheet_sections
 
 ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf", ".docx"} | SPREADSHEET_EXTENSIONS
@@ -314,6 +314,8 @@ def parse_metadata(path, sections, elements=None, stats=None):
         "parse_strategy": "hi_res" if suffix == ".pdf" else ("default" if suffix == ".docx" else None),
         "table_structure_inference": TABLE_STRUCTURE_ENABLED if suffix == ".pdf" else None,
         "ocr_languages": list(OCR_LANGUAGES) if suffix == ".pdf" else None,
+        # 部首字换回汉字的规则版本（app/textnorm.py）
+        "text_fold": TEXT_FOLD,
         "table_chunking": TABLE_CHUNKING if suffix in SPREADSHEET_EXTENSIONS else None,
         "table_fallback_reason": TABLE_FALLBACK_REASON if suffix == ".pdf" and not TABLE_STRUCTURE_ENABLED else None,
         "page_count": total_pages or (max(pages) if pages else None),

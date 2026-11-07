@@ -31,3 +31,24 @@ def test_parsed_sections_and_text_are_folded():
 # 评测证据：旧题里复制的原文带部首字，导入后的新分片是正常汉字，比对时也要对得上。
 def test_evaluation_evidence_matches_after_folding():
     assert normalize("⻓期⻛险") == normalize("长期风险")
+
+
+# 换规则之前解析的 PDF（元数据没有 text_fold）：重新上传同一个文件不算重复，会按新规则重新切分。
+def test_old_pdf_versions_are_not_duplicates():
+    from app.ingestion.chunking import chunk_settings
+    from app.ingestion.parser import OCR_LANGUAGES
+    from app.storage import Storage
+    from app.textnorm import TEXT_FOLD
+
+    size, overlap = chunk_settings()
+    metadata = {
+        "contextual_retrieval": False,
+        "chunk_size": size,
+        "overlap": overlap,
+        "parse_strategy": "hi_res",
+        "ocr_languages": list(OCR_LANGUAGES),
+    }
+    assert not Storage.same_settings(metadata, False)
+    assert Storage.same_settings({**metadata, "text_fold": TEXT_FOLD}, False)
+    # 不是 PDF（纯文本、Word 等）不看这个标记。
+    assert Storage.same_settings({**metadata, "parse_strategy": None}, False)
