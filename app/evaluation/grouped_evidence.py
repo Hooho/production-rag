@@ -3,6 +3,8 @@ import hashlib
 import re
 import unicodedata
 
+from ..textnorm import fold_radicals
+
 
 def fingerprint(content):
     text = re.sub(r"\s+", "", unicodedata.normalize("NFKC", content or ""))
@@ -12,7 +14,7 @@ def fingerprint(content):
 def legacy_groups(texts, catalog):
     """旧题只按原有证据定位分片，不推测或新增答案要点。"""
     def normalized(text):
-        return re.sub(r"\s+", "", unicodedata.normalize("NFKC", text or ""))
+        return re.sub(r"\s+", "", fold_radicals(unicodedata.normalize("NFKC", text or "")))
     rows = [(row, normalized(row["quote"])) for row in catalog]
     result = []
     for index, text in enumerate(texts):

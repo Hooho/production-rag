@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 
 from ..mysql.store import eval_items, eval_suite_items, eval_suites, settings as settings_table
 from ..runtime_config import bound_engine
+from ..textnorm import fold_radicals
 
 
 # 评测语料和结果放在仓库的 eval 目录；调参评测集和专项评测集的题目存数据库（eval_items、eval_suites），
@@ -29,7 +30,7 @@ SPLITS = ["dev", "holdout"]
 # 比较前统一去掉空白并做 NFKC 规范化（全角字母数字和标点转半角）。
 # 语料经过 OCR、分块和换行处理，空格和全角半角经常与标注时复制的原文不一致，不统一就会误判为未命中。
 def normalize(text):
-    folded = unicodedata.normalize("NFKC", text or "")
+    folded = fold_radicals(unicodedata.normalize("NFKC", text or ""))
     return re.sub(r"\s+", "", folded)
 
 

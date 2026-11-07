@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from ..ingestion.chunking import chunk_document_records
 from ..mysql.store import chunks, document_chunks, document_heads, documents
+from ..textnorm import fold_radicals
 from .dataset import EVIDENCE_OR, normalize
 from .retrieval import EVAL_OWNER
 
@@ -17,7 +18,7 @@ def normalized_index(text):
     folded = []
     positions = []
     for index, character in enumerate(text):
-        for piece in unicodedata.normalize("NFKC", character):
+        for piece in fold_radicals(unicodedata.normalize("NFKC", character)):
             if piece.isspace():
                 continue
             folded.append(piece)

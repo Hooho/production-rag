@@ -12,6 +12,7 @@ from ..mysql.tables import (
     graph_relations,
     graph_versions,
 )
+from ..textnorm import fold_radicals
 from .schemas import now
 
 ORGANIZATION_TYPE = "组织"
@@ -43,50 +44,11 @@ KEY_LENGTH = 255
 
 # 规范化：全角转半角、去空格、英文小写、去掉两边的书名号和引号；组织再去掉一个常见后缀。
 # 规则和 schemas.MATCHING_RULES 里给页面看的说明一致。
-# PDF 解析出的原文里常有「部首补充」区的字（⻛险的 ⻛ 是 U+2EDB，不是常用的 风 U+98CE），
-# 看起来一样，NFKC 却不转换（康熙部首区 ⼀ 等 NFKC 会转）。MySQL 默认比较规则又把它们当成同一个字，
-# 程序和数据库判断不一致会导致合并键「重复」写入失败。规范化时统一转成常用字。
-RADICALS = str.maketrans(
-    {
-        "\u2e9f": "母",
-        "\u2ea0": "民",
-        "\u2ea9": "王",
-        "\u2eae": "竹",
-        "\u2ec1": "虎",
-        "\u2ec4": "西",
-        "\u2ec5": "见",
-        "\u2ec6": "角",
-        "\u2ec8": "讠",
-        "\u2ec9": "贝",
-        "\u2ecb": "车",
-        "\u2ed1": "長",
-        "\u2ed3": "长",
-        "\u2ed4": "门",
-        "\u2ed8": "青",
-        "\u2ed9": "韦",
-        "\u2eda": "页",
-        "\u2edb": "风",
-        "\u2edc": "飞",
-        "\u2edd": "食",
-        "\u2ee2": "马",
-        "\u2ee3": "骨",
-        "\u2ee4": "鬼",
-        "\u2ee5": "鱼",
-        "\u2ee6": "鸟",
-        "\u2ee7": "卤",
-        "\u2ee8": "麦",
-        "\u2ee9": "黄",
-        "\u2eec": "齐",
-        "\u2eee": "齿",
-        "\u2ef0": "龙",
-        "\u2ef3": "龟",
-    }
-)
-
-
+# PDF 原文里的部首字（⻛险的 ⻛ 是 U+2EDB，不是 风）看起来一样、编码不同；不换的话程序当成两个名字，
+# MySQL 默认比较规则又当成同一个，合并键写入时会唯一键重复。规范化时统一换回汉字（见 app/textnorm.py）。
 def fold(text):
-    """NFKC 再把部首补充区的字转成常用字。"""
-    return unicodedata.normalize("NFKC", text or "").translate(RADICALS)
+    """NFKC 再把部首字换回对应的汉字。"""
+    return fold_radicals(unicodedata.normalize("NFKC", text or ""))
 
 
 def normalize(name, entity_type=None):

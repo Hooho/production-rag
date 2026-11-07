@@ -4,6 +4,7 @@ import re
 
 
 from .. import runtime_config
+from ..textnorm import fold_radicals
 
 # 代码默认值；实际切分用设置页「RAG 配置 → 分片」里的值（没改过时就是这两个值）。
 CHUNK_SIZE = 800
@@ -16,9 +17,9 @@ def chunk_settings():
 HEADING_ENDINGS = "。！？；，、：.!?;,：,、)]}）》”’"
 
 
-# 统一换行和空白，保留段落边界供后续切分。
+# 统一换行和空白，保留段落边界供后续切分；PDF 里的部首字换回汉字（见 app/textnorm.py）。
 def normalize_text(content):
-    text = content.replace("\r\n", "\n").replace("\r", "\n").replace("\f", "\n")
+    text = fold_radicals(content).replace("\r\n", "\n").replace("\r", "\n").replace("\f", "\n")
     lines = []
     for line in text.split("\n"):
         lines.append(re.sub(r"[ \t]+", " ", line).strip())
