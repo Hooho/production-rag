@@ -131,6 +131,8 @@ export function GraphCheckStep({
   const [sub, setSub] = useState<number | null>(null);
   const [filter, setFilter] = useState<"pending" | "all">("pending");
   const [page, setPage] = useState(1);
+  // 确认写入页：已经写入的项默认收起。
+  const [showWritten, setShowWritten] = useState(false);
   const [original, setOriginal] = useState<{
     title: string;
     body: string;
@@ -250,6 +252,38 @@ export function GraphCheckStep({
   );
   const toJudge = items.length - finished.length;
   const unwritten = unwrittenOf(report ?? {});
+  // 上次写入的是哪几项（老记录没记 ids：当作写入的就是现在采纳的）。
+  const writtenIds = new Set(
+    report?.applied?.ids ??
+      (report?.applied && countApplied(report.applied.items) > 0
+        ? accepted.map((item) => item.id)
+        : []),
+  );
+  const written = accepted.filter((item) => writtenIds.has(item.id));
+  const added = accepted.filter((item) => !writtenIds.has(item.id));
+  const dropped = items.filter(
+    (item) =>
+      writtenIds.has(item.id) && decisions[item.id]?.decision !== "accept",
+  );
+  const changeText =
+    [
+      added.length ? `新增 ${added.length}` : "",
+      dropped.length ? `撤掉 ${dropped.length}` : "",
+    ]
+      .filter(Boolean)
+      .join(" · ") || `${accepted.length} 项`;
+  const removeButton = (item: Item) =>
+    canDecide && (
+      <button
+        type="button"
+        className={`link-button gr-remove${loadingClass(action === `decide:${item.id}:null`)}`}
+        disabled={busy}
+        title="撤销采纳，回到第 3 步待处理；写入时不包含这一项"
+        onClick={() => void decide([item.id], null)}
+      >
+        移除
+      </button>
+    );
   const canDecide =
     canEdit &&
     ["ready", "stopped", "scanned", "queued", "running"].includes(status);
@@ -690,52 +724,88 @@ export function GraphCheckStep({
               <strong>不会马上生效</strong>，要在「图谱版本」里设为生效。
               {DEPENDENT[step]}
             </p>
-            {report.applied && !unwritten && (
-              <p className="gc-written">
-                已写入：{report.applied.by} ·{" "}
-                {formatShortTime(report.applied.at)}，下面{" "}
-                {countApplied(report.applied.items)}{" "}
-                项已经在新版本里。移除某一项或回到第 3
-                步改了决定后，才需要再写入。
-              </p>
+            {report.applied && (
+              <div className="gc-written">
+                <span>
+                  已写入：{report.applied.by} ·{" "}
+                  {formatShortTime(report.applied.at)}，共{" "}
+                  {countApplied(report.applied.items)} 项，已经在新版本里。
+                  {unwritten
+                    ? "下面是之后的改动，确认写入后再存成一个新版本。"
+                    : "移除某一项或回到第 3 步改了决定后，才需要再写入。"}
+                </span>
+                {written.length > 0 && (
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() => setShowWritten((value) => !value)}
+                  >
+                    {showWritten ? "收起" : "查看已经写入的实体关系"}
+                  </button>
+                )}
+                {showWritten && (
+                  <ol className="gr-plan">
+                    {written.map((item) => (
+                      <li key={item.id}>
+                        <span>
+                          {summaryLine(
+                            step,
+                            item,
+                            judgments[item.id],
+                            decisions[item.id],
+                          )}
+                          {removeButton(item)}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
             )}
-            {accepted.length ? (
+            {/* 新增的（采纳了还没写入的）和要撤掉的（写入过、现在不采纳了）才列在这里。 */}
+            {added.length > 0 || dropped.length > 0 ? (
               <ol className="gr-plan">
-                {accepted.map((item) => (
+                {added.map((item) => (
                   <li key={item.id}>
                     <span>
+                      <Tag size="sm" tone="info">
+                        新增
+                      </Tag>
                       {summaryLine(
                         step,
                         item,
                         judgments[item.id],
                         decisions[item.id],
                       )}
-                      {canDecide && (
-                        <button
-                          type="button"
-                          className={`link-button gr-remove${loadingClass(action === `decide:${item.id}:null`)}`}
-                          disabled={busy}
-                          title="撤销采纳，回到第 3 步待处理；写入时不包含这一项"
-                          onClick={() => void decide([item.id], null)}
-                        >
-                          移除
-                        </button>
+                      {removeButton(item)}
+                    </span>
+                  </li>
+                ))}
+                {dropped.map((item) => (
+                  <li key={item.id}>
+                    <span>
+                      <Tag size="sm" tone="warning">
+                        撤掉
+                      </Tag>
+                      {summaryLine(
+                        step,
+                        item,
+                        judgments[item.id],
+                        decisions[item.id],
                       )}
                     </span>
                   </li>
                 ))}
               </ol>
             ) : (
-              <p className="graph-note">
-                {report.applied
-                  ? `上次已写入 ${countApplied(report.applied.items)} 项；现在没有采纳的项，写入会撤掉上次写入的内容。`
-                  : "还没有采纳任何建议。"}
-              </p>
+              !report.applied && (
+                <p className="graph-note">还没有采纳任何建议。</p>
+              )
             )}
             {canWrite && unwritten && (
               <div className="gr-actions">
                 <ConfirmPopover
-                  message={`写入 ${accepted.length} 项？结果存成新版本，不会马上生效。`}
+                  message={`写入改动（${changeText}）？写入后共 ${accepted.length} 项，结果存成新版本，不会马上生效。`}
                   confirmText="写入"
                   onConfirm={() =>
                     act("write", "已提交：写入后存成新版本（不自动生效）")
@@ -746,7 +816,7 @@ export function GraphCheckStep({
                     className={`primary-button${loadingClass(action === "write")}`}
                     disabled={busy}
                   >
-                    确认写入（{accepted.length} 项）
+                    确认写入（{changeText}）
                   </button>
                 </ConfirmPopover>
               </div>
