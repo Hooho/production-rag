@@ -499,7 +499,7 @@ export function GraphCheckStep({
               <div className={`gc-progress${running ? "" : " is-stopped"}`}>
                 <div className="gc-progress-head">
                   <span className="gc-progress-phases">
-                    <span>① 找可疑项：{items.length} 项</span>
+                    <span>① 要补抽的分片：{items.length} 片</span>
                     <span className={running ? "is-active" : ""}>
                       ② AI 判断：{finished.length} / {items.length}
                     </span>
