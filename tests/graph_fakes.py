@@ -25,8 +25,11 @@ class FakeGraphClient:
         for row in data:
             self.collections[collection_name][row["id"]] = row
 
-    @staticmethod
-    def matches(row, expression):
+    @classmethod
+    def matches(cls, row, expression):
+        if " and id in " in expression:
+            head, ids = expression.split(" and id in ", 1)
+            return cls.matches(row, head) and row["id"] in json.loads(ids)
         if expression.startswith("version_id in "):
             return row["version_id"] in json.loads(expression[len("version_id in "):])
         if expression.startswith("document_id == "):

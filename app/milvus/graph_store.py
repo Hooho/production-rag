@@ -88,14 +88,18 @@ class GraphVectorStore:
     def search_names(self, vector, version_ids, limit):
         return self._search(self.names, NAME_FIELDS, vector, version_ids, limit)
 
-    def search_relations(self, vector, version_ids, limit):
-        return self._search(self.relations, RELATION_FIELDS, vector, version_ids, limit)
+    # ids 不为空时只在这些关系里算相似度（给找到的实体的关系按和问题的相似度排序）。
+    def search_relations(self, vector, version_ids, limit, ids=None):
+        return self._search(self.relations, RELATION_FIELDS, vector, version_ids, limit, ids)
 
-    def _search(self, collection, fields, vector, version_ids, limit):
-        if not version_ids or not self.exists(collection):
+    def _search(self, collection, fields, vector, version_ids, limit, ids=None):
+        if not version_ids or not self.exists(collection) or ids == []:
             return []
+        expression = self.version_filter(version_ids)
+        if ids:
+            expression += " and id in [" + ", ".join(filter_literal(item) for item in ids) + "]"
         result = self.client.search(collection_name=collection, data=[vector], anns_field="vector",
-            filter=self.version_filter(version_ids), limit=limit, output_fields=fields,
+            filter=expression, limit=limit, output_fields=fields,
             search_params={"metric_type": "COSINE"}, timeout=10)
         hits = []
         for hit in result[0]:
