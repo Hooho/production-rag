@@ -100,12 +100,14 @@ class DocumentSearchTool:
         # 权限范围每次检索只查一次，所有检索词和召回方式共用；范围由服务端按登录身份从 MySQL 查出，模型和前端改不了。
         # 测试和评测里的替身存储没有权限范围，这时退回各自查询、诊断里不记范围。
         # scope 只给知识巡检用：传入全库范围，判断"提问人看不到、但知识库里其实有"的权限缺口。线上问答不传。
+        scope_started = time.monotonic()
         if scope is None:
             scope = (
                 store.readable_scope(owner)
                 if hasattr(store, "readable_scope")
                 else None
             )
+        scope_ms = round((time.monotonic() - scope_started) * 1000)
         limit = title_limit(owner)
         if limit is not None and scope is not None:
             kept = [item for item in scope["documents"] if item["title"] in limit]
@@ -341,6 +343,7 @@ class DocumentSearchTool:
             "dense_hits": dense_hits,
             "keyword_hits": keyword_hits,
             "graph_hits": graph_hits,
+            "scope_ms": scope_ms,
             "dense_ms": dense_ms,
             "keyword_ms": keyword_ms,
             "graph_ms": (graph or {}).get("timings", {}).get("total_ms"),

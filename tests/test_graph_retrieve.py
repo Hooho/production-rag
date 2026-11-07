@@ -170,3 +170,23 @@ def test_search_tool_graph_failure(graph, runtime, monkeypatch):
     assert result["diagnostics"]["graph"]["status"] == "failed"
     assert "milvus down" in result["diagnostics"]["graph"]["reason"]
     assert result["stats"]["dense_hits"] > 0
+
+
+# Agent：打开图检索时 search_knowledge 多两个可选参数；传了就直接用，不再调用模型提取；hybrid 包含图。
+def test_agent_search_knowledge_graph(graph, runtime):
+    from app.agentic import tools as agent_tools
+
+    client, store, models, document_id = graph
+    ctx = agent_tools.AgentContext(store=store, models=models, owner="alice")
+    runtime(graph_retrieval=False)
+    names = lambda: agent_tools.tool_definitions(ctx)[0]["function"]["parameters"]["properties"]
+    assert "entities" not in names()
+    runtime(graph_retrieval=True, graph_name_min_score=0.3, graph_relation_min_score=0.3)
+    assert "entities" in names() and "themes" in names()
+    outcome = agent_tools.search_knowledge(ctx, "段永平投资了什么", entities=["段永平"], themes=["投资"])
+    graph_diag = outcome["trace"]["retrieval"]["diagnostics"]["graph"]
+    assert graph_diag["keywords"]["source"] == "agent" and graph_diag["status"] == "ok"
+    keyword_only = agent_tools.search_knowledge(ctx, "段永平", mode="keyword")
+    assert "graph" not in keyword_only["trace"]["retrieval"]["diagnostics"]
+    bad = agent_tools.search_knowledge(ctx, "段永平", entities="段永平")
+    assert bad["ok"] is False and "entities" in bad["content"]
