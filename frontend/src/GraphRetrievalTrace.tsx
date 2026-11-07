@@ -15,7 +15,7 @@ import "./GraphRetrieval.css";
 // 每一步都列出留下的和去掉的（附原因）。权限、生效版本在查询条件里，没有「权限过滤掉多少条」。
 
 const SOURCE_LABELS: Record<string, string> = {
-  agent: "Agent 提供",
+  agent: "调用方提供",
   model: "模型提取（graph_keywords）",
   fallback: "没有提取",
 };

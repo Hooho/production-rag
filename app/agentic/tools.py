@@ -88,31 +88,11 @@ def invalid(message):
 # ---------- search_knowledge ----------
 
 
-# 图检索的关键词（entities / themes）：Agent 给了就直接用，不再调用模型提取；没给由图检索自己提取。
-GRAPH_KEYWORD_MAX = 8
-
-
-def keyword_list(value, name):
-    if value is None:
-        return [], None
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        return None, f"{name} 应为字符串列表"
-    if len(value) > GRAPH_KEYWORD_MAX:
-        return None, f"{name} 最多 {GRAPH_KEYWORD_MAX} 个"
-    return [item.strip() for item in value if item.strip()], None
-
-
-def search_knowledge(
-    ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT, entities=None, themes=None
-):
+# 图检索对 Agent 是透明的：Agent 只管写检索词，打开图检索时 hybrid 模式在工具内部多走一路图，
+# 关键词由图检索自己从 query 里提取（graph_keywords）。工具定义和 Agent 提示词都不随开关变化。
+def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
     if not isinstance(query, str) or not query.strip():
         return invalid("query 不能为空")
-    entities, error = keyword_list(entities, "entities")
-    if error:
-        return invalid(error)
-    themes, error = keyword_list(themes, "themes")
-    if error:
-        return invalid(error)
     if mode not in SEARCH_MODES:
         return invalid(f"mode 只能是 {'、'.join(SEARCH_MODES)}")
     if isinstance(top_k, bool) or not isinstance(top_k, int):
@@ -135,9 +115,6 @@ def search_knowledge(
         parent=settings["agent_parent_context"],
         return_limit=cap,
         excellent_score=settings["agent_excellent_score"],
-        graph_keywords={"entities": entities, "themes": themes}
-        if entities or themes
-        else None,
     )
     # 过了相关度阈值的资料，最多给 agent_return_limit 条；模型要得更少（top_k）就再少取，不能绕过阈值。
     # 不低于 Agent 优秀阈值的资料全部给，不受模型自己要的 top_k 限制（检索那边也已经不受上限限制）。
@@ -370,29 +347,7 @@ def tool_definitions(ctx):
     同一次问答里每轮的 tools 完全相同，可以命中模型服务的前缀缓存。
     """
     readable, _ = ctx.data_tool.load_access(ctx.store, ctx.owner)
-    settings = runtime_snapshot()
-    cap = settings["agent_return_limit"]
-    # 打开图检索时才多给两个可选参数；关闭时工具定义和以前完全一样。
-    graph_parameters = (
-        {
-            "entities": {
-                "type": "array",
-                "items": {"type": "string"},
-                "maxItems": GRAPH_KEYWORD_MAX,
-                "description": "可选，hybrid 模式的图检索用：问题里的具体对象（人名、公司、产品等），照抄写法。"
-                "不填时系统会自己从 query 里提取。",
-            },
-            "themes": {
-                "type": "array",
-                "items": {"type": "string"},
-                "maxItems": GRAPH_KEYWORD_MAX,
-                "description": "可选，hybrid 模式的图检索用：问题关心的主题、关系或角度（如投资经历、人物评价）。"
-                "不填时系统会自己从 query 里提取。",
-            },
-        }
-        if settings.get("graph_retrieval")
-        else {}
-    )
+    cap = runtime_snapshot()["agent_return_limit"]
     definitions = [
         function(
             "search_knowledge",
@@ -415,7 +370,6 @@ def tool_definitions(ctx):
                     "maximum": cap,
                     "description": f"最多返回几条，默认 {min(TOP_K_DEFAULT, cap)}，最多 {cap}。",
                 },
-                **graph_parameters,
                 "query_explanation": QUERY_EXPLANATION_SCHEMA,
             },
             ["query", "query_explanation"],

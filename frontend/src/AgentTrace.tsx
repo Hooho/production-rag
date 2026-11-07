@@ -1387,14 +1387,14 @@ function ProgramItem({ result }: { result: AgentToolResult }) {
       {result.name === "search_knowledge" && retrieval && (
         <RetrievalFunnel stats={stats} topK={trace.top_k} given={ids.length} />
       )}
-      {/* 打开图检索时：这次调用的图检索明细（关键词是 Agent 给的还是系统提取的、找到哪些实体和关系、带回哪些分片）。 */}
+      {/* 打开图检索时：这次调用的图检索明细（从检索词里提出的关键词、找到哪些实体和关系、带回哪些分片）。 */}
       {result.name === "search_knowledge" && graphTrace && (
         <details className="agent-graph-trace">
           <summary>
             图检索
             <small>
               {graphTrace.status === "ok"
-                ? `${graphTrace.counts?.chunks ?? 0} 个分片 · 关键词来源：${graphTrace.keywords?.source === "agent" ? "Agent 提供" : "系统提取"}`
+                ? `${graphTrace.counts?.chunks ?? 0} 个分片 · 关键词：${[...(graphTrace.keywords?.entities ?? []), ...(graphTrace.keywords?.themes ?? [])].join("、") || "—"}`
                 : graphTrace.reason}
             </small>
           </summary>
