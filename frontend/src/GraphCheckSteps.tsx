@@ -109,20 +109,27 @@ export function VerticalSteps({
   );
 }
 
-// 横向步骤条（只看不点）：圆圈 + 标题 + 副标题，标题右边一条连线接到下一步，下面一行说明。
+// 进度步骤条（只看不点）：圆圈 + 标题 + 副标题，下面一行说明，连线接到下一步。
+// horizontal：横着排，连线在标题右边；vertical：竖着排，连线在圆圈下面。
 // 已完成：白底蓝圈打勾、后面的连线变蓝；进行中：浅蓝底蓝圈数字，说明文字加深；等待：灰圈数字；失败：红圈 ×。
-export type HorizontalStepStatus = "finish" | "process" | "wait" | "error";
-export type HorizontalStep = {
+export type ProgressStepStatus = "finish" | "process" | "wait" | "error";
+export type ProgressStep = {
   key: string;
   title: string;
   subtitle?: string;
   description?: string;
-  status: HorizontalStepStatus;
+  status: ProgressStepStatus;
 };
 
-export function HorizontalSteps({ steps }: { steps: HorizontalStep[] }) {
+export function ProgressSteps({
+  steps,
+  direction = "horizontal",
+}: {
+  steps: ProgressStep[];
+  direction?: "horizontal" | "vertical";
+}) {
   return (
-    <ol className="hsteps">
+    <ol className={`hsteps is-${direction}`}>
       {steps.map((item, index) => (
         <li key={item.key} className={`hstep is-${item.status}`}>
           <span className="hstep-icon" aria-hidden="true">

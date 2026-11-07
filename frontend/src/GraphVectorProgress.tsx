@@ -1,7 +1,7 @@
 import type { GraphTaskVectors, GraphVectorState } from "./api";
 import { DetailDialog } from "./DetailDialog";
 import { formatDuration, formatShortTime } from "./format";
-import { HorizontalSteps, type HorizontalStep } from "./GraphCheckSteps";
+import { ProgressSteps, type ProgressStep } from "./GraphCheckSteps";
 import { Tag } from "./Tag";
 import type { Tone } from "./tags";
 
@@ -85,7 +85,7 @@ function remaining(value: GraphTaskVectors) {
 }
 
 // 三步的状态：完成前面的打勾；当前这步进行中（失败、中断时打叉）；后面的等待。
-export function vectorSteps(value: GraphTaskVectors): HorizontalStep[] {
+export function vectorSteps(value: GraphTaskVectors): ProgressStep[] {
   const finished = value.state === "done";
   const broken = value.state === "failed" || value.state === "interrupted";
   const phase = PHASE_ORDER.indexOf(value.phase ?? "");
@@ -182,10 +182,10 @@ export function GraphVectorDialog({
           </Tag>
           <strong>{percent}%</strong>
         </div>
-        <HorizontalSteps steps={vectorSteps(value)} />
         <div className="gv-progress-bar">
           <span style={{ width: `${percent}%` }} />
         </div>
+        <ProgressSteps steps={vectorSteps(value)} direction="vertical" />
       </div>
       {value.state === "none" && (
         <p className="graph-note">

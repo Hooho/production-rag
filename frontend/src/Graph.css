@@ -1386,12 +1386,8 @@
 /* 建图任务 · 图检索向量的进度抽屉：阶段 + 进度条 + 明细。 */
 .gv-progress {
   display: grid;
-  gap: 8px;
-  margin-bottom: 16px;
-  padding: 14px 16px;
-  border: 1px solid #e3e8ef;
-  border-radius: 10px;
-  background: #f8fafc;
+  gap: 12px;
+  margin-bottom: 20px;
   font-size: 13px;
 }
 .gv-progress-head {
@@ -1453,7 +1449,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 横向步骤条（HorizontalSteps）：圆圈 + 标题 + 副标题 + 连线，下面一行说明。 */
+/* 进度步骤条（ProgressSteps）：圆圈 + 标题 + 副标题 + 连线，下面一行说明；横排或竖排。 */
 .hsteps {
   display: flex;
   gap: 16px;
@@ -1549,12 +1545,43 @@
 .hstep.is-error small {
   color: #b42335;
 }
-/* 抽屉窄的时候竖着排，连线去掉。 */
+/* 竖排：一步一行，连线从圆圈下面接到下一步的圆圈。 */
+.hsteps.is-vertical {
+  flex-direction: column;
+  gap: 0;
+}
+.hsteps.is-vertical .hstep {
+  position: relative;
+  flex: none;
+  padding-bottom: 18px;
+}
+.hsteps.is-vertical .hstep:last-child {
+  padding-bottom: 0;
+}
+.hsteps.is-vertical .hstep-line {
+  display: none;
+}
+.hsteps.is-vertical .hstep:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 32px;
+  bottom: 4px;
+  left: 14px;
+  width: 1px;
+  background: #d5dbe4;
+}
+.hsteps.is-vertical .hstep.is-finish:not(:last-child)::after {
+  background: #1d6ff2;
+}
+.hsteps.is-vertical .hstep-head {
+  flex-wrap: wrap;
+}
+/* 横排在窄处也改成竖排的样子，连线去掉。 */
 @media (max-width: 640px) {
-  .hsteps {
+  .hsteps.is-horizontal {
     flex-direction: column;
   }
-  .hstep-line {
+  .hsteps.is-horizontal .hstep-line {
     display: none;
   }
 }
