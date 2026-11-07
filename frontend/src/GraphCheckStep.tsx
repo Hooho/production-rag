@@ -14,6 +14,7 @@ import { ConfirmPopover } from "./ConfirmPopover";
 import { DetailDialog } from "./DetailDialog";
 import { VerticalSteps, type CheckStep } from "./GraphCheckSteps";
 import { formatShortTime } from "./format";
+import { HighlightedText, type HighlightGroup } from "./HighlightedText";
 import { Tag } from "./Tag";
 import { errorText, useToast } from "./Toast";
 
@@ -21,7 +22,12 @@ import { errorText, useToast } from "./Toast";
 // 左边竖直小步骤：找出可疑项 → AI 判断 → 逐条决定 → 确认写入；右边是这一小步的内容。
 
 type Item = Record<string, unknown> & { id: string };
-type ShowOriginal = (title: string, body: string) => void;
+// 打开原文浮窗；groups 是要高亮的实体名字和原文引用（HighlightedText）。
+type ShowOriginal = (
+  title: string,
+  body: string,
+  groups?: HighlightGroup[],
+) => void;
 const PAGE_SIZE = 20;
 type Decision = NonNullable<CheckReport["decisions"]>[string];
 
@@ -136,9 +142,10 @@ export function GraphCheckStep({
   const [original, setOriginal] = useState<{
     title: string;
     body: string;
+    groups?: HighlightGroup[];
   } | null>(null);
-  const showOriginal: ShowOriginal = (title, body) =>
-    setOriginal({ title, body });
+  const showOriginal: ShowOriginal = (title, body, groups) =>
+    setOriginal({ title, body, groups });
   const [scope, setScope] = useState<"few" | "all">("few");
   const [sample, setSample] = useState(0);
   // 检查用的模型：空 = 和建图时一样。
@@ -891,7 +898,7 @@ export function GraphCheckStep({
             title={original.title}
             onClose={() => setOriginal(null)}
           >
-            <p className="graph-chunk-text">{original.body}</p>
+            <HighlightedText text={original.body} groups={original.groups} />
           </DetailDialog>
         )}
       </div>
@@ -1000,7 +1007,7 @@ function ItemCard({
           </Tag>
         )}
       </header>
-      {itemBody(step, item, onOriginal)}
+      {itemBody(step, item, onOriginal, value)}
       {judgment?.status === "completed" && (
         <div className="gc-judgment">
           {judgmentBody(step, item, value, edit, setEdit, editable)}
@@ -1092,12 +1099,13 @@ function originalButton(
   title: string,
   body: string,
   onOriginal: ShowOriginal,
+  groups?: HighlightGroup[],
 ) {
   return (
     <button
       type="button"
       className="link-button gc-original"
-      onClick={() => onOriginal(title, body)}
+      onClick={() => onOriginal(title, body, groups)}
     >
       {label}
     </button>
@@ -1108,17 +1116,27 @@ function itemBody(
   step: CheckStepName,
   item: Item,
   onOriginal: ShowOriginal,
+  value: Record<string, unknown> = {},
 ): ReactNode {
   const chunkTitle = `第 ${Number(item.position) + 1} 片 · 原文`;
-  if (step === "glean")
+  if (step === "glean") {
+    // 原文高亮：已经抽出的实体（浅色）、这次补的实体（深色）、补的关系的原文引用（黄底）。
+    const added = (value.entities as { name: string }[] | undefined) ?? [];
+    const relations =
+      (value.relations as { evidence?: string }[] | undefined) ?? [];
     return (
       <p className="gr-small">
         {(item.names as string[]).length > 0
           ? `之前建图时从这片已经抽出了 ${(item.names as string[]).length} 个实体：${(item.names as string[]).join("、")}`
           : "建图时没从这片抽出任何实体"}
-        {originalButton("原文", chunkTitle, text(item.excerpt), onOriginal)}
+        {originalButton("原文", chunkTitle, text(item.excerpt), onOriginal, [
+          { kind: "entity-weak", texts: item.names as string[] },
+          { kind: "entity", texts: added.map((row) => row.name) },
+          { kind: "evidence", texts: relations.map((row) => row.evidence) },
+        ])}
       </p>
     );
+  }
   if (step === "relation")
     return (
       <>
@@ -1143,7 +1161,10 @@ function itemBody(
             </Tag>
           ))}
           <span className="gr-small">第 {Number(item.position) + 1} 片</span>
-          {originalButton("原文", chunkTitle, text(item.excerpt), onOriginal)}
+          {originalButton("原文", chunkTitle, text(item.excerpt), onOriginal, [
+            { kind: "entity", texts: [text(item.source), text(item.target)] },
+            { kind: "evidence", texts: [text(item.evidence)] },
+          ])}
         </p>
       </>
     );
@@ -1174,6 +1195,7 @@ function itemBody(
                   `第 ${sample.position + 1} 片 · 原文`,
                   sample.excerpt,
                   onOriginal,
+                  [{ kind: "entity", texts: item.names as string[] }],
                 )}
               </p>
             ))}
@@ -1201,6 +1223,7 @@ function itemBody(
               `第 ${row.position + 1} 片 · 原文`,
               row.excerpt,
               onOriginal,
+              [{ kind: "entity", texts: [row.name] }],
             )}
           </li>
         ))}

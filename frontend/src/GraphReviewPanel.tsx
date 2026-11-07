@@ -33,6 +33,7 @@ import { errorText, useToast } from "./Toast";
 import type { Tone } from "./tags";
 import { diffPlan, type PlanDiff } from "./graphReviewDiff";
 import { CHECK_INFO, GraphCheckStep, unwrittenOf } from "./GraphCheckStep";
+import { HighlightedText } from "./HighlightedText";
 import {
   GraphCheckSteps,
   VerticalSteps,
@@ -179,7 +180,14 @@ function entityLabel(entity: Entity | undefined, fallback: string) {
   return entity ? entity.names.join(" / ") : fallback;
 }
 
-function EvidenceList({ entity }: { entity: Entity }) {
+// 原文里高亮这个实体的名字；others 是同组其他实体的名字（浅色），方便对比是不是同一个。
+function EvidenceList({
+  entity,
+  others = [],
+}: {
+  entity: Entity;
+  others?: string[];
+}) {
   return (
     <div className="gr-evidence">
       {entity.evidence.map((item, index) => (
@@ -187,7 +195,13 @@ function EvidenceList({ entity }: { entity: Entity }) {
           <Tag mono size="sm" title={item.chunk_id}>
             分片 {item.chunk_id.split(":").at(-1)}
           </Tag>
-          <p className="graph-chunk-text">{item.text}</p>
+          <HighlightedText
+            text={item.text}
+            groups={[
+              { kind: "entity", texts: entity.names },
+              { kind: "entity-weak", texts: others },
+            ]}
+          />
         </section>
       ))}
     </div>
@@ -422,10 +436,13 @@ export function GraphReviewDetails({
     await onDecide(ids, decision);
   }
 
-  function openEvidence(entity: Entity) {
+  function openEvidence(entity: Entity, group: Entity[] = []) {
+    const others = group
+      .filter((item) => item.id !== entity.id)
+      .flatMap((item) => item.names);
     setDialog({
       title: `原文依据 · ${entity.names.join(" / ")}`,
-      body: <EvidenceList entity={entity} />,
+      body: <EvidenceList entity={entity} others={others} />,
     });
   }
 
@@ -631,7 +648,7 @@ export function GraphReviewDetails({
               key={item.id}
               entity={item}
               code={`e${index + 1}`}
-              onEvidence={openEvidence}
+              onEvidence={(entity) => openEvidence(entity, candidate.entities)}
             />
           ))}
         </ul>

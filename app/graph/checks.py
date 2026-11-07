@@ -314,7 +314,8 @@ def scan_glean(plan, chunks, params, models):
                         if row["chunk_id"] == chunk["chunk_id"]
                     }
                 ),
-                "excerpt": chunk["content"][:EXCERPT],
+                # 「原文」浮窗看整片（补的实体、关系可能在后半段），不截断。
+                "excerpt": chunk["content"],
             }
         )
     return items

@@ -73,6 +73,14 @@
 - 最多两层，浮窗里不再打开新的 `DetailDialog`。浮窗里还要看的只读内容（例如卡片的「原文」）用 `InfoPopover`（`frontend/src/Popover.tsx`）：点按钮后在按钮旁边弹出带箭头的小气泡，点外面或按 Esc 关闭，不会把浮窗一起关掉；不要改成就地展开。
 - 跟随按钮的气泡（`InfoPopover`、`ConfirmPopover`）共用 `useAnchoredBubble`，同一时间只开一个。新增这类气泡也用它，不要另写定位逻辑。
 
+## 原文高亮
+
+- 凡是从某个实体、关系、证据点开「原文」（分片原文、出处原文、原文依据），原文里都要高亮相关内容，统一用 `HighlightedText`（`frontend/src/HighlightedText.tsx`），不要自己写 `split` / 正则高亮。
+- 三种样式：`entity` 这次要看的实体名字（浅蓝底 + 下划线）；`entity-weak` 一起出现、用来对比的实体名字（浅灰底 + 虚线），例如同组的其他实体、这一片已经抽出的实体；`evidence` 原文引用（黄底）。
+- 匹配用 `evidenceRanges`（`frontend/src/evidenceRanges.ts`）：忽略空白、全角半角和 PDF 部首字（「⾃⼰」对得上「自己」），原文引用支持 `||` 隔开的多处；和后端 `app/textnorm.py`、评测证据比对同一规则。不要用 `includes` / `split` 做一字不差的匹配。
+- 打开时自动滚到第一处高亮；原文引用在原文里找不到时，`HighlightedText` 会在上面提示，不要另写「未精确匹配」之类的提示。
+- 原文给整片，不要只给截断的片段，否则要看的内容可能不在里面。
+
 ## 二次确认
 
 - 需要二次确认的操作（删除、覆盖、清掉已有决定、写入等）用 `ConfirmPopover`（`frontend/src/ConfirmPopover.tsx`）包住按钮：点按钮后在按钮旁边弹出小气泡，确认后才执行。

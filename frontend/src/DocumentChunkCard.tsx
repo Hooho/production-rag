@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { DetailDialog } from "./DetailDialog";
 import { GraphEntityPanel } from "./GraphEntityPanel";
 import type { ChunkGraph, DocumentChunk } from "./api";
+import { evidenceRanges } from "./evidenceRanges";
 import { Tag } from "./Tag";
 
 // 分片卡片：知识库文档详情的「全部分块」和评测语料库共用，从 App.tsx 挪出来。
@@ -320,6 +321,7 @@ function GraphBadge({ graph }: { graph: ChunkGraph }) {
 }
 
 // 原文里高亮抽出的名字（长的先匹配，「苹果公司」不会被拆成「苹果」）。
+// 匹配忽略空白、全角半角和 PDF 部首字（evidenceRanges），和其他原文高亮一致。
 function highlight(
   content: string,
   graph: ChunkGraph,
@@ -331,14 +333,27 @@ function highlight(
     ),
   ].sort((a, b) => b.length - a.length);
   if (names.length === 0) return content;
-  const pattern = new RegExp(
-    `(${names.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`,
-    "g",
-  );
   const byName = new Map(graph.mentions.map((item) => [item.name, item]));
-  return content.split(pattern).map((part, index) => {
-    const mention = byName.get(part);
-    if (!mention || index % 2 === 0) return part;
+  // 每个字符归到哪个名字；先占先得，长名字先放。
+  const owner: (string | null)[] = new Array(content.length).fill(null);
+  const starts = new Set<number>();
+  for (const name of names)
+    for (const [start, end] of evidenceRanges(content, [name])) {
+      if (owner.slice(start, end).some((value) => value !== null)) continue;
+      for (let index = start; index < end; index += 1) owner[index] = name;
+      starts.add(start);
+    }
+  const parts: { text: string; name: string | null }[] = [];
+  for (let index = 0; index < content.length; index += 1) {
+    const last = parts[parts.length - 1];
+    // 名字换了，或者同一个名字又从这里开始出现一次，就新起一段。
+    if (last && last.name === owner[index] && !starts.has(index))
+      last.text += content[index];
+    else parts.push({ text: content[index], name: owner[index] });
+  }
+  return parts.map((part, index) => {
+    const mention = part.name ? byName.get(part.name) : undefined;
+    if (!mention) return part.text;
     if (mention.entity_id)
       return (
         <button
@@ -346,18 +361,18 @@ function highlight(
           type="button"
           className="chunk-graph-mark is-clickable"
           onClick={() => onSelectEntity(mention.entity_id!)}
-          title={`查看「${mention.entity_name ?? part}」的实体详情`}
+          title={`查看「${mention.entity_name ?? part.text}」的实体详情`}
         >
-          {part}
+          {part.text}
         </button>
       );
     return (
       <mark
         key={index}
         className="chunk-graph-mark"
-        title={`${mention.type} → 归到「${mention.entity_name ?? mention.canonical ?? part}」（${mention.method_label ?? ""}）`}
+        title={`${mention.type} → 归到「${mention.entity_name ?? mention.canonical ?? part.text}」（${mention.method_label ?? ""}）`}
       >
-        {part}
+        {part.text}
       </mark>
     );
   });

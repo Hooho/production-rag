@@ -5,6 +5,7 @@ import {
   type GraphRelationDetail,
 } from "./api";
 import { DetailDialog } from "./DetailDialog";
+import { HighlightedText } from "./HighlightedText";
 import { Tag } from "./Tag";
 
 export function GraphRelationPanel({
@@ -108,28 +109,19 @@ export function GraphRelationPanel({
           title={`原文 · ${original.document_title ?? "文档"} · 第 ${original.position + 1} 片`}
           onClose={() => setOriginal(null)}
         >
-          {original.evidence &&
-            !original.chunk_content.includes(original.evidence) && (
-              <p className="graph-note">
-                抽取的证据与原文未精确匹配，以下显示完整原文。
-              </p>
-            )}
-          <p className="graph-original-content">
-            {highlightEvidence(original.chunk_content, original.evidence)}
-          </p>
+          <HighlightedText
+            className="graph-original-content"
+            text={original.chunk_content}
+            groups={[
+              {
+                kind: "entity",
+                texts: [original.source_name, original.target_name],
+              },
+              { kind: "evidence", texts: [original.evidence] },
+            ]}
+          />
         </DetailDialog>
       )}
     </aside>
   );
-}
-
-function highlightEvidence(text: string, evidence: string | null) {
-  if (!evidence || !text.includes(evidence)) return text;
-  const parts = text.split(evidence);
-  return parts.map((part, index) => (
-    <span key={index}>
-      {index > 0 && <mark>{evidence}</mark>}
-      {part}
-    </span>
-  ));
 }
