@@ -13,6 +13,7 @@ import {
 import { ConfirmPopover } from "./ConfirmPopover";
 import { DetailDialog } from "./DetailDialog";
 import { VerticalSteps, type CheckStep } from "./GraphCheckSteps";
+import { formatShortTime } from "./format";
 import { Tag } from "./Tag";
 import { errorText, useToast } from "./Toast";
 
@@ -689,6 +690,15 @@ export function GraphCheckStep({
               <strong>不会马上生效</strong>，要在「图谱版本」里设为生效。
               {DEPENDENT[step]}
             </p>
+            {report.applied && !unwritten && (
+              <p className="gc-written">
+                已写入：{report.applied.by} ·{" "}
+                {formatShortTime(report.applied.at)}，下面{" "}
+                {countApplied(report.applied.items)}{" "}
+                项已经在新版本里。移除某一项或回到第 3
+                步改了决定后，才需要再写入。
+              </p>
+            )}
             {accepted.length ? (
               <ol className="gr-plan">
                 {accepted.map((item) => (
@@ -722,7 +732,7 @@ export function GraphCheckStep({
                   : "还没有采纳任何建议。"}
               </p>
             )}
-            {canWrite && (accepted.length > 0 || report.applied) && (
+            {canWrite && unwritten && (
               <div className="gr-actions">
                 <ConfirmPopover
                   message={`写入 ${accepted.length} 项？结果存成新版本，不会马上生效。`}

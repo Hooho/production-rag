@@ -1147,3 +1147,13 @@
   font-size: 12px;
   font-style: normal;
 }
+
+/* 确认写入页：已经写入、采纳也没变时的说明。 */
+.gc-written {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-left: 3px solid #86c79a;
+  background: #eef8f1;
+  color: #15803d;
+  font-size: 13px;
+}
