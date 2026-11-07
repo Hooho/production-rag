@@ -340,6 +340,13 @@ export function DocumentGraph({
     );
   }
   const status = BUILD_STATUS[build.status] ?? BUILD_STATUS.none;
+  // 最近一次建图失败或部分失败、但下面显示的是另一次（生效中的）建图时，在顶部单独提示，
+  // 否则失败只藏在折叠的建图记录里，看起来像是重建成功了却没有变化。
+  const newest = data.history[0];
+  const newestFailed =
+    newest && newest.id !== build.id && newest.status === "failed"
+      ? newest
+      : null;
   const counts = stats?.status_counts;
   const processedCount = build.extracted + build.reused + build.failed;
   return (
@@ -355,6 +362,28 @@ export function DocumentGraph({
           onChanged={() => setTick((value) => value + 1)}
           onToast={onToast}
         />
+      )}
+      {newestFailed && (
+        <div className="graph-latest-failed" role="alert">
+          <strong>
+            最近一次建图（{formatShortTime(newestFailed.created)} ·{" "}
+            {TRIGGER_LABELS[newestFailed.trigger] ?? newestFailed.trigger}
+            ）失败，没有写入图谱。
+          </strong>
+          <span>
+            下面显示的还是生效中的建图。已抽取的分片结果都保存着（新抽取{" "}
+            {newestFailed.extracted} · 失败 {newestFailed.failed}
+            ），修复后点「重新建图」会复用，只重抽失败的分片。
+          </span>
+          {newestFailed.error && (
+            <details>
+              <summary>
+                失败原因：{newestFailed.error.split("\n")[0].slice(0, 160)}
+              </summary>
+              <pre>{newestFailed.error}</pre>
+            </details>
+          )}
+        </div>
       )}
       <div className="graph-summary">
         <div className="graph-summary-main">
@@ -529,6 +558,11 @@ export function DocumentGraph({
                   <td>
                     {(BUILD_STATUS[item.status] ?? BUILD_STATUS.none).label}
                     {item.active ? <small>生效中</small> : null}
+                    {item.error ? (
+                      <small title={item.error}>
+                        {item.error.split("\n")[0].slice(0, 80)}
+                      </small>
+                    ) : null}
                   </td>
                   <td>
                     {item.schema_name} · {item.model}

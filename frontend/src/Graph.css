@@ -1324,3 +1324,33 @@
   width: 280px;
   max-width: 100%;
 }
+
+/* 最近一次建图失败（下面显示的是生效中的另一次建图）时的提示。 */
+.graph-latest-failed {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #f1b8bd;
+  border-radius: 8px;
+  background: #fff5f5;
+  color: #7f1d1d;
+  font-size: 13px;
+}
+.graph-latest-failed strong {
+  color: #b42318;
+}
+.graph-latest-failed summary {
+  cursor: pointer;
+  color: #9f1239;
+  word-break: break-all;
+}
+.graph-latest-failed pre {
+  max-height: 200px;
+  margin: 6px 0 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 12px;
+}
