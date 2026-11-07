@@ -813,9 +813,9 @@ def test_finalize_failure_tracks_actual_step_and_preserves_previous_graph(
     assert steps["graph_write"]["status"] == "completed"
 
 
-# 最近一次建图写入失败、生效的是上一次时：「重试」补的是最近这次（不是生效的那次），
-# 没有失败分片也能重试：抽取结果都在，直接重新合并、写入。
-def test_retry_targets_newest_failed_build_even_without_failed_chunks(
+# 「重试」带着失败那一步记录的建图 id，补的就是那一次（生效的是另一次也不会补错）；
+# 不带 id 时（旧页面）补最近一次。没有失败分片也能重试：抽取结果都在，直接重新合并、写入。
+def test_retry_targets_given_failed_build_even_without_failed_chunks(
     setup, monkeypatch
 ):
     client, store = setup
@@ -833,10 +833,24 @@ def test_retry_targets_newest_failed_build_even_without_failed_chunks(
     run_graph_jobs(store, models)
     assert graph_build.get_build(store.engine, second["id"])["status"] == "failed"
     monkeypatch.setattr(graph_build.resolve, "write_build", original)
-    calls = models.chat_model.calls
-    retry = client.post(
-        f"/documents/{document_id}/graph/retry", headers=headers(), json={}
+    url = f"/documents/{document_id}/graph/retry"
+    other = add_document(client, title="别的", content="另一份文档的内容。")
+    assert other != document_id
+    assert (
+        client.post(
+            f"/documents/{other}/graph/retry",
+            headers=headers(),
+            json={"build_id": second["id"]},
+        ).status_code
+        == 404
     )
+    # 生效的那次没有可补的。
+    assert (
+        client.post(url, headers=headers(), json={"build_id": first["id"]}).status_code
+        == 409
+    )
+    calls = models.chat_model.calls
+    retry = client.post(url, headers=headers(), json={"build_id": second["id"]})
     assert retry.status_code == 202, retry.text
     assert retry.json()["id"] == second["id"]
     run_graph_jobs(store, models)

@@ -3971,14 +3971,19 @@ export function stopDocumentGraph(documentId: string, buildId: string) {
   });
 }
 
+// 重试指定那次建图（buildId）里失败的分片；chunkId 只重试这一片。
 export function retryDocumentGraph(
   documentId: string,
+  buildId?: string | null,
   chunkId?: string | null,
 ) {
   return request<GraphBuild>(`/documents/${documentId}/graph/retry`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chunk_id: chunkId ?? null }),
+    body: JSON.stringify({
+      build_id: buildId ?? null,
+      chunk_id: chunkId ?? null,
+    }),
   });
 }
 

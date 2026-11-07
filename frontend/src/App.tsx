@@ -5524,7 +5524,11 @@ function Knowledge({
               setExpandedChunks({});
             }}
             onRetryChunkGraph={(chunkId) => {
-              retryDocumentGraph(selected.document_id, chunkId)
+              retryDocumentGraph(
+                selected.document_id,
+                chunkData?.graph?.build_id,
+                chunkId,
+              )
                 .then(() =>
                   onToast(
                     "success",
@@ -5561,9 +5565,9 @@ function Knowledge({
                 onToast("error", (reason as Error).message);
               }
             }}
-            onRetryGraph={async () => {
+            onRetryGraph={async (buildId) => {
               try {
-                await retryDocumentGraph(selected.document_id);
+                await retryDocumentGraph(selected.document_id, buildId);
                 setDetail(await getDocument(selected.document_id));
                 onToast(
                   "success",
@@ -6364,7 +6368,7 @@ function DocumentDetail({
   chunkGraphStatus: ChunkGraphStatus | null;
   onGraphStatusChange: (status: ChunkGraphStatus | null) => void;
   onRetryChunkGraph: (chunkId: string) => void;
-  onRetryGraph: () => Promise<void>;
+  onRetryGraph: (buildId?: string) => Promise<void>;
   onRetryReview: () => Promise<void>;
   onReviewChanged: () => void;
   graphPanel: ReactNode;
@@ -7231,7 +7235,7 @@ function DocumentTrace({
   onRetry?: () => void;
   onRetryContexts?: () => void;
   missingContexts?: number;
-  onRetryGraph?: () => Promise<void>;
+  onRetryGraph?: (buildId?: string) => Promise<void>;
   onRetryReview?: () => Promise<void>;
 }) {
   const [retryingGraph, setRetryingGraph] = useState(false);
@@ -7433,7 +7437,11 @@ function DocumentTrace({
                   onClick={async () => {
                     setRetryingGraph(true);
                     try {
-                      await onRetryGraph();
+                      // 重试这一步记录的那次建图（每次建图写进步骤结果里的 build_id）。
+                      const buildId = step.result?.build_id;
+                      await onRetryGraph(
+                        typeof buildId === "string" ? buildId : undefined,
+                      );
                     } finally {
                       setRetryingGraph(false);
                     }

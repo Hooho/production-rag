@@ -36,6 +36,9 @@ class BatchBuildInput(BuildInput):
 
 class RetryInput(BaseModel):
     chunk_id: str | None = Field(None, max_length=64)
+    # 重试哪一次建图：处理流程里失败的那一步、分片卡片上的结果都带着自己的建图 id。
+    # 不传时（旧页面）补最近一次。
+    build_id: UUID | None = None
 
 
 class ReviewChoice(BaseModel):
@@ -257,9 +260,13 @@ def build_router(current_user, identity, require_admin):
         state = request.app.state
         row = readable(state, user["username"], document_id)
         check_can_build(user, row)
-        # 补跑最近一次建图：它失败了的话，latest_build 返回的是生效中的另一次（没有失败分片），会补错。
-        with state.store.engine.connect() as connection:
-            build = graph_query.newest_build(connection, str(document_id))
+        if body.build_id:
+            build = graph_build.get_build(state.store.engine, str(body.build_id))
+            if build is None or build["document_id"] != str(document_id):
+                raise HTTPException(404, "建图记录不存在")
+        else:
+            with state.store.engine.connect() as connection:
+                build = graph_query.newest_build(connection, str(document_id))
         if build is None:
             raise HTTPException(409, "这份文档还没有建过图")
         try:
