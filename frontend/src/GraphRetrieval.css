@@ -74,14 +74,23 @@
   color: #8a6d1c;
 }
 
-.grt-kept {
-  color: var(--diag-good, #178a63);
+/* 结果：留下绿色、去掉红色，带浅底色。写成 .grt .grt-kept：步骤里的 .result-grid span 会把文字统一成灰色，要压过它。 */
+.grt .grt-kept,
+.grt .grt-dropped {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 4px;
   white-space: nowrap;
 }
 
-.grt-dropped {
-  color: var(--diag-critical, #c83f4e);
-  white-space: nowrap;
+.grt .grt-kept {
+  background: var(--tone-success-bg, #e8f6ef);
+  color: var(--tone-success-text, #178a63);
+}
+
+.grt .grt-dropped {
+  background: var(--tone-danger-bg, #fdecee);
+  color: var(--tone-danger-text, #c83f4e);
 }
 
 .grt-origin {
