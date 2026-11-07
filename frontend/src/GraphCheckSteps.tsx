@@ -109,7 +109,7 @@ export function VerticalSteps({
   );
 }
 
-// 进度步骤条（只看不点）：圆圈 + 标题 + 副标题，下面一行说明，连线接到下一步。
+// 进度步骤条（只看不点）：圆圈 + 标题，标题下面依次是副标题（如剩余时间）、说明，连线接到下一步。
 // horizontal：横着排，连线在标题右边；vertical：竖着排，连线在圆圈下面。
 // 已完成：白底蓝圈打勾、后面的连线变蓝；进行中：浅蓝底蓝圈数字，说明文字加深；等待：灰圈数字；失败：红圈 ×。
 export type ProgressStepStatus = "finish" | "process" | "wait" | "error";
@@ -161,9 +161,11 @@ export function ProgressSteps({
           <span className="hstep-content">
             <span className="hstep-head">
               <strong>{item.title}</strong>
-              {item.subtitle && <em>{item.subtitle}</em>}
               {index < steps.length - 1 && <i className="hstep-line" />}
             </span>
+            {item.subtitle && (
+              <em className="hstep-subtitle">{item.subtitle}</em>
+            )}
             {item.description && <small>{item.description}</small>}
           </span>
         </li>

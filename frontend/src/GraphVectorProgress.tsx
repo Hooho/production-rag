@@ -182,10 +182,10 @@ export function GraphVectorDialog({
           </Tag>
           <strong>{percent}%</strong>
         </div>
+        <ProgressSteps steps={vectorSteps(value)} />
         <div className="gv-progress-bar">
           <span style={{ width: `${percent}%` }} />
         </div>
-        <ProgressSteps steps={vectorSteps(value)} direction="vertical" />
       </div>
       {value.state === "none" && (
         <p className="graph-note">

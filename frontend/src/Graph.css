@@ -1482,7 +1482,8 @@
 .hstep-content {
   display: grid;
   flex: 1;
-  gap: 4px;
+  align-content: start;
+  gap: 2px;
   min-width: 0;
 }
 .hstep-head {
@@ -1499,8 +1500,7 @@
   font-weight: 500;
   white-space: nowrap;
 }
-.hstep-head em {
-  flex: none;
+.hstep-subtitle {
   color: #9aa5b5;
   font-size: 12px;
   font-style: normal;
@@ -1542,6 +1542,7 @@
   color: #d45160;
 }
 .hstep.is-error .hstep-head strong,
+.hstep.is-error .hstep-subtitle,
 .hstep.is-error small {
   color: #b42335;
 }
