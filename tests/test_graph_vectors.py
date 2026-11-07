@@ -1,7 +1,7 @@
 from sqlalchemy import select
 
 from app.graph import vectors as graph_vectors
-from app.milvus.graph_store import GraphVectorStore
+from app.milvus.graph_store import LOAD_TIMEOUT, GraphVectorStore
 from app.mysql.tables import graph_versions
 from graph_fakes import FakeGraphClient
 from test_app import headers, setup  # noqa: F401
@@ -242,3 +242,24 @@ def test_failed_and_stale_view(setup):
         == "stale"
     )
     assert graph_vectors.view({}, "c")["state"] == "none"
+
+
+# 建集合分三步：建集合、建索引、加载（加载用长超时）。以前加载超时、已经建好但没加载的集合，下次写入或检索时补加载。
+def test_collections_loaded_with_long_timeout(setup):
+    client, store = setup
+    models = enable_model(client)
+    fake = use_fake_vectors(store, models)
+    document_id = add_document(client)
+    build(client, document_id)
+    run_graph_jobs(store, models)
+    target = store.graph_vectors
+    assert {name for name, _ in fake.load_calls} == {target.names, target.relations}
+    assert all(timeout == LOAD_TIMEOUT for _, timeout in fake.load_calls)
+    # 模拟加载超时后的状态：集合在，但没加载；新的进程（新的 GraphVectorStore）再写入时补加载。
+    fake.loaded.clear()
+    fresh = GraphVectorStore(fake, models.collection, models.dimension)
+    store.graph_vectors = fresh
+    version = active_version(store, document_id)
+    graph_vectors.index_version(store, models, version["id"])
+    assert fake.loaded == {fresh.names, fresh.relations}
+    assert len(fake.rows(fresh.names)) == 4

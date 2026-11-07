@@ -13,6 +13,9 @@ from pymilvus import DataType, MilvusClient
 from .store import filter_literal
 
 NAME_FIELDS = ["id", "version_id", "document_id", "entity_id", "name"]
+# 加载集合（把向量和索引读进内存）可能很慢：刚建的集合、机器负载高时 10 秒常常不够。
+# 建集合时分三步（建集合 → 建索引 → 加载），只有加载用这个长超时。
+LOAD_TIMEOUT = 120
 RELATION_FIELDS = ["id", "version_id", "document_id"]
 
 
@@ -24,6 +27,7 @@ class GraphVectorStore:
         self.relations = base_collection + "_grels"
         self.dimension = dimension
         self._ready = set()
+        self._loaded = set()
 
     # 集合是否已经建好；检索、删除时集合不存在就当作没有数据，不报错。
     def exists(self, collection):
@@ -41,7 +45,9 @@ class GraphVectorStore:
         for collection, extra in ((self.names, True), (self.relations, False)):
             if self.exists(collection):
                 continue
-            schema = MilvusClient.create_schema(auto_id=False, enable_dynamic_field=False)
+            schema = MilvusClient.create_schema(
+                auto_id=False, enable_dynamic_field=False
+            )
             schema.add_field("id", DataType.VARCHAR, is_primary=True, max_length=64)
             schema.add_field("version_id", DataType.VARCHAR, max_length=64)
             schema.add_field("document_id", DataType.VARCHAR, max_length=64)
@@ -51,22 +57,58 @@ class GraphVectorStore:
                 schema.add_field("name", DataType.VARCHAR, max_length=1024)
             schema.add_field("vector", DataType.FLOAT_VECTOR, dim=self.dimension)
             index_params = self.client.prepare_index_params()
-            index_params.add_index(field_name="vector", index_type="AUTOINDEX", metric_type="COSINE")
-            self.client.create_collection(collection_name=collection, schema=schema,
-                index_params=index_params, consistency_level="Strong", timeout=10)
+            index_params.add_index(
+                field_name="vector", index_type="AUTOINDEX", metric_type="COSINE"
+            )
+            # 不把 index_params 交给 create_collection：那样会在同一个 10 秒超时里建索引、加载并等加载完，
+            # 加载慢一点就报 wait for loading collection timeout（集合其实已经建好了）。
+            self.client.create_collection(
+                collection_name=collection,
+                schema=schema,
+                consistency_level="Strong",
+                timeout=10,
+            )
+            self.client.create_index(
+                collection_name=collection, index_params=index_params, timeout=30
+            )
             self._ready.add(collection)
+        for collection in (self.names, self.relations):
+            self.load(collection)
+
+    # 确保集合已加载：删除（按条件）和检索都要求集合在内存里。以前建集合时加载超时的集合也在这里补上。
+    def load(self, collection):
+        if collection in self._loaded:
+            return
+        state = self.client.get_load_state(collection_name=collection, timeout=10).get(
+            "state"
+        )
+        if getattr(state, "name", str(state)) != "Loaded":
+            self.client.load_collection(
+                collection_name=collection, timeout=LOAD_TIMEOUT
+            )
+        self._loaded.add(collection)
 
     def upsert_names(self, rows):
         for start in range(0, len(rows), 200):
-            self.client.upsert(collection_name=self.names, data=rows[start:start + 200], timeout=30)
+            self.client.upsert(
+                collection_name=self.names, data=rows[start : start + 200], timeout=30
+            )
 
     def upsert_relations(self, rows):
         for start in range(0, len(rows), 200):
-            self.client.upsert(collection_name=self.relations, data=rows[start:start + 200], timeout=30)
+            self.client.upsert(
+                collection_name=self.relations,
+                data=rows[start : start + 200],
+                timeout=30,
+            )
 
     @staticmethod
     def version_filter(version_ids):
-        return "version_id in [" + ", ".join(filter_literal(item) for item in version_ids) + "]"
+        return (
+            "version_id in ["
+            + ", ".join(filter_literal(item) for item in version_ids)
+            + "]"
+        )
 
     # 删掉某些版本的向量（版本被清理、重新计算前）。
     def delete_versions(self, version_ids):
@@ -74,15 +116,23 @@ class GraphVectorStore:
             return
         for collection in (self.names, self.relations):
             if self.exists(collection):
-                self.client.delete(collection_name=collection,
-                    filter=self.version_filter(version_ids), timeout=10)
+                self.load(collection)
+                self.client.delete(
+                    collection_name=collection,
+                    filter=self.version_filter(version_ids),
+                    timeout=10,
+                )
 
     # 删掉一个文档版本的全部图向量（文档删除、被新版本取代时）。
     def delete_document(self, document_id):
         for collection in (self.names, self.relations):
             if self.exists(collection):
-                self.client.delete(collection_name=collection,
-                    filter="document_id == " + filter_literal(document_id), timeout=10)
+                self.load(collection)
+                self.client.delete(
+                    collection_name=collection,
+                    filter="document_id == " + filter_literal(document_id),
+                    timeout=10,
+                )
 
     # version_ids 由业务层按权限和生效版本算好；空范围绝不能退化成全库检索。
     def search_names(self, vector, version_ids, limit):
@@ -90,17 +140,29 @@ class GraphVectorStore:
 
     # ids 不为空时只在这些关系里算相似度（给找到的实体的关系按和问题的相似度排序）。
     def search_relations(self, vector, version_ids, limit, ids=None):
-        return self._search(self.relations, RELATION_FIELDS, vector, version_ids, limit, ids)
+        return self._search(
+            self.relations, RELATION_FIELDS, vector, version_ids, limit, ids
+        )
 
     def _search(self, collection, fields, vector, version_ids, limit, ids=None):
         if not version_ids or not self.exists(collection) or ids == []:
             return []
+        self.load(collection)
         expression = self.version_filter(version_ids)
         if ids:
-            expression += " and id in [" + ", ".join(filter_literal(item) for item in ids) + "]"
-        result = self.client.search(collection_name=collection, data=[vector], anns_field="vector",
-            filter=expression, limit=limit, output_fields=fields,
-            search_params={"metric_type": "COSINE"}, timeout=10)
+            expression += (
+                " and id in [" + ", ".join(filter_literal(item) for item in ids) + "]"
+            )
+        result = self.client.search(
+            collection_name=collection,
+            data=[vector],
+            anns_field="vector",
+            filter=expression,
+            limit=limit,
+            output_fields=fields,
+            search_params={"metric_type": "COSINE"},
+            timeout=10,
+        )
         hits = []
         for hit in result[0]:
             entity = hit["entity"]
