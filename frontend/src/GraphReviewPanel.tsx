@@ -32,7 +32,7 @@ import { Tag } from "./Tag";
 import { errorText, useToast } from "./Toast";
 import type { Tone } from "./tags";
 import { diffPlan, type PlanDiff } from "./graphReviewDiff";
-import { CHECK_INFO, GraphCheckStep } from "./GraphCheckStep";
+import { CHECK_INFO, GraphCheckStep, unwrittenOf } from "./GraphCheckStep";
 import {
   GraphCheckSteps,
   VerticalSteps,
@@ -2390,6 +2390,11 @@ export function summarizeCheck(value: CheckReport | null): CheckSummary {
       (item) => judgments[item.id]?.decision?.suggest && !decisions[item.id],
     ).length,
     applied: !!value.applied && countItems(value.applied.items) > 0,
+    accepted: Object.entries(decisions).filter(
+      ([key, row]) =>
+        row?.decision === "accept" && items.some((item) => item.id === key),
+    ).length,
+    unwritten: unwrittenOf(value),
     started: value.started ?? null,
     error: value.error ?? null,
   };
@@ -2546,6 +2551,15 @@ function checkStep(
     return { ...base, state: "failed", text: `${value.failed} 项判断失败` };
   if (value?.pending)
     return { ...base, state: "current", text: `待处理 ${value.pending}` };
+  // 采纳了但还没确认写入：还是当前步骤，不算完成，不跳到下一步。
+  if (value?.unwritten)
+    return {
+      ...base,
+      state: "current",
+      text: value.accepted
+        ? `采纳 ${value.accepted} 项，待写入`
+        : "撤掉上次写入的内容，待写入",
+    };
   if (!count)
     return {
       ...base,
@@ -2555,7 +2569,7 @@ function checkStep(
   return {
     ...base,
     state: "done",
-    text: value?.applied ? "已写入" : "已处理完，待写入",
+    text: value?.applied ? "已写入" : "已处理完，没有采纳",
   };
 }
 

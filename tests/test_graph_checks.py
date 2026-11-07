@@ -289,6 +289,11 @@ def test_relation_check_end_to_end(setup, monkeypatch):
         json={"build_id": build_id, "item_ids": suggested, "decision": "accept"},
     )
     assert response.status_code == 200, response.text
+    # 采纳了还没写入：步骤是「待写入」，不算完成。
+    check_url = f"/documents/{document_id}/graph/check"
+    steps = client.get(check_url, headers=headers()).json()["steps"]
+    assert steps["relation"]["unwritten"] is True
+    assert steps["relation"]["accepted"] == 1
     assert (
         client.post(
             f"{url}/write", headers=headers(), json={"build_id": build_id}
@@ -296,6 +301,8 @@ def test_relation_check_end_to_end(setup, monkeypatch):
         == 200
     )
     run_graph_jobs(store, models)
+    steps = client.get(check_url, headers=headers()).json()["steps"]
+    assert steps["relation"]["unwritten"] is False
     graph = client.get(f"/documents/{document_id}/graph", headers=headers()).json()
     # 生效的还是 v1（2 条关系）；检查写入的 v2 少了一条，没有生效。
     assert graph["version"]["number"] == 1 and graph["stats"]["relation_count"] == 2

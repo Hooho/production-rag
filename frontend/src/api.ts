@@ -4323,6 +4323,9 @@ export type CheckSummary = {
   failed?: number;
   pending?: number;
   applied?: boolean;
+  // 采纳了几项；采纳的和上次写入的不一样（还没写入）
+  accepted?: number;
+  unwritten?: boolean;
   started?: string | null;
   error?: string | null;
 };
@@ -4361,7 +4364,13 @@ export type CheckReport = {
       edit?: Record<string, unknown>;
     }
   >;
-  applied?: { items: unknown; by: string; at: string } | null;
+  applied?: {
+    items: unknown;
+    // 写入时采纳的是哪几项（老记录没有）
+    ids?: string[];
+    by: string;
+    at: string;
+  } | null;
 };
 
 export function getCheckSummary(documentId: string) {

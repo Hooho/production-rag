@@ -1153,7 +1153,13 @@ def write_step_result(store, build_id, step, username):
     with store.engine.begin() as connection:
         lock(connection, build)
         value = report_in(connection, build, step)
-        value["applied"] = {"items": items, "by": username, "at": now()}
+        # ids：这次写入时采纳的是哪几项，用来判断之后采纳有没有变（变了就是「待写入」）。
+        value["applied"] = {
+            "items": items,
+            "ids": accepted_ids(value),
+            "by": username,
+            "at": now(),
+        }
         value["status"] = "rewriting"
         save_in(
             connection, build, step, value, "running", "已提交：写入图谱，存成新版本"
@@ -1249,6 +1255,26 @@ def busy(engine, build):
 
 
 # 步骤条要的概要：状态、可疑项数、判断进度、待处理数、是否需要重新检查。
+# 采纳了的项（编号排好序）。
+def accepted_ids(value):
+    ids = {item["id"] for item in value.get("items") or []}
+    return sorted(
+        key
+        for key, row in (value.get("decisions") or {}).items()
+        if key in ids and (row or {}).get("decision") == "accept"
+    )
+
+
+# 采纳的和上次写入的不一样：还没写入。老的写入记录没记 ids，有写入就当作已经写入了现在的采纳。
+def unwritten(value):
+    accepted = accepted_ids(value)
+    applied = value.get("applied") or {}
+    written = applied.get("ids")
+    if written is None:
+        written = accepted if applied.get("items") else []
+    return accepted != sorted(written)
+
+
 def summary(value):
     if not value:
         return {"status": "idle"}
@@ -1268,6 +1294,8 @@ def summary(value):
         "failed": sum(row.get("status") == "failed" for row in judgments.values()),
         "pending": sum(1 for key in suggested if key not in decisions),
         "applied": bool((value.get("applied") or {}).get("items")),
+        "accepted": len(accepted_ids(value)),
+        "unwritten": unwritten(value),
         "started": value.get("started"),
         "error": value.get("error"),
     }

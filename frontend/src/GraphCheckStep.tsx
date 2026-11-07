@@ -248,6 +248,7 @@ export function GraphCheckStep({
     (item) => decisions[item.id]?.decision === "accept",
   );
   const toJudge = items.length - finished.length;
+  const unwritten = unwrittenOf(report ?? {});
   const canDecide =
     canEdit &&
     ["ready", "stopped", "scanned", "queued", "running"].includes(status);
@@ -384,20 +385,23 @@ export function GraphCheckStep({
     {
       key: 4,
       title: "确认写入",
+      // 采纳了但还没写入：这一步是当前步骤，不算完成。
       text:
         status === "rewriting"
           ? "正在写入"
-          : report.applied
-            ? `已写入 ${countApplied(report.applied.items)} 项`
-            : `${accepted.length} 项待写入`,
+          : unwritten
+            ? accepted.length
+              ? `${accepted.length} 项待写入`
+              : "撤掉上次写入的内容，待写入"
+            : report.applied
+              ? `已写入 ${countApplied(report.applied.items)} 项`
+              : "没有采纳的项",
       state:
-        status === "rewriting"
+        status === "rewriting" || unwritten
           ? "current"
-          : report.applied && !accepted.length
+          : report.applied
             ? "done"
-            : accepted.length
-              ? "current"
-              : "waiting",
+            : "waiting",
     },
   ];
   const shown = sub ?? 1;
@@ -689,12 +693,25 @@ export function GraphCheckStep({
               <ol className="gr-plan">
                 {accepted.map((item) => (
                   <li key={item.id}>
-                    {summaryLine(
-                      step,
-                      item,
-                      judgments[item.id],
-                      decisions[item.id],
-                    )}
+                    <span>
+                      {summaryLine(
+                        step,
+                        item,
+                        judgments[item.id],
+                        decisions[item.id],
+                      )}
+                      {canDecide && (
+                        <button
+                          type="button"
+                          className={`link-button gr-remove${loadingClass(action === `decide:${item.id}:null`)}`}
+                          disabled={busy}
+                          title="撤销采纳，回到第 3 步待处理；写入时不包含这一项"
+                          onClick={() => void decide([item.id], null)}
+                        >
+                          移除
+                        </button>
+                      )}
+                    </span>
                   </li>
                 ))}
               </ol>
@@ -808,6 +825,24 @@ const DEPENDENT: Record<CheckStepName, string> = {
   type: "写入后，后面的拆分、合并要重新检查。",
   split: "写入后，后面的合并要重新检查。",
 };
+
+// 采纳的和上次写入的不一样：还没写入（和后端 checks.unwritten 同一规则）。
+// 老的写入记录没记 ids，有写入就当作已经写入了现在的采纳。
+export function unwrittenOf(report: {
+  items?: { id: string }[];
+  decisions?: Record<string, { decision: string } | undefined>;
+  applied?: { items: unknown; ids?: string[] } | null;
+}) {
+  const ids = new Set((report.items ?? []).map((item) => item.id));
+  const accepted = Object.entries(report.decisions ?? {})
+    .filter(([key, row]) => ids.has(key) && row?.decision === "accept")
+    .map(([key]) => key)
+    .sort();
+  const written =
+    report.applied?.ids ??
+    (report.applied && countApplied(report.applied.items) > 0 ? accepted : []);
+  return accepted.join(",") !== [...written].sort().join(",");
+}
 
 function countApplied(items: unknown) {
   if (Array.isArray(items)) return items.length;
