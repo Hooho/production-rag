@@ -3531,10 +3531,10 @@ label {
   color: var(--diag-muted);
 }
 
-/* 混合检索的三个模块：向量、关键词并排，图检索占满一行。 */
+/* 混合检索的三个模块（向量、关键词、图检索）：每个模块单独一行，不并排。 */
 .diag-modules {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
 }
 
