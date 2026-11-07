@@ -396,6 +396,15 @@ class DocumentSearchTool:
         )
         if scope:
             diagnostics["scope"] = self.scope_summary(scope["documents"])
+        # 每一步、每一路的耗时：检索过程拆成「权限范围 / 混合检索 / 重排与过滤」三步显示时用。
+        diagnostics["timings"] = {
+            "scope_ms": scope_ms,
+            "dense_ms": dense_ms,
+            "keyword_ms": keyword_ms,
+            "graph_ms": stats["graph_ms"],
+            "recall_ms": recall_ms,
+            "rerank_ms": rerank_ms,
+        }
         if graph is not None:
             # 两张图排名表的来源正文已经在候选里，诊断里不再重复存。
             diagnostics["graph"] = {

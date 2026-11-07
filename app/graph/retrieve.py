@@ -370,7 +370,9 @@ def retrieve(store, models, question, scope, settings=None, entities=None, theme
                 item.update(kept=False, reason="分片不在当前文档版本")
                 continue
             rank += 1
-            item.update(kept=True, rank=rank, title=source["title"])
+            # 正文一起存进诊断：页面上点「原文」时在整片里高亮引用和实体名字。
+            item.update(kept=True, rank=rank, title=source["title"], text=source["text"],
+                version=source["version"], heading=source["heading"])
             rows.append({**source, "score": item["score"], "relation_ids": item["relation_ids"]})
         sources[name] = rows
     timings["chunks_ms"] = round((time.monotonic() - step) * 1000)
