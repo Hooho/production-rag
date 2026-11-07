@@ -1116,49 +1116,32 @@ function judgmentBody(
         description?: string;
         evidence?: string;
       }[]) ?? [];
-    // 程序过滤：每张卡片都用引用样式写明程序查了什么、去掉了什么（旧规则判断的没有这一步）。
-    const filtered = Array.isArray(value.dropped);
+    // 程序过滤：只有真的去掉了东西才显示，用引用样式写明查了什么、去掉了什么。
     const dropped =
       (value.dropped as
         | { kind?: string; name: string; reason: string }[]
         | undefined) ?? [];
     const droppedCount = Number(value.dropped_count ?? dropped.length);
-    const droppedNote = (
+    const droppedNote = droppedCount > 0 && (
       <blockquote className="gc-filter-note">
-        <strong>程序过滤（不调用模型）</strong>
-        {filtered ? (
-          <>
-            <span>
-              检查了：实体名字在不在这一片原文里；关系的起点、终点是不是实体，原文引用在不在这一片里，这两个实体之间是不是已经有关系。
-            </span>
-            {droppedCount > 0 ? (
-              <>
-                <span>去掉了 {droppedCount} 个：</span>
-                <ul>
-                  {dropped.map((row, index) => (
-                    <li key={index}>
-                      {(row.kind ??
-                        (row.name.includes("→") ? "relation" : "entity")) ===
-                      "relation"
-                        ? "关系"
-                        : "实体"}
-                      「{row.name}」：{row.reason}
-                    </li>
-                  ))}
-                  {droppedCount > dropped.length && (
-                    <li>还有 {droppedCount - dropped.length} 个没有列出</li>
-                  )}
-                </ul>
-              </>
-            ) : (
-              <span>全部通过，没有去掉任何内容。</span>
-            )}
-          </>
-        ) : (
-          <span>
-            这一项是旧规则判断的，没有经过程序过滤；点「全部重新判断」更新。
-          </span>
-        )}
+        <strong>程序过滤（不调用模型）：去掉了 {droppedCount} 个</strong>
+        <span>
+          检查了：实体名字在不在这一片原文里；关系的起点、终点是不是实体，原文引用在不在这一片里，这两个实体之间是不是已经有关系。
+        </span>
+        <ul>
+          {dropped.map((row, index) => (
+            <li key={index}>
+              {(row.kind ??
+                (row.name.includes("→") ? "relation" : "entity")) === "relation"
+                ? "关系"
+                : "实体"}
+              「{row.name}」：{row.reason}
+            </li>
+          ))}
+          {droppedCount > dropped.length && (
+            <li>还有 {droppedCount - dropped.length} 个没有列出</li>
+          )}
+        </ul>
       </blockquote>
     );
     if (!entities.length && !relations.length)
