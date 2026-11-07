@@ -389,6 +389,21 @@ def status(store, models):
     }
 
 
+def mark_queued(store, models, version_id):
+    collection = vector_store(store, models).base
+    set_marker(
+        store.engine,
+        version_id,
+        {
+            "status": "queued",
+            "collection": collection,
+            "model": getattr(models, "embedding_model", None),
+            "queued_at": now(),
+            "at": now(),
+        },
+    )
+
+
 # 补算向量：把缺向量的生效版本排进建图队列，worker 逐个计算。
 # 已经在排队、在算的不重复排；先在版本上记「排队中」，页面马上能看到。
 def backfill(store, models, enqueue):
@@ -399,20 +414,33 @@ def backfill(store, models, enqueue):
         if not indexed(row, collection) and not busy(marker(row))
     ]
     for version_id in missing:
-        set_marker(
-            store.engine,
-            version_id,
-            {
-                "status": "queued",
-                "collection": collection,
-                "model": getattr(models, "embedding_model", None),
-                "queued_at": now(),
-                "at": now(),
-            },
-        )
+        mark_queued(store, models, version_id)
     for start in range(0, len(missing), 20):
         enqueue(missing[start : start + 20])
     return len(missing)
+
+
+# 单独给一个生效版本算（或重算）向量。返回 None 表示版本不存在或没生效，False 表示已经在排队或在算。
+def queue_version(store, models, version_id, enqueue, space=ONLINE_SPACE):
+    with store.engine.connect() as connection:
+        row = (
+            connection.execute(
+                select(graph_versions.c.id, graph_versions.c.summary).where(
+                    graph_versions.c.id == version_id,
+                    graph_versions.c.space == space,
+                    graph_versions.c.active.is_(True),
+                )
+            )
+            .mappings()
+            .first()
+        )
+    if row is None:
+        return None
+    if busy(marker(row)):
+        return False
+    mark_queued(store, models, version_id)
+    enqueue([version_id])
+    return True
 
 
 def run_job(store, models, version_ids):

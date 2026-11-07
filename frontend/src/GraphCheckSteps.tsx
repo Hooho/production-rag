@@ -108,3 +108,59 @@ export function VerticalSteps({
     </ol>
   );
 }
+
+// 横向步骤条（只看不点）：圆圈 + 标题 + 副标题，标题右边一条连线接到下一步，下面一行说明。
+// 已完成：白底蓝圈打勾、后面的连线变蓝；进行中：浅蓝底蓝圈数字，说明文字加深；等待：灰圈数字；失败：红圈 ×。
+export type HorizontalStepStatus = "finish" | "process" | "wait" | "error";
+export type HorizontalStep = {
+  key: string;
+  title: string;
+  subtitle?: string;
+  description?: string;
+  status: HorizontalStepStatus;
+};
+
+export function HorizontalSteps({ steps }: { steps: HorizontalStep[] }) {
+  return (
+    <ol className="hsteps">
+      {steps.map((item, index) => (
+        <li key={item.key} className={`hstep is-${item.status}`}>
+          <span className="hstep-icon" aria-hidden="true">
+            {item.status === "finish" ? (
+              <svg viewBox="0 0 16 16" width="16" height="16">
+                <path
+                  d="M3 8.5l3.2 3.2L13 5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            ) : item.status === "error" ? (
+              <svg viewBox="0 0 16 16" width="14" height="14">
+                <path
+                  d="M4 4l8 8M12 4l-8 8"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                />
+              </svg>
+            ) : (
+              index + 1
+            )}
+          </span>
+          <span className="hstep-content">
+            <span className="hstep-head">
+              <strong>{item.title}</strong>
+              {item.subtitle && <em>{item.subtitle}</em>}
+              {index < steps.length - 1 && <i className="hstep-line" />}
+            </span>
+            {item.description && <small>{item.description}</small>}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}

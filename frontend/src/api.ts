@@ -4240,6 +4240,13 @@ export function backfillGraphVectors() {
     { method: "POST" },
   );
 }
+// 单独给一个图谱版本算（或重算）向量。
+export function queueGraphVersionVectors(versionId: string) {
+  return request<GraphVectorStatus & { queued: number }>(
+    `/graph/versions/${encodeURIComponent(versionId)}/vectors`,
+    { method: "POST" },
+  );
+}
 export function getGraphTasks() {
   return request<{ items: GraphTask[] }>("/graph/tasks");
 }

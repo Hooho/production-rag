@@ -1,6 +1,7 @@
 import type { GraphTaskVectors, GraphVectorState } from "./api";
 import { DetailDialog } from "./DetailDialog";
 import { formatDuration, formatShortTime } from "./format";
+import { HorizontalSteps, type HorizontalStep } from "./GraphCheckSteps";
 import { Tag } from "./Tag";
 import type { Tone } from "./tags";
 
@@ -65,6 +66,70 @@ export function GraphVectorTag({
 
 const PHASE_ORDER = ["names", "relations", "writing", "done"];
 
+// 时长显示成 00:00:08。
+function clock(ms: number) {
+  const total = Math.max(0, Math.round(ms / 1000));
+  return [Math.floor(total / 3600), Math.floor((total % 3600) / 60), total % 60]
+    .map((part) => String(part).padStart(2, "0"))
+    .join(":");
+}
+
+// 剩余时间按已算条数的速度估：(总条数 - 已算) ÷ (已算 ÷ 已用时间)。还没算出一批时不估。
+function remaining(value: GraphTaskVectors) {
+  if (!value.started || !value.at) return null;
+  const used = new Date(value.at).getTime() - new Date(value.started).getTime();
+  const done = (value.names_done ?? 0) + (value.relations_done ?? 0);
+  const total = (value.names ?? 0) + (value.relations ?? 0);
+  if (used <= 0 || done <= 0 || total <= done) return null;
+  return ((total - done) * used) / done;
+}
+
+// 三步的状态：完成前面的打勾；当前这步进行中（失败、中断时打叉）；后面的等待。
+export function vectorSteps(value: GraphTaskVectors): HorizontalStep[] {
+  const finished = value.state === "done";
+  const broken = value.state === "failed" || value.state === "interrupted";
+  const phase = PHASE_ORDER.indexOf(value.phase ?? "");
+  const at = broken
+    ? Math.max(phase, 0)
+    : value.state === "running"
+      ? phase
+      : -1;
+  const left = value.state === "running" ? remaining(value) : null;
+  const count = (done?: number, total?: number) =>
+    total === undefined ? undefined : `${done ?? 0} / ${total} 条`;
+  return PHASES.map((item, index) => {
+    const status = finished
+      ? "finish"
+      : at < 0 || index > at
+        ? "wait"
+        : index < at
+          ? "finish"
+          : broken
+            ? "error"
+            : "process";
+    let subtitle: string | undefined;
+    if (status === "process" && item.key !== "writing" && left !== null)
+      subtitle = `剩余约 ${clock(left)}`;
+    if (status === "error")
+      subtitle = value.state === "interrupted" ? "中断" : "失败";
+    const description =
+      item.key === "names"
+        ? count(value.names_done, value.names)
+        : item.key === "relations"
+          ? count(value.relations_done, value.relations)
+          : status === "finish"
+            ? "已写入，集合已加载"
+            : "删除旧向量、写入、加载集合";
+    return {
+      key: item.key,
+      title: item.label,
+      subtitle,
+      description: description ?? "等待开始",
+      status,
+    };
+  });
+}
+
 export function GraphVectorDialog({
   title,
   value,
@@ -76,7 +141,6 @@ export function GraphVectorDialog({
 }) {
   const state = VECTOR_STATE[value.state] ?? VECTOR_STATE.none;
   const percent = vectorPercent(value);
-  const current = PHASE_ORDER.indexOf(value.phase ?? "");
   const running = vectorsBusy(value);
   const elapsed =
     value.duration_ms ??
@@ -116,24 +180,9 @@ export function GraphVectorDialog({
           <Tag size="sm" tone={state.tone} dot>
             {state.label}
           </Tag>
-          <span className="gv-progress-phases">
-            {PHASES.map((phase, index) => (
-              <span
-                key={phase.key}
-                className={
-                  value.phase === phase.key
-                    ? "is-active"
-                    : current > index
-                      ? "is-done"
-                      : ""
-                }
-              >
-                {index + 1}. {phase.label}
-              </span>
-            ))}
-          </span>
           <strong>{percent}%</strong>
         </div>
+        <HorizontalSteps steps={vectorSteps(value)} />
         <div className="gv-progress-bar">
           <span style={{ width: `${percent}%` }} />
         </div>

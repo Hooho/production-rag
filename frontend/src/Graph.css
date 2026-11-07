@@ -1404,19 +1404,6 @@
   margin-left: auto;
   font-variant-numeric: tabular-nums;
 }
-.gv-progress-phases {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-  color: #94a3b8;
-}
-.gv-progress-phases .is-done {
-  color: #475569;
-}
-.gv-progress-phases .is-active {
-  color: #1d6ff2;
-  font-weight: 600;
-}
 .gv-progress-bar {
   height: 8px;
   border-radius: 4px;
@@ -1464,4 +1451,117 @@
   color: #1f2937;
   word-break: break-all;
   font-variant-numeric: tabular-nums;
+}
+
+/* 横向步骤条（HorizontalSteps）：圆圈 + 标题 + 副标题 + 连线，下面一行说明。 */
+.hsteps {
+  display: flex;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.hstep {
+  display: flex;
+  flex: 1 1 0;
+  gap: 10px;
+  min-width: 0;
+}
+.hstep:last-child {
+  flex: 0 0 auto;
+}
+.hstep-icon {
+  display: grid;
+  flex: 0 0 28px;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #c4cbd6;
+  border-radius: 50%;
+  background: #fff;
+  color: #9aa5b5;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.hstep-content {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
+}
+.hstep-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  min-width: 0;
+}
+.hstep-head strong {
+  flex: none;
+  color: #9aa5b5;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.hstep-head em {
+  flex: none;
+  color: #9aa5b5;
+  font-size: 12px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.hstep-line {
+  flex: 1;
+  min-width: 16px;
+  height: 1px;
+  background: #d5dbe4;
+}
+.hstep small {
+  color: #9aa5b5;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.hstep.is-finish .hstep-icon {
+  border-color: #1d6ff2;
+  color: #1d6ff2;
+}
+.hstep.is-finish .hstep-head strong {
+  color: #1f2937;
+}
+.hstep.is-finish .hstep-line {
+  background: #1d6ff2;
+}
+.hstep.is-process .hstep-icon {
+  border-color: #1d6ff2;
+  background: #e8f1ff;
+  color: #1d6ff2;
+}
+.hstep.is-process .hstep-head strong,
+.hstep.is-process small {
+  color: #1f2937;
+}
+.hstep.is-error .hstep-icon {
+  border-color: #d45160;
+  color: #d45160;
+}
+.hstep.is-error .hstep-head strong,
+.hstep.is-error small {
+  color: #b42335;
+}
+/* 抽屉窄的时候竖着排，连线去掉。 */
+@media (max-width: 640px) {
+  .hsteps {
+    flex-direction: column;
+  }
+  .hstep-line {
+    display: none;
+  }
+}
+/* 建图任务表每行右边的操作：算向量、建图。 */
+.graph-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  white-space: nowrap;
 }

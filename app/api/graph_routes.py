@@ -744,6 +744,22 @@ def build_router(current_user, identity, require_admin):
         )
         return {"queued": queued, **graph_vectors.status(state.store, state.models)}
 
+    # 单独给一个图谱版本算（或重算）向量：建图任务表里每行的「算向量」。
+    @router.post("/graph/versions/{version_id}/vectors", status_code=202)
+    def vector_queue(version_id: str, request: Request, admin=Depends(require_admin)):
+        state = request.app.state
+        queued = graph_vectors.queue_version(
+            state.store,
+            state.models,
+            version_id,
+            lambda ids: graph_build.enqueue_vectors(state.store, ids),
+        )
+        if queued is None:
+            raise HTTPException(404, "图谱版本不存在或没有生效")
+        if queued is False:
+            raise HTTPException(409, "这个版本的向量已经在排队或计算中")
+        return {"queued": 1, **graph_vectors.status(state.store, state.models)}
+
     return router
 
 

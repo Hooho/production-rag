@@ -9,6 +9,7 @@ import {
   getGraphOverview,
   getGraphTasks,
   getGraphVectors,
+  queueGraphVersionVectors,
   type GraphOverview,
   type GraphTask,
   type GraphVectorStatus,
@@ -354,6 +355,22 @@ function Tasks({
   const [backfilling, setBackfilling] = useState(false);
   // 打开了哪一行的向量进度抽屉（按 doc_key 记，轮询刷新后抽屉里的进度跟着变）。
   const [vectorKey, setVectorKey] = useState<string | null>(null);
+  // 正在请求单独算向量的那一行（按 doc_key），按钮显示加载状态。
+  const [queueing, setQueueing] = useState<string | null>(null);
+  async function queueVectors(task: GraphTask) {
+    if (!task.vectors) return;
+    setQueueing(task.doc_key);
+    try {
+      const result = await queueGraphVersionVectors(task.vectors.version_id);
+      setVectors(result);
+      setTick((value) => value + 1);
+      onToast("success", `已排队计算《${task.title}》的图检索向量`);
+    } catch (reason) {
+      onToast("error", errorText(reason));
+    } finally {
+      setQueueing(null);
+    }
+  }
   useEffect(() => {
     let cancelled = false;
     getGraphVectors()
@@ -429,7 +446,7 @@ function Tasks({
           {vectors && vectors.missing > 0 && (
             <button
               className={`secondary-button ${backfilling ? "is-loading" : ""}`}
-              disabled={backfilling}
+              disabled={backfilling || queueing !== null}
               onClick={() => void backfill()}
               title="以前建的图谱没有名字、关系向量，图检索查不到；补算后才能用"
             >
@@ -560,19 +577,35 @@ function Tasks({
                     : "—"}
                 </td>
                 <td>
-                  {canBuild && (
-                    <button
-                      className="secondary-button"
-                      onClick={() =>
-                        setDialog({
-                          ids: [item.document_id],
-                          title: `《${item.title}》v${item.version}`,
-                        })
-                      }
-                    >
-                      {item.state === "none" ? "建图" : "重建"}
-                    </button>
-                  )}
+                  <div className="graph-row-actions">
+                    {item.vectors && !vectorsBusy(item.vectors) && (
+                      <button
+                        className={`secondary-button ${queueing === item.doc_key ? "is-loading" : ""}`}
+                        disabled={queueing !== null || backfilling}
+                        title={
+                          item.vectors.state === "done"
+                            ? "重新计算这份图谱的名字、关系向量"
+                            : "计算这份图谱的名字、关系向量，算好后图检索才能查到"
+                        }
+                        onClick={() => void queueVectors(item)}
+                      >
+                        {item.vectors.state === "done" ? "重算向量" : "算向量"}
+                      </button>
+                    )}
+                    {canBuild && (
+                      <button
+                        className="secondary-button"
+                        onClick={() =>
+                          setDialog({
+                            ids: [item.document_id],
+                            title: `《${item.title}》v${item.version}`,
+                          })
+                        }
+                      >
+                        {item.state === "none" ? "建图" : "重建"}
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             );

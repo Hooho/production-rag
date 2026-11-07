@@ -263,3 +263,29 @@ def test_collections_loaded_with_long_timeout(setup):
     graph_vectors.index_version(store, models, version["id"])
     assert fake.loaded == {fresh.names, fresh.relations}
     assert len(fake.rows(fresh.names)) == 4
+
+
+# 单独给一个版本算向量：算好的也能重算；在排队时再点返回 409；不存在的版本 404；只有管理员能点。
+def test_queue_single_version(setup):
+    client, store = setup
+    models = enable_model(client)
+    fake = use_fake_vectors(store, models)
+    document_id = add_document(client)
+    build(client, document_id)
+    run_graph_jobs(store, models)
+    version = active_version(store, document_id)
+    url = f"/graph/versions/{version['id']}/vectors"
+    assert client.post(url, headers=headers()).status_code == 403
+    response = client.post(url, headers=headers("admin"))
+    assert response.status_code == 202 and response.json()["working"] == 1
+    assert task_vectors(client, document_id)["state"] == "queued"
+    assert client.post(url, headers=headers("admin")).status_code == 409
+    assert run_graph_jobs(store, models) == 1
+    assert task_vectors(client, document_id)["state"] == "done"
+    assert len(fake.rows(store.graph_vectors.names)) == 4
+    assert (
+        client.post(
+            "/graph/versions/nope/vectors", headers=headers("admin")
+        ).status_code
+        == 404
+    )
