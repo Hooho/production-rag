@@ -4023,6 +4023,37 @@ export type GraphTask = {
   auto: boolean;
   state: GraphTaskState;
   build: GraphBuild | null;
+  // 生效图谱版本的图检索向量（名字、关系向量）状态；没有生效版本时为 null。
+  vectors: GraphTaskVectors | null;
+};
+// none 没算 / queued 排队中 / running 计算中 / done 已算 / failed 失败 /
+// stale 算在别的集合里（换过 embedding 模型）/ interrupted 很久没动静
+export type GraphVectorState =
+  | "none"
+  | "queued"
+  | "running"
+  | "done"
+  | "failed"
+  | "stale"
+  | "interrupted";
+export type GraphTaskVectors = {
+  state: GraphVectorState;
+  status?: string;
+  // names 算名字向量 / relations 算关系向量 / writing 写入 Milvus / done
+  phase?: string;
+  version_id: string;
+  version_number: number;
+  collection?: string;
+  model?: string | null;
+  names?: number;
+  relations?: number;
+  names_done?: number;
+  relations_done?: number;
+  queued_at?: string;
+  started?: string;
+  at?: string;
+  duration_ms?: number;
+  error?: string;
 };
 export type GraphOverview = {
   documents: { document_id: string; title: string }[];
@@ -4198,6 +4229,7 @@ export type GraphVectorStatus = {
   indexed: number;
   missing: number;
   failed: number;
+  working: number;
 };
 export function getGraphVectors() {
   return request<GraphVectorStatus>("/graph/vectors");

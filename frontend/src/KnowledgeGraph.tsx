@@ -20,6 +20,11 @@ import { GraphEntityPanel } from "./GraphEntityPanel";
 import { GraphWorkspace } from "./GraphWorkspace";
 import { GraphExplorerControls, useGraphExplorer } from "./GraphExplorer";
 import { GraphView } from "./GraphView";
+import {
+  GraphVectorDialog,
+  GraphVectorTag,
+  vectorsBusy,
+} from "./GraphVectorProgress";
 import { Tag } from "./Tag";
 import { errorText } from "./Toast";
 
@@ -347,6 +352,8 @@ function Tasks({
   // 图检索向量：生效版本里多少已经算好、多少还缺；还缺时可以补算（排进建图队列）。
   const [vectors, setVectors] = useState<GraphVectorStatus | null>(null);
   const [backfilling, setBackfilling] = useState(false);
+  // 打开了哪一行的向量进度抽屉（按 doc_key 记，轮询刷新后抽屉里的进度跟着变）。
+  const [vectorKey, setVectorKey] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     getGraphVectors()
@@ -361,6 +368,8 @@ function Tasks({
     try {
       const result = await backfillGraphVectors();
       setVectors(result);
+      // 立刻刷新列表：补算的那几行马上显示「排队中」，之后自动轮询进度。
+      setTick((value) => value + 1);
       onToast(
         "success",
         result.queued > 0
@@ -374,8 +383,14 @@ function Tasks({
     }
   }
   const busy = items?.some(
-    (item) => item.state === "queued" || item.state === "running",
+    (item) =>
+      item.state === "queued" ||
+      item.state === "running" ||
+      vectorsBusy(item.vectors),
   );
+  const vectorItem = vectorKey
+    ? items?.find((item) => item.doc_key === vectorKey)
+    : null;
   useEffect(() => {
     if (!busy) return;
     const timer = window.setInterval(() => setTick((value) => value + 1), 3000);
@@ -453,6 +468,7 @@ function Tasks({
             <th>清单 · 模型</th>
             <th>分片</th>
             <th>实体 / 关系</th>
+            <th>检索向量</th>
             <th>时间</th>
             <th />
           </tr>
@@ -529,6 +545,16 @@ function Tasks({
                     : "—"}
                 </td>
                 <td>
+                  {item.vectors ? (
+                    <GraphVectorTag
+                      value={item.vectors}
+                      onClick={() => setVectorKey(item.doc_key)}
+                    />
+                  ) : (
+                    "—"
+                  )}
+                </td>
+                <td>
                   {build
                     ? formatShortTime(build.finished ?? build.created)
                     : "—"}
@@ -553,6 +579,13 @@ function Tasks({
           })}
         </tbody>
       </table>
+      {vectorItem?.vectors && (
+        <GraphVectorDialog
+          title={`《${vectorItem.title}》`}
+          value={vectorItem.vectors}
+          onClose={() => setVectorKey(null)}
+        />
+      )}
       {dialog && (
         <GraphBuildDialog
           documentIds={dialog.ids}

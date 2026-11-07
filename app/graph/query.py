@@ -19,6 +19,7 @@ from ..mysql.tables import (
     graph_versions,
     users,
 )
+from . import vectors as graph_vectors
 from . import versions
 from .build import build_view
 from .schemas import ONLINE_SPACE
@@ -995,7 +996,8 @@ def entity_detail(engine, entity_id, document_id=None, version_id=None):
 
 
 # 建图任务：每份文档（当前版本）的建图状态。outdated：最近生效的图是给旧版本建的，当前版本还没建。
-def tasks(engine, space=ONLINE_SPACE):
+# collection：当前图检索向量集合名，用来判断每份文档的图谱向量是不是算在当前集合里；不给就不带向量状态。
+def tasks(engine, space=ONLINE_SPACE, collection=None):
     with engine.connect() as connection:
         heads = (
             connection.execute(
@@ -1038,6 +1040,24 @@ def tasks(engine, space=ONLINE_SPACE):
             ).all()
         }
         registered = set(connection.execute(select(users.c.username)).scalars().all())
+        active_versions = (
+            connection.execute(
+                select(
+                    graph_versions.c.id,
+                    graph_versions.c.doc_key,
+                    graph_versions.c.document_id,
+                    graph_versions.c.number,
+                    graph_versions.c.summary,
+                ).where(
+                    graph_versions.c.space == space, graph_versions.c.active.is_(True)
+                )
+            )
+            .mappings()
+            .all()
+        )
+    versions_by_key = {}
+    for row in active_versions:
+        versions_by_key.setdefault(row["doc_key"], []).append(dict(row))
     by_key = {}
     for row in builds:
         by_key.setdefault(row["doc_key"], []).append(dict(row))
@@ -1067,6 +1087,23 @@ def tasks(engine, space=ONLINE_SPACE):
             state = "none"
         shown = latest or older
         settings = (head["document_metadata"] or {}).get("graph") or {}
+        # 图检索向量：跟着生效的图谱版本走，优先当前文档版本的。
+        candidates = versions_by_key.get(head["doc_key"], [])
+        version = next(
+            (
+                row
+                for row in candidates
+                if row["document_id"] == head["current_document_id"]
+            ),
+            candidates[0] if candidates else None,
+        )
+        vector_state = None
+        if collection is not None and version is not None:
+            vector_state = {
+                **graph_vectors.view(graph_vectors.marker(version), collection),
+                "version_id": version["id"],
+                "version_number": version["number"],
+            }
         result.append(
             {
                 "doc_key": head["doc_key"],
@@ -1086,6 +1123,7 @@ def tasks(engine, space=ONLINE_SPACE):
                 }
                 if shown
                 else None,
+                "vectors": vector_state,
             }
         )
     return result

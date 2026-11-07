@@ -1278,13 +1278,41 @@
   width: auto;
 }
 /* 合并记录里标记撤销：攒起来到二次检查第 4 步一起确认、写入。 */
-.graph-undo-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 0; padding: 8px 12px; border: 1px solid var(--tone-warning-border); border-radius: 6px; background: var(--tone-warning-bg); color: var(--tone-warning-text); font-size: 13px; }
-.graph-undo-cell { display: inline-flex; align-items: center; gap: 6px; }
-.graph-undo-link { font-size: 12px; }
+.graph-undo-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--tone-warning-border);
+  border-radius: 6px;
+  background: var(--tone-warning-bg);
+  color: var(--tone-warning-text);
+  font-size: 13px;
+}
+.graph-undo-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.graph-undo-link {
+  font-size: 12px;
+}
 /* 切换页签 / 翻页 / 搜索时的占位骨架。 */
-.graph-switch-skeleton { padding: 8px 0; }
-.graph-switch-skeleton-canvas { display: block; height: 420px; border-radius: 8px; }
-.graph-switch-skeleton-row { display: block; height: 44px; border-radius: 6px; }
+.graph-switch-skeleton {
+  padding: 8px 0;
+}
+.graph-switch-skeleton-canvas {
+  display: block;
+  height: 420px;
+  border-radius: 8px;
+}
+.graph-switch-skeleton-row {
+  display: block;
+  height: 44px;
+  border-radius: 6px;
+}
 
 /* 图谱版本条：切换查看的版本、设为生效、备注。查看未生效的版本时整条用警告色提示。 */
 .graph-version-bar {
@@ -1353,4 +1381,87 @@
   white-space: pre-wrap;
   word-break: break-all;
   font-size: 12px;
+}
+
+/* 建图任务 · 图检索向量的进度抽屉：阶段 + 进度条 + 明细。 */
+.gv-progress {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid #e3e8ef;
+  border-radius: 10px;
+  background: #f8fafc;
+  font-size: 13px;
+}
+.gv-progress-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.gv-progress-head strong {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.gv-progress-phases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  color: #94a3b8;
+}
+.gv-progress-phases .is-done {
+  color: #475569;
+}
+.gv-progress-phases .is-active {
+  color: #1d6ff2;
+  font-weight: 600;
+}
+.gv-progress-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+.gv-progress-bar span {
+  display: block;
+  height: 100%;
+  background: #1d6ff2;
+  transition: width 0.3s;
+}
+.gv-progress.is-stopped .gv-progress-bar span {
+  background: #94a3b8;
+}
+.gv-progress.is-done .gv-progress-bar span {
+  background: #16a34a;
+}
+.gv-error {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.gv-facts {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+}
+.gv-facts div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 12px;
+}
+.gv-facts dt {
+  color: #7a8799;
+}
+.gv-facts dd {
+  margin: 0;
+  color: #1f2937;
+  word-break: break-all;
+  font-variant-numeric: tabular-nums;
 }

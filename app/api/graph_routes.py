@@ -723,7 +723,9 @@ def build_router(current_user, identity, require_admin):
 
     @router.get("/graph/tasks")
     def tasks(request: Request, admin=Depends(require_admin)):
-        return {"items": graph_query.tasks(request.app.state.store.engine)}
+        state = request.app.state
+        collection = graph_vectors.vector_store(state.store, state.models).base
+        return {"items": graph_query.tasks(state.store.engine, collection=collection)}
 
     # 图检索向量：生效版本里多少已经算好、多少还缺（换了 embedding 模型后全部算缺）。
     @router.get("/graph/vectors")
