@@ -24,7 +24,7 @@ from ..mysql.tables import (
     graph_relations,
     graph_versions,
 )
-from . import checks, resolve, review, versions
+from . import checks, resolve, review, vectors, versions
 from .extract import PROMPT_ID, cache_key, extract_chunk
 from .schemas import DEFAULT_SCHEMA_ID, ONLINE_SPACE, get_schema, now, type_names
 
@@ -356,6 +356,14 @@ def get_build(engine, build_id):
 
 
 # stage="review"：只跑二次检查（模型判断），不重新抽取和写入。
+# 补算图检索向量：一批版本 id 一个任务。
+def enqueue_vectors(store, version_ids):
+    store.cache.rpush(
+        QUEUE,
+        json.dumps({"type": "graph", "stage": "vectors", "version_ids": list(version_ids)}),
+    )
+
+
 def enqueue(store, build_id, stage=None):
     payload = {"type": "graph", "build_id": build_id}
     if stage:
@@ -537,6 +545,9 @@ def mark_failed(store, build, message, step_id="graph_extract", duration_ms=None
 
 # worker 处理一个建图任务：抽一批分片，还有剩下的就重新排队，全部抽完后合并实体、写入图谱。
 def run_job(store, models, payload):
+    if payload.get("stage") == "vectors":
+        vectors.run_job(store, models, payload.get("version_ids"))
+        return
     if payload.get("stage") == "review":
         run_review_job(store, models, payload["build_id"])
         return
@@ -800,6 +811,7 @@ def finalize(store, build, models=None):
         )
         version = None
         activated = False
+        pruned = []
         with store.engine.begin() as connection:
             require_running(connection, build["id"])
             if rows:
@@ -827,7 +839,7 @@ def finalize(store, build, models=None):
                 if not checking and should_activate(connection, build, retried):
                     versions.activate(connection, version["id"])
                     activated = True
-                versions.prune(connection, build["document_id"])
+                pruned = versions.prune(connection, build["document_id"])
             values = {
                 **value,
                 "status": status,
@@ -848,6 +860,10 @@ def finalize(store, build, models=None):
                 .where(graph_builds.c.id == build["id"])
                 .values(**values)
             )
+        # 图检索用的名字、关系向量：写入版本后算；失败只记标记，可以用「补算向量」补上。
+        vectors.remove_versions(store, pruned)
+        if version is not None:
+            vectors.index_after_write(store, models, version["id"])
         if summary is not None:
             write_step(
                 store,

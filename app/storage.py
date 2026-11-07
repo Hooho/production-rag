@@ -31,6 +31,7 @@ from .mysql.store import (
 )
 from .redis.store import RedisStore
 from .graph.build import remove_documents as remove_document_graph
+from .graph import vectors as graph_vectors
 from . import prompts
 from .ingestion.chunking import chunk_document_records, chunk_settings
 from .ingestion.parser import OCR_LANGUAGES
@@ -1024,6 +1025,8 @@ class Storage:
     # Milvus 按 document_id 过滤删除，写了一半的失败版本也能清理干净。
     def remove_version_data(self, document_id):
         self.milvus.delete_document(document_id)
+        # 图检索的名字、关系向量也按文档版本删；检索只看生效版本，删失败不影响正确性。
+        graph_vectors.remove_document(self, document_id)
         with self.engine.begin() as connection:
             chunk_ids = (
                 connection.execute(

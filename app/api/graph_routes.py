@@ -15,6 +15,7 @@ from .. import prompts
 from ..graph import build as graph_build
 from ..graph import checks as graph_checks
 from ..graph import query as graph_query
+from ..graph import vectors as graph_vectors
 from ..graph.extract import PROMPT_ID, build_messages
 from ..graph.schemas import DEFAULT_SCHEMA_ID, MATCHING_RULES, get_schema, list_schemas
 from ..mysql.tables import documents
@@ -723,6 +724,23 @@ def build_router(current_user, identity, require_admin):
     @router.get("/graph/tasks")
     def tasks(request: Request, admin=Depends(require_admin)):
         return {"items": graph_query.tasks(request.app.state.store.engine)}
+
+    # 图检索向量：生效版本里多少已经算好、多少还缺（换了 embedding 模型后全部算缺）。
+    @router.get("/graph/vectors")
+    def vector_status(request: Request, admin=Depends(require_admin)):
+        state = request.app.state
+        return graph_vectors.status(state.store, state.models)
+
+    # 补算向量：把缺向量的生效版本排进建图队列，worker 逐个计算。
+    @router.post("/graph/vectors/backfill", status_code=202)
+    def vector_backfill(request: Request, admin=Depends(require_admin)):
+        state = request.app.state
+        queued = graph_vectors.backfill(
+            state.store,
+            state.models,
+            lambda ids: graph_build.enqueue_vectors(state.store, ids),
+        )
+        return {"queued": queued, **graph_vectors.status(state.store, state.models)}
 
     return router
 
