@@ -20,6 +20,7 @@ import { typeColor } from "./GraphView";
 
 // 实体详情：标准名、类型；由哪些名字合并而来（各自出自第几片、用什么方法合并）；出现在哪些文档；全部关系和出处。
 // documentId 给了只看这份文档里的，不给看全局（管理员）。
+// embedded = true 时放进弹窗里用：关掉的按钮由弹窗自己带，面板不再自己收边距。
 export function GraphEntityPanel({
   hopInfo,
   entityId,
@@ -40,6 +41,7 @@ export function GraphEntityPanel({
   onEntityQueryChange,
   onShowMatches,
   matchingLimitReached = false,
+  embedded = false,
 }: {
   hopInfo?: GraphHopInfo | null;
   onOpenDocument?: (documentId: string) => void;
@@ -61,6 +63,7 @@ export function GraphEntityPanel({
   onEntityQueryChange?: (query: string) => void;
   onShowMatches?: (query: string, category: string | null) => void;
   matchingLimitReached?: boolean;
+  embedded?: boolean;
 }) {
   const panel = useRef<HTMLElement>(null);
   const header = useRef<HTMLDivElement>(null);
@@ -182,9 +185,11 @@ export function GraphEntityPanel({
               {detail.entity.type}
             </span>
           </h3>
-          <button type="button" className="link-button" onClick={onClose}>
-            关闭
-          </button>
+          {!embedded && (
+            <button type="button" className="link-button" onClick={onClose}>
+              关闭
+            </button>
+          )}
         </div>
         {hopInfo && (
           <p className="graph-note">

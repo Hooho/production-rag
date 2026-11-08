@@ -6,6 +6,7 @@ import type {
   GraphRetrievalTrace as GraphTrace,
 } from "./api";
 import { DetailDialog } from "./DetailDialog";
+import { GraphEntityDialog } from "./GraphEntityDialog";
 import { typeColor } from "./GraphView";
 import { HighlightedText } from "./HighlightedText";
 import { InfoPopover } from "./Popover";
@@ -74,25 +75,61 @@ function OriginalButton({
   );
 }
 
-function RelationText({ relation }: { relation: GraphRetrievalRelation }) {
+// 关系按三行显示：先是谁和谁之间有什么关系（起点 → 关系类型 → 终点），
+// 再是这条关系自己的描述，最后是原文引用。实体名字可以点开看详情。
+function RelationText({
+  relation,
+  onEntity,
+}: {
+  relation: GraphRetrievalRelation;
+  onEntity?: (entityId: string, documentId: string) => void;
+}) {
   const renamed = (name: string, entity: string | null) =>
     entity && entity !== name ? (
       <small className="grt-entity-of" title={`归到实体「${entity}」`}>
         （{entity}）
       </small>
     ) : null;
+  const entityName = (text: string, entityId: string, entity: string | null) =>
+    onEntity && entityId ? (
+      <button
+        type="button"
+        className="link-button button-sm grt-entity-name"
+        title={`看实体「${entity ?? text}」的详情`}
+        onClick={() => onEntity(entityId, relation.document_id)}
+      >
+        {text}
+      </button>
+    ) : (
+      <b>{text}</b>
+    );
   return (
     <span className="grt-rel">
-      <b>{relation.source}</b>
-      {renamed(relation.source, relation.source_entity)}
-      <span className="grt-arrow">→</span>
-      <span className="grt-rel-desc">
-        {relation.description || relation.category}
+      <span className="grt-rel-line">
+        {entityName(
+          relation.source,
+          relation.source_entity_id,
+          relation.source_entity,
+        )}
+        {renamed(relation.source, relation.source_entity)}
+        <span className="grt-arrow">→</span>
+        <small className="grt-category">{relation.category}</small>
+        <span className="grt-arrow">→</span>
+        {entityName(
+          relation.target,
+          relation.target_entity_id,
+          relation.target_entity,
+        )}
+        {renamed(relation.target, relation.target_entity)}
       </span>
-      <span className="grt-arrow">→</span>
-      <b>{relation.target}</b>
-      {renamed(relation.target, relation.target_entity)}
-      <small className="grt-category">{relation.category}</small>
+      {relation.description && (
+        <small className="grt-rel-desc">{relation.description}</small>
+      )}
+      {relation.evidence && (
+        <small className="grt-evidence" title="原文引用">
+          「{relation.evidence}」
+        </small>
+      )}
     </span>
   );
 }
@@ -469,12 +506,19 @@ function TraceDetail({
     detail.kind === "chunks"
       ? `⑤ 取分片 · ${CHUNK_TABLES[detail.table]}`
       : DETAIL_TITLES[detail.kind];
+  // 实体详情：点匹配到的名字或关系里的实体打开，内容和图谱里点实体一样。
+  const [entity, setEntity] = useState<{
+    id: string;
+    documentId: string;
+  } | null>(null);
+  const openEntity = (entityId: string, documentId: string) =>
+    setEntity({ id: entityId, documentId });
   return (
     <DetailDialog open title={title} className="grt-dialog" onClose={onClose}>
       {/* 抽屉可能挂在别的弹窗里，不在 .diag 下面：自己带上 .diag，表格颜色变量才对。 */}
       <div className="diag grt">
         {detail.kind === "names" && (
-          <NamesDetail graph={graph} detail={detail} />
+          <NamesDetail graph={graph} detail={detail} onEntity={openEntity} />
         )}
         {detail.kind === "entityRelations" && (
           <RelationsDetail
@@ -485,6 +529,7 @@ function TraceDetail({
             first="实体"
             firstValue={(row) => row.entity_name ?? ""}
             chunks={chunks}
+            onEntity={openEntity}
           />
         )}
         {detail.kind === "relationMatches" && (
@@ -497,12 +542,20 @@ function TraceDetail({
             firstValue={(row) => row.keyword ?? ""}
             chunks={chunks}
             extra={(row) => (row.also_entity ? "和 ③ 重复" : undefined)}
+            onEntity={openEntity}
           />
         )}
         {detail.kind === "chunks" && (
           <ChunksDetail
             rows={graph.tables[detail.table]}
             relations={relations}
+          />
+        )}
+        {entity && (
+          <GraphEntityDialog
+            entityId={entity.id}
+            documentId={entity.documentId}
+            onClose={() => setEntity(null)}
           />
         )}
       </div>
@@ -513,9 +566,11 @@ function TraceDetail({
 function NamesDetail({
   graph,
   detail,
+  onEntity,
 }: {
   graph: GraphTrace;
   detail: { dim?: string; value?: string };
+  onEntity?: (entityId: string, documentId: string) => void;
 }) {
   const list = useDetailList(
     graph.name_matches,
@@ -546,7 +601,23 @@ function NamesDetail({
                 className={match.kept ? "" : "is-dropped"}
               >
                 <td>{match.keyword}</td>
-                <td>{match.name}</td>
+                <td>
+                  {/* 匹配到的名字点开看实体详情，和图谱里点实体一样。 */}
+                  {onEntity && match.entity_id ? (
+                    <button
+                      type="button"
+                      className="link-button button-sm"
+                      title={`看实体「${match.entity_name ?? match.name}」的详情`}
+                      onClick={() =>
+                        onEntity(match.entity_id, match.document_id)
+                      }
+                    >
+                      {match.name}
+                    </button>
+                  ) : (
+                    match.name
+                  )}
+                </td>
                 <td>
                   {/* 名字向量是用这段文字算的：名字（类型）：描述1；描述2 */}
                   <span
@@ -597,6 +668,7 @@ function RelationsDetail({
   firstValue,
   chunks,
   extra,
+  onEntity,
 }: {
   rows: RelationRow[];
   dims: Dim<RelationRow>[];
@@ -606,6 +678,7 @@ function RelationsDetail({
   firstValue: (row: RelationRow) => string;
   chunks: Map<string, ChunkInfo>;
   extra?: (row: RelationRow) => string | undefined;
+  onEntity?: (entityId: string, documentId: string) => void;
 }) {
   const list = useDetailList(rows, dims, detail.dim, detail.value);
   return (
@@ -617,6 +690,7 @@ function RelationsDetail({
         firstValue={firstValue}
         chunks={chunks}
         extra={extra}
+        onEntity={onEntity}
       />
       <Pager page={list.page} total={list.total} onPage={list.setPage} />
     </>
@@ -962,12 +1036,14 @@ function RelationTable({
   firstValue,
   chunks,
   extra,
+  onEntity,
 }: {
   rows: RelationRow[];
   first: string;
   firstValue: (row: RelationRow) => string;
   chunks: Map<string, ChunkInfo>;
   extra?: (row: RelationRow) => string | undefined;
+  onEntity?: (entityId: string, documentId: string) => void;
 }) {
   if (rows.length === 0) return <p className="grt-empty">没有找到关系</p>;
   return (
@@ -990,12 +1066,7 @@ function RelationTable({
             >
               <td>{firstValue(row)}</td>
               <td>
-                <RelationText relation={row} />
-                {row.evidence && (
-                  <small className="grt-evidence" title="原文引用">
-                    「{row.evidence}」
-                  </small>
-                )}
+                <RelationText relation={row} onEntity={onEntity} />
               </td>
               <td className="num">{score(row.score)}</td>
               <td>
@@ -1393,9 +1464,6 @@ function GraphRetrievalMap({
             </span>
             {!openRelation.kept && openRelation.reason && (
               <p className="grt-dropped">没被留下：{openRelation.reason}</p>
-            )}
-            {openRelation.evidence && (
-              <blockquote>{openRelation.evidence}</blockquote>
             )}
             <OriginalButton
               relation={openRelation}

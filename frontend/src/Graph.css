@@ -1056,6 +1056,19 @@
   top: var(--entity-header-height, 0px);
 }
 
+/* 实体详情弹窗：图谱里的实体面板整个放进弹窗，去掉卡片外框和自身的高度限制，滚动交给弹窗。 */
+.ag-delivery-dialog .graph-side {
+  max-height: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+.ag-delivery-dialog .graph-entity-header {
+  position: static;
+  margin: 0;
+  padding: 0 0 10px;
+}
+
 .graph-chunk-spinner {
   display: inline-block;
   width: 12px;

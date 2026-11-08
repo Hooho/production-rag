@@ -43,8 +43,18 @@
   line-height: 1.6;
 }
 
+/* 关系的第一行：起点 → 关系类型 → 终点。描述和原文引用各占一行，在下面。 */
+.grt-rel-line {
+  display: block;
+}
+
 .grt-rel b {
   color: var(--diag-strong, #173b5b);
+  font-weight: 600;
+}
+
+/* 关系里的实体名字可以点开看详情。 */
+.grt-entity-name {
   font-weight: 600;
 }
 
@@ -67,6 +77,20 @@
   border: 1px solid var(--diag-line, #d6e2ee);
   border-radius: 3px;
   color: var(--diag-muted, #6f8ba4);
+}
+
+/* 关系类型在第一行中间，两边各留一点距离。 */
+.grt-rel-line .grt-category {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+/* 关系的描述：第二行，跟着第一行往下。 */
+.grt-table td small.grt-rel-desc,
+.grt-rel-desc {
+  display: block;
+  margin-top: 2px;
+  color: var(--diag-text, #536d86);
 }
 
 .grt-table td small.grt-evidence {
