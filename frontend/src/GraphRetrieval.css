@@ -279,6 +279,49 @@
   gap: 6px;
 }
 
+/* 关系图顶部的实体列表：点一个实体，图里只看和它相连的关系。 */
+.grt-map-entities {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.grt-map-entities-label {
+  color: var(--diag-muted, #6f8ba4);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* 实体多的时候列表会顶掉整张图，限高三行，多的在里面滚。 */
+.grt-map-entities .grt-chips {
+  max-height: 92px;
+  overflow-y: auto;
+  align-content: flex-start;
+}
+
+.grt-entity-chip {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+/* 圆点用实体类型的颜色，和图里节点的描边色一致。 */
+.grt-entity-dot {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* 找到的实体（②）在图里是粗蓝边框，列表里用一圈蓝环对上。 */
+.grt-entity-chip.is-found .grt-entity-dot {
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 3.5px #1d4ed8;
+}
+
 .grt-map-legend {
   display: flex;
   flex-wrap: wrap;

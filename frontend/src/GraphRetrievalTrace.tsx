@@ -1203,6 +1203,51 @@ const ROUTE_COLORS = {
 };
 const DROPPED_EDGES = 8;
 
+// 图上的一个实体：找到的实体（②）和只出现在关系两端的实体。
+type MapEntity = {
+  id: string;
+  name: string;
+  type: string | null;
+  found: boolean;
+  degree: number;
+};
+
+// 画布是宽的（宽 > 高），布局算完按画布比例把节点横向撑开，
+// 否则 cose 排出来是一团圆，挤在中间，宽度全浪费了。
+// 只撑开窄的那一维，不压缩另一边，节点间距不会被挤在一起。
+function stretchToCanvas(instance: Core, box: HTMLElement) {
+  const nodes = instance.nodes();
+  if (nodes.length === 0) return;
+  const width = box.clientWidth;
+  const height = box.clientHeight;
+  if (width < 80 || height < 80) return;
+  const bb = nodes.boundingBox({ includeLabels: true });
+  if (!bb.w || !bb.h) return;
+  const layoutAspect = bb.w / bb.h;
+  const canvasAspect = width / height;
+  const scaleX =
+    layoutAspect < canvasAspect
+      ? Math.min(canvasAspect / layoutAspect, 2.4)
+      : 1;
+  const scaleY =
+    layoutAspect > canvasAspect
+      ? Math.min(layoutAspect / canvasAspect, 2.4)
+      : 1;
+  if (scaleX !== 1 || scaleY !== 1) {
+    const cx = (bb.x1 + bb.x2) / 2;
+    const cy = (bb.y1 + bb.y2) / 2;
+    nodes.forEach((item) => {
+      const pos = item.position();
+      item.position({
+        x: cx + (pos.x - cx) * scaleX,
+        y: cy + (pos.y - cy) * scaleY,
+      });
+    });
+  }
+  // 顺带把图整个收进画布：布局算完不 fit 的话，上面的节点会被画布顶边切掉。
+  instance.fit(undefined, 20);
+}
+
 function GraphRetrievalMap({
   graph,
   chunks,
@@ -1215,7 +1260,9 @@ function GraphRetrievalMap({
   // 点开的关系：详情在弹窗里看，图上只留一条边的标签。
   const [openRelation, setOpenRelation] =
     useState<GraphRetrievalRelation | null>(null);
-  const { elements, relations } = useMemo(() => {
+  // 聚焦的实体：只看和它相连的关系，其他部分淡掉。
+  const [focus, setFocus] = useState<string | null>(null);
+  const { elements, relations, entities } = useMemo(() => {
     const routes = new Map<
       string,
       {
@@ -1271,6 +1318,8 @@ function GraphRetrievalMap({
           border: found.has(id) ? 4 : 1.5,
           text: color.text,
           faded: faded ? 1 : 0,
+          type: type ?? "其他",
+          isFound: found.has(id) ? 1 : 0,
         },
       });
     };
@@ -1315,6 +1364,28 @@ function GraphRetrievalMap({
         },
       });
     }
+    // 每个实体连了几条边，列表里标出来，方便点之前先看规模。
+    const degree = new Map<string, number>();
+    for (const edge of edges) {
+      const source = String(edge.data.source);
+      const target = String(edge.data.target);
+      degree.set(source, (degree.get(source) ?? 0) + 1);
+      degree.set(target, (degree.get(target) ?? 0) + 1);
+    }
+    const entities: MapEntity[] = [...nodes.values()]
+      .map((item) => ({
+        id: String(item.data.id),
+        name: String(item.data.label),
+        type: (item.data.type as string) ?? null,
+        found: item.data.isFound === 1,
+        degree: degree.get(String(item.data.id)) ?? 0,
+      }))
+      .sort(
+        (a, b) =>
+          Number(b.found) - Number(a.found) ||
+          b.degree - a.degree ||
+          a.name.localeCompare(b.name, "zh"),
+      );
     return {
       elements: [...nodes.values(), ...edges],
       relations: new Map(
@@ -1323,6 +1394,7 @@ function GraphRetrievalMap({
           item.relation,
         ]),
       ),
+      entities,
     };
   }, [graph]);
 
@@ -1376,14 +1448,31 @@ function GraphRetrievalMap({
           },
         },
         {
-          // 鼠标停在边上、点中的实体相邻的边、点中的边，才显示这条边的关系类别。
-          selector: "edge.is-hover, edge:selected",
+          // 鼠标停在边上、聚焦的实体相邻的边、点中的边，才显示这条边的关系类别。
+          selector: "edge.is-hover, edge:selected, edge.is-focus-edge",
           style: {
             label: "data(label)",
             "font-weight": "bold",
             "text-background-opacity": 1,
             "z-index": 10,
           },
+        },
+        {
+          // 聚焦一个实体时，和它无关的部分淡到几乎看不见。
+          selector: "node.is-dim",
+          style: { opacity: 0.12 },
+        },
+        {
+          selector: "edge.is-dim",
+          style: { opacity: 0.07 },
+        },
+        {
+          selector: "node.is-focus",
+          style: { "border-width": 5, "border-color": "#1d4ed8", opacity: 1 },
+        },
+        {
+          selector: "edge.is-focus-edge",
+          style: { "z-index": 20, opacity: 1 },
         },
         {
           selector: "edge[dashed = 1]",
@@ -1410,20 +1499,103 @@ function GraphRetrievalMap({
       if (container.current) container.current.title = "";
     });
     instance.on("tap", "node", (event) => {
-      // 点实体：只亮出它相邻的边，它们的关系类别才显示出来。
+      // 点实体：只看和它相连的关系（进来的、出去的），再点一次恢复全部。
+      const id = event.target.id();
       instance.edges().unselect();
-      event.target.connectedEdges().select();
+      setFocus((current) => (current === id ? null : id));
+    });
+    // 点空白处：取消聚焦。
+    instance.on("tap", (event) => {
+      if (event.target === instance) {
+        instance.edges().unselect();
+        setFocus(null);
+      }
     });
     cy.current = instance;
+    // 布局算完按画布比例横向铺开，再整个收进画布。
+    stretchToCanvas(instance, container.current);
     return () => {
       instance.destroy();
       cy.current = null;
     };
   }, [elements]);
 
+  // 聚焦的实体：它相邻的边留着并显示关系类别，其余淡掉。
+  useEffect(() => {
+    const instance = cy.current;
+    if (!instance) return;
+    instance.elements().removeClass("is-dim is-focus is-focus-edge");
+    if (!focus) return;
+    const node = instance.getElementById(focus);
+    if (!node || node.empty()) return;
+    const edgeIds = new Set<string>();
+    node.connectedEdges().forEach((edge) => {
+      edgeIds.add(edge.id());
+    });
+    const nodeIds = new Set<string>([focus]);
+    node.connectedNodes().forEach((item) => {
+      nodeIds.add(item.id());
+    });
+    instance.nodes().forEach((item) => {
+      if (!nodeIds.has(item.id())) item.addClass("is-dim");
+    });
+    instance.edges().forEach((edge) => {
+      if (!edgeIds.has(edge.id())) edge.addClass("is-dim");
+    });
+    node.addClass("is-focus");
+    node.connectedEdges().addClass("is-focus-edge");
+  }, [focus, elements]);
+
+  // 面板展开/收起、窗口变宽变窄时重新按画布比例铺一次。
+  useEffect(() => {
+    const box = container.current;
+    if (!box) return;
+    let last = "";
+    const observer = new ResizeObserver(() => {
+      const size = `${box.clientWidth}x${box.clientHeight}`;
+      if (size === last) return;
+      last = size;
+      if (cy.current) stretchToCanvas(cy.current, box);
+    });
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, []);
+
   if (elements.length === 0) return <p className="grt-empty">没有可画的关系</p>;
   return (
     <div className="grt-map">
+      <div className="grt-map-entities">
+        <span className="grt-map-entities-label">实体</span>
+        <div className="grt-chips">
+          <button
+            type="button"
+            className={`grt-chip${focus ? "" : " is-active"}`}
+            onClick={() => setFocus(null)}
+          >
+            全部 <em>{entities.length}</em>
+          </button>
+          {entities.map((entity) => (
+            <button
+              key={entity.id}
+              type="button"
+              className={`grt-chip grt-entity-chip${entity.found ? " is-found" : ""}${focus === entity.id ? " is-active" : ""}`}
+              title={`${entity.found ? "② 找到的实体" : "关系里出现的实体"} · ${entity.degree} 条关系`}
+              onClick={() =>
+                setFocus((current) =>
+                  current === entity.id ? null : entity.id,
+                )
+              }
+            >
+              <i
+                className="grt-entity-dot"
+                style={{ background: typeColor(entity.type ?? "其他").stroke }}
+              />
+              {entity.name}
+              <em>{entity.degree}</em>
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="grt-map-legend">
         <span>
           <i className="grt-node-found" />
@@ -1448,7 +1620,7 @@ function GraphRetrievalMap({
       </div>
       <div className="grt-map-canvas" ref={container} />
       <p className="grt-hint">
-        鼠标停在边上显示关系类别，点一条边在弹窗里看详情；滚轮缩放，可以拖动
+        点上面的实体只看和它相连的关系，再点一次或点空白处恢复；鼠标停在边上显示关系类别，点一条边在弹窗里看详情；滚轮缩放，可以拖动
       </p>
       {openRelation && (
         <DetailDialog
