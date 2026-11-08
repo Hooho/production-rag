@@ -4642,9 +4642,17 @@ function RetrievalDiagnostics({
   }
   // 交给重排的候选池：进池的分片就是 status 不是 not_in_pool 的那些（app/tools/search.py 里
   // RRF 排名前 pool_size 个，再按图检索名额补几个）。后端把候选按 status 排的，这里按 RRF 名次重排。
-  const rerankPool = candidates
+  // 池子分两批：RRF 名前 pool_size 个，和 RRF 名次不够、靠图检索名额补进来的（后端标了 graph_quota）。
+  const poolAll = candidates
     .filter((item) => item.status !== "not_in_pool")
     .sort((a, b) => a.rrf_rank - b.rrf_rank);
+  const quotaPool = poolAll.filter((item) => item.graph_quota);
+  const rrfPool = poolAll.filter((item) => !item.graph_quota);
+  const rerankPool = [...rrfPool, ...quotaPool];
+  // 入口上写清楚这两批各多少，别让人以为池子就是 RRF 前几个。
+  const poolBreakdown = quotaPool.length
+    ? `RRF 前 ${rrfPool.length} 个 + 图检索名额 ${quotaPool.length} 个`
+    : `RRF 前 ${rrfPool.length} 个`;
   // 漏斗每一行表示"这一步之后剩下多少"，名称里直接写出关键参数（RRF 前几名、阈值、返回上限），
   // 右侧列出这一步淘汰了多少、为什么。
   const rerankedCount = config.reranked ? pooled : candidates.length;
@@ -5101,6 +5109,80 @@ function RetrievalDiagnostics({
     </DetailDialog>
   );
 
+  // 候选池里的一行：召回方式、分片、RRF 分、各路名次、原文。
+  const poolRow = (item: RetrievalCandidate) => {
+    const methods = ["dense", "keyword", "graph"].filter((method) =>
+      item.retrieval_methods.includes(method),
+    );
+    return (
+      <tr key={item.chunk_id}>
+        <td>
+          <div className="diag-contribs">
+            {methods.map((method) => (
+              <span className={`diag-contrib method-${method}`} key={method}>
+                <i className={`diag-dot method-${method}`} />
+                {METHOD_LABELS[method] ?? method}
+              </span>
+            ))}
+          </div>
+        </td>
+        <td className="diag-snippet">
+          <span className="diag-title">
+            {item.title}
+            <small className="source-location">
+              {sourceLocation(item.version, item.page_start, item.heading)}
+            </small>
+          </span>
+          <span className="diag-preview" title={item.preview}>
+            {item.preview}
+          </span>
+          {item.graph_quota && (
+            <span
+              className="diag-graph-only"
+              title="RRF 名次不够进入重排，靠图检索名额补进来的"
+            >
+              图检索名额
+            </span>
+          )}
+        </td>
+        <td className="num">
+          {formatNumber(item.rrf_score, 5)}
+          <small className="diag-sub">第 {item.rrf_rank} 名</small>
+        </td>
+        <td>
+          <div className="diag-contribs">
+            {item.contributions.map((contribution, index) => (
+              <span
+                className={`diag-contrib method-${contribution.method}`}
+                key={index}
+                title={`${contribution.query}\n${METHOD_LABELS[contribution.method] ?? contribution.method}第 ${contribution.rank} 名，${RAW_SCORE_LABELS[contribution.method] ?? "原始分"} ${formatNumber(contribution.raw_score)}\nRRF 贡献 1/(k+${contribution.rank}) = ${formatNumber(contribution.rrf, 5)}`}
+              >
+                <i className={`diag-dot method-${contribution.method}`} />
+                {METHOD_LABELS[contribution.method] ?? contribution.method}
+                {contribution.method === "graph" ? (
+                  <em>{contribution.query.includes("实体") ? "实" : "关"}</em>
+                ) : queries.length > 1 ? (
+                  <em>Q{queries.indexOf(contribution.query) + 1}</em>
+                ) : null}
+                #{contribution.rank}
+                <small>{formatNumber(contribution.raw_score, 3)}</small>
+              </span>
+            ))}
+          </div>
+        </td>
+        <td>
+          <button
+            type="button"
+            className="link-button button-sm"
+            onClick={() => setPoolChunkOpen(item.chunk_id)}
+          >
+            原文
+          </button>
+        </td>
+      </tr>
+    );
+  };
+
   // 交给重排的候选池：每片一行，写清楚是哪几路找到的、在各路的排名表里第几。
   // 分数用 RRF 分（这一步的得分），原文按钮点开是伴随浮窗。
   const poolDialog = poolOpen && rerankPool.length > 0 && (
@@ -5112,7 +5194,9 @@ function RetrievalDiagnostics({
     >
       <div className="diag">
         <p className="diag-part-lead">
-          <strong>RRF 融合后得分最高的 {rerankPool.length} 个分片</strong>
+          <strong>
+            {poolBreakdown}，共 {rerankPool.length} 个分片
+          </strong>
           <small>
             按 RRF 得分排；每行写清楚这片是哪几路找到的、在各路的排名表里第几
           </small>
@@ -5129,88 +5213,17 @@ function RetrievalDiagnostics({
               </tr>
             </thead>
             <tbody>
-              {rerankPool.map((item) => {
-                const methods = ["dense", "keyword", "graph"].filter((method) =>
-                  item.retrieval_methods.includes(method),
-                );
-                return (
-                  <tr key={item.chunk_id}>
-                    <td>
-                      <div className="diag-contribs">
-                        {methods.map((method) => (
-                          <span
-                            className={`diag-contrib method-${method}`}
-                            key={method}
-                          >
-                            <i className={`diag-dot method-${method}`} />
-                            {METHOD_LABELS[method] ?? method}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="diag-snippet">
-                      <span className="diag-title">
-                        {item.title}
-                        <small className="source-location">
-                          {sourceLocation(
-                            item.version,
-                            item.page_start,
-                            item.heading,
-                          )}
-                        </small>
-                      </span>
-                      <span className="diag-preview" title={item.preview}>
-                        {item.preview}
-                      </span>
-                    </td>
-                    <td className="num">
-                      {formatNumber(item.rrf_score, 5)}
-                      <small className="diag-sub">第 {item.rrf_rank} 名</small>
-                    </td>
-                    <td>
-                      <div className="diag-contribs">
-                        {item.contributions.map((contribution, index) => (
-                          <span
-                            className={`diag-contrib method-${contribution.method}`}
-                            key={index}
-                            title={`${contribution.query}\n${METHOD_LABELS[contribution.method] ?? contribution.method}第 ${contribution.rank} 名，${RAW_SCORE_LABELS[contribution.method] ?? "原始分"} ${formatNumber(contribution.raw_score)}\nRRF 贡献 1/(k+${contribution.rank}) = ${formatNumber(contribution.rrf, 5)}`}
-                          >
-                            <i
-                              className={`diag-dot method-${contribution.method}`}
-                            />
-                            {METHOD_LABELS[contribution.method] ??
-                              contribution.method}
-                            {contribution.method === "graph" ? (
-                              <em>
-                                {contribution.query.includes("实体")
-                                  ? "实"
-                                  : "关"}
-                              </em>
-                            ) : queries.length > 1 ? (
-                              <em>
-                                Q{queries.indexOf(contribution.query) + 1}
-                              </em>
-                            ) : null}
-                            #{contribution.rank}
-                            <small>
-                              {formatNumber(contribution.raw_score, 3)}
-                            </small>
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="link-button button-sm"
-                        onClick={() => setPoolChunkOpen(item.chunk_id)}
-                      >
-                        原文
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
+              {rrfPool.map(poolRow)}
+              {/* 名额补进来的单独一段，别和 RRF 名前面几个混在一起。 */}
+              {quotaPool.length > 0 && (
+                <tr className="diag-pool-group">
+                  <td colSpan={5}>
+                    图检索名额补进来的 {quotaPool.length} 个：RRF
+                    名次不够，靠名额进池
+                  </td>
+                </tr>
+              )}
+              {quotaPool.map(poolRow)}
             </tbody>
           </table>
         </div>
@@ -5354,9 +5367,7 @@ function RetrievalDiagnostics({
             >
               交给重排的 {rerankPool.length} 个
             </button>
-            <small>
-              RRF 融合后得分最高的这批；点开看每片是哪几路找到的、各路排第几
-            </small>
+            <small>{poolBreakdown}；点开看每片是哪几路找到的、各路排第几</small>
           </div>
         )}
       </div>

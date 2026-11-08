@@ -7010,6 +7010,14 @@ label {
   min-width: 660px;
 }
 
+/* 候选池里两批的分界行：图检索名额补进来的那批前面说明一句，别和 RRF 名的混着看。 */
+.diag-pool-group td {
+  padding: 5px 8px;
+  background: var(--diag-track);
+  color: var(--diag-muted);
+  font-size: 11px;
+}
+
 /* 模型名标签：检索过程里出现的模型用浅蓝底等宽字包起来，和普通说明文字区分。 */
 .model-tag {
   display: inline-block;
