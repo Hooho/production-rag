@@ -189,6 +189,32 @@ class DocumentSearchTool:
             item["status"] = "not_in_pool"
         # RRF 只负责挑出进入重排的候选池；池子比最终返回数大，给重排留出纠正召回排序的空间。
         pool = ranked[:pool_size]
+        # 图检索名额：候选池里图检索带回的分片不够 graph_rerank_quota 个时，按图排名表里的名次补进来（池子相应变大），
+        # 交给重排判断。不然只有图找到的分片要和被多张表找到的分片比 RRF 分数，几乎进不了池子。
+        graph_quota = (
+            int(config.get("graph_rerank_quota") or 0) if "graph" in methods else 0
+        )
+        if graph_quota:
+
+            def graph_rank(item):
+                return min(
+                    contribution["rank"]
+                    for contribution in item["contributions"]
+                    if contribution["method"] == "graph"
+                )
+
+            present = sum(1 for item in pool if "graph" in item["retrieval_methods"])
+            extra = sorted(
+                (
+                    item
+                    for item in ranked[pool_size:]
+                    if "graph" in item["retrieval_methods"]
+                ),
+                key=lambda item: (graph_rank(item), item["rrf_rank"]),
+            )
+            for item in extra[: max(0, graph_quota - present)]:
+                item["graph_quota"] = True
+                pool.append(item)
         rerank_documents = []
         for item in pool:
             item["status"] = "in_pool"
@@ -418,7 +444,9 @@ class DocumentSearchTool:
     @staticmethod
     def graph_recall(store, models, question, scope, config, keywords=None):
         if scope is None:
-            return graph_retrieve.empty("skipped", "这次检索没有权限范围（测试替身），不走图检索")
+            return graph_retrieve.empty(
+                "skipped", "这次检索没有权限范围（测试替身），不走图检索"
+            )
         keywords = keywords or {}
         try:
             return graph_retrieve.retrieve(
@@ -715,12 +743,17 @@ class DocumentSearchTool:
                     else None,
                     "rerank_rank": item.get("rerank_rank"),
                     "graph_relation_ids": item.get("graph_relation_ids") or [],
+                    # 不是靠 RRF 名次、而是靠图检索名额进入重排的
+                    "graph_quota": bool(item.get("graph_quota")),
                 }
             )
         # 候选池、融合方式和召回方式写进诊断配置，评测对比不同参数时能看出每次实际用的是哪一组。
         config = {
             "rrf_k": settings["rrf_k"],
             "rerank_candidates": pool_size,
+            "graph_rerank_quota": settings.get("graph_rerank_quota", 0)
+            if "graph" in methods
+            else 0,
             "fusion": fusion,
             "methods": list(methods),
             "return_limit": settings["return_limit"],

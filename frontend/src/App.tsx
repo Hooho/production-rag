@@ -787,7 +787,6 @@ function App() {
   );
 }
 
-
 // 用户名密码登录。原来粘贴一个永不过期的访问密钥；现在登录后拿到会自动续期的短期令牌。
 function Login({ onLogin }: { onLogin: (user: AuthUser) => void }) {
   const [username, setUsername] = useState("");
@@ -2431,84 +2430,95 @@ function TraceTimeline({
         <span className="panel-chevron">⌄</span>
       </summary>
       <div className="trace-body">
-        {traceRows(steps).map(({ step, part, title, detail, duration }, index) => (
-          <details
-            className={`trace-step ${step.status}`}
-            key={part ? `${step.id}-${part}` : step.id}
-            open={live || undefined}
-          >
-            <summary>
-              <span className="step-number">
-                {String(index + 1).padStart(2, "0")}
-              </span>
-              <span className="step-status">
-                {step.status === "failed"
-                  ? "!"
-                  : step.status === "running"
-                    ? "·"
-                    : "✓"}
-              </span>
-              <span className="step-copy">
-                <strong>{part ? title : step.title}</strong>
-                <small>
-                  {part
-                    ? PART_PURPOSES[part]
-                    : (step.status !== "failed" && stepPurpose(step.result)) ||
-                      step.detail}
-                </small>
-              </span>
-              {(part ? duration : step.duration_ms) !== undefined && (
-                <time title={durationTitle((part ? duration : step.duration_ms) ?? 0)}>
-                  {formatDuration((part ? duration : step.duration_ms) ?? 0)}
-                </time>
-              )}
-            </summary>
-            <div className="step-result">
-              {part ? (
-                <div className="result-grid">
-                  <div className="result-row result-step_detail">
-                    <span>{formatResultLabel("step_detail")}</span>
-                    <div className="result-value">{detail}</div>
-                  </div>
-                  <div className="result-row result-diagnostics">
-                    <span>{formatResultLabel("diagnostics")}</span>
-                    <div className="result-value">
-                      <RetrievalDiagnostics
-                        part={part}
-                        data={step.result?.diagnostics as RetrievalDiagnosticsData}
-                        embeddingModel={String(step.result?.model_called ?? "")
-                          .split("；")[0]
-                          .replace("（向量模型）", "")}
-                      />
+        {traceRows(steps).map(
+          ({ step, part, title, detail, duration }, index) => (
+            <details
+              className={`trace-step ${step.status}`}
+              key={part ? `${step.id}-${part}` : step.id}
+              open={live || undefined}
+            >
+              <summary>
+                <span className="step-number">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <span className="step-status">
+                  {step.status === "failed"
+                    ? "!"
+                    : step.status === "running"
+                      ? "·"
+                      : "✓"}
+                </span>
+                <span className="step-copy">
+                  <strong>{part ? title : step.title}</strong>
+                  <small>
+                    {part
+                      ? PART_PURPOSES[part]
+                      : (step.status !== "failed" &&
+                          stepPurpose(step.result)) ||
+                        step.detail}
+                  </small>
+                </span>
+                {(part ? duration : step.duration_ms) !== undefined && (
+                  <time
+                    title={durationTitle(
+                      (part ? duration : step.duration_ms) ?? 0,
+                    )}
+                  >
+                    {formatDuration((part ? duration : step.duration_ms) ?? 0)}
+                  </time>
+                )}
+              </summary>
+              <div className="step-result">
+                {part ? (
+                  <div className="result-grid">
+                    <div className="result-row result-step_detail">
+                      <span>{formatResultLabel("step_detail")}</span>
+                      <div className="result-value">{detail}</div>
+                    </div>
+                    <div className="result-row result-diagnostics">
+                      <span>{formatResultLabel("diagnostics")}</span>
+                      <div className="result-value">
+                        <RetrievalDiagnostics
+                          part={part}
+                          data={
+                            step.result?.diagnostics as RetrievalDiagnosticsData
+                          }
+                          embeddingModel={String(
+                            step.result?.model_called ?? "",
+                          )
+                            .split("；")[0]
+                            .replace("（向量模型）", "")}
+                        />
+                      </div>
                     </div>
                   </div>
-                </div>
-              ) : step.id === "agent" ? (
-                <AgentStepView
-                  step={step}
-                  requestId={requestId}
-                  rounds={rounds}
-                />
-              ) : step.id === "complete" && step.status !== "failed" ? (
-                <RunSummary
-                  steps={steps}
-                  answer={answer}
-                  sources={sources}
-                  traceId={traceId}
-                />
-              ) : (
-                formatResult(
-                  step.result,
-                  step.status !== "failed" && stepPurpose(step.result)
-                    ? step.detail
-                    : undefined,
-                  step.field_order,
-                  step,
-                )
-              )}
-            </div>
-          </details>
-        ))}
+                ) : step.id === "agent" ? (
+                  <AgentStepView
+                    step={step}
+                    requestId={requestId}
+                    rounds={rounds}
+                  />
+                ) : step.id === "complete" && step.status !== "failed" ? (
+                  <RunSummary
+                    steps={steps}
+                    answer={answer}
+                    sources={sources}
+                    traceId={traceId}
+                  />
+                ) : (
+                  formatResult(
+                    step.result,
+                    step.status !== "failed" && stepPurpose(step.result)
+                      ? step.detail
+                      : undefined,
+                    step.field_order,
+                    step,
+                  )
+                )}
+              </div>
+            </details>
+          ),
+        )}
         {live && steps.length === 0 && (
           <LoadingSkeleton className="trace-waiting" label="正在等待处理阶段">
             <SkeletonBlock className="skeleton-line" />
@@ -2539,7 +2549,9 @@ const PART_PURPOSES: Record<DiagnosticsPart, string> = {
 function traceRows(steps: TraceStep[]): TraceRow[] {
   const rows: TraceRow[] = [];
   for (const step of steps) {
-    const data = step.result?.diagnostics as RetrievalDiagnosticsData | undefined;
+    const data = step.result?.diagnostics as
+      | RetrievalDiagnosticsData
+      | undefined;
     if (step.id !== "retrieval" || step.status === "failed" || !data?.config) {
       rows.push({ step });
       continue;
@@ -2549,8 +2561,12 @@ function traceRows(steps: TraceStep[]): TraceRow[] {
     const candidates = data.candidates ?? [];
     let hits = 0;
     for (const list of data.lists ?? []) hits += list.hits.length;
-    const returned = candidates.filter((item) => item.status === "returned").length;
-    const pooled = candidates.filter((item) => item.status !== "not_in_pool").length;
+    const returned = candidates.filter(
+      (item) => item.status === "returned",
+    ).length;
+    const pooled = candidates.filter(
+      (item) => item.status !== "not_in_pool",
+    ).length;
     const methods = (data.config.methods ?? ["dense", "keyword"]).map(
       (method) => METHOD_LABELS[method] ?? method,
     );
@@ -4558,7 +4574,8 @@ function RetrievalDiagnostics({
   const hitsByMethod: Record<string, number> = {};
   for (const list of lists) {
     totalHits += list.hits.length;
-    hitsByMethod[list.method] = (hitsByMethod[list.method] ?? 0) + list.hits.length;
+    hitsByMethod[list.method] =
+      (hitsByMethod[list.method] ?? 0) + list.hits.length;
   }
   let pooled = 0;
   let passed = 0;
@@ -4594,6 +4611,7 @@ function RetrievalDiagnostics({
     .filter((method) => hitsByMethod[method] !== undefined)
     .map((method) => `${METHOD_LABELS[method]} ${hitsByMethod[method]}`)
     .join(" · ");
+  const quotaCount = candidates.filter((item) => item.graph_quota).length;
   const funnel = [
     {
       label: "三路返回（含重复）",
@@ -4609,14 +4627,25 @@ function RetrievalDiagnostics({
     },
     config.reranked
       ? {
-          label: `交给重排（RRF 前 ${config.rerank_candidates}）`,
+          label:
+            quotaCount > 0
+              ? `交给重排（RRF 前 ${config.rerank_candidates} + 图检索名额 ${quotaCount}）`
+              : `交给重排（RRF 前 ${config.rerank_candidates}）`,
           value: rerankedCount,
           dropped:
-            removed(candidates.length - rerankedCount, "排名靠后", "全部交给重排") +
+            removed(
+              candidates.length - rerankedCount,
+              "排名靠后",
+              "全部交给重排",
+            ) +
             (graphOnlyOutOfPool > 0
               ? `（其中只有图找到的 ${graphOnlyOutOfPool} 个）`
               : ""),
-          hint: `RRF 前 ${config.rerank_candidates} 名交给交叉编码器重新打分排序`,
+          hint:
+            `RRF 前 ${config.rerank_candidates} 名交给交叉编码器重新打分排序` +
+            (quotaCount > 0
+              ? `；另按图排名表的名次补进 ${quotaCount} 个图检索带回的分片（图检索名额 ${config.graph_rerank_quota}）`
+              : ""),
         }
       : {
           label: config.rerank_error ? "重排失败" : "未启用重排",
@@ -4630,7 +4659,11 @@ function RetrievalDiagnostics({
       ? {
           label: `相关性 ≥ ${formatNumber(config.min_score, 2)}`,
           value: passedCount,
-          dropped: removed(rerankedCount - passedCount, "相关性不足", "全部通过"),
+          dropped: removed(
+            rerankedCount - passedCount,
+            "相关性不足",
+            "全部通过",
+          ),
           hint: `重排相关概率低于 ${config.min_score} 的分片被过滤`,
         }
       : {
@@ -4654,15 +4687,21 @@ function RetrievalDiagnostics({
   for (const list of lists)
     if (list.method !== "graph" && !queries.includes(list.query))
       queries.push(list.query);
-  const methods =
-    config.methods ??
-    [...new Set(lists.map((list) => list.method))];
+  const methods = config.methods ?? [
+    ...new Set(lists.map((list) => list.method)),
+  ];
   const textLists = lists.filter((list) => list.method !== "graph");
   const graphLists = lists.filter((list) => list.method === "graph");
   // 图检索那一路的关系：候选明细悬停时说明这一片是通过哪几条关系找到的。
   const graphRelations = new Map<string, string>();
-  for (const row of [...(graph?.entity_relations ?? []), ...(graph?.relation_matches ?? [])])
-    graphRelations.set(row.relation_id, `${row.source} → ${row.target}（${row.description || row.category}）`);
+  for (const row of [
+    ...(graph?.entity_relations ?? []),
+    ...(graph?.relation_matches ?? []),
+  ])
+    graphRelations.set(
+      row.relation_id,
+      `${row.source} → ${row.target}（${row.description || row.category}）`,
+    );
   const scope = data.scope;
 
   const scopeSection = scope ? (
@@ -4717,7 +4756,9 @@ function RetrievalDiagnostics({
                   </span>
                   {scope.graph_versions && (
                     <span className="scope-graph">
-                      {graphVersion ? `图谱 v${graphVersion.number} 生效` : "没有建图"}
+                      {graphVersion
+                        ? `图谱 v${graphVersion.number} 生效`
+                        : "没有建图"}
                     </span>
                   )}
                 </li>
@@ -4761,12 +4802,14 @@ function RetrievalDiagnostics({
                 {embeddingModel || "向量模型"}
               </StackTag>
               按语义相似度取前 {limit} 个分片（不设相似度下限；embedding 服务
-              /v1/embeddings → <StackTag kind="store">Milvus</StackTag>向量检索）
+              /v1/embeddings → <StackTag kind="store">Milvus</StackTag>
+              向量检索）
             </>
           ) : (
             <>
-              <StackTag kind="algo">BM25</StackTag>包含检索词中任意一个词的分片，按
-              BM25 分数取前 {limit} 个（<StackTag kind="store">Milvus</StackTag>
+              <StackTag kind="algo">BM25</StackTag>
+              包含检索词中任意一个词的分片，按 BM25 分数取前 {limit} 个（
+              <StackTag kind="store">Milvus</StackTag>
               全文检索）
             </>
           )}
@@ -4776,7 +4819,10 @@ function RetrievalDiagnostics({
             <tr>
               <th>检索词</th>
               <th>返回分片</th>
-              <th>{method === "dense" ? "相似度" : "BM25 分数"}（第 1 名 ~ 最后一名）</th>
+              <th>
+                {method === "dense" ? "相似度" : "BM25 分数"}（第 1 名 ~
+                最后一名）
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -4786,7 +4832,8 @@ function RetrievalDiagnostics({
                   <em className="diag-q">Q{queries.indexOf(list.query) + 1}</em>
                 </td>
                 <td className="num">
-                  {list.hits.length} / {method === "dense" ? limit : `最多 ${limit}`}
+                  {list.hits.length} /{" "}
+                  {method === "dense" ? limit : `最多 ${limit}`}
                 </td>
                 <td className="num">
                   {list.hits.length
@@ -4811,7 +4858,10 @@ function RetrievalDiagnostics({
     <details className="diag-fold">
       <summary>
         原始排名表（{lists.length} 张）
-        <small>每个检索词 × 向量 / 关键词各一张{graphLists.length ? "，图检索按实体、关系各一张" : ""}</small>
+        <small>
+          每个检索词 × 向量 / 关键词各一张
+          {graphLists.length ? "，图检索按实体、关系各一张" : ""}
+        </small>
       </summary>
       <div className="diag-lists">
         {lists.map((list, index) => (
@@ -4884,13 +4934,21 @@ function RetrievalDiagnostics({
     <div className="diag-part">
       <p className="diag-part-lead">
         <strong>
-          {queries.length} 个检索词 × {textLists.length > 0 ? methods.filter((method) => method !== "graph").map((method) => METHOD_LABELS[method] ?? method).join(" + ") : "—"}{" "}
+          {queries.length} 个检索词 ×{" "}
+          {textLists.length > 0
+            ? methods
+                .filter((method) => method !== "graph")
+                .map((method) => METHOD_LABELS[method] ?? method)
+                .join(" + ")
+            : "—"}{" "}
           = {textLists.length} 张排名表
-          {graph ? `，图检索 ${graphLists.length} 张（实体 / 关系）` : ""}，共{" "}
-          {lists.length} 张
+          {graph
+            ? `，图检索 ${graphLists.length} 张（实体 / 关系）`
+            : ""}，共 {lists.length} 张
         </strong>
         <small>
-          {graph ? "三" : "两"}路共返回 {totalHits} 个分片（同一分片被多路或多个检索词找到时重复计数），去重后{" "}
+          {graph ? "三" : "两"}路共返回 {totalHits}{" "}
+          个分片（同一分片被多路或多个检索词找到时重复计数），去重后{" "}
           {candidates.length} 个
         </small>
         {queries.map((query, index) => (
@@ -4914,7 +4972,9 @@ function RetrievalDiagnostics({
                   : graph.status === "skipped"
                     ? "没有走图检索"
                     : "失败"}
-                {timings.graph_ms ? ` · ${formatDuration(timings.graph_ms)}` : ""}
+                {timings.graph_ms
+                  ? ` · ${formatDuration(timings.graph_ms)}`
+                  : ""}
               </span>
             </header>
             <small className="diag-module-desc">
@@ -4935,11 +4995,13 @@ function RetrievalDiagnostics({
       <div className="diag-fusion">
         <p className="diag-part-lead">
           <strong>
-            融合：<StackTag kind="algo">RRF</StackTag>（k={config.rrf_k}）按名次合并，
+            融合：<StackTag kind="algo">RRF</StackTag>（k={config.rrf_k}
+            ）按名次合并，
             {candidates.length} 个分片，前 {config.rerank_candidates} 个进入重排
           </strong>
           <small>
-            得分 = Σ 1 / ({config.rrf_k} + 名次)，只看名次不看原始分数；被多路找到的分片更靠前
+            得分 = Σ 1 / ({config.rrf_k} +
+            名次)，只看名次不看原始分数；被多路找到的分片更靠前
           </small>
         </p>
         {combos.size > 0 && (
@@ -4954,7 +5016,10 @@ function RetrievalDiagnostics({
               {comboOrder
                 .filter((key) => combos.has(key))
                 .map((key) => (
-                  <tr key={key} className={key === "graph" ? "is-graph-only" : ""}>
+                  <tr
+                    key={key}
+                    className={key === "graph" ? "is-graph-only" : ""}
+                  >
                     <td>
                       {key.split("+").length === 3
                         ? "三路都找到"
@@ -5177,19 +5242,25 @@ function RetrievalDiagnostics({
         <>
           <div className="diag-part-title">
             权限范围
-            {timings.scope_ms !== undefined && <small>{formatDuration(timings.scope_ms)}</small>}
+            {timings.scope_ms !== undefined && (
+              <small>{formatDuration(timings.scope_ms)}</small>
+            )}
           </div>
           {scopeSection}
         </>
       )}
       <div className="diag-part-title">
         混合检索
-        {timings.recall_ms !== undefined && <small>{formatDuration(timings.recall_ms)}</small>}
+        {timings.recall_ms !== undefined && (
+          <small>{formatDuration(timings.recall_ms)}</small>
+        )}
       </div>
       {recallSection}
       <div className="diag-part-title">
         重排与过滤
-        {timings.rerank_ms !== undefined && <small>{formatDuration(timings.rerank_ms)}</small>}
+        {timings.rerank_ms !== undefined && (
+          <small>{formatDuration(timings.rerank_ms)}</small>
+        )}
       </div>
       {rerankSection}
     </div>
@@ -5209,7 +5280,8 @@ function CandidateRow({
   relations?: Map<string, string>;
 }) {
   const graphOnly =
-    item.retrieval_methods.length === 1 && item.retrieval_methods[0] === "graph";
+    item.retrieval_methods.length === 1 &&
+    item.retrieval_methods[0] === "graph";
   const linked = (item.graph_relation_ids ?? [])
     .map((id) => relations?.get(id) ?? id)
     .join("\n");
@@ -5243,6 +5315,14 @@ function CandidateRow({
         {graphOnly && (
           <span className="diag-graph-only" title={`通过关系找到：\n${linked}`}>
             只有图找到
+          </span>
+        )}
+        {item.graph_quota && (
+          <span
+            className="diag-graph-only"
+            title="RRF 名次不够进入重排，靠图检索名额补进来的"
+          >
+            图检索名额
           </span>
         )}
       </td>

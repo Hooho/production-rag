@@ -1,12 +1,14 @@
 """图检索（参考 LightRAG，只走一跳）：
 
 ① 提关键词：调用方给了（Agent 传入 entities / themes）就直接用，没给就用 graph_keywords 提示词从问题里提取。
-② 找实体（local）：每个具体关键词先做字面匹配（名字或标准名和关键词相同、互相包含），再去名字向量里找相似的名字，
+② 找实体（local）：每个具体关键词先做字面匹配（名字或标准名和关键词相同，或被关键词包含），再去名字向量里找相似的名字，
    按名字的归属合并成实体；每个关键词只留排在前面的几个实体（字面命中的排最前，其余按相似度）。
    参考：LlamaIndex 的 LLMSynonymRetriever 按名字精确匹配；RAGFlow 向量找实体后只留前 6 个（ent_topn）。
-③ 实体的关系：取找到的实体直接相连的关系，按关系和问题的相似度排序，每个实体最多留 N 条。
+③ 实体的关系：取找到的实体直接相连的关系，按关系和问题的相似度排序，每个实体最多留 N 条；
+   同一个实体连到同一个另一端只留相似度最高的一条。
 ④ 找关系（global）：每个概括关键词去关系向量里找相似的关系。
 ⑤ 取分片：③ 的关系的出处分片 → 排名表「图 · 实体」；④ 的 → 排名表「图 · 关系」，两张表都进入 RRF。
+   进入重排时另有图检索名额（graph_rerank_quota，见 app/tools/search.py），不只靠 RRF 名次。
 
 范围（权限 + 生效版本）在一开始就算成版本 id 列表，所有查询都带着它：没权限的文档、不是生效版本的、
 已删除的关系从头就查不到，看不到的文档里的名字也不会参与匹配。所以诊断里只有检索本身的取舍（低于阈值、超过条数）。
@@ -43,7 +45,7 @@ DEFAULTS = {
     "graph_name_min_score": 0.5,
     "graph_name_top_k": 10,
     "graph_entity_top_k": 6,
-    "graph_entity_relation_limit": 10,
+    "graph_entity_relation_limit": 30,
     "graph_relation_min_score": 0.5,
     "graph_relation_top_k": 20,
 }
@@ -192,8 +194,9 @@ def keywords(models, question, entities=None, themes=None):
     return result
 
 
-# 字面匹配：名字或标准名（模型给的，例如「阿段」的标准名是「段永平」）规范化后和关键词相同算 exact，
-# 互相包含（「段永平」和「段永平先生」）算 contains。先用 LIKE 粗筛，再按规范化结果判断。
+# 字面匹配：名字或标准名（模型给的，例如「阿段」的标准名是「段永平」）规范化后和关键词相同算 exact；
+# 关键词包含名字（关键词「段永平先生」、名字「段永平」）算 contains。反过来名字包含关键词的不算：
+# 「段永平的投资风格」包含「段永平」，但它是一个概念，不是这个人，交给向量判断。先用 LIKE 粗筛，再按规范化结果判断。
 def literal_names(connection, keyword, version_ids):
     key = normalize(keyword)
     raw = keyword.strip()
@@ -212,12 +215,7 @@ def literal_names(connection, keyword, version_ids):
             .distinct()
             .where(
                 graph_mentions.c.build_id.in_(version_ids),
-                or_(
-                    name.contains(raw, autoescape=True),
-                    canonical.contains(raw, autoescape=True),
-                    literal(raw).contains(name),
-                    literal(raw).contains(canonical),
-                ),
+                or_(literal(raw).contains(name), literal(raw).contains(canonical)),
             )
         )
         .mappings()
@@ -231,9 +229,7 @@ def literal_names(connection, keyword, version_ids):
             if value == key:
                 best = "exact"
                 break
-            if (key in value and len(key) >= LITERAL_MIN_LENGTH) or (
-                value in key and len(value) >= LITERAL_MIN_LENGTH
-            ):
+            if value and value in key and len(value) >= LITERAL_MIN_LENGTH:
                 best = best or "contains"
         if best is None:
             continue
@@ -634,11 +630,27 @@ def retrieve(store, models, question, scope, settings=None, entities=None, theme
             reverse=True,
         )
         entity = entity_rows.get(entity_id) or {}
-        for index, relation_id in enumerate(ranked):
+        # 同一个实体连到同一个另一端（例如两条「段永平 → 通用电气」）只留相似度最高的一条，
+        # 名额留给不同的另一端：列举题能覆盖更多不同的公司。
+        counted = 0
+        others = set()
+        for relation_id in ranked:
             row = details.get(relation_id)
             if row is None:
                 continue
-            kept = index < per_entity
+            other = (
+                row["target_entity_id"]
+                if row["source_entity_id"] == entity_id
+                else row["source_entity_id"]
+            )
+            if other in others:
+                kept, reason = False, "和前面一条连到同一个实体"
+            elif counted < per_entity:
+                kept, reason = True, None
+                counted += 1
+                others.add(other)
+            else:
+                kept, reason = False, f"超过每个实体 {per_entity} 条"
             if kept:
                 kept_entity_relations.add(relation_id)
             entity_relations.append(
@@ -647,7 +659,7 @@ def retrieve(store, models, question, scope, settings=None, entities=None, theme
                     "entity_id": entity_id,
                     "entity_name": entity.get("name"),
                     "kept": kept,
-                    "reason": None if kept else f"超过每个实体 {per_entity} 条",
+                    "reason": reason,
                 }
             )
     timings["entity_relations_ms"] = round((time.monotonic() - step) * 1000)

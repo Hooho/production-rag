@@ -729,7 +729,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
         <h5>
           ② 找实体
           <small>
-            具体关键词 → 字面匹配（名字相同或互相包含）+ 名字向量（相似度 ≥{" "}
+            具体关键词 → 字面匹配（名字相同或被关键词包含）+ 名字向量（相似度 ≥{" "}
             {settings.graph_name_min_score ?? 0.5}
             ，前 {settings.graph_name_top_k ?? 10} 个）→
             按归属合并成实体，每个关键词最多 {settings.graph_entity_top_k ?? 6}{" "}
@@ -781,7 +781,8 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
           ③ 实体的关系
           <small>
             一跳：找到的实体直接相连的关系，按和问题的相似度排序，每个实体最多{" "}
-            {settings.graph_entity_relation_limit ?? 10} 条
+            {settings.graph_entity_relation_limit ?? 10}{" "}
+            条，连到同一个实体的只留一条
           </small>
           <DetailButton
             count={graph.entity_relations.length}

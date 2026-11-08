@@ -69,12 +69,16 @@ export type RetrievalCandidate = {
   rerank_probability: number | null;
   rerank_rank: number | null;
   graph_relation_ids?: string[];
+  // 靠图检索名额（不是 RRF 名次）进入重排的；旧记录没有。
+  graph_quota?: boolean;
 };
 export type RetrievalDiagnosticsData = {
   config: {
     methods?: string[];
     rrf_k: number;
     rerank_candidates: number;
+    // 图检索名额：交给重排的候选里至少几个图带回的分片；旧记录没有。
+    graph_rerank_quota?: number;
     return_limit: number;
     reranked: boolean;
     min_score: number | null;

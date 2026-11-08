@@ -197,13 +197,26 @@ SPECS = [
         "max": 50,
         "advanced": True,
     },
+    # 每个实体最多几条关系：10 条时，「段永平投资了哪些公司」只覆盖 6 家公司，被去掉的里还有百度、茅台、创维等（2026-11-08 查）。
     {
         "key": "graph_entity_relation_limit",
         "group": "retrieval",
         "type": "int",
-        "default": 10,
+        "default": 30,
         "min": 1,
         "max": 100,
+        "advanced": True,
+    },
+    # 图检索名额：保证交给重排的候选里至少有几个图检索带回的分片。图只有 2 张排名表，向量、关键词每个检索词各 1 张，
+    # 同一分片被多张表找到时 RRF 分数是只被图找到的 3 倍左右，只有图找到的分片几乎进不了 RRF 前 N（2026-11-08 查：最好第 32 名）。
+    # LightRAG、RAGFlow 也不让图和分片比名次，而是单独交给模型；这里交给重排判断。0 表示不留名额。
+    {
+        "key": "graph_rerank_quota",
+        "group": "retrieval",
+        "type": "int",
+        "default": 4,
+        "min": 0,
+        "max": 20,
         "advanced": True,
     },
     {

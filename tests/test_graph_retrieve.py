@@ -196,6 +196,8 @@ def test_literal_contains(graph):
             )
         ]
         assert graph_retrieve.literal_names(connection, "段", version_ids) == []
+        # 名字包含关键词的不算字面命中：「段永平」包含「永平」，但只有关键词包含名字才算。
+        assert graph_retrieve.literal_names(connection, "永平", version_ids) == []
 
 
 # 每个关键词最多留几个实体：字面命中的排最前，多的标原因。
@@ -361,3 +363,86 @@ def test_agent_search_knowledge_graph(graph, runtime):
         ctx, "search_knowledge", json.dumps({"query": "段永平", "entities": ["段永平"]})
     )
     assert rejected["ok"] is False and "entities" in rejected["content"]
+
+
+# 同一个实体连到同一个另一端的关系只留相似度最高的一条，名额留给不同的另一端。
+def test_entity_relations_dedupe_other_end(graph):
+    from sqlalchemy import insert, select as sql_select
+
+    client, store, models, document_id = graph
+    with store.engine.begin() as connection:
+        row = dict(
+            connection.execute(
+                sql_select(graph_relations).where(graph_relations.c.category == "创办")
+            )
+            .mappings()
+            .first()
+        )
+        row.update(id="duplicate-relation", description="段永平又创办了步步高")
+        connection.execute(insert(graph_relations).values(**row))
+    result = graph_retrieve.retrieve(
+        store,
+        models,
+        "段永平",
+        store.readable_scope("alice"),
+        {"graph_name_min_score": 0.3},
+        entities=["段永平"],
+    )
+    to_bbk = [
+        item
+        for item in result["entity_relations"]
+        if item["entity_name"] == "段永平" and item["target"] == "步步高"
+    ]
+    assert len(to_bbk) == 2
+    assert sorted(item["kept"] for item in to_bbk) == [False, True]
+    assert [item["reason"] for item in to_bbk if not item["kept"]] == [
+        "和前面一条连到同一个实体"
+    ]
+
+
+# 图检索名额：RRF 名次不够进候选池时，按图排名表的名次补进来交给重排，诊断里标出来；名额为 0 时不补。
+def test_graph_rerank_quota(graph, runtime):
+    from app.tools.search import DocumentSearchTool
+
+    client, store, models, document_id = graph
+    tool = DocumentSearchTool()
+    keywords = {"entities": ["段永平"], "themes": ["投资"]}
+    runtime(
+        graph_retrieval=True,
+        graph_name_min_score=0.3,
+        graph_relation_min_score=0.3,
+        graph_rerank_quota=0,
+    )
+    off = tool.execute(
+        store,
+        models,
+        "alice",
+        ["段永平投资"],
+        "段永平投资了什么",
+        pool_size=1,
+        graph_keywords=keywords,
+    )
+    assert not any(item["graph_quota"] for item in off["diagnostics"]["candidates"])
+    assert off["diagnostics"]["config"]["graph_rerank_quota"] == 0
+    runtime(
+        graph_retrieval=True,
+        graph_name_min_score=0.3,
+        graph_relation_min_score=0.3,
+        graph_rerank_quota=5,
+    )
+    on = tool.execute(
+        store,
+        models,
+        "alice",
+        ["段永平投资"],
+        "段永平投资了什么",
+        pool_size=1,
+        graph_keywords=keywords,
+    )
+    candidates = on["diagnostics"]["candidates"]
+    graph_items = [item for item in candidates if "graph" in item["retrieval_methods"]]
+    # 图带回的分片全部进了重排（不再是 not_in_pool），靠名额进来的标 graph_quota。
+    assert graph_items and all(item["status"] != "not_in_pool" for item in graph_items)
+    assert any(item["graph_quota"] for item in graph_items)
+    assert all(item["rrf_rank"] > 1 for item in candidates if item["graph_quota"])
+    assert on["diagnostics"]["config"]["graph_rerank_quota"] == 5
