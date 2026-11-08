@@ -4557,24 +4557,36 @@ function RetrievalDiagnostics({
   const [candidatesOpen, setCandidatesOpen] = useState(false);
   // 原始排名表：点哪张表就在弹窗里看哪张。
   const [rankList, setRankList] = useState<RetrievalList | null>(null);
+  // 候选明细里按召回方式过滤：向量、关键词、图检索。
+  const [candidateMethod, setCandidateMethod] = useState<string | null>(null);
+  // 一个分片可能被多路找到，各路的数量会重叠。
+  const candidateMethodCounts: Record<string, number> = {};
+  for (const item of candidates)
+    for (const method of item.retrieval_methods)
+      candidateMethodCounts[method] = (candidateMethodCounts[method] ?? 0) + 1;
+  const filteredCandidates = candidateMethod
+    ? candidates.filter((item) =>
+        item.retrieval_methods.includes(candidateMethod),
+      )
+    : candidates;
   const candidatePageCount = Math.max(
     1,
-    Math.ceil(candidates.length / DIAGNOSTICS_PAGE_SIZE),
+    Math.ceil(filteredCandidates.length / DIAGNOSTICS_PAGE_SIZE),
   );
   const visibleCandidatePage = Math.min(candidatePage, candidatePageCount);
   const candidatePageStart = (visibleCandidatePage - 1) * DIAGNOSTICS_PAGE_SIZE;
   const candidatePageEnd = Math.min(
     candidatePageStart + DIAGNOSTICS_PAGE_SIZE,
-    candidates.length,
+    filteredCandidates.length,
   );
-  const visibleCandidates = candidates.slice(
+  const visibleCandidates = filteredCandidates.slice(
     candidatePageStart,
     candidatePageEnd,
   );
-  // 检索问题或候选数量变化时回到第一页，避免复用旧页码后看到空白明细。
+  // 检索问题、候选数量或过滤方式变化时回到第一页，避免复用旧页码后看到空白明细。
   useEffect(() => {
     setCandidatePage(1);
-  }, [candidates.length, config.rerank_query]);
+  }, [candidates.length, config.rerank_query, candidateMethod]);
   let totalHits = 0;
   const hitsByMethod: Record<string, number> = {};
   for (const list of lists) {
@@ -5178,6 +5190,31 @@ function RetrievalDiagnostics({
         >
           {/* 弹窗不在 .diag 下面：自己带上，表格颜色变量才对。 */}
           <div className="diag">
+            {/* 召回方式筛选：复用图检索详情弹窗那排胶囊按钮。 */}
+            {candidates.length > 0 && (
+              <div className="grt-chips">
+                <button
+                  type="button"
+                  className={`grt-chip${candidateMethod === null ? " is-active" : ""}`}
+                  onClick={() => setCandidateMethod(null)}
+                >
+                  全部 <em>{candidates.length}</em>
+                </button>
+                {(["dense", "keyword", "graph"] as const).map((method) =>
+                  candidateMethodCounts[method] ? (
+                    <button
+                      key={method}
+                      type="button"
+                      className={`grt-chip${candidateMethod === method ? " is-active" : ""}`}
+                      onClick={() => setCandidateMethod(method)}
+                    >
+                      {METHOD_LABELS[method] ?? method}{" "}
+                      <em>{candidateMethodCounts[method]}</em>
+                    </button>
+                  ) : null,
+                )}
+              </div>
+            )}
             <div className="diag-legend">
               <span>
                 <i className="diag-dot method-dense" />
@@ -5238,7 +5275,10 @@ function RetrievalDiagnostics({
               <div className="diag-pagination" aria-label="候选明细分页">
                 <span aria-live="polite">
                   显示第 {candidatePageStart + 1}–{candidatePageEnd} 条，共{" "}
-                  {candidates.length} 条
+                  {filteredCandidates.length} 条
+                  {candidateMethod
+                    ? `（${METHOD_LABELS[candidateMethod] ?? candidateMethod}召回）`
+                    : ""}
                 </span>
                 <div className="diag-pagination-controls">
                   <button
