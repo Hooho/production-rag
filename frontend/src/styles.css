@@ -2636,7 +2636,8 @@ label {
 
 .document-metadata-table-wrap {
   overflow-x: auto;
-  border-top: 1px solid var(--t-d6e5f2);
+  /* 外框：这张表不在 .diag-table-wrap 那种表格框里，外框由框自己画一圈。 */
+  border: 1px solid var(--t-d6e5f2);
 }
 
 .document-metadata-table {
@@ -2650,9 +2651,16 @@ label {
 .document-metadata-table td {
   padding: 10px 14px;
   border-bottom: 1px solid var(--t-d6e5f2);
+  /* 列分隔线：三列长短不一，没有竖线时容易把说明看串到上一行。 */
+  border-right: 1px solid var(--t-d6e5f2);
   text-align: left;
   vertical-align: top;
   overflow-wrap: anywhere;
+}
+
+.document-metadata-table th:last-child,
+.document-metadata-table td:last-child {
+  border-right: 0;
 }
 
 .document-metadata-table thead th {
@@ -3639,13 +3647,25 @@ label {
 
 .diag-table-wrap {
   overflow-x: auto;
-  border: 1px solid var(--diag-line);
+  /* 兜底色：表格框也可能不在 .diag 下面（评测页的部分表格框），没有变量时也要有框。 */
+  border: 1px solid var(--diag-line, rgb(var(--t-80a4c7-rgb) / 0.42));
 }
 
 .diag-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
+}
+
+/* 表格外框：页内的召回表、图检索各步的表没套 .diag-table-wrap，外面没人画框，
+   表格自己画一圈；在框里的表由框提供外边线，自身不再画，免得叠成双线。
+   评测页的表（.ev-table）有自己的一套边框，这里不动。 */
+.diag-table:not(.ev-table) {
+  border: 1px solid var(--diag-line, rgb(var(--t-80a4c7-rgb) / 0.42));
+}
+
+.diag-table-wrap > .diag-table:not(.ev-table) {
+  border: 0;
 }
 
 .diag-table th {
