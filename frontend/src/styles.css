@@ -7005,6 +7005,11 @@ label {
   min-width: 760px;
 }
 
+/* 交给重排的候选池：分片和「各路名次」都要放得下，列宽不够就横向滚动。 */
+.diag-pool {
+  min-width: 660px;
+}
+
 /* 模型名标签：检索过程里出现的模型用浅蓝底等宽字包起来，和普通说明文字区分。 */
 .model-tag {
   display: inline-block;

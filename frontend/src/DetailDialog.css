@@ -68,6 +68,16 @@
   max-height: calc(100dvh - 32px);
 }
 
+/* 交给重排的候选池：五列（召回方式、分片、RRF 分、各路名次、原文），
+   默认宽度会把列挤扁，放宽一点，表格不用左右拉。
+   内容就这些：表格框自己滚，弹窗按内容收高，不留大片空白。 */
+.ag-delivery-dialog.ag-dialog-pool:not(.ag-dialog-companion) {
+  width: min(760px, calc(100vw - 32px));
+  height: auto;
+  bottom: auto;
+  max-height: calc(100dvh - 32px);
+}
+
 .ag-delivery-dialog-head {
   display: flex;
   align-items: center;
