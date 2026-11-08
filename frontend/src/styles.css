@@ -3889,24 +3889,6 @@ label {
   transform: translateX(-1px);
 }
 
-.diag-lists {
-  display: grid;
-  gap: 4px;
-}
-
-.diag-list {
-  display: flex;
-  gap: 7px;
-  align-items: center;
-  padding: 6px 8px;
-  border: 1px solid var(--diag-line);
-}
-
-.diag-list > small {
-  margin-left: auto;
-  color: var(--diag-muted);
-}
-
 .diag-empty {
   margin: 0;
   padding: 6px 8px;
@@ -6918,30 +6900,6 @@ label {
   font-weight: 600;
 }
 
-/* 候选明细、原始排名表默认折叠，标题和"检索漏斗"保持同一样式。 */
-/* 折叠块用普通块布局：details 设成 grid 时，收起状态下隐藏的内容仍占一格加一份间距，两个折叠块之间空得很大。 */
-.diag-fold {
-  display: block;
-}
-
-.diag-fold[open] > * + * {
-  margin-top: 10px;
-}
-
-.diag-fold > summary {
-  display: flex;
-  gap: 10px;
-  align-items: baseline;
-  color: var(--t-2563eb);
-  letter-spacing: 0.06em;
-  cursor: pointer;
-}
-
-.diag-fold > summary small {
-  color: var(--diag-muted);
-  letter-spacing: 0;
-}
-
 /* 折叠块改成点开弹窗后，入口那行沿用折叠块标题的排版。 */
 .diag-fold-head {
   display: flex;
@@ -6952,6 +6910,21 @@ label {
 .diag-fold-head small {
   color: var(--diag-muted);
   letter-spacing: 0;
+}
+
+/* 原始排名表弹窗：标签栏并排放每张表，标签外观沿用检索诊断里的胶囊按钮。 */
+.rank-tabs {
+  margin-bottom: 10px;
+}
+
+/* 标签里的召回方式圆点：胶囊按钮是行内排版，圆点自己留一点间距。 */
+.rank-tabs .diag-dot {
+  margin-right: 4px;
+}
+
+/* 排名表的表格框高度固定：切换标签时框的大小不变，行多了在框里滚。 */
+.rank-table-wrap {
+  height: 340px;
 }
 
 /* 候选明细列多，弹窗窄：定个最小宽度，靠框内横向滚动看分数。 */

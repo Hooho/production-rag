@@ -57,6 +57,15 @@
   background: #16362233;
 }
 
+/* 原始排名表弹窗：内容就这些（标签栏 + 固定高度表格 + 翻页），弹窗按内容收高，不留大片空白。
+   bottom 改成 auto，否则定位上下都钉死时高度会被拉满。
+   浮窗形态继续用自己的宽高规则。 */
+.ag-delivery-dialog.ag-dialog-rank:not(.ag-dialog-companion) {
+  height: auto;
+  bottom: auto;
+  max-height: calc(100dvh - 32px);
+}
+
 .ag-delivery-dialog-head {
   display: flex;
   align-items: center;

@@ -4527,6 +4527,9 @@ function shortChunkId(chunkId: string) {
 // 候选明细每页六条：表格在弹窗里自己上下滚，表头吸在框顶，分页翻得少一点。
 const DIAGNOSTICS_PAGE_SIZE = 6;
 
+// 原始排名表每页六条：表格框高度固定，切换标签时框的大小不变。
+const RANK_PAGE_SIZE = 6;
+
 // 检索诊断面板：把后端每一步的计算结果完整展示出来，便于理解一条来源为什么被返回或被丢弃。
 // 分三块（docs：claude/graph-retrieval-phase2-plan.md 第一部分第四节）：
 //   scope  权限范围：可检索的文档、图检索范围；
@@ -4555,8 +4558,10 @@ function RetrievalDiagnostics({
   const [candidatePage, setCandidatePage] = useState(1);
   // 候选明细在弹窗里看：一页只列三条，页面上不用摊开一张宽表。
   const [candidatesOpen, setCandidatesOpen] = useState(false);
-  // 原始排名表：点哪张表就在弹窗里看哪张。
-  const [rankList, setRankList] = useState<RetrievalList | null>(null);
+  // 原始排名表：整块收进弹窗，页面上只留一个入口；弹窗里用标签切换每张表。
+  const [rankOpen, setRankOpen] = useState(false);
+  const [rankIndex, setRankIndex] = useState(0);
+  const [rankPage, setRankPage] = useState(1);
   // 候选明细里按召回方式过滤：向量、关键词、图检索。
   const [candidateMethod, setCandidateMethod] = useState<string | null>(null);
   // 一个分片可能被多路找到，各路的数量会重叠。
@@ -4587,6 +4592,10 @@ function RetrievalDiagnostics({
   useEffect(() => {
     setCandidatePage(1);
   }, [candidates.length, config.rerank_query, candidateMethod]);
+  // 换标签或排名表换了，回到第一页，避免沿用旧页码后看到空白表格。
+  useEffect(() => {
+    setRankPage(1);
+  }, [lists.length, rankIndex]);
   let totalHits = 0;
   const hitsByMethod: Record<string, number> = {};
   for (const list of lists) {
@@ -4876,78 +4885,143 @@ function RetrievalDiagnostics({
       ? list.query
       : `${METHOD_LABELS[list.method] ?? list.method} · Q${queries.indexOf(list.query) + 1} ${list.query}`;
 
+  // 标签上只放短标签（召回方式 + 检索词序号），完整的检索词写在表格上方。
+  const listTabLabel = (list: RetrievalList) =>
+    list.method === "graph"
+      ? list.query
+      : `${METHOD_LABELS[list.method] ?? list.method} · Q${queries.indexOf(list.query) + 1}`;
+
+  // 当前标签对应的那张表，以及这张表自己的分页。
+  const activeList = lists[rankIndex];
+  const activeHits = activeList?.hits ?? [];
+  const rankPageCount = Math.max(
+    1,
+    Math.ceil(activeHits.length / RANK_PAGE_SIZE),
+  );
+  const visibleRankPage = Math.min(rankPage, rankPageCount);
+  const rankStart = (visibleRankPage - 1) * RANK_PAGE_SIZE;
+  const rankEnd = Math.min(rankStart + RANK_PAGE_SIZE, activeHits.length);
+  const visibleRankHits = activeHits.slice(rankStart, rankEnd);
+
+  // 原始排名表在弹窗里看，页面上只留一个入口。
   const rankingTables = (
-    <details className="diag-fold">
-      <summary>
+    <div className="diag-fold-head">
+      <button
+        type="button"
+        className="link-button"
+        onClick={() => setRankOpen(true)}
+      >
         原始排名表（{lists.length} 张）
-        <small>
-          每个检索词 × 向量 / 关键词各一张
-          {graphLists.length ? "，图检索按实体、关系各一张" : ""}
-        </small>
-      </summary>
-      <div className="diag-lists">
-        {lists.map((list, index) => (
-          <div className="diag-list" key={`${list.method}-${index}`}>
-            <i className={`diag-dot method-${list.method}`} />
-            <button
-              type="button"
-              className="link-button"
-              onClick={() => setRankList(list)}
-            >
-              {listLabel(list)}
-            </button>
-            <small>{list.hits.length} 个分片</small>
-          </div>
-        ))}
-      </div>
-    </details>
+      </button>
+      <small>
+        每个检索词 × 向量 / 关键词各一张
+        {graphLists.length ? "，图检索按实体、关系各一张" : ""}
+        ；点开看每张表的分片排名
+      </small>
+    </div>
   );
 
-  // 点开的排名表在弹窗里看：表格颜色变量在 .diag 上，弹窗不在 .diag 下面，要自己带上。
-  const rankDialog = rankList && (
+  // 点开的排名表在弹窗里看：标签栏并排放每张表，点标签切换下面的表格；
+  // 表格框高度固定，超出的行在框里滚，底部翻页。
+  // 表格颜色变量在 .diag 上，弹窗不在 .diag 下面，要自己带上。
+  const rankDialog = rankOpen && activeList && (
     <DetailDialog
       open
-      title={`原始排名表 · ${listLabel(rankList)}`}
-      onClose={() => setRankList(null)}
+      title={`原始排名表（${lists.length} 张）`}
+      onClose={() => setRankOpen(false)}
+      className="ag-dialog-rank"
     >
       <div className="diag">
-        {rankList.hits.length === 0 ? (
-          <p className="diag-empty">没有找到分片</p>
-        ) : (
-          <table className="diag-table diag-table-compact">
-            <thead>
-              <tr>
-                <th>名次</th>
-                <th>分片</th>
-                <th>{RAW_SCORE_LABELS[rankList.method] ?? "原始分"}</th>
-                <th>RRF 贡献</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rankList.hits.map((hit) => (
-                <tr key={hit.rank}>
-                  <td className="num">{hit.rank}</td>
-                  <td>
-                    <span className="diag-title">{hit.title}</span>
-                    <code title={hit.chunk_id}>
-                      {shortChunkId(hit.chunk_id)}
-                    </code>
-                    {hit.relation_ids?.length ? (
-                      <small className="diag-sub">
-                        通过关系：
-                        {hit.relation_ids
-                          .map((id) => graphRelations.get(id) ?? id)
-                          .join("；")}
-                      </small>
-                    ) : null}
-                  </td>
-                  <td className="num">{formatNumber(hit.raw_score)}</td>
-                  <td className="num">{formatNumber(hit.rrf, 5)}</td>
+        <div
+          className="grt-chips rank-tabs"
+          role="tablist"
+          aria-label="原始排名表"
+        >
+          {lists.map((list, index) => (
+            <button
+              key={`${list.method}-${index}`}
+              type="button"
+              role="tab"
+              aria-selected={index === rankIndex}
+              className={`grt-chip${index === rankIndex ? " is-active" : ""}`}
+              onClick={() => setRankIndex(index)}
+            >
+              <i className={`diag-dot method-${list.method}`} />
+              {listTabLabel(list)} <em>{list.hits.length}</em>
+            </button>
+          ))}
+        </div>
+        <p className="diag-part-lead">
+          <strong>{listLabel(activeList)}</strong>
+          <small>按这一路召回的名次排列</small>
+        </p>
+        <div className="diag-table-wrap rank-table-wrap">
+          {activeHits.length === 0 ? (
+            <p className="diag-empty">没有找到分片</p>
+          ) : (
+            <table className="diag-table diag-table-compact">
+              <thead>
+                <tr>
+                  <th>名次</th>
+                  <th>分片</th>
+                  <th>{RAW_SCORE_LABELS[activeList.method] ?? "原始分"}</th>
+                  <th>RRF 贡献</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+              </thead>
+              <tbody>
+                {visibleRankHits.map((hit) => (
+                  <tr key={hit.rank}>
+                    <td className="num">{hit.rank}</td>
+                    <td>
+                      <span className="diag-title">{hit.title}</span>
+                      <code title={hit.chunk_id}>
+                        {shortChunkId(hit.chunk_id)}
+                      </code>
+                      {hit.relation_ids?.length ? (
+                        <small className="diag-sub">
+                          通过关系：
+                          {hit.relation_ids
+                            .map((id) => graphRelations.get(id) ?? id)
+                            .join("；")}
+                        </small>
+                      ) : null}
+                    </td>
+                    <td className="num">{formatNumber(hit.raw_score)}</td>
+                    <td className="num">{formatNumber(hit.rrf, 5)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div className="diag-pagination" aria-label="排名表分页">
+          <span aria-live="polite">
+            {activeHits.length === 0
+              ? "这张表没有找到分片"
+              : `显示第 ${rankStart + 1}–${rankEnd} 名，共 ${activeHits.length} 个分片`}
+          </span>
+          <div className="diag-pagination-controls">
+            <button
+              type="button"
+              disabled={visibleRankPage === 1}
+              onClick={() => setRankPage((page) => Math.max(1, page - 1))}
+            >
+              上一页
+            </button>
+            <span>
+              第 {visibleRankPage} / {rankPageCount} 页
+            </span>
+            <button
+              type="button"
+              disabled={visibleRankPage === rankPageCount}
+              onClick={() =>
+                setRankPage((page) => Math.min(rankPageCount, page + 1))
+              }
+            >
+              下一页
+            </button>
+          </div>
+        </div>
       </div>
     </DetailDialog>
   );
