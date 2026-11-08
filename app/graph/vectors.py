@@ -51,6 +51,25 @@ def clip(text):
     return text[:MAX_CHARS]
 
 
+# 名字的文字：「名字（类型）：描述1；描述2」。
+def name_text(name, type_, descriptions):
+    text = f"{name}（{type_}）"
+    if descriptions:
+        text += "：" + "；".join(descriptions)
+    return clip(text)
+
+
+# 描述取前几段不重复的。
+def add_description(item, description):
+    description = (description or "").strip()
+    if (
+        description
+        and description not in item["descriptions"]
+        and len(item["descriptions"]) < MAX_DESCRIPTIONS
+    ):
+        item["descriptions"].append(description)
+
+
 # 名字的文字：「名字（类型）：描述1；描述2」。同一实体的同一个名字在一个版本里只算一行，描述取前几段不重复的。
 def name_rows(connection, version_id):
     rows = (
@@ -81,26 +100,60 @@ def name_rows(connection, version_id):
                 "descriptions": [],
             },
         )
-        description = (row["description"] or "").strip()
-        if (
-            description
-            and description not in item["descriptions"]
-            and len(item["descriptions"]) < MAX_DESCRIPTIONS
-        ):
-            item["descriptions"].append(description)
+        add_description(item, row["description"])
     items = []
     for item in grouped.values():
-        text = f"{item['name']}（{item['type']}）"
-        if item["descriptions"]:
-            text += "：" + "；".join(item["descriptions"])
         items.append(
             {
                 **item,
                 "id": name_key(version_id, item["entity_id"], item["name"]),
-                "text": clip(text),
+                "text": name_text(item["name"], item["type"], item["descriptions"]),
             }
         )
     return items
+
+
+# 诊断用：查匹配到的名字在各自版本里的描述，按算向量时同样的规则拼出那段文字。
+# 返回 {(version_id, entity_id, name): 算向量用的文字}；matches 每条带 version_id / entity_id / name。
+def name_vector_texts(engine, matches):
+    if not matches:
+        return {}
+    wanted = {
+        (match["version_id"], match["entity_id"], match["name"]) for match in matches
+    }
+    with engine.connect() as connection:
+        rows = (
+            connection.execute(
+                select(
+                    graph_mentions.c.build_id,
+                    graph_mentions.c.entity_id,
+                    graph_mentions.c.name,
+                    graph_mentions.c.type,
+                    graph_mentions.c.description,
+                )
+                .where(
+                    graph_mentions.c.build_id.in_({key[0] for key in wanted}),
+                    graph_mentions.c.entity_id.in_({key[1] for key in wanted}),
+                    graph_mentions.c.name.in_({key[2] for key in wanted}),
+                )
+                .order_by(graph_mentions.c.chunk_id)
+            )
+            .mappings()
+            .all()
+        )
+    grouped = {}
+    for row in rows:
+        key = (row["build_id"], row["entity_id"], row["name"])
+        if key not in wanted:
+            continue
+        item = grouped.setdefault(
+            key, {"name": row["name"], "type": row["type"], "descriptions": []}
+        )
+        add_description(item, row["description"])
+    return {
+        key: name_text(item["name"], item["type"], item["descriptions"])
+        for key, item in grouped.items()
+    }
 
 
 # 关系的文字：「起点 → 终点（分类）：描述」，起点、终点用抽取时的原名。

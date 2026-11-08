@@ -532,6 +532,7 @@ function NamesDetail({
             <tr>
               <th>具体关键词</th>
               <th>匹配到的名字</th>
+              <th>算向量用的文字</th>
               <th>出自</th>
               <th>匹配方式</th>
               <th>归到实体</th>
@@ -546,6 +547,15 @@ function NamesDetail({
               >
                 <td>{match.keyword}</td>
                 <td>{match.name}</td>
+                <td>
+                  {/* 名字向量是用这段文字算的：名字（类型）：描述1；描述2 */}
+                  <span
+                    className="grt-vector-text"
+                    title={match.vector_text ?? ""}
+                  >
+                    {match.vector_text ?? "—"}
+                  </span>
+                </td>
                 <td>
                   {match.title ?? "—"}
                   {match.version_number ? (

@@ -35,7 +35,7 @@ from ..mysql.tables import (
 from .extract import model_options
 from .resolve import normalize
 from .schemas import ONLINE_SPACE
-from .vectors import vector_store
+from .vectors import name_vector_texts, vector_store
 
 logger = logging.getLogger(__name__)
 
@@ -545,9 +545,14 @@ def retrieve(
             .mappings()
             .all()
         }
+    # 名字向量是用哪段文字算的（名字＋描述）：诊断里显示出来，能看到向量到底算的是什么。
+    vector_texts = name_vector_texts(store.engine, name_matches)
     for match in name_matches:
         entity = entity_rows.get(match["entity_id"]) or {}
         match.update(entity_name=entity.get("name"), entity_type=entity.get("type"))
+        match["vector_text"] = vector_texts.get(
+            (match["version_id"], match["entity_id"], match["name"])
+        )
     found = []
     for entity_id in entity_ids:
         entity = entity_rows.get(entity_id) or {}

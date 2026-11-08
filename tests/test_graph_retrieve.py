@@ -59,6 +59,15 @@ def test_retrieve_with_given_keywords(graph):
     assert [entity["name"] for entity in result["entities"]] == ["段永平"]
     kept_names = {match["name"] for match in result["name_matches"] if match["kept"]}
     assert "段永平" in kept_names
+    # 名字向量用的文字：名字（类型）：描述，诊断里能看到向量到底算的是什么。
+    assert (
+        next(
+            match["vector_text"]
+            for match in result["name_matches"]
+            if match["name"] == "段永平"
+        )
+        == "段永平（人物）：企业家"
+    )
     relations = {
         (item["source"], item["target"])
         for item in result["entity_relations"]

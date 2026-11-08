@@ -116,6 +116,14 @@
   background: #fdf8ec;
 }
 
+/* 名字向量用的那段文字：次要信息，限宽换行，不把整张表撑开。 */
+.grt-vector-text {
+  display: block;
+  max-width: 300px;
+  color: var(--diag-muted, #6f8ba4);
+  line-height: 1.5;
+}
+
 /* 提关键词时按的是哪个问题、来自哪条流程：诊断里记下来的，说明为什么是这些关键词。 */
 .grt-question {
   margin: 0;

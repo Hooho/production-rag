@@ -180,6 +180,8 @@ export type GraphRetrievalTrace = {
     score: number;
     // exact 字面相同 / contains 互相包含 / vector 名字向量（旧记录没有这一项，当作 vector）
     match?: "exact" | "contains" | "vector";
+    // 算名字向量用的那段文字：名字（类型）：描述1；描述2
+    vector_text?: string | null;
     kept: boolean;
     reason: string | null;
   }[];
