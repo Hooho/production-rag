@@ -1,4 +1,5 @@
 import { DetailDialog } from "./DetailDialog";
+import { ChunkOriginalPanel } from "./ChunkOriginalPanel";
 import { ConfirmPopover } from "./ConfirmPopover";
 import {
   checkOverview,
@@ -85,6 +86,7 @@ import {
   type DocumentVisibility,
   type Group,
   getDocument,
+  getChunkOriginals,
   getSessionHistory,
   listDocumentChunks,
   listDocuments,
@@ -92,6 +94,7 @@ import {
   sendChatStream,
   uploadDocument,
   type ChatResult,
+  type ChunkOriginal,
   type DocumentChunk,
   type ChunkSource,
   type DocumentChunkPage,
@@ -4469,7 +4472,7 @@ const METHOD_LABELS: Record<string, string> = {
   graph: "图检索",
 };
 const RAW_SCORE_LABELS: Record<string, string> = {
-  dense: "余弦",
+  dense: "语义相似度",
   keyword: "BM25",
   graph: "关系相似度",
 };
@@ -4562,6 +4565,12 @@ function RetrievalDiagnostics({
   const [rankOpen, setRankOpen] = useState(false);
   const [rankIndex, setRankIndex] = useState(0);
   const [rankPage, setRankPage] = useState(1);
+  // 正在看原文的那一片：点「更多」打开伴随浮窗。
+  const [chunkOpen, setChunkOpen] = useState<string | null>(null);
+  // 当前这一页分片的原文：来源列显示原文预览，「更多」看全文。读过的留在里面，翻页不用重读。
+  const [chunkOriginals, setChunkOriginals] = useState<
+    Record<string, ChunkOriginal>
+  >({});
   // 候选明细里按召回方式过滤：向量、关键词、图检索。
   const [candidateMethod, setCandidateMethod] = useState<string | null>(null);
   // 一个分片可能被多路找到，各路的数量会重叠。
@@ -4902,6 +4911,30 @@ function RetrievalDiagnostics({
   const rankStart = (visibleRankPage - 1) * RANK_PAGE_SIZE;
   const rankEnd = Math.min(rankStart + RANK_PAGE_SIZE, activeHits.length);
   const visibleRankHits = activeHits.slice(rankStart, rankEnd);
+  // 来源列要显示原文预览：切页或切标签后取一次当前这一页分片的原文，读过的不再读。
+  const missingChunkKey = visibleRankHits
+    .map((hit) => hit.chunk_id)
+    .filter((id) => !chunkOriginals[id])
+    .join(",");
+  useEffect(() => {
+    if (!rankOpen || !missingChunkKey) return;
+    let cancelled = false;
+    getChunkOriginals(missingChunkKey.split(","))
+      .then((result) => {
+        if (cancelled) return;
+        setChunkOriginals((previous) => {
+          const next = { ...previous };
+          for (const item of result.items) next[item.chunk_id] = item;
+          return next;
+        });
+      })
+      .catch(() => {
+        // 读不到原文就只留标题，不打断这一页的查看。
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [rankOpen, missingChunkKey]);
 
   // 原始排名表在弹窗里看，页面上只留一个入口。
   const rankingTables = (
@@ -4963,33 +4996,52 @@ function RetrievalDiagnostics({
               <thead>
                 <tr>
                   <th>名次</th>
-                  <th>分片</th>
+                  <th>来源</th>
                   <th>{RAW_SCORE_LABELS[activeList.method] ?? "原始分"}</th>
                   <th>RRF 贡献</th>
                 </tr>
               </thead>
               <tbody>
-                {visibleRankHits.map((hit) => (
-                  <tr key={hit.rank}>
-                    <td className="num">{hit.rank}</td>
-                    <td>
-                      <span className="diag-title">{hit.title}</span>
-                      <code title={hit.chunk_id}>
-                        {shortChunkId(hit.chunk_id)}
-                      </code>
-                      {hit.relation_ids?.length ? (
-                        <small className="diag-sub">
-                          通过关系：
-                          {hit.relation_ids
-                            .map((id) => graphRelations.get(id) ?? id)
-                            .join("；")}
-                        </small>
-                      ) : null}
-                    </td>
-                    <td className="num">{formatNumber(hit.raw_score)}</td>
-                    <td className="num">{formatNumber(hit.rrf, 5)}</td>
-                  </tr>
-                ))}
+                {visibleRankHits.map((hit) => {
+                  const body = chunkOriginals[hit.chunk_id]?.content;
+                  return (
+                    <tr key={hit.rank}>
+                      <td className="num">{hit.rank}</td>
+                      <td className="rank-source">
+                        <span className="rank-source-head">
+                          <span className="diag-title">{hit.title}</span>
+                          <button
+                            type="button"
+                            className="link-button button-sm"
+                            onClick={() => setChunkOpen(hit.chunk_id)}
+                          >
+                            更多
+                          </button>
+                        </span>
+                        {body ? (
+                          <span
+                            className="diag-preview"
+                            title={body.slice(0, 160)}
+                          >
+                            {body}
+                          </span>
+                        ) : (
+                          <SkeletonBlock className="rank-preview-skeleton" />
+                        )}
+                        {hit.relation_ids?.length ? (
+                          <small className="diag-sub">
+                            通过关系：
+                            {hit.relation_ids
+                              .map((id) => graphRelations.get(id) ?? id)
+                              .join("；")}
+                          </small>
+                        ) : null}
+                      </td>
+                      <td className="num">{formatNumber(hit.raw_score)}</td>
+                      <td className="num">{formatNumber(hit.rrf, 5)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -5022,6 +5074,14 @@ function RetrievalDiagnostics({
             </button>
           </div>
         </div>
+        {/* 「更多」打开的原文：弹窗里再打开的内容是伴随浮窗，贴着「更多」出现。 */}
+        {chunkOpen && (
+          <ChunkOriginalPanel
+            chunkId={chunkOpen}
+            chunk={chunkOriginals[chunkOpen]}
+            onClose={() => setChunkOpen(null)}
+          />
+        )}
       </div>
     </DetailDialog>
   );

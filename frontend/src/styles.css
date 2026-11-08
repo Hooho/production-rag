@@ -6924,7 +6924,33 @@ label {
 
 /* 排名表的表格框高度固定：切换标签时框的大小不变，行多了在框里滚。 */
 .rank-table-wrap {
-  height: 340px;
+  height: 430px;
+}
+
+/* 排名表的来源列：标题一行（右边跟「更多」），下面接这一片的原文预览。 */
+.rank-source {
+  min-width: 280px;
+}
+
+.rank-source-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.rank-source-head .diag-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.rank-source-head .link-button {
+  flex: none;
+}
+
+/* 来源列的原文还在读：先占两行的位置，读完换成文字。 */
+.rank-preview-skeleton {
+  height: 30px;
+  margin-top: 4px;
 }
 
 /* 候选明细列多，弹窗窄：定个最小宽度，靠框内横向滚动看分数。 */

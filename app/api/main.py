@@ -1804,6 +1804,25 @@ def create_app(store=None, models=None, jwt_secret=None):
             chunk["graph"] = per_chunk.get(chunk["chunk_id"])
         return result
 
+    # 分片原文：检索诊断里点「更多」时读这一片的正文。只给当前用户读得到的文档里的分片。
+    @app.get("/chunks/{chunk_id}")
+    def chunk_original(chunk_id: str, owner=Depends(identity)):
+        result = app.state.store.readable_chunk(owner, chunk_id)
+        if result is None:
+            raise HTTPException(404, "分片不存在或没有权限查看")
+        return result
+
+    # 一次读多片原文：来源列要显示当前这一页分片的原文预览，不用一片一个请求。
+    @app.get("/chunks")
+    def chunks_original(
+        ids: str = Query("", description="分片 id，多个用逗号分隔"),
+        owner=Depends(identity),
+    ):
+        chunk_ids = [item for item in (part.strip() for part in ids.split(",")) if item]
+        if not chunk_ids:
+            raise HTTPException(400, "没有指定分片")
+        return {"items": app.state.store.readable_chunks(owner, chunk_ids)}
+
     # 返回当前用户可读的文档版本状态，并附带同一文档的全部版本历史和可见范围。
     @app.get("/documents/{document_id}")
     def document_status(document_id: UUID, owner=Depends(identity)):

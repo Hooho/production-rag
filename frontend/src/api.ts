@@ -1025,6 +1025,25 @@ export function listDocumentChunks(
   );
 }
 
+// 分片原文：检索诊断里点「更多」时读这一片的正文。权限和检索范围一致，读不到就回 404。
+export type ChunkOriginal = {
+  chunk_id: string;
+  title: string;
+  heading: string | null;
+  content: string;
+};
+
+export function getChunkOriginal(chunkId: string) {
+  return request<ChunkOriginal>(`/chunks/${encodeURIComponent(chunkId)}`);
+}
+
+// 一次读多片原文：来源列要显示当前这一页分片的原文预览，不用一片一个请求。
+export function getChunkOriginals(chunkIds: string[]) {
+  return request<{ items: ChunkOriginal[] }>(
+    `/chunks?ids=${encodeURIComponent(chunkIds.join(","))}`,
+  );
+}
+
 // 评测：题目、单次评测结果、历次评测列表与两次对比，字段与后端 app/evaluation 保持一致。
 export type EvalItem = {
   evidence_groups?: EvalScoringGroup[];

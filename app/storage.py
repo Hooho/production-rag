@@ -59,6 +59,22 @@ def row_range(chunk_metadata):
     return f"第 {start} 行" if start == end else f"第 {start}–{end} 行"
 
 
+# 分片正文：content 就是这一片自己的原文。老数据没有这一列时，从送去检索的文字里去掉
+# 上下文说明和标题路径，剩下的也是原文——送去检索的文字是「说明 + 标题路径 + 正文」拼起来的。
+def chunk_body(content, text, chunk_metadata):
+    if content is not None:
+        return content
+    body = text or ""
+    context = (chunk_metadata or {}).get("context")
+    if context and body.startswith(context + "\n"):
+        body = body[len(context) + 1 :]
+    if body.startswith("标题路径："):
+        _, separator, rest = body.partition("\n")
+        if separator:
+            body = rest
+    return body
+
+
 class Storage:
     """组合 MySQL、Redis 和 Milvus，供 API 注入单一运行时容器。"""
 
@@ -1111,6 +1127,59 @@ class Storage:
                 .mappings()
                 .first()
             )
+
+    # 读多个分片的原文：先找到它们分别属于哪份文档，再按文档的可见范围判断当前用户能不能读。
+    # 检索诊断的来源列要显示原文预览，一次把当前这一页的分片取回来；读不到的直接不返回。
+    def readable_chunks(self, username, chunk_ids):
+        if not chunk_ids:
+            return []
+        with self.engine.connect() as connection:
+            rows = (
+                connection.execute(
+                    select(
+                        chunks.c.id,
+                        chunks.c.title,
+                        chunks.c.text,
+                        chunks.c.content,
+                        document_chunks.c.document_id,
+                        document_chunks.c.chunk_metadata,
+                    )
+                    .select_from(
+                        document_chunks.join(
+                            chunks, chunks.c.id == document_chunks.c.chunk_id
+                        )
+                    )
+                    .where(chunks.c.id.in_(list(chunk_ids)))
+                )
+                .mappings()
+                .all()
+            )
+        # 同一页的分片多半来自同一份文档，权限按文档查一次就够。
+        allowed = {}
+        result = []
+        for row in rows:
+            document_id = row["document_id"]
+            if document_id not in allowed:
+                allowed[document_id] = (
+                    self.readable_document(username, document_id) is not None
+                )
+            if not allowed[document_id]:
+                continue
+            metadata = row["chunk_metadata"] or {}
+            result.append(
+                {
+                    "chunk_id": row["id"],
+                    "title": row["title"],
+                    "heading": " / ".join(metadata.get("heading_path") or []) or None,
+                    "content": chunk_body(row["content"], row["text"], metadata),
+                }
+            )
+        return result
+
+    # 读一个分片的原文：检索诊断里点「更多」时用，权限和检索范围保持一致。
+    def readable_chunk(self, username, chunk_id):
+        items = self.readable_chunks(username, [chunk_id])
+        return items[0] if items else None
 
     # 读取一份文档的可见范围和共享部门；没有记录的文档按 private 处理。
     def document_permission(self, doc_key):
