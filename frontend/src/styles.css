@@ -6942,6 +6942,23 @@ label {
   letter-spacing: 0;
 }
 
+/* 折叠块改成点开弹窗后，入口那行沿用折叠块标题的排版。 */
+.diag-fold-head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.diag-fold-head small {
+  color: var(--diag-muted);
+  letter-spacing: 0;
+}
+
+/* 候选明细列多，弹窗窄：定个最小宽度，靠框内横向滚动看分数。 */
+.diag-candidates {
+  min-width: 760px;
+}
+
 /* 模型名标签：检索过程里出现的模型用浅蓝底等宽字包起来，和普通说明文字区分。 */
 .model-tag {
   display: inline-block;

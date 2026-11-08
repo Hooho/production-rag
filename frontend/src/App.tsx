@@ -4553,6 +4553,8 @@ function RetrievalDiagnostics({
   const timings = data.timings ?? {};
   const graph = data.graph;
   const [candidatePage, setCandidatePage] = useState(1);
+  // 候选明细在弹窗里看：一页只列三条，页面上不用摊开一张宽表。
+  const [candidatesOpen, setCandidatesOpen] = useState(false);
   // 原始排名表：点哪张表就在弹窗里看哪张。
   const [rankList, setRankList] = useState<RetrievalList | null>(null);
   const candidatePageCount = Math.max(
@@ -5154,105 +5156,122 @@ function RetrievalDiagnostics({
           </div>
         ))}
       </div>
-      {/* 候选明细只在排查时看，默认折叠。 */}
-      <details className="diag-fold">
-        <summary>
+      {/* 候选明细在弹窗里看，页面上只留一个入口。 */}
+      <div className="diag-fold-head">
+        <button
+          type="button"
+          className="link-button"
+          onClick={() => setCandidatesOpen(true)}
+        >
           查看候选明细（{candidates.length} 个）
-          <small>
-            按最终处理顺序排列；悬停查看说明
-            {graphOnly > 0 ? `；只有图找到的 ${graphOnly} 个` : ""}
-          </small>
-        </summary>
-        <div className="diag-legend">
-          <span>
-            <i className="diag-dot method-dense" />
-            向量召回
-          </span>
-          <span>
-            <i className="diag-dot method-keyword" />
-            关键词召回（BM25）
-          </span>
-          {graph && (
-            <span>
-              <i className="diag-dot method-graph" />
-              图检索（实 = 图 · 实体，关 = 图 · 关系）
-            </span>
-          )}
-          <span>
-            <i className="diag-threshold-sample" />
-            相关性阈值
-          </span>
-        </div>
-        <p className="diag-contrib-hint">
-          召回贡献的写法，例如 <code>Q1 #6 0.700</code>：<code>Q1</code> 是第 1
-          个检索词「{queries[0] ?? "—"}」，<code>#6</code> 是在这一路召回里排第
-          6 名，<code>0.700</code> 是这一路的原始分数
-        </p>
-        <p className="diag-scroll-hint">表格可左右滑动查看分数</p>
-        <div className="diag-table-wrap">
-          <table className="diag-table">
-            <thead>
-              <tr>
-                <th>去向</th>
-                <th>来源</th>
-                <th>分片</th>
-                <th title="每张排名表中的名次、原始分数，以及贡献的 RRF 分">
-                  召回贡献
-                </th>
-                <th title="RRF 得分 = Σ 1 / (k + 名次)">RRF 分 / 名次</th>
-                <th title="重排模型原始输出与重排后名次">重排 logit / 名次</th>
-                <th title="sigmoid(logit)，与阈值比较">重排概率</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleCandidates.map((item) => (
-                <CandidateRow
-                  item={item}
-                  minScore={config.min_score}
-                  queries={queries}
-                  relations={graphRelations}
-                  key={item.chunk_id + item.rrf_rank}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {candidates.length > 0 ? (
-          <div className="diag-pagination" aria-label="候选明细分页">
-            <span aria-live="polite">
-              显示第 {candidatePageStart + 1}–{candidatePageEnd} 条，共{" "}
-              {candidates.length} 条
-            </span>
-            <div className="diag-pagination-controls">
-              <button
-                type="button"
-                disabled={visibleCandidatePage === 1}
-                onClick={() =>
-                  setCandidatePage((page) => Math.max(1, page - 1))
-                }
-              >
-                上一页
-              </button>
+        </button>
+        <small>
+          按最终处理顺序排列；悬停查看说明
+          {graphOnly > 0 ? `；只有图找到的 ${graphOnly} 个` : ""}
+        </small>
+      </div>
+      {candidatesOpen && (
+        <DetailDialog
+          open
+          title={`候选明细（${candidates.length} 个）`}
+          onClose={() => setCandidatesOpen(false)}
+        >
+          {/* 弹窗不在 .diag 下面：自己带上，表格颜色变量才对。 */}
+          <div className="diag">
+            <div className="diag-legend">
               <span>
-                第 {visibleCandidatePage} / {candidatePageCount} 页
+                <i className="diag-dot method-dense" />
+                向量召回
               </span>
-              <button
-                type="button"
-                disabled={visibleCandidatePage === candidatePageCount}
-                onClick={() =>
-                  setCandidatePage((page) =>
-                    Math.min(candidatePageCount, page + 1),
-                  )
-                }
-              >
-                下一页
-              </button>
+              <span>
+                <i className="diag-dot method-keyword" />
+                关键词召回（BM25）
+              </span>
+              {graph && (
+                <span>
+                  <i className="diag-dot method-graph" />
+                  图检索（实 = 图 · 实体，关 = 图 · 关系）
+                </span>
+              )}
+              <span>
+                <i className="diag-threshold-sample" />
+                相关性阈值
+              </span>
             </div>
+            <p className="diag-contrib-hint">
+              召回贡献的写法，例如 <code>Q1 #6 0.700</code>：<code>Q1</code>{" "}
+              是第 1 个检索词「{queries[0] ?? "—"}」，<code>#6</code>{" "}
+              是在这一路召回里排第 6 名，<code>0.700</code> 是这一路的原始分数
+            </p>
+            <p className="diag-scroll-hint">表格可左右滑动查看分数</p>
+            <div className="diag-table-wrap">
+              <table className="diag-table diag-candidates">
+                <thead>
+                  <tr>
+                    <th>去向</th>
+                    <th>来源</th>
+                    <th>分片</th>
+                    <th title="每张排名表中的名次、原始分数，以及贡献的 RRF 分">
+                      召回贡献
+                    </th>
+                    <th title="RRF 得分 = Σ 1 / (k + 名次)">RRF 分 / 名次</th>
+                    <th title="重排模型原始输出与重排后名次">
+                      重排 logit / 名次
+                    </th>
+                    <th title="sigmoid(logit)，与阈值比较">重排概率</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleCandidates.map((item) => (
+                    <CandidateRow
+                      item={item}
+                      minScore={config.min_score}
+                      queries={queries}
+                      relations={graphRelations}
+                      key={item.chunk_id + item.rrf_rank}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {candidates.length > 0 ? (
+              <div className="diag-pagination" aria-label="候选明细分页">
+                <span aria-live="polite">
+                  显示第 {candidatePageStart + 1}–{candidatePageEnd} 条，共{" "}
+                  {candidates.length} 条
+                </span>
+                <div className="diag-pagination-controls">
+                  <button
+                    type="button"
+                    disabled={visibleCandidatePage === 1}
+                    onClick={() =>
+                      setCandidatePage((page) => Math.max(1, page - 1))
+                    }
+                  >
+                    上一页
+                  </button>
+                  <span>
+                    第 {visibleCandidatePage} / {candidatePageCount} 页
+                  </span>
+                  <button
+                    type="button"
+                    disabled={visibleCandidatePage === candidatePageCount}
+                    onClick={() =>
+                      setCandidatePage((page) =>
+                        Math.min(candidatePageCount, page + 1),
+                      )
+                    }
+                  >
+                    下一页
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="diag-page-summary">暂无候选明细</p>
+            )}
           </div>
-        ) : (
-          <p className="diag-page-summary">暂无候选明细</p>
-        )}
-      </details>
+        </DetailDialog>
+      )}
     </div>
   );
 
