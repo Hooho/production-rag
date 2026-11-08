@@ -3895,25 +3895,16 @@ label {
 }
 
 .diag-list {
-  border: 1px solid var(--diag-line);
-}
-
-.diag-list > summary {
   display: flex;
   gap: 7px;
   align-items: center;
   padding: 6px 8px;
-  cursor: pointer;
-  color: var(--diag-strong);
+  border: 1px solid var(--diag-line);
 }
 
-.diag-list > summary small {
+.diag-list > small {
   margin-left: auto;
   color: var(--diag-muted);
-}
-
-.diag-list .diag-table {
-  border-top: 1px solid var(--diag-line);
 }
 
 .diag-empty {

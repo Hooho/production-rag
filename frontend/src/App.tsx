@@ -101,6 +101,7 @@ import {
   type HistoryRun,
   type RetrievalCandidate,
   type RetrievalDiagnosticsData,
+  type RetrievalList,
   type Source,
   type TraceStep,
 } from "./api";
@@ -4552,6 +4553,8 @@ function RetrievalDiagnostics({
   const timings = data.timings ?? {};
   const graph = data.graph;
   const [candidatePage, setCandidatePage] = useState(1);
+  // 原始排名表：点哪张表就在弹窗里看哪张。
+  const [rankList, setRankList] = useState<RetrievalList | null>(null);
   const candidatePageCount = Math.max(
     1,
     Math.ceil(candidates.length / DIAGNOSTICS_PAGE_SIZE),
@@ -4854,6 +4857,11 @@ function RetrievalDiagnostics({
     );
   };
 
+  const listLabel = (list: RetrievalList) =>
+    list.method === "graph"
+      ? list.query
+      : `${METHOD_LABELS[list.method] ?? list.method} · Q${queries.indexOf(list.query) + 1} ${list.query}`;
+
   const rankingTables = (
     <details className="diag-fold">
       <summary>
@@ -4865,55 +4873,69 @@ function RetrievalDiagnostics({
       </summary>
       <div className="diag-lists">
         {lists.map((list, index) => (
-          <details className="diag-list" key={`${list.method}-${index}`}>
-            <summary>
-              <i className={`diag-dot method-${list.method}`} />
-              {list.method === "graph"
-                ? list.query
-                : `${METHOD_LABELS[list.method] ?? list.method} · Q${queries.indexOf(list.query) + 1} ${list.query}`}
-              <small>{list.hits.length} 个分片</small>
-            </summary>
-            {list.hits.length === 0 ? (
-              <p className="diag-empty">没有找到分片</p>
-            ) : (
-              <table className="diag-table diag-table-compact">
-                <thead>
-                  <tr>
-                    <th>名次</th>
-                    <th>分片</th>
-                    <th>{RAW_SCORE_LABELS[list.method] ?? "原始分"}</th>
-                    <th>RRF 贡献</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {list.hits.map((hit) => (
-                    <tr key={hit.rank}>
-                      <td className="num">{hit.rank}</td>
-                      <td>
-                        <span className="diag-title">{hit.title}</span>
-                        <code title={hit.chunk_id}>
-                          {shortChunkId(hit.chunk_id)}
-                        </code>
-                        {hit.relation_ids?.length ? (
-                          <small className="diag-sub">
-                            通过关系：
-                            {hit.relation_ids
-                              .map((id) => graphRelations.get(id) ?? id)
-                              .join("；")}
-                          </small>
-                        ) : null}
-                      </td>
-                      <td className="num">{formatNumber(hit.raw_score)}</td>
-                      <td className="num">{formatNumber(hit.rrf, 5)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </details>
+          <div className="diag-list" key={`${list.method}-${index}`}>
+            <i className={`diag-dot method-${list.method}`} />
+            <button
+              type="button"
+              className="link-button"
+              onClick={() => setRankList(list)}
+            >
+              {listLabel(list)}
+            </button>
+            <small>{list.hits.length} 个分片</small>
+          </div>
         ))}
       </div>
     </details>
+  );
+
+  // 点开的排名表在弹窗里看：表格颜色变量在 .diag 上，弹窗不在 .diag 下面，要自己带上。
+  const rankDialog = rankList && (
+    <DetailDialog
+      open
+      title={`原始排名表 · ${listLabel(rankList)}`}
+      onClose={() => setRankList(null)}
+    >
+      <div className="diag">
+        {rankList.hits.length === 0 ? (
+          <p className="diag-empty">没有找到分片</p>
+        ) : (
+          <table className="diag-table diag-table-compact">
+            <thead>
+              <tr>
+                <th>名次</th>
+                <th>分片</th>
+                <th>{RAW_SCORE_LABELS[rankList.method] ?? "原始分"}</th>
+                <th>RRF 贡献</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rankList.hits.map((hit) => (
+                <tr key={hit.rank}>
+                  <td className="num">{hit.rank}</td>
+                  <td>
+                    <span className="diag-title">{hit.title}</span>
+                    <code title={hit.chunk_id}>
+                      {shortChunkId(hit.chunk_id)}
+                    </code>
+                    {hit.relation_ids?.length ? (
+                      <small className="diag-sub">
+                        通过关系：
+                        {hit.relation_ids
+                          .map((id) => graphRelations.get(id) ?? id)
+                          .join("；")}
+                      </small>
+                    ) : null}
+                  </td>
+                  <td className="num">{formatNumber(hit.raw_score)}</td>
+                  <td className="num">{formatNumber(hit.rrf, 5)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </DetailDialog>
   );
 
   const comboLabel = (key: string) =>
@@ -5035,6 +5057,7 @@ function RetrievalDiagnostics({
         )}
         {rankingTables}
       </div>
+      {rankDialog}
     </div>
   );
 
