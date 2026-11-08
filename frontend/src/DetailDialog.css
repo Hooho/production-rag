@@ -1,4 +1,5 @@
 .ag-delivery-dialog {
+  --dialog-pad: 24px;
   position: fixed;
   inset: 16px 16px 16px auto;
   margin: 0;
@@ -10,10 +11,16 @@
   overflow-y: auto;
   border: 1px solid #d9e5dc;
   border-radius: 12px;
-  padding: 24px;
+  padding: var(--dialog-pad);
   background: var(--surface, #fff);
   color: var(--text, #244b32);
   box-shadow: -8px 0 36px #16362226;
+}
+
+/* 弹窗里表格的表头吸在弹窗内边缘，不吸在内容区：sticky 默认贴着内容区顶部，
+   表头上方会留一条内边距，往上滚的行从那条缝里透出来。 */
+.ag-delivery-dialog .diag-table th {
+  top: calc(-1 * var(--dialog-pad));
 }
 
 .ag-delivery-dialog::backdrop {
@@ -50,7 +57,9 @@
   max-height: var(--companion-max-height, calc(80dvh - 26px));
   bottom: auto;
   right: auto;
-  box-shadow: 0 24px 80px #102b2559, 0 8px 28px #102b253d;
+  box-shadow:
+    0 24px 80px #102b2559,
+    0 8px 28px #102b253d;
 }
 
 .ag-dialog-companion::backdrop {
@@ -58,7 +67,7 @@
   pointer-events: none;
 }
 
-.ag-dialog-companion>.ag-delivery-dialog-head {
+.ag-dialog-companion > .ag-delivery-dialog-head {
   cursor: move;
   touch-action: none;
   user-select: none;
@@ -102,7 +111,7 @@
   font-size: 12px;
 }
 
-.ag-original-chunk-heading>span {
+.ag-original-chunk-heading > span {
   font-size: 11px;
 }
 
