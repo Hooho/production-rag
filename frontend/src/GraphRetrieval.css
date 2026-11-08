@@ -143,6 +143,11 @@
   word-break: break-word;
 }
 
+/* 提示词在弹窗里：整块由弹窗滚动，段落不再单独限高，避免两层滚动条。 */
+.ag-delivery-dialog .grt-pre {
+  max-height: none;
+}
+
 /* 每一步的数量表：只列数量和类型，明细点「详情」在抽屉里看。 */
 .grt-step h5 .grt-detail-button {
   margin-left: auto;

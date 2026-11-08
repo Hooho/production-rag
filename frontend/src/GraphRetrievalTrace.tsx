@@ -648,6 +648,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
     return map;
   }, [graph]);
   const [detail, setDetail] = useState<Detail | null>(null);
+  const [promptOpen, setPromptOpen] = useState(false);
   // 字面命中（名字相同或互相包含）的实体，按「关键词|实体名」记，数量表里给它们标「字面」。
   const literalEntities = useMemo(
     () =>
@@ -710,18 +711,13 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
           </tbody>
         </table>
         {words?.prompt && (
-          <details className="mem-fold">
-            <summary>发给模型的提示词和原始输出</summary>
-            {words.prompt.map((message, index) => (
-              <pre className="grt-pre" key={index}>
-                {message.role === "system" ? "系统：" : "用户："}
-                {message.content}
-              </pre>
-            ))}
-            <pre className="grt-pre">
-              输出：{words.raw_output || words.error || "（空）"}
-            </pre>
-          </details>
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => setPromptOpen(true)}
+          >
+            发给模型的提示词和原始输出
+          </button>
         )}
       </section>
 
@@ -915,6 +911,23 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
           relations={relations}
           onClose={() => setDetail(null)}
         />
+      )}
+      {promptOpen && words?.prompt && (
+        <DetailDialog
+          open
+          title="发给模型的提示词和原始输出"
+          onClose={() => setPromptOpen(false)}
+        >
+          {words.prompt.map((message, index) => (
+            <pre className="grt-pre" key={index}>
+              {message.role === "system" ? "系统：" : "用户："}
+              {message.content}
+            </pre>
+          ))}
+          <pre className="grt-pre">
+            输出：{words.raw_output || words.error || "（空）"}
+          </pre>
+        </DetailDialog>
       )}
     </div>
   );
