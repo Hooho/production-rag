@@ -1106,7 +1106,8 @@ function ChunkTable({
 }
 
 // ⑥ 关系图：② 找到的实体粗蓝边框；③ 实体路线的边蓝色，④ 关系路线的边绿色，两条都找到的紫色粗线；
-// 去掉的边灰色虚线（最多画 8 条，其余只在表格里）。点一条边在下面显示它的原文。
+// 去掉的边灰色虚线（最多画 8 条，其余只在表格里）。边只写关系类别（和知识图谱一样），默认不画标签；
+// 鼠标停在边上才显示这条边的类别，提示框里给完整描述；点一条边在弹窗里看它的详情。
 const ROUTE_COLORS = {
   entity: "#2563eb",
   relation: "#16a34a",
@@ -1124,7 +1125,9 @@ function GraphRetrievalMap({
 }) {
   const container = useRef<HTMLDivElement>(null);
   const cy = useRef<Core | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  // 点开的关系：详情在弹窗里看，图上只留一条边的标签。
+  const [openRelation, setOpenRelation] =
+    useState<GraphRetrievalRelation | null>(null);
   const { elements, relations } = useMemo(() => {
     const routes = new Map<
       string,
@@ -1217,9 +1220,11 @@ function GraphRetrievalMap({
           color: ROUTE_COLORS[route],
           width: route === "both" ? 4 : faded ? 1.5 : 2.5,
           dashed: faded ? 1 : 0,
-          label: faded
-            ? `${text.slice(0, 10)} · ${item.reason ?? "去掉"}`
-            : text.slice(0, 14),
+          // 关系只写类别，和知识图谱一样；完整描述在提示框和点开后的弹窗里。
+          label: relation.category || "关系",
+          title: faded
+            ? `${relation.category}：${text}（${item.reason ?? "去掉"}）`
+            : `${relation.category}：${text}`,
         },
       });
     }
@@ -1274,13 +1279,23 @@ function GraphRetrievalMap({
             "target-arrow-shape": "triangle",
             width: "data(width)",
             "curve-style": "bezier",
-            label: "data(label)",
-            "font-size": 9,
+            // 默认不画标签，和知识图谱一样：几十条边都标着长句，图会糊成一片。
             color: "#475569",
+            "font-size": 9,
             "text-background-color": "#ffffff",
-            "text-background-opacity": 0.85,
+            "text-background-opacity": 0.9,
             "text-background-padding": "2px",
-            "text-rotation": "autorotate",
+            "text-rotation": "none",
+          },
+        },
+        {
+          // 鼠标停在边上、点中的实体相邻的边、点中的边，才显示这条边的关系类别。
+          selector: "edge.is-hover, edge:selected",
+          style: {
+            label: "data(label)",
+            "font-weight": "bold",
+            "text-background-opacity": 1,
+            "z-index": 10,
           },
         },
         {
@@ -1293,9 +1308,23 @@ function GraphRetrievalMap({
         },
       ],
     });
-    instance.on("tap", "edge", (event) => setSelected(event.target.id()));
+    instance.on("tap", "edge", (event) => {
+      const relation = relations.get(event.target.id());
+      if (relation) setOpenRelation(relation);
+    });
+    // 鼠标停在边上：显示这条边的关系类别，提示框里给完整描述。
+    instance.on("mouseover", "edge", (event) => {
+      event.target.addClass("is-hover");
+      if (container.current)
+        container.current.title = event.target.data("title") ?? "";
+    });
+    instance.on("mouseout", "edge", (event) => {
+      event.target.removeClass("is-hover");
+      if (container.current) container.current.title = "";
+    });
     instance.on("tap", "node", (event) => {
-      setSelected(null);
+      // 点实体：只亮出它相邻的边，它们的关系类别才显示出来。
+      instance.edges().unselect();
       event.target.connectedEdges().select();
     });
     cy.current = instance;
@@ -1305,7 +1334,6 @@ function GraphRetrievalMap({
     };
   }, [elements]);
 
-  const relation = selected ? relations.get(selected) : undefined;
   if (elements.length === 0) return <p className="grt-empty">没有可画的关系</p>;
   return (
     <div className="grt-map">
@@ -1332,20 +1360,33 @@ function GraphRetrievalMap({
         </span>
       </div>
       <div className="grt-map-canvas" ref={container} />
-      {relation ? (
-        <div className="grt-map-detail">
-          <RelationText relation={relation} />
-          <span>
-            相似度 {score(relation.score)} · <Origin relation={relation} />
-          </span>
-          {relation.evidence && <blockquote>{relation.evidence}</blockquote>}
-          <OriginalButton
-            relation={relation}
-            chunk={chunks.get(relation.chunk_id)}
-          />
-        </div>
-      ) : (
-        <p className="grt-hint">点一条边看它的原文；滚轮缩放，可以拖动</p>
+      <p className="grt-hint">
+        鼠标停在边上显示关系类别，点一条边在弹窗里看详情；滚轮缩放，可以拖动
+      </p>
+      {openRelation && (
+        <DetailDialog
+          open
+          title={`关系 · ${openRelation.source} → ${openRelation.target}`}
+          onClose={() => setOpenRelation(null)}
+        >
+          <div className="grt grt-map-detail">
+            <RelationText relation={openRelation} />
+            <span>
+              相似度 {score(openRelation.score)} ·{" "}
+              <Origin relation={openRelation} />
+            </span>
+            {!openRelation.kept && openRelation.reason && (
+              <p className="grt-dropped">没被留下：{openRelation.reason}</p>
+            )}
+            {openRelation.evidence && (
+              <blockquote>{openRelation.evidence}</blockquote>
+            )}
+            <OriginalButton
+              relation={openRelation}
+              chunk={chunks.get(openRelation.chunk_id)}
+            />
+          </div>
+        </DetailDialog>
       )}
     </div>
   );
