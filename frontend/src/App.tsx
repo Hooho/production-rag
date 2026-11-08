@@ -2417,25 +2417,36 @@ function TraceTimeline({
   requestId?: string;
   rounds?: AgentRound[];
 }) {
+  // 「本步结果」里的两个数字：点开看具体是哪几个分片（候选池、最终返回的）。
+  const [drill, setDrill] = useState<{
+    kind: "pool" | "returned";
+    data: RetrievalDiagnosticsData;
+  } | null>(null);
+  const drillPool = drill?.kind === "pool" ? poolCandidates(drill.data) : [];
+  const drillReturned =
+    drill?.kind === "returned" ? returnedCandidates(drill.data) : [];
   return (
-    <details
-      className={`trace-timeline ${live ? "is-live" : ""}`}
-      open={live || undefined}
-    >
-      <summary className="trace-toggle">
-        <span>{live ? "当前处理阶段" : "处理阶段"}</span>
-        <strong>
-          {steps.length} 个阶段
-          {totalElapsed(steps) !== null
-            ? ` · 共 ${formatDuration(totalElapsed(steps))}`
-            : ""}
-          {live ? " · 实时更新" : ""}
-        </strong>
-        <span className="panel-chevron">⌄</span>
-      </summary>
-      <div className="trace-body">
-        {traceRows(steps).map(
-          ({ step, part, title, detail, duration }, index) => (
+    <>
+      <details
+        className={`trace-timeline ${live ? "is-live" : ""}`}
+        open={live || undefined}
+      >
+        <summary className="trace-toggle">
+          <span>{live ? "当前处理阶段" : "处理阶段"}</span>
+          <strong>
+            {steps.length} 个阶段
+            {totalElapsed(steps) !== null
+              ? ` · 共 ${formatDuration(totalElapsed(steps))}`
+              : ""}
+            {live ? " · 实时更新" : ""}
+          </strong>
+          <span className="panel-chevron">⌄</span>
+        </summary>
+        <div className="trace-body">
+          {traceRows(steps, {
+            onPool: (data) => setDrill({ kind: "pool", data }),
+            onReturned: (data) => setDrill({ kind: "returned", data }),
+          }).map(({ step, part, title, detail, duration }, index) => (
             <details
               className={`trace-step ${step.status}`}
               key={part ? `${step.id}-${part}` : step.id}
@@ -2521,16 +2532,42 @@ function TraceTimeline({
                 )}
               </div>
             </details>
-          ),
-        )}
-        {live && steps.length === 0 && (
-          <LoadingSkeleton className="trace-waiting" label="正在等待处理阶段">
-            <SkeletonBlock className="skeleton-line" />
-            <SkeletonBlock className="skeleton-line-short" />
-          </LoadingSkeleton>
-        )}
-      </div>
-    </details>
+          ))}
+          {live && steps.length === 0 && (
+            <LoadingSkeleton className="trace-waiting" label="正在等待处理阶段">
+              <SkeletonBlock className="skeleton-line" />
+              <SkeletonBlock className="skeleton-line-short" />
+            </LoadingSkeleton>
+          )}
+        </div>
+      </details>
+      {/* 从「本步结果」点开的两个弹窗：候选池和最终返回的分片。 */}
+      {drill?.kind === "pool" && drillPool.length > 0 && (
+        <CandidateChunksDialog
+          open
+          title={`交给重排的 ${drillPool.length} 个分片`}
+          lead={`${poolBreakdownText(drillPool)}，共 ${drillPool.length} 个分片`}
+          leadNote="按 RRF 得分排；每行写清楚这片是哪几路找到的、在各路的排名表里第几"
+          candidates={drillPool}
+          queries={textQueries(drill.data)}
+          scoreKind="rrf"
+          splitQuota
+          onClose={() => setDrill(null)}
+        />
+      )}
+      {drill?.kind === "returned" && drillReturned.length > 0 && (
+        <CandidateChunksDialog
+          open
+          title={`最终返回的 ${drillReturned.length} 个分片`}
+          lead={`交给回答模型的 ${drillReturned.length} 个分片`}
+          leadNote="按重排概率排；每行写清楚这片是哪几路找到的、在各路的排名表里第几"
+          candidates={drillReturned}
+          queries={textQueries(drill.data)}
+          scoreKind="rerank"
+          onClose={() => setDrill(null)}
+        />
+      )}
+    </>
   );
 }
 
@@ -2550,7 +2587,13 @@ const PART_PURPOSES: Record<DiagnosticsPart, string> = {
   rerank: "重排候选，按相关性阈值和返回上限决定交给回答模型的资料",
 };
 
-function traceRows(steps: TraceStep[]): TraceRow[] {
+function traceRows(
+  steps: TraceStep[],
+  drill?: {
+    onPool?: (data: RetrievalDiagnosticsData) => void;
+    onReturned?: (data: RetrievalDiagnosticsData) => void;
+  },
+): TraceRow[] {
   const rows: TraceRow[] = [];
   for (const step of steps) {
     const data = step.result?.diagnostics as
@@ -2597,7 +2640,29 @@ function traceRows(steps: TraceStep[]): TraceRow[] {
       step,
       part: "rerank",
       title: "重排与过滤",
-      detail: `${data.config.reranked ? pooled : candidates.length} 个候选 → 返回 ${returned} 个`,
+      // 两个数字都能点开看具体是哪几个分片：候选池一份、最终返回的一份。
+      // 包一层 span：本步结果那格是 grid，直接放 fragment 会把两个数字拆成两行。
+      detail: drill?.onPool ? (
+        <span>
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => drill.onPool?.(data)}
+          >
+            {data.config.reranked ? pooled : candidates.length} 个候选
+          </button>
+          {" → "}
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => drill.onReturned?.(data)}
+          >
+            返回 {returned} 个
+          </button>
+        </span>
+      ) : (
+        `${data.config.reranked ? pooled : candidates.length} 个候选 → 返回 ${returned} 个`
+      ),
       duration: timings.rerank_ms ?? stats.rerank_ms,
     });
   }
@@ -4569,8 +4634,6 @@ function RetrievalDiagnostics({
   const [chunkOpen, setChunkOpen] = useState<string | null>(null);
   // 交给重排的候选池单独看：页面上只留一个入口，内容在弹窗里。
   const [poolOpen, setPoolOpen] = useState(false);
-  // 候选池里正在看原文的那一片。
-  const [poolChunkOpen, setPoolChunkOpen] = useState<string | null>(null);
   // 当前这一页分片的原文：来源列显示原文预览，「更多」看全文。读过的留在里面，翻页不用重读。
   const [chunkOriginals, setChunkOriginals] = useState<
     Record<string, ChunkOriginal>
@@ -4641,18 +4704,11 @@ function RetrievalDiagnostics({
     }
   }
   // 交给重排的候选池：进池的分片就是 status 不是 not_in_pool 的那些（app/tools/search.py 里
-  // RRF 排名前 pool_size 个，再按图检索名额补几个）。后端把候选按 status 排的，这里按 RRF 名次重排。
-  // 池子分两批：RRF 名前 pool_size 个，和 RRF 名次不够、靠图检索名额补进来的（后端标了 graph_quota）。
-  const poolAll = candidates
-    .filter((item) => item.status !== "not_in_pool")
-    .sort((a, b) => a.rrf_rank - b.rrf_rank);
-  const quotaPool = poolAll.filter((item) => item.graph_quota);
-  const rrfPool = poolAll.filter((item) => !item.graph_quota);
-  const rerankPool = [...rrfPool, ...quotaPool];
+  // RRF 排名前 pool_size 个，再按图检索名额补几个）。池子分两批：RRF 名前 pool_size 个，
+  // 和 RRF 名次不够、靠图检索名额补进来的（后端标了 graph_quota）。
+  const rerankPool = poolCandidates(data);
   // 入口上写清楚这两批各多少，别让人以为池子就是 RRF 前几个。
-  const poolBreakdown = quotaPool.length
-    ? `RRF 前 ${rrfPool.length} 个 + 图检索名额 ${quotaPool.length} 个`
-    : `RRF 前 ${rrfPool.length} 个`;
+  const poolBreakdown = poolBreakdownText(rerankPool);
   // 漏斗每一行表示"这一步之后剩下多少"，名称里直接写出关键参数（RRF 前几名、阈值、返回上限），
   // 右侧列出这一步淘汰了多少、为什么。
   const rerankedCount = config.reranked ? pooled : candidates.length;
@@ -5109,133 +5165,20 @@ function RetrievalDiagnostics({
     </DetailDialog>
   );
 
-  // 候选池里的一行：召回方式、分片、RRF 分、各路名次、原文。
-  const poolRow = (item: RetrievalCandidate) => {
-    const methods = ["dense", "keyword", "graph"].filter((method) =>
-      item.retrieval_methods.includes(method),
-    );
-    return (
-      <tr key={item.chunk_id}>
-        <td>
-          <div className="diag-contribs">
-            {methods.map((method) => (
-              <span className={`diag-contrib method-${method}`} key={method}>
-                <i className={`diag-dot method-${method}`} />
-                {METHOD_LABELS[method] ?? method}
-              </span>
-            ))}
-          </div>
-        </td>
-        <td className="diag-snippet">
-          <span className="diag-title">
-            {item.title}
-            <small className="source-location">
-              {sourceLocation(item.version, item.page_start, item.heading)}
-            </small>
-          </span>
-          <span className="diag-preview" title={item.preview}>
-            {item.preview}
-          </span>
-          {item.graph_quota && (
-            <span
-              className="diag-graph-only"
-              title="RRF 名次不够进入重排，靠图检索名额补进来的"
-            >
-              图检索名额
-            </span>
-          )}
-        </td>
-        <td className="num">
-          {formatNumber(item.rrf_score, 5)}
-          <small className="diag-sub">第 {item.rrf_rank} 名</small>
-        </td>
-        <td>
-          <div className="diag-contribs">
-            {item.contributions.map((contribution, index) => (
-              <span
-                className={`diag-contrib method-${contribution.method}`}
-                key={index}
-                title={`${contribution.query}\n${METHOD_LABELS[contribution.method] ?? contribution.method}第 ${contribution.rank} 名，${RAW_SCORE_LABELS[contribution.method] ?? "原始分"} ${formatNumber(contribution.raw_score)}\nRRF 贡献 1/(k+${contribution.rank}) = ${formatNumber(contribution.rrf, 5)}`}
-              >
-                <i className={`diag-dot method-${contribution.method}`} />
-                {METHOD_LABELS[contribution.method] ?? contribution.method}
-                {contribution.method === "graph" ? (
-                  <em>{contribution.query.includes("实体") ? "实" : "关"}</em>
-                ) : queries.length > 1 ? (
-                  <em>Q{queries.indexOf(contribution.query) + 1}</em>
-                ) : null}
-                #{contribution.rank}
-                <small>{formatNumber(contribution.raw_score, 3)}</small>
-              </span>
-            ))}
-          </div>
-        </td>
-        <td>
-          <button
-            type="button"
-            className="link-button button-sm"
-            onClick={() => setPoolChunkOpen(item.chunk_id)}
-          >
-            原文
-          </button>
-        </td>
-      </tr>
-    );
-  };
-
   // 交给重排的候选池：每片一行，写清楚是哪几路找到的、在各路的排名表里第几。
   // 分数用 RRF 分（这一步的得分），原文按钮点开是伴随浮窗。
   const poolDialog = poolOpen && rerankPool.length > 0 && (
-    <DetailDialog
+    <CandidateChunksDialog
       open
       title={`交给重排的 ${rerankPool.length} 个分片`}
+      lead={`${poolBreakdown}，共 ${rerankPool.length} 个分片`}
+      leadNote="按 RRF 得分排；每行写清楚这片是哪几路找到的、在各路的排名表里第几"
+      candidates={rerankPool}
+      queries={queries}
+      scoreKind="rrf"
+      splitQuota
       onClose={() => setPoolOpen(false)}
-      className="ag-dialog-pool"
-    >
-      <div className="diag">
-        <p className="diag-part-lead">
-          <strong>
-            {poolBreakdown}，共 {rerankPool.length} 个分片
-          </strong>
-          <small>
-            按 RRF 得分排；每行写清楚这片是哪几路找到的、在各路的排名表里第几
-          </small>
-        </p>
-        <div className="diag-table-wrap">
-          <table className="diag-table diag-pool">
-            <thead>
-              <tr>
-                <th>召回方式</th>
-                <th>分片</th>
-                <th>RRF 分</th>
-                <th>各路名次</th>
-                <th>原文</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rrfPool.map(poolRow)}
-              {/* 名额补进来的单独一段，别和 RRF 名前面几个混在一起。 */}
-              {quotaPool.length > 0 && (
-                <tr className="diag-pool-group">
-                  <td colSpan={5}>
-                    图检索名额补进来的 {quotaPool.length} 个：RRF
-                    名次不够，靠名额进池
-                  </td>
-                </tr>
-              )}
-              {quotaPool.map(poolRow)}
-            </tbody>
-          </table>
-        </div>
-        {/* 「原文」打开的内容是伴随浮窗，贴着按钮出现。 */}
-        {poolChunkOpen && (
-          <ChunkOriginalPanel
-            chunkId={poolChunkOpen}
-            onClose={() => setPoolChunkOpen(null)}
-          />
-        )}
-      </div>
-    </DetailDialog>
+    />
   );
 
   const comboLabel = (key: string) =>
@@ -5647,6 +5590,203 @@ function RetrievalDiagnostics({
       </div>
       {rerankSection}
     </div>
+  );
+}
+
+// 候选池：进池的分片（status 不是 not_in_pool），按 RRF 名次排。
+// 后端把候选按去向排的，这里要按 RRF 名次重排。
+function poolCandidates(data: RetrievalDiagnosticsData) {
+  return (data.candidates ?? [])
+    .filter((item) => item.status !== "not_in_pool")
+    .sort((a, b) => a.rrf_rank - b.rrf_rank);
+}
+
+// 最终交给回答模型的分片，按重排名次排。
+function returnedCandidates(data: RetrievalDiagnosticsData) {
+  return (data.candidates ?? [])
+    .filter((item) => item.status === "returned")
+    .sort((a, b) => (a.rerank_rank ?? 0) - (b.rerank_rank ?? 0));
+}
+
+// 候选池两批各多少：RRF 名前面的，和 RRF 名次不够、靠图检索名额补进来的。
+function poolBreakdownText(pool: RetrievalCandidate[]) {
+  const quota = pool.filter((item) => item.graph_quota).length;
+  const rrf = pool.length - quota;
+  return quota
+    ? `RRF 前 ${rrf} 个 + 图检索名额 ${quota} 个`
+    : `RRF 前 ${rrf} 个`;
+}
+
+// 文本检索的检索词（按出现顺序）：多个检索词时用 Q1、Q2 标注每条召回贡献来自哪个。
+// 图检索的两张表不按检索词分，不算进去。
+function textQueries(data: RetrievalDiagnosticsData) {
+  const queries: string[] = [];
+  for (const list of data.lists ?? [])
+    if (list.method !== "graph" && !queries.includes(list.query))
+      queries.push(list.query);
+  return queries;
+}
+
+// 一组候选分片的弹窗：召回方式、分片、分数、各路名次、原文。
+// 「交给重排的候选池」和「最终返回给回答模型的分片」两处共用。
+// scoreKind 决定分数列写什么：rrf 是融合得分，rerank 是重排概率。
+// splitQuota 把「靠图检索名额补进来的」那几片单独分段，和候选池里一样。
+function CandidateChunksDialog({
+  open,
+  title,
+  lead,
+  leadNote,
+  candidates,
+  queries,
+  scoreKind = "rrf",
+  splitQuota = false,
+  onClose,
+}: {
+  open: boolean;
+  title: string;
+  lead: ReactNode;
+  leadNote?: ReactNode;
+  candidates: RetrievalCandidate[];
+  queries: string[];
+  scoreKind?: "rrf" | "rerank";
+  splitQuota?: boolean;
+  onClose: () => void;
+}) {
+  const [chunkOpen, setChunkOpen] = useState<string | null>(null);
+  const quota = splitQuota ? candidates.filter((item) => item.graph_quota) : [];
+  const rest = splitQuota
+    ? candidates.filter((item) => !item.graph_quota)
+    : candidates;
+  const row = (item: RetrievalCandidate) => {
+    const methods = ["dense", "keyword", "graph"].filter((method) =>
+      item.retrieval_methods.includes(method),
+    );
+    return (
+      <tr key={item.chunk_id}>
+        <td>
+          <div className="diag-contribs">
+            {methods.map((method) => (
+              <span className={`diag-contrib method-${method}`} key={method}>
+                <i className={`diag-dot method-${method}`} />
+                {METHOD_LABELS[method] ?? method}
+              </span>
+            ))}
+          </div>
+        </td>
+        <td className="diag-snippet">
+          <span className="diag-title">
+            {item.title}
+            <small className="source-location">
+              {sourceLocation(item.version, item.page_start, item.heading)}
+            </small>
+          </span>
+          <span className="diag-preview" title={item.preview}>
+            {item.preview}
+          </span>
+          {item.graph_quota && (
+            <span
+              className="diag-graph-only"
+              title="RRF 名次不够进入重排，靠图检索名额补进来的"
+            >
+              图检索名额
+            </span>
+          )}
+        </td>
+        <td className="num">
+          {scoreKind === "rerank" ? (
+            <>
+              {formatNumber(item.rerank_probability, 3)}
+              {item.rerank_rank !== null ? (
+                <small className="diag-sub">第 {item.rerank_rank} 名</small>
+              ) : null}
+            </>
+          ) : (
+            <>
+              {formatNumber(item.rrf_score, 5)}
+              <small className="diag-sub">第 {item.rrf_rank} 名</small>
+            </>
+          )}
+        </td>
+        <td>
+          <div className="diag-contribs">
+            {item.contributions.map((contribution, index) => (
+              <span
+                className={`diag-contrib method-${contribution.method}`}
+                key={index}
+                title={`${contribution.query}\n${METHOD_LABELS[contribution.method] ?? contribution.method}第 ${contribution.rank} 名，${RAW_SCORE_LABELS[contribution.method] ?? "原始分"} ${formatNumber(contribution.raw_score)}\nRRF 贡献 1/(k+${contribution.rank}) = ${formatNumber(contribution.rrf, 5)}`}
+              >
+                <i className={`diag-dot method-${contribution.method}`} />
+                {METHOD_LABELS[contribution.method] ?? contribution.method}
+                {contribution.method === "graph" ? (
+                  <em>{contribution.query.includes("实体") ? "实" : "关"}</em>
+                ) : queries.length > 1 ? (
+                  <em>Q{queries.indexOf(contribution.query) + 1}</em>
+                ) : null}
+                #{contribution.rank}
+                <small>{formatNumber(contribution.raw_score, 3)}</small>
+              </span>
+            ))}
+          </div>
+        </td>
+        <td>
+          <button
+            type="button"
+            className="link-button button-sm"
+            onClick={() => setChunkOpen(item.chunk_id)}
+          >
+            原文
+          </button>
+        </td>
+      </tr>
+    );
+  };
+  return (
+    <DetailDialog
+      open
+      title={title}
+      onClose={onClose}
+      className="ag-dialog-pool"
+    >
+      <div className="diag">
+        <p className="diag-part-lead">
+          <strong>{lead}</strong>
+          {leadNote ? <small>{leadNote}</small> : null}
+        </p>
+        <div className="diag-table-wrap">
+          <table className="diag-table diag-pool">
+            <thead>
+              <tr>
+                <th>召回方式</th>
+                <th>分片</th>
+                <th>{scoreKind === "rerank" ? "重排概率" : "RRF 分"}</th>
+                <th>各路名次</th>
+                <th>原文</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rest.map(row)}
+              {/* 名额补进来的单独一段，别和 RRF 名前面几个混在一起。 */}
+              {quota.length > 0 && (
+                <tr className="diag-pool-group">
+                  <td colSpan={5}>
+                    图检索名额补进来的 {quota.length} 个：RRF
+                    名次不够，靠名额进池
+                  </td>
+                </tr>
+              )}
+              {quota.map(row)}
+            </tbody>
+          </table>
+        </div>
+        {/* 「原文」打开的内容是伴随浮窗，贴着按钮出现。 */}
+        {chunkOpen && (
+          <ChunkOriginalPanel
+            chunkId={chunkOpen}
+            onClose={() => setChunkOpen(null)}
+          />
+        )}
+      </div>
+    </DetailDialog>
   );
 }
 
