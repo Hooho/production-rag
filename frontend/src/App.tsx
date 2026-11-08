@@ -4524,8 +4524,8 @@ function shortChunkId(chunkId: string) {
   return chunkId.slice(0, 10);
 }
 
-// 候选明细数量较多时固定三条一页，避免完整 diagnostics 在前端连续堆叠；原始排名表仍完整保留在下方。
-const DIAGNOSTICS_PAGE_SIZE = 3;
+// 候选明细每页六条：表格在弹窗里自己上下滚，表头吸在框顶，分页翻得少一点。
+const DIAGNOSTICS_PAGE_SIZE = 6;
 
 // 检索诊断面板：把后端每一步的计算结果完整展示出来，便于理解一条来源为什么被返回或被丢弃。
 // 分三块（docs：claude/graph-retrieval-phase2-plan.md 第一部分第四节）：
@@ -5241,7 +5241,7 @@ function RetrievalDiagnostics({
               是在这一路召回里排第 6 名，<code>0.700</code> 是这一路的原始分数
             </p>
             <p className="diag-scroll-hint">表格可左右滑动查看分数</p>
-            <div className="diag-table-wrap">
+            <div className="diag-table-wrap diag-candidates-wrap">
               <table className="diag-table diag-candidates">
                 <thead>
                   <tr>
