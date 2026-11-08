@@ -25,6 +25,7 @@ export function GraphEntityDialog({
         documentId={documentId}
         onClose={onClose}
         embedded
+        summaryOnly
       />
     </DetailDialog>
   );

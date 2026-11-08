@@ -21,6 +21,7 @@ import { typeColor } from "./GraphView";
 // 实体详情：标准名、类型；由哪些名字合并而来（各自出自第几片、用什么方法合并）；出现在哪些文档；全部关系和出处。
 // documentId 给了只看这份文档里的，不给看全局（管理员）。
 // embedded = true 时放进弹窗里用：关掉的按钮由弹窗自己带，面板不再自己收边距。
+// summaryOnly = true 时只说实体本身：不列关系，也不列每个名字出自第几片。
 export function GraphEntityPanel({
   hopInfo,
   entityId,
@@ -42,6 +43,7 @@ export function GraphEntityPanel({
   onShowMatches,
   matchingLimitReached = false,
   embedded = false,
+  summaryOnly = false,
 }: {
   hopInfo?: GraphHopInfo | null;
   onOpenDocument?: (documentId: string) => void;
@@ -64,6 +66,7 @@ export function GraphEntityPanel({
   onShowMatches?: (query: string, category: string | null) => void;
   matchingLimitReached?: boolean;
   embedded?: boolean;
+  summaryOnly?: boolean;
 }) {
   const panel = useRef<HTMLElement>(null);
   const header = useRef<HTMLDivElement>(null);
@@ -222,22 +225,28 @@ export function GraphEntityPanel({
               {item.method_label}
             </Tag>
             <small>
-              出现 {item.count} 次：
-              {item.positions.slice(0, 8).map((position, index) => (
-                <button
-                  key={`${item.chunk_ids[index]}-${index}`}
-                  type="button"
-                  className="link-button"
-                  disabled={!onOpenChunk || !documentId}
-                  onClick={() =>
-                    documentId &&
-                    onOpenChunk?.(item.chunk_ids[index], position, documentId)
-                  }
-                >
-                  第 {position + 1} 片
-                </button>
-              ))}
-              {item.positions.length > 8 ? " …" : ""}
+              出现 {item.count} 次
+              {summaryOnly
+                ? ""
+                : `：${item.positions.slice(0, 8).map((position, index) => (
+                    <button
+                      key={`${item.chunk_ids[index]}-${index}`}
+                      type="button"
+                      className="link-button"
+                      disabled={!onOpenChunk || !documentId}
+                      onClick={() =>
+                        documentId &&
+                        onOpenChunk?.(
+                          item.chunk_ids[index],
+                          position,
+                          documentId,
+                        )
+                      }
+                    >
+                      第 {position + 1} 片
+                    </button>
+                  ))}
+                  {item.positions.length > 8 ? " …" : ""}`}
             </small>
             {item.descriptions.length > 0 && (
               <small>{item.descriptions.join("；")}</small>
@@ -267,159 +276,162 @@ export function GraphEntityPanel({
           </ul>
         </>
       )}
-      <section className="graph-entity-relations" aria-label="实体关系">
-        <div className="graph-relations-header">
-          <h4>
-            关系（{relations.length} / {detail.relations.length}）
-          </h4>
-          {visibleEdges !== undefined && (
-            <div
-              className="graph-relation-scope"
-              role="group"
-              aria-label="关系显示范围"
-            >
-              <button
-                type="button"
-                aria-pressed={scope === "visible"}
-                onClick={() => {
-                  setScope("visible");
-                  onScopeChange?.("visible");
-                  setCategory(null);
-                  onHighlightCategory?.(null);
-                }}
+      {/* 只要实体本身时不列关系：检索诊断里看关系有专门的表，这里再列一遍是重复。 */}
+      {!summaryOnly && (
+        <section className="graph-entity-relations" aria-label="实体关系">
+          <div className="graph-relations-header">
+            <h4>
+              关系（{relations.length} / {detail.relations.length}）
+            </h4>
+            {visibleEdges !== undefined && (
+              <div
+                className="graph-relation-scope"
+                role="group"
+                aria-label="关系显示范围"
               >
-                图中关系 {visibleRelations.length}
-              </button>
-              <button
-                type="button"
-                aria-pressed={scope === "all"}
-                onClick={() => {
-                  setScope("all");
-                  onScopeChange?.("all");
-                  setCategory(null);
-                  onHighlightCategory?.(null);
-                }}
-              >
-                全部关系 {detail.relations.length}
-              </button>
-            </div>
-          )}
-          <div
-            className="graph-relation-categories"
-            role="group"
-            aria-label="筛选关系分类"
-          >
-            <button
-              type="button"
-              aria-pressed={category === null}
-              onClick={() => {
-                setCategory(null);
-                onHighlightCategory?.(null);
-              }}
-            >
-              全部 {scopedRelations.length}
-            </button>
-            {[...categoryCounts].map(([name, count]) => (
-              <button
-                type="button"
-                key={name}
-                className="tag is-hue"
-                style={{ "--tag-h": labelHue(name) } as CSSProperties}
-                aria-pressed={category === name}
-                onClick={() => {
-                  setCategory(name);
-                  onHighlightCategory?.(name);
-                }}
-              >
-                {name} {count}
-              </button>
-            ))}
-          </div>
-          <form
-            className="graph-entity-search"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const query = draftQuery.trim();
-              setLocalQuery(query);
-              onEntityQueryChange?.(query);
-            }}
-          >
-            <label htmlFor={searchId}>在当前关系中查找实体</label>
-            <div className="graph-entity-search-row">
-              <input
-                id={searchId}
-                type="search"
-                value={draftQuery}
-                placeholder="输入实体名称，例如腾讯"
-                onChange={(event) => setDraftQuery(event.target.value)}
-              />
-              <button type="submit" className="secondary-button">
-                搜索
-              </button>
-              {(draftQuery || nameQuery) && (
                 <button
                   type="button"
-                  className="secondary-button"
+                  aria-pressed={scope === "visible"}
                   onClick={() => {
-                    setDraftQuery("");
-                    setLocalQuery("");
-                    onEntityQueryChange?.("");
+                    setScope("visible");
+                    onScopeChange?.("visible");
+                    setCategory(null);
+                    onHighlightCategory?.(null);
                   }}
                 >
-                  清空
+                  图中关系 {visibleRelations.length}
                 </button>
-              )}
-            </div>
-            {nameQuery.trim() && (
-              <small role="status">
-                匹配 {matchingEntities.size} 个实体、{relations.length} 条关系
-              </small>
-            )}
-            {nameQuery.trim() &&
-              scope === "all" &&
-              hiddenMatches.size > 0 &&
-              onShowMatches && (
                 <button
                   type="button"
-                  className="secondary-button"
-                  disabled={matchingLimitReached}
-                  title="遵循顶部类型筛选，图中最多显示300个实体"
-                  onClick={() => onShowMatches(nameQuery.trim(), category)}
+                  aria-pressed={scope === "all"}
+                  onClick={() => {
+                    setScope("all");
+                    onScopeChange?.("all");
+                    setCategory(null);
+                    onHighlightCategory?.(null);
+                  }}
                 >
-                  {matchingLimitReached
-                    ? "已达300个实体上限，请先收起部分展开"
-                    : "显示匹配实体"}
-                  （{hiddenMatches.size} 个未显示）
+                  全部关系 {detail.relations.length}
                 </button>
+              </div>
+            )}
+            <div
+              className="graph-relation-categories"
+              role="group"
+              aria-label="筛选关系分类"
+            >
+              <button
+                type="button"
+                aria-pressed={category === null}
+                onClick={() => {
+                  setCategory(null);
+                  onHighlightCategory?.(null);
+                }}
+              >
+                全部 {scopedRelations.length}
+              </button>
+              {[...categoryCounts].map(([name, count]) => (
+                <button
+                  type="button"
+                  key={name}
+                  className="tag is-hue"
+                  style={{ "--tag-h": labelHue(name) } as CSSProperties}
+                  aria-pressed={category === name}
+                  onClick={() => {
+                    setCategory(name);
+                    onHighlightCategory?.(name);
+                  }}
+                >
+                  {name} {count}
+                </button>
+              ))}
+            </div>
+            <form
+              className="graph-entity-search"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const query = draftQuery.trim();
+                setLocalQuery(query);
+                onEntityQueryChange?.(query);
+              }}
+            >
+              <label htmlFor={searchId}>在当前关系中查找实体</label>
+              <div className="graph-entity-search-row">
+                <input
+                  id={searchId}
+                  type="search"
+                  value={draftQuery}
+                  placeholder="输入实体名称，例如腾讯"
+                  onChange={(event) => setDraftQuery(event.target.value)}
+                />
+                <button type="submit" className="secondary-button">
+                  搜索
+                </button>
+                {(draftQuery || nameQuery) && (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      setDraftQuery("");
+                      setLocalQuery("");
+                      onEntityQueryChange?.("");
+                    }}
+                  >
+                    清空
+                  </button>
+                )}
+              </div>
+              {nameQuery.trim() && (
+                <small role="status">
+                  匹配 {matchingEntities.size} 个实体、{relations.length} 条关系
+                </small>
               )}
-          </form>
-        </div>
-        <ul>
-          {relations.map((row, index) => (
-            <RelationItem
-              key={row.id}
-              row={row}
-              number={index + 1}
-              entityId={detail.entity.id}
-              onOpenChunk={onOpenChunk}
-              showDocument={!documentId}
-              highlighted={highlightedRelationId === row.id && isVisible(row)}
-              onHighlight={
-                isVisible(row) && onHighlightRelation
-                  ? () => onHighlightRelation(row)
-                  : undefined
-              }
-            />
-          ))}
-        </ul>
-        {relations.length === 0 && (
-          <p className="graph-note">
-            {nameQuery.trim()
-              ? "当前范围没有名称匹配的实体，可清空查找或切换到全部关系。"
-              : "当前范围没有关系，可切换显示范围或展开邻居。"}
-          </p>
-        )}
-      </section>
+              {nameQuery.trim() &&
+                scope === "all" &&
+                hiddenMatches.size > 0 &&
+                onShowMatches && (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={matchingLimitReached}
+                    title="遵循顶部类型筛选，图中最多显示300个实体"
+                    onClick={() => onShowMatches(nameQuery.trim(), category)}
+                  >
+                    {matchingLimitReached
+                      ? "已达300个实体上限，请先收起部分展开"
+                      : "显示匹配实体"}
+                    （{hiddenMatches.size} 个未显示）
+                  </button>
+                )}
+            </form>
+          </div>
+          <ul>
+            {relations.map((row, index) => (
+              <RelationItem
+                key={row.id}
+                row={row}
+                number={index + 1}
+                entityId={detail.entity.id}
+                onOpenChunk={onOpenChunk}
+                showDocument={!documentId}
+                highlighted={highlightedRelationId === row.id && isVisible(row)}
+                onHighlight={
+                  isVisible(row) && onHighlightRelation
+                    ? () => onHighlightRelation(row)
+                    : undefined
+                }
+              />
+            ))}
+          </ul>
+          {relations.length === 0 && (
+            <p className="graph-note">
+              {nameQuery.trim()
+                ? "当前范围没有名称匹配的实体，可清空查找或切换到全部关系。"
+                : "当前范围没有关系，可切换显示范围或展开邻居。"}
+            </p>
+          )}
+        </section>
+      )}
     </aside>
   );
 }
