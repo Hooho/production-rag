@@ -3666,6 +3666,19 @@ label {
   vertical-align: top;
 }
 
+/* 列分隔线：检索诊断的表列多，数值又挨着，没有竖线时容易看串列。
+   末列不画右线，免得和表格框的右边框叠成双线。
+   评测页的表有自己的一套分隔线（.ev-table），这里不动。 */
+.diag-table:not(.ev-table) th,
+.diag-table:not(.ev-table) td {
+  border-right: 1px solid var(--diag-line, rgb(var(--t-80a4c7-rgb) / 0.42));
+}
+
+.diag-table:not(.ev-table) th:last-child,
+.diag-table:not(.ev-table) td:last-child {
+  border-right: 0;
+}
+
 .diag-table tbody tr:last-child td {
   border-bottom: 0;
 }
