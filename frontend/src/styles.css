@@ -6959,18 +6959,6 @@ label {
   min-width: 760px;
 }
 
-/* 候选明细弹窗：表格框自己上下左右滚，表头吸在框顶，
-   弹窗本身不用滚，分页一直留在框外看得见。 */
-.ag-delivery-dialog .diag-candidates-wrap {
-  overflow: auto;
-  max-height: max(180px, calc(100dvh - 380px));
-}
-
-/* 表格框自己滚时，表头吸在框顶，不用往上偏到弹窗内边缘。 */
-.ag-delivery-dialog .diag-candidates-wrap .diag-table th {
-  top: 0;
-}
-
 /* 模型名标签：检索过程里出现的模型用浅蓝底等宽字包起来，和普通说明文字区分。 */
 .model-tag {
   display: inline-block;

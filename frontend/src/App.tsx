@@ -5241,7 +5241,7 @@ function RetrievalDiagnostics({
               是在这一路召回里排第 6 名，<code>0.700</code> 是这一路的原始分数
             </p>
             <p className="diag-scroll-hint">表格可左右滑动查看分数</p>
-            <div className="diag-table-wrap diag-candidates-wrap">
+            <div className="diag-table-wrap">
               <table className="diag-table diag-candidates">
                 <thead>
                   <tr>

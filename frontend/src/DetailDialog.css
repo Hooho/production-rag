@@ -23,12 +23,34 @@
   top: calc(-1 * var(--dialog-pad));
 }
 
-/* 图检索的详情弹窗里，表要吸在弹窗顶部，就不能被 .diag-table-wrap 挡着：
-   它的 overflow-x: auto 会连带把 overflow-y 变成 auto，自己成了滚动容器，
-   表头就只吸在表格身上、跟着表格一起滚走。放开后表头直接吸在弹窗上。
-   只放开图检索这几张表：它们列不多，不会横向溢出；列多的表还要靠这个框横向滚动。 */
-.ag-delivery-dialog.grt-dialog .diag-table-wrap {
-  overflow: visible;
+/* 弹窗里带表格的：内容区撑满剩下的高度，表格框自己上下左右滚，表头吸在框顶。
+   顶部的筛选和底部的翻页留在框外一屏显示完，弹窗本身不用滚。 */
+.ag-delivery-dialog[open]:has(> .diag > .diag-table-wrap) {
+  display: flex;
+  flex-direction: column;
+}
+
+.ag-delivery-dialog[open] > .diag:has(> .diag-table-wrap) {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.ag-delivery-dialog[open] > .diag > .diag-table-wrap {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* 只有表格框跟着高度压缩，筛选条、说明和翻页保持原样。 */
+.ag-delivery-dialog[open] > .diag > :not(.diag-table-wrap) {
+  flex: none;
+}
+
+/* 表格框自己滚时，表头吸在框顶，不用往上偏到弹窗内边缘。 */
+.ag-delivery-dialog .diag-table-wrap .diag-table th {
+  top: 0;
 }
 
 .ag-delivery-dialog::backdrop {
