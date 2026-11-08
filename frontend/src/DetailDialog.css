@@ -23,6 +23,13 @@
   top: calc(-1 * var(--dialog-pad));
 }
 
+/* 弹窗里的表格要能吸在弹窗顶部，就不能被 .diag-table-wrap 挡着：
+   它的 overflow-x: auto 会连带把 overflow-y 变成 auto，自己成了滚动容器，
+   表头就只吸在表格身上、跟着表格一起滚走。放开后表头直接吸在弹窗上。 */
+.ag-delivery-dialog .diag-table-wrap {
+  overflow: visible;
+}
+
 .ag-delivery-dialog::backdrop {
   background: #16362233;
 }
