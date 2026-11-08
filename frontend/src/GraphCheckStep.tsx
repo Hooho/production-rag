@@ -719,6 +719,26 @@ export function GraphCheckStep({
                   </button>
                 </ConfirmPopover>
               )}
+              {canDecide && pending.length > 0 && (
+                <ConfirmPopover
+                  message={`全部 ${pending.length} 项都不采纳 AI 建议（${info.reject}）？之后还可以逐项撤销。`}
+                  confirmText="全部不采纳"
+                  onConfirm={() =>
+                    decide(
+                      pending.map((item) => item.id),
+                      "reject",
+                    )
+                  }
+                >
+                  <button
+                    type="button"
+                    className="secondary-button button-sm"
+                    disabled={busy}
+                  >
+                    全部不采纳
+                  </button>
+                </ConfirmPopover>
+              )}
             </div>
           </div>
         )}
