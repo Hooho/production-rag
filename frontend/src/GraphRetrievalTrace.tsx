@@ -1534,6 +1534,13 @@ function GraphRetrievalMap({
     });
     node.addClass("is-focus");
     node.connectedEdges().addClass("is-focus-edge");
+    // 选中的实体移到画布中间：它可能在边上，缩着图看不清楚。
+    instance.animate({
+      center: { eles: node },
+      zoom: instance.zoom(),
+      duration: 220,
+      easing: "ease-out",
+    });
   }, [focus, elements]);
 
   // 面板展开/收起、窗口变宽变窄时重新按画布比例铺一次。
