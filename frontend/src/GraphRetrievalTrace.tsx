@@ -688,6 +688,12 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
             {words?.prompt_tag ? ` · ${words.prompt_tag}` : ""}
           </small>
         </h5>
+        {words?.question && (
+          <p className="grt-question">
+            根据问题「{words.question}」提取关键词
+            {words.question_source ? ` · ${words.question_source}` : ""}
+          </p>
+        )}
         {words?.reason && <p className="grt-note">{words.reason}</p>}
         <table className="diag-table grt-table">
           <thead>

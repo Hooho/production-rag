@@ -665,7 +665,12 @@ class Agent:
         # owner 过滤由服务端注入，LangChain Tool 只能检索当前用户的 Milvus 向量和全文索引。
         def search_my_documents(queries: list[str], rerank_query: str):
             return self.search_tool.execute(
-                state["store"], state["models"], state["owner"], queries, rerank_query
+                state["store"],
+                state["models"],
+                state["owner"],
+                queries,
+                rerank_query,
+                graph_question_source="固定流程的独立问题",
             )
 
         tool = StructuredTool.from_function(

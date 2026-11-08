@@ -891,7 +891,12 @@ def evaluate_items(
         queries, rerank_query = rewrite["queries"], rewrite["standalone_query"]
         started = time.monotonic()
         retrieval = tool.execute(
-            store, models, EVAL_OWNER, queries, rerank_query, **options
+            store,
+            models,
+            EVAL_OWNER,
+            queries,
+            rerank_query,
+            **{**options, "graph_question_source": "评测的独立问题"},
         )
         latency_ms = round((time.monotonic() - started) * 1000)
         row = score_question(item, retrieval, chunk_texts, pool_size)

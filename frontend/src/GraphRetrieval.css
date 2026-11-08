@@ -116,6 +116,12 @@
   background: #fdf8ec;
 }
 
+/* 提关键词时按的是哪个问题、来自哪条流程：诊断里记下来的，说明为什么是这些关键词。 */
+.grt-question {
+  margin: 0;
+  color: var(--diag-strong, #173b5b);
+}
+
 .grt-empty,
 .grt-hint {
   margin: 0;

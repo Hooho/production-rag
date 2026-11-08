@@ -158,6 +158,9 @@ export type GraphRetrievalTrace = {
     fallback?: boolean;
     prompt?: { role: string; content: string }[];
     raw_output?: string;
+    // 提关键词时用的是哪个问题、来自哪条流程（固定流程的独立问题、Agent 的检索词…）。
+    question?: string;
+    question_source?: string | null;
     input_tokens?: number | null;
     output_tokens?: number | null;
     prompt_tag?: string;

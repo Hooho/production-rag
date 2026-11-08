@@ -115,6 +115,7 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
         parent=settings["agent_parent_context"],
         return_limit=cap,
         excellent_score=settings["agent_excellent_score"],
+        graph_question_source="Agent 的检索词",
     )
     # 过了相关度阈值的资料，最多给 agent_return_limit 条；模型要得更少（top_k）就再少取，不能绕过阈值。
     # 不低于 Agent 优秀阈值的资料全部给，不受模型自己要的 top_k 限制（检索那边也已经不受上限限制）。

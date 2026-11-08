@@ -128,7 +128,8 @@ def parse_keywords(text):
 
 
 # ① 提关键词。返回 {"source", "entities", "themes", ...}；source 是 agent / model / fallback。
-def keywords(models, question, entities=None, themes=None):
+# question_source 是这次按哪个问题提的（固定流程的独立问题、Agent 的检索词…），调用方最清楚，诊断里记下来。
+def keywords(models, question, entities=None, themes=None, question_source=None):
     started = time.monotonic()
     given_entities = clean_keywords(entities, MAX_ENTITIES)
     given_themes = clean_keywords(themes, MAX_THEMES)
@@ -143,6 +144,8 @@ def keywords(models, question, entities=None, themes=None):
         "source": "model",
         "entities": [],
         "themes": [],
+        "question": question,
+        "question_source": question_source,
         "prompt_tag": prompts.tag(PROMPT_ID),
     }
     chat_model = getattr(models, "chat_model", None)
@@ -421,7 +424,16 @@ def empty(status, reason, scope=None, **extra):
 
 # 图检索主流程。scope 是这次检索的权限范围（Storage.readable_scope 的结果）；
 # entities / themes 是调用方给的关键词（Agent），不给就提取。返回诊断，sources 里是两张排名表的来源。
-def retrieve(store, models, question, scope, settings=None, entities=None, themes=None):
+def retrieve(
+    store,
+    models,
+    question,
+    scope,
+    settings=None,
+    entities=None,
+    themes=None,
+    question_source=None,
+):
     started = time.monotonic()
     timings = {}
     graph_scope = scope_versions(store.engine, scope)
@@ -434,7 +446,7 @@ def retrieve(store, models, question, scope, settings=None, entities=None, theme
     }
     target = vector_store(store, models)
 
-    words = keywords(models, question, entities, themes)
+    words = keywords(models, question, entities, themes, question_source)
     timings["keywords_ms"] = words["duration_ms"]
 
     step = time.monotonic()

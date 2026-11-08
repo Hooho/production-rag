@@ -79,6 +79,7 @@ class DocumentSearchTool:
         excellent_score=None,
         graph_keywords=None,
         graph_question=None,
+        graph_question_source=None,
     ):
         # 一次检索只读一次参数，整条检索用同一份；实际用到的值写进诊断配置，事后能查到这次用的是哪组参数。
         config = runtime_snapshot()
@@ -129,6 +130,7 @@ class DocumentSearchTool:
                 scope,
                 config,
                 graph_keywords,
+                graph_question_source,
             )
         dense_ms = 0
         keyword_ms = 0
@@ -442,7 +444,9 @@ class DocumentSearchTool:
 
     # 图检索这一路：失败不影响向量、关键词两路，诊断里写明原因。
     @staticmethod
-    def graph_recall(store, models, question, scope, config, keywords=None):
+    def graph_recall(
+        store, models, question, scope, config, keywords=None, question_source=None
+    ):
         if scope is None:
             return graph_retrieve.empty(
                 "skipped", "这次检索没有权限范围（测试替身），不走图检索"
@@ -457,6 +461,7 @@ class DocumentSearchTool:
                 config,
                 entities=keywords.get("entities"),
                 themes=keywords.get("themes"),
+                question_source=question_source,
             )
         except Exception as error:
             logger.exception("graph_recall_failed")
@@ -577,7 +582,11 @@ class DocumentSearchTool:
                 owner,
                 retry_queries,
                 rerank_query,
-                **{"graph_question": rewrite, **options},
+                **{
+                    **options,
+                    "graph_question": rewrite,
+                    "graph_question_source": "补充检索词",
+                },
             )
             result["retry_ms"] = round((time.monotonic() - retry_started) * 1000)
             result.update(

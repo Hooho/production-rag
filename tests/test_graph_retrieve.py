@@ -255,6 +255,20 @@ def test_keywords_from_model(graph):
     assert json.loads(words["prompt"][1]["content"]) == {"question": "段永平厉害吗"}
 
 
+# 提关键词时按的是哪个问题、来自哪条流程，诊断里要记下来：前端据此说明关键词的出处。
+def test_keywords_records_question_source(graph):
+    client, store, models, document_id = graph
+    models.chat_model = KeywordModel('{"entities": ["段永平"], "themes": ["投资"]}')
+    words = graph_retrieve.keywords(
+        models, "段永平厉害吗", question_source="Agent 的检索词"
+    )
+    assert words["question"] == "段永平厉害吗"
+    assert words["question_source"] == "Agent 的检索词"
+    # 调用方自己给了关键词就不问模型，没有问题可记。
+    given = graph_retrieve.keywords(models, "段永平厉害吗", entities=["段永平"])
+    assert given["source"] == "agent" and "question" not in given
+
+
 # 提取失败或什么都没提出来：用整个问题当具体关键词，并写明原因。
 def test_keywords_fallback(graph):
     client, store, models, document_id = graph
