@@ -1203,12 +1203,11 @@ const ROUTE_COLORS = {
 };
 const DROPPED_EDGES = 8;
 
-// 图上的一个实体：找到的实体（②）和只出现在关系两端的实体。
+// 图上的一个实体：② 找到的实体（关键词匹配上的）。
 type MapEntity = {
   id: string;
   name: string;
   type: string | null;
-  found: boolean;
   degree: number;
 };
 
@@ -1318,8 +1317,6 @@ function GraphRetrievalMap({
           border: found.has(id) ? 4 : 1.5,
           text: color.text,
           faded: faded ? 1 : 0,
-          type: type ?? "其他",
-          isFound: found.has(id) ? 1 : 0,
         },
       });
     };
@@ -1364,7 +1361,8 @@ function GraphRetrievalMap({
         },
       });
     }
-    // 每个实体连了几条边，列表里标出来，方便点之前先看规模。
+    // 列表只列 ② 找到的实体（关键词匹配上的），图里其他实体不占位置。
+    // 每个实体连了几条边标在后面，点之前先看得到规模。
     const degree = new Map<string, number>();
     for (const edge of edges) {
       const source = String(edge.data.source);
@@ -1372,20 +1370,12 @@ function GraphRetrievalMap({
       degree.set(source, (degree.get(source) ?? 0) + 1);
       degree.set(target, (degree.get(target) ?? 0) + 1);
     }
-    const entities: MapEntity[] = [...nodes.values()]
-      .map((item) => ({
-        id: String(item.data.id),
-        name: String(item.data.label),
-        type: (item.data.type as string) ?? null,
-        found: item.data.isFound === 1,
-        degree: degree.get(String(item.data.id)) ?? 0,
-      }))
-      .sort(
-        (a, b) =>
-          Number(b.found) - Number(a.found) ||
-          b.degree - a.degree ||
-          a.name.localeCompare(b.name, "zh"),
-      );
+    const entities: MapEntity[] = graph.entities.map((entity) => ({
+      id: entity.entity_id,
+      name: entity.name ?? entity.entity_id,
+      type: entity.type,
+      degree: degree.get(entity.entity_id) ?? 0,
+    }));
     return {
       elements: [...nodes.values(), ...edges],
       relations: new Map(
@@ -1565,7 +1555,7 @@ function GraphRetrievalMap({
   return (
     <div className="grt-map">
       <div className="grt-map-entities">
-        <span className="grt-map-entities-label">实体</span>
+        <span className="grt-map-entities-label">找到的实体</span>
         <div className="grt-chips">
           <button
             type="button"
@@ -1578,8 +1568,8 @@ function GraphRetrievalMap({
             <button
               key={entity.id}
               type="button"
-              className={`grt-chip grt-entity-chip${entity.found ? " is-found" : ""}${focus === entity.id ? " is-active" : ""}`}
-              title={`${entity.found ? "② 找到的实体" : "关系里出现的实体"} · ${entity.degree} 条关系`}
+              className={`grt-chip grt-entity-chip${focus === entity.id ? " is-active" : ""}`}
+              title={`② 找到的实体 · ${entity.degree} 条关系`}
               onClick={() =>
                 setFocus((current) =>
                   current === entity.id ? null : entity.id,

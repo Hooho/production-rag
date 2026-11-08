@@ -315,8 +315,8 @@
   border-radius: 50%;
 }
 
-/* 找到的实体（②）在图里是粗蓝边框，列表里用一圈蓝环对上。 */
-.grt-entity-chip.is-found .grt-entity-dot {
+/* 列表里都是 ② 找到的实体，在图里是粗蓝边框，这里用一圈蓝环对上。 */
+.grt-entity-chip .grt-entity-dot {
   box-shadow:
     0 0 0 2px #fff,
     0 0 0 3.5px #1d4ed8;
