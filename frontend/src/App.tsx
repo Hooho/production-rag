@@ -4623,9 +4623,10 @@ function RetrievalDiagnostics({
   const config = data.config;
   const timings = data.timings ?? {};
   const graph = data.graph;
-  const [candidatePage, setCandidatePage] = useState(1);
-  // 候选明细在弹窗里看：一页只列三条，页面上不用摊开一张宽表。
+  // 候选明细在弹窗里看：一页只列六条，页面上不用摊开一张宽表。
   const [candidatesOpen, setCandidatesOpen] = useState(false);
+  // 最终返回给回答模型的分片单独看：和候选明细同一个弹窗，只是只列返回的那些。
+  const [returnedOpen, setReturnedOpen] = useState(false);
   // 原始排名表：整块收进弹窗，页面上只留一个入口；弹窗里用标签切换每张表。
   const [rankOpen, setRankOpen] = useState(false);
   const [rankIndex, setRankIndex] = useState(0);
@@ -4638,36 +4639,7 @@ function RetrievalDiagnostics({
   const [chunkOriginals, setChunkOriginals] = useState<
     Record<string, ChunkOriginal>
   >({});
-  // 候选明细里按召回方式过滤：向量、关键词、图检索。
-  const [candidateMethod, setCandidateMethod] = useState<string | null>(null);
-  // 一个分片可能被多路找到，各路的数量会重叠。
-  const candidateMethodCounts: Record<string, number> = {};
-  for (const item of candidates)
-    for (const method of item.retrieval_methods)
-      candidateMethodCounts[method] = (candidateMethodCounts[method] ?? 0) + 1;
-  const filteredCandidates = candidateMethod
-    ? candidates.filter((item) =>
-        item.retrieval_methods.includes(candidateMethod),
-      )
-    : candidates;
-  const candidatePageCount = Math.max(
-    1,
-    Math.ceil(filteredCandidates.length / DIAGNOSTICS_PAGE_SIZE),
-  );
-  const visibleCandidatePage = Math.min(candidatePage, candidatePageCount);
-  const candidatePageStart = (visibleCandidatePage - 1) * DIAGNOSTICS_PAGE_SIZE;
-  const candidatePageEnd = Math.min(
-    candidatePageStart + DIAGNOSTICS_PAGE_SIZE,
-    filteredCandidates.length,
-  );
-  const visibleCandidates = filteredCandidates.slice(
-    candidatePageStart,
-    candidatePageEnd,
-  );
-  // 检索问题、候选数量或过滤方式变化时回到第一页，避免复用旧页码后看到空白明细。
-  useEffect(() => {
-    setCandidatePage(1);
-  }, [candidates.length, config.rerank_query, candidateMethod]);
+  // 候选明细里按召回方式过滤和翻页的状态放在弹窗组件里（见 CandidateDetailDialog）。
   // 换标签或排名表换了，回到第一页，避免沿用旧页码后看到空白表格。
   useEffect(() => {
     setRankPage(1);
@@ -4707,6 +4679,8 @@ function RetrievalDiagnostics({
   // RRF 排名前 pool_size 个，再按图检索名额补几个）。池子分两批：RRF 名前 pool_size 个，
   // 和 RRF 名次不够、靠图检索名额补进来的（后端标了 graph_quota）。
   const rerankPool = poolCandidates(data);
+  // 最终返回的分片：漏斗最后一步留下的那几片，按重排名次排。
+  const returnedChunks = returnedCandidates(data);
   // 入口上写清楚这两批各多少，别让人以为池子就是 RRF 前几个。
   const poolBreakdown = poolBreakdownText(rerankPool);
   // 漏斗每一行表示"这一步之后剩下多少"，名称里直接写出关键参数（RRF 前几名、阈值、返回上限），
@@ -5426,135 +5400,46 @@ function RetrievalDiagnostics({
           {graphOnly > 0 ? `；只有图找到的 ${graphOnly} 个` : ""}
         </small>
       </div>
+      {/* 最终过滤后留下的分片：和候选明细一样的内容，只是只列真正返回的那几个。 */}
+      {returned > 0 && (
+        <div className="diag-fold-head">
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => setReturnedOpen(true)}
+          >
+            查看最终返回（{returned} 个）
+          </button>
+          <small>
+            最终交给回答模型的分片；点开看每片从哪几路找到、分数多少
+          </small>
+        </div>
+      )}
       {candidatesOpen && (
-        <DetailDialog
+        <CandidateDetailDialog
           open
           title={`候选明细（${candidates.length} 个）`}
+          candidates={candidates}
+          minScore={config.min_score}
+          queries={queries}
+          relations={graphRelations}
+          showGraph={Boolean(graph)}
+          resetKey={config.rerank_query}
           onClose={() => setCandidatesOpen(false)}
-        >
-          {/* 弹窗不在 .diag 下面：自己带上，表格颜色变量才对。 */}
-          <div className="diag">
-            {/* 召回方式筛选：复用图检索详情弹窗那排胶囊按钮。 */}
-            {candidates.length > 0 && (
-              <div className="grt-chips">
-                <button
-                  type="button"
-                  className={`grt-chip${candidateMethod === null ? " is-active" : ""}`}
-                  onClick={() => setCandidateMethod(null)}
-                >
-                  全部 <em>{candidates.length}</em>
-                </button>
-                {(["dense", "keyword", "graph"] as const).map((method) =>
-                  candidateMethodCounts[method] ? (
-                    <button
-                      key={method}
-                      type="button"
-                      className={`grt-chip${candidateMethod === method ? " is-active" : ""}`}
-                      onClick={() => setCandidateMethod(method)}
-                    >
-                      {METHOD_LABELS[method] ?? method}{" "}
-                      <em>{candidateMethodCounts[method]}</em>
-                    </button>
-                  ) : null,
-                )}
-              </div>
-            )}
-            <div className="diag-legend">
-              <span>
-                <i className="diag-dot method-dense" />
-                向量召回
-              </span>
-              <span>
-                <i className="diag-dot method-keyword" />
-                关键词召回（BM25）
-              </span>
-              {graph && (
-                <span>
-                  <i className="diag-dot method-graph" />
-                  图检索（实 = 图 · 实体，关 = 图 · 关系）
-                </span>
-              )}
-              <span>
-                <i className="diag-threshold-sample" />
-                相关性阈值
-              </span>
-            </div>
-            <p className="diag-contrib-hint">
-              召回贡献的写法，例如 <code>Q1 #6 0.700</code>：<code>Q1</code>{" "}
-              是第 1 个检索词「{queries[0] ?? "—"}」，<code>#6</code>{" "}
-              是在这一路召回里排第 6 名，<code>0.700</code> 是这一路的原始分数
-            </p>
-            <p className="diag-scroll-hint">表格可左右滑动查看分数</p>
-            <div className="diag-table-wrap">
-              <table className="diag-table diag-candidates">
-                <thead>
-                  <tr>
-                    <th>去向</th>
-                    <th>来源</th>
-                    <th>分片</th>
-                    <th title="每张排名表中的名次、原始分数，以及贡献的 RRF 分">
-                      召回贡献
-                    </th>
-                    <th title="RRF 得分 = Σ 1 / (k + 名次)">RRF 分 / 名次</th>
-                    <th title="重排模型原始输出与重排后名次">
-                      重排 logit / 名次
-                    </th>
-                    <th title="sigmoid(logit)，与阈值比较">重排概率</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleCandidates.map((item) => (
-                    <CandidateRow
-                      item={item}
-                      minScore={config.min_score}
-                      queries={queries}
-                      relations={graphRelations}
-                      key={item.chunk_id + item.rrf_rank}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {candidates.length > 0 ? (
-              <div className="diag-pagination" aria-label="候选明细分页">
-                <span aria-live="polite">
-                  显示第 {candidatePageStart + 1}–{candidatePageEnd} 条，共{" "}
-                  {filteredCandidates.length} 条
-                  {candidateMethod
-                    ? `（${METHOD_LABELS[candidateMethod] ?? candidateMethod}召回）`
-                    : ""}
-                </span>
-                <div className="diag-pagination-controls">
-                  <button
-                    type="button"
-                    disabled={visibleCandidatePage === 1}
-                    onClick={() =>
-                      setCandidatePage((page) => Math.max(1, page - 1))
-                    }
-                  >
-                    上一页
-                  </button>
-                  <span>
-                    第 {visibleCandidatePage} / {candidatePageCount} 页
-                  </span>
-                  <button
-                    type="button"
-                    disabled={visibleCandidatePage === candidatePageCount}
-                    onClick={() =>
-                      setCandidatePage((page) =>
-                        Math.min(candidatePageCount, page + 1),
-                      )
-                    }
-                  >
-                    下一页
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <p className="diag-page-summary">暂无候选明细</p>
-            )}
-          </div>
-        </DetailDialog>
+        />
+      )}
+      {returnedOpen && (
+        <CandidateDetailDialog
+          open
+          title={`最终返回（${returned} 个）`}
+          candidates={returnedChunks}
+          minScore={config.min_score}
+          queries={queries}
+          relations={graphRelations}
+          showGraph={Boolean(graph)}
+          resetKey={config.rerank_query}
+          onClose={() => setReturnedOpen(false)}
+        />
       )}
     </div>
   );
@@ -5784,6 +5669,172 @@ function CandidateChunksDialog({
             chunkId={chunkOpen}
             onClose={() => setChunkOpen(null)}
           />
+        )}
+      </div>
+    </DetailDialog>
+  );
+}
+
+// 候选明细弹窗：一组候选分片的完整表格（去向、来源、召回贡献、RRF、重排分数），
+// 可按召回方式筛选、分页查看。
+// 「查看候选明细」和「查看最终返回」两处共用：内容一样，只是列出的候选不同。
+function CandidateDetailDialog({
+  open,
+  title,
+  candidates,
+  minScore,
+  queries,
+  relations,
+  showGraph,
+  resetKey,
+  onClose,
+}: {
+  open: boolean;
+  title: string;
+  candidates: RetrievalCandidate[];
+  minScore: number | null;
+  queries: string[];
+  relations: Map<string, string>;
+  showGraph: boolean;
+  // 检索问题变了就回到第一页：同一批候选换了打分，旧页码对不上。
+  resetKey: string;
+  onClose: () => void;
+}) {
+  const [page, setPage] = useState(1);
+  // 按召回方式过滤：向量、关键词、图检索。
+  const [method, setMethod] = useState<string | null>(null);
+  // 一个分片可能被多路找到，各路的数量会重叠。
+  const methodCounts: Record<string, number> = {};
+  for (const item of candidates)
+    for (const name of item.retrieval_methods)
+      methodCounts[name] = (methodCounts[name] ?? 0) + 1;
+  const filtered = method
+    ? candidates.filter((item) => item.retrieval_methods.includes(method))
+    : candidates;
+  const pageCount = Math.max(
+    1,
+    Math.ceil(filtered.length / DIAGNOSTICS_PAGE_SIZE),
+  );
+  const visiblePage = Math.min(page, pageCount);
+  const pageStart = (visiblePage - 1) * DIAGNOSTICS_PAGE_SIZE;
+  const pageEnd = Math.min(pageStart + DIAGNOSTICS_PAGE_SIZE, filtered.length);
+  const visible = filtered.slice(pageStart, pageEnd);
+  // 候选数量、过滤方式或检索问题变化时回到第一页，避免复用旧页码后看到空白明细。
+  useEffect(() => {
+    setPage(1);
+  }, [candidates.length, method, resetKey]);
+  return (
+    <DetailDialog open={open} title={title} onClose={onClose}>
+      {/* 弹窗不在 .diag 下面：自己带上，表格颜色变量才对。 */}
+      <div className="diag">
+        {/* 召回方式筛选：复用图检索详情弹窗那排胶囊按钮。 */}
+        {candidates.length > 0 && (
+          <div className="grt-chips">
+            <button
+              type="button"
+              className={`grt-chip${method === null ? " is-active" : ""}`}
+              onClick={() => setMethod(null)}
+            >
+              全部 <em>{candidates.length}</em>
+            </button>
+            {(["dense", "keyword", "graph"] as const).map((name) =>
+              methodCounts[name] ? (
+                <button
+                  key={name}
+                  type="button"
+                  className={`grt-chip${method === name ? " is-active" : ""}`}
+                  onClick={() => setMethod(name)}
+                >
+                  {METHOD_LABELS[name] ?? name} <em>{methodCounts[name]}</em>
+                </button>
+              ) : null,
+            )}
+          </div>
+        )}
+        <div className="diag-legend">
+          <span>
+            <i className="diag-dot method-dense" />
+            向量召回
+          </span>
+          <span>
+            <i className="diag-dot method-keyword" />
+            关键词召回（BM25）
+          </span>
+          {showGraph && (
+            <span>
+              <i className="diag-dot method-graph" />
+              图检索（实 = 图 · 实体，关 = 图 · 关系）
+            </span>
+          )}
+          <span>
+            <i className="diag-threshold-sample" />
+            相关性阈值
+          </span>
+        </div>
+        <p className="diag-contrib-hint">
+          召回贡献的写法，例如 <code>Q1 #6 0.700</code>：<code>Q1</code> 是第 1
+          个检索词「{queries[0] ?? "—"}」，<code>#6</code> 是在这一路召回里排第
+          6 名，<code>0.700</code> 是这一路的原始分数
+        </p>
+        <p className="diag-scroll-hint">表格可左右滑动查看分数</p>
+        <div className="diag-table-wrap">
+          <table className="diag-table diag-candidates">
+            <thead>
+              <tr>
+                <th>去向</th>
+                <th>来源</th>
+                <th>分片</th>
+                <th title="每张排名表中的名次、原始分数，以及贡献的 RRF 分">
+                  召回贡献
+                </th>
+                <th title="RRF 得分 = Σ 1 / (k + 名次)">RRF 分 / 名次</th>
+                <th title="重排模型原始输出与重排后名次">重排 logit / 名次</th>
+                <th title="sigmoid(logit)，与阈值比较">重排概率</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((item) => (
+                <CandidateRow
+                  item={item}
+                  minScore={minScore}
+                  queries={queries}
+                  relations={relations}
+                  key={item.chunk_id + item.rrf_rank}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {candidates.length > 0 ? (
+          <div className="diag-pagination" aria-label="候选明细分页">
+            <span aria-live="polite">
+              显示第 {pageStart + 1}–{pageEnd} 条，共 {filtered.length} 条
+              {method ? `（${METHOD_LABELS[method] ?? method}召回）` : ""}
+            </span>
+            <div className="diag-pagination-controls">
+              <button
+                type="button"
+                disabled={visiblePage === 1}
+                onClick={() => setPage((value) => Math.max(1, value - 1))}
+              >
+                上一页
+              </button>
+              <span>
+                第 {visiblePage} / {pageCount} 页
+              </span>
+              <button
+                type="button"
+                disabled={visiblePage === pageCount}
+                onClick={() =>
+                  setPage((value) => Math.min(pageCount, value + 1))
+                }
+              >
+                下一页
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="diag-page-summary">暂无候选明细</p>
         )}
       </div>
     </DetailDialog>
