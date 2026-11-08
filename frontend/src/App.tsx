@@ -4997,6 +4997,7 @@ function RetrievalDiagnostics({
                 <tr>
                   <th>名次</th>
                   <th>来源</th>
+                  <th>分片</th>
                   <th>{RAW_SCORE_LABELS[activeList.method] ?? "原始分"}</th>
                   <th>RRF 贡献</th>
                 </tr>
@@ -5007,9 +5008,24 @@ function RetrievalDiagnostics({
                   return (
                     <tr key={hit.rank}>
                       <td className="num">{hit.rank}</td>
+                      {/* 来源是这一片出自哪份文档；分片列是这一片的原文。 */}
                       <td className="rank-source">
-                        <span className="rank-source-head">
-                          <span className="diag-title">{hit.title}</span>
+                        <span className="rank-source-title" title={hit.title}>
+                          {hit.title}
+                        </span>
+                      </td>
+                      <td className="rank-chunk">
+                        <span className="rank-chunk-body">
+                          {body ? (
+                            <span
+                              className="diag-preview"
+                              title={body.slice(0, 160)}
+                            >
+                              {body}
+                            </span>
+                          ) : (
+                            <SkeletonBlock className="rank-preview-skeleton" />
+                          )}
                           <button
                             type="button"
                             className="link-button button-sm"
@@ -5018,16 +5034,6 @@ function RetrievalDiagnostics({
                             更多
                           </button>
                         </span>
-                        {body ? (
-                          <span
-                            className="diag-preview"
-                            title={body.slice(0, 160)}
-                          >
-                            {body}
-                          </span>
-                        ) : (
-                          <SkeletonBlock className="rank-preview-skeleton" />
-                        )}
                         {hit.relation_ids?.length ? (
                           <small className="diag-sub">
                             通过关系：

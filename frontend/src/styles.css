@@ -6924,26 +6924,40 @@ label {
 
 /* 排名表的表格框高度固定：切换标签时框的大小不变，行多了在框里滚。 */
 .rank-table-wrap {
-  height: 430px;
+  height: 340px;
 }
 
-/* 排名表的来源列：标题一行（右边跟「更多」），下面接这一片的原文预览。 */
+/* 来源列：这一片出自哪份文档，最多两行。 */
 .rank-source {
+  min-width: 150px;
+  max-width: 220px;
+}
+
+.rank-source-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--diag-strong);
+}
+
+/* 分片列：这一片的原文（两行省略），右边跟一个「更多」。 */
+.rank-chunk {
   min-width: 280px;
 }
 
-.rank-source-head {
+.rank-chunk-body {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   gap: 8px;
 }
 
-.rank-source-head .diag-title {
+.rank-chunk-body .diag-preview {
   flex: 1 1 auto;
   min-width: 0;
 }
 
-.rank-source-head .link-button {
+.rank-chunk-body .link-button {
   flex: none;
 }
 

@@ -62,7 +62,7 @@
    bottom 改成 auto，否则定位上下都钉死时高度会被拉满。
    浮窗形态继续用自己的宽高规则。 */
 .ag-delivery-dialog.ag-dialog-rank:not(.ag-dialog-companion) {
-  width: min(720px, calc(100vw - 32px));
+  width: min(780px, calc(100vw - 32px));
   height: auto;
   bottom: auto;
   max-height: calc(100dvh - 32px);
