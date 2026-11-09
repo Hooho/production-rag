@@ -3869,6 +3869,40 @@ label {
   font-style: normal;
 }
 
+/* RRF 算式：1 / (k + 名次)，数字按召回方式着色，和「各路名次」的标签对得上。 */
+.rrf-formula {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  align-items: baseline;
+  margin-top: 2px;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.rrf-term {
+  font-family: "DM Mono", monospace;
+  white-space: nowrap;
+}
+
+.rrf-term.method-dense {
+  color: var(--diag-dense);
+}
+
+.rrf-term.method-keyword {
+  color: var(--diag-keyword);
+}
+
+.rrf-term.method-graph {
+  color: var(--diag-graph);
+}
+
+.rrf-op {
+  margin: 0 1px;
+  color: var(--diag-muted);
+  font-weight: 400;
+}
+
 .diag-scroll-hint {
   display: none;
   margin: 0;

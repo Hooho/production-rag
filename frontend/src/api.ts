@@ -76,6 +76,8 @@ export type RetrievalDiagnosticsData = {
   config: {
     methods?: string[];
     rrf_k: number;
+    // 融合方式：sum = 各路贡献全累加；best = 同一路只取名次最好的那次。旧记录没有。
+    fusion?: string;
     rerank_candidates: number;
     // 图检索名额：交给重排的候选里至少几个图带回的分片；旧记录没有。
     graph_rerank_quota?: number;

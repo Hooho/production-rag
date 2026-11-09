@@ -103,6 +103,7 @@ import {
   type FeedbackRecord,
   type HistoryRun,
   type RetrievalCandidate,
+  type RetrievalContribution,
   type RetrievalDiagnosticsData,
   type RetrievalList,
   type Source,
@@ -2552,6 +2553,8 @@ function TraceTimeline({
           queries={textQueries(drill.data)}
           scoreKind="rrf"
           splitQuota
+          rrfK={drill.data.config.rrf_k}
+          fusion={drill.data.config.fusion}
           onClose={() => setDrill(null)}
         />
       )}
@@ -2564,6 +2567,8 @@ function TraceTimeline({
           candidates={drillReturned}
           queries={textQueries(drill.data)}
           scoreKind="rerank"
+          rrfK={drill.data.config.rrf_k}
+          fusion={drill.data.config.fusion}
           onClose={() => setDrill(null)}
         />
       )}
@@ -4541,6 +4546,66 @@ const RAW_SCORE_LABELS: Record<string, string> = {
   keyword: "BM25",
   graph: "关系相似度",
 };
+
+// RRF 的算式：每张排名表贡献 1 / (k + 名次)，k 是平滑常数（默认 60）。
+// 数字按召回方式着色，和「各路名次」里的标签一一对应，看得出来这一分是哪一路给的。
+// 融合方式选「每路只取最好名次」时，同一路只算名次最好的那次。
+function rrfTerms(
+  contributions: RetrievalContribution[],
+  fusion?: string,
+): RetrievalContribution[] {
+  if (fusion !== "best") return contributions;
+  const best = new Map<string, RetrievalContribution>();
+  for (const contribution of contributions) {
+    const current = best.get(contribution.method);
+    if (!current || contribution.rank < current.rank)
+      best.set(contribution.method, contribution);
+  }
+  return [...best.values()];
+}
+
+// 单张排名表给一个分片的贡献：1 / (k + 名次)。
+function RrfTerm({
+  method,
+  rank,
+  k,
+}: {
+  method: string;
+  rank: number;
+  k: number;
+}) {
+  return (
+    <span
+      className={`rrf-term method-${method}`}
+      title={`${METHOD_LABELS[method] ?? method}第 ${rank} 名：1 / (${k} + ${rank})`}
+    >
+      1/{k + rank}
+    </span>
+  );
+}
+
+// 一个分片的 RRF 分：各张排名表的贡献加起来。
+function RrfFormula({
+  contributions,
+  k,
+  fusion,
+}: {
+  contributions: RetrievalContribution[];
+  k: number;
+  fusion?: string;
+}) {
+  const terms = rrfTerms(contributions, fusion);
+  return (
+    <span className="rrf-formula">
+      {terms.map((term, index) => (
+        <span key={index}>
+          {index > 0 ? <b className="rrf-op">+</b> : null}
+          <RrfTerm method={term.method} rank={term.rank} k={k} />
+        </span>
+      ))}
+    </span>
+  );
+}
 const STATUS_INFO: Record<
   string,
   { icon: string; label: string; hint: string }
@@ -5046,7 +5111,7 @@ function RetrievalDiagnostics({
                   <th>来源</th>
                   <th>分片</th>
                   <th>{RAW_SCORE_LABELS[activeList.method] ?? "原始分"}</th>
-                  <th>RRF 贡献</th>
+                  <th title={`1 / (${config.rrf_k} + 名次)`}>RRF 贡献</th>
                 </tr>
               </thead>
               <tbody>
@@ -5091,7 +5156,16 @@ function RetrievalDiagnostics({
                         ) : null}
                       </td>
                       <td className="num">{formatNumber(hit.raw_score)}</td>
-                      <td className="num">{formatNumber(hit.rrf, 5)}</td>
+                      <td className="num">
+                        <RrfTerm
+                          method={activeList.method}
+                          rank={hit.rank}
+                          k={config.rrf_k}
+                        />
+                        <small className="diag-sub">
+                          {formatNumber(hit.rrf, 5)}
+                        </small>
+                      </td>
                     </tr>
                   );
                 })}
@@ -5151,6 +5225,8 @@ function RetrievalDiagnostics({
       queries={queries}
       scoreKind="rrf"
       splitQuota
+      rrfK={config.rrf_k}
+      fusion={config.fusion}
       onClose={() => setPoolOpen(false)}
     />
   );
@@ -5425,6 +5501,8 @@ function RetrievalDiagnostics({
           relations={graphRelations}
           showGraph={Boolean(graph)}
           resetKey={config.rerank_query}
+          rrfK={config.rrf_k}
+          fusion={config.fusion}
           onClose={() => setCandidatesOpen(false)}
         />
       )}
@@ -5438,6 +5516,8 @@ function RetrievalDiagnostics({
           relations={graphRelations}
           showGraph={Boolean(graph)}
           resetKey={config.rerank_query}
+          rrfK={config.rrf_k}
+          fusion={config.fusion}
           onClose={() => setReturnedOpen(false)}
         />
       )}
@@ -5525,6 +5605,8 @@ function CandidateChunksDialog({
   queries,
   scoreKind = "rrf",
   splitQuota = false,
+  rrfK = 60,
+  fusion,
   onClose,
 }: {
   open: boolean;
@@ -5535,6 +5617,9 @@ function CandidateChunksDialog({
   queries: string[];
   scoreKind?: "rrf" | "rerank";
   splitQuota?: boolean;
+  // RRF 的常数和融合方式：算式要按这次实际用的参数写出来。
+  rrfK?: number;
+  fusion?: string;
   onClose: () => void;
 }) {
   const [chunkOpen, setChunkOpen] = useState<string | null>(null);
@@ -5589,6 +5674,11 @@ function CandidateChunksDialog({
             <>
               {formatNumber(item.rrf_score, 5)}
               <small className="diag-sub">第 {item.rrf_rank} 名</small>
+              <RrfFormula
+                contributions={item.contributions}
+                k={rrfK}
+                fusion={fusion}
+              />
             </>
           )}
         </td>
@@ -5598,7 +5688,7 @@ function CandidateChunksDialog({
               <span
                 className={`diag-contrib method-${contribution.method}`}
                 key={index}
-                title={`${contribution.query}\n${METHOD_LABELS[contribution.method] ?? contribution.method}第 ${contribution.rank} 名，${RAW_SCORE_LABELS[contribution.method] ?? "原始分"} ${formatNumber(contribution.raw_score)}\nRRF 贡献 1/(k+${contribution.rank}) = ${formatNumber(contribution.rrf, 5)}`}
+                title={`${contribution.query}\n${METHOD_LABELS[contribution.method] ?? contribution.method}第 ${contribution.rank} 名，${RAW_SCORE_LABELS[contribution.method] ?? "原始分"} ${formatNumber(contribution.raw_score)}\nRRF 贡献 1/(${rrfK}+${contribution.rank}) = ${formatNumber(contribution.rrf, 5)}`}
               >
                 <i className={`diag-dot method-${contribution.method}`} />
                 {METHOD_LABELS[contribution.method] ?? contribution.method}
@@ -5643,7 +5733,15 @@ function CandidateChunksDialog({
               <tr>
                 <th>召回方式</th>
                 <th>分片</th>
-                <th>{scoreKind === "rerank" ? "重排概率" : "RRF 分"}</th>
+                <th
+                  title={
+                    scoreKind === "rerank"
+                      ? "重排模型给的概率"
+                      : `RRF 得分 = Σ 1 / (${rrfK} + 名次)`
+                  }
+                >
+                  {scoreKind === "rerank" ? "重排概率" : "RRF 分"}
+                </th>
                 <th>各路名次</th>
                 <th>原文</th>
               </tr>
@@ -5687,6 +5785,8 @@ function CandidateDetailDialog({
   relations,
   showGraph,
   resetKey,
+  rrfK = 60,
+  fusion,
   onClose,
 }: {
   open: boolean;
@@ -5698,6 +5798,9 @@ function CandidateDetailDialog({
   showGraph: boolean;
   // 检索问题变了就回到第一页：同一批候选换了打分，旧页码对不上。
   resetKey: string;
+  // RRF 的常数和融合方式：算式要按这次实际用的参数写出来。
+  rrfK?: number;
+  fusion?: string;
   onClose: () => void;
 }) {
   const [page, setPage] = useState(1);
@@ -5787,7 +5890,9 @@ function CandidateDetailDialog({
                 <th title="每张排名表中的名次、原始分数，以及贡献的 RRF 分">
                   召回贡献
                 </th>
-                <th title="RRF 得分 = Σ 1 / (k + 名次)">RRF 分 / 名次</th>
+                <th title={`RRF 得分 = Σ 1 / (${rrfK} + 名次)`}>
+                  RRF 分 / 名次
+                </th>
                 <th title="重排模型原始输出与重排后名次">重排 logit / 名次</th>
                 <th title="sigmoid(logit)，与阈值比较">重排概率</th>
               </tr>
@@ -5799,6 +5904,8 @@ function CandidateDetailDialog({
                   minScore={minScore}
                   queries={queries}
                   relations={relations}
+                  rrfK={rrfK}
+                  fusion={fusion}
                   key={item.chunk_id + item.rrf_rank}
                 />
               ))}
@@ -5847,11 +5954,15 @@ function CandidateRow({
   minScore,
   queries,
   relations,
+  rrfK = 60,
+  fusion,
 }: {
   item: RetrievalCandidate;
   minScore: number | null;
   queries: string[];
   relations?: Map<string, string>;
+  rrfK?: number;
+  fusion?: string;
 }) {
   const graphOnly =
     item.retrieval_methods.length === 1 &&
@@ -5907,7 +6018,7 @@ function CandidateRow({
             <span
               className={`diag-contrib method-${contribution.method}`}
               key={index}
-              title={`${contribution.method === "graph" ? "排名表" : "检索词"}：${contribution.query}\n${METHOD_LABELS[contribution.method] ?? contribution.method}第 ${contribution.rank} 名，${RAW_SCORE_LABELS[contribution.method] ?? "原始分"} ${formatNumber(contribution.raw_score)}\nRRF 贡献 1/(k+${contribution.rank}) = ${formatNumber(contribution.rrf, 5)}${contribution.method === "graph" && linked ? `\n通过关系：\n${linked}` : ""}`}
+              title={`${contribution.method === "graph" ? "排名表" : "检索词"}：${contribution.query}\n${METHOD_LABELS[contribution.method] ?? contribution.method}第 ${contribution.rank} 名，${RAW_SCORE_LABELS[contribution.method] ?? "原始分"} ${formatNumber(contribution.raw_score)}\nRRF 贡献 1/(${rrfK}+${contribution.rank}) = ${formatNumber(contribution.rrf, 5)}${contribution.method === "graph" && linked ? `\n通过关系：\n${linked}` : ""}`}
             >
               <i className={`diag-dot method-${contribution.method}`} />
               {contribution.method === "graph" ? (
@@ -5924,6 +6035,11 @@ function CandidateRow({
       <td className="num">
         {formatNumber(item.rrf_score, 5)}
         <small className="diag-sub">第 {item.rrf_rank} 名</small>
+        <RrfFormula
+          contributions={item.contributions}
+          k={rrfK}
+          fusion={fusion}
+        />
       </td>
       <td className="num">
         {formatNumber(item.rerank_logit, 3)}
