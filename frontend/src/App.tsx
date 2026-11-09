@@ -2613,9 +2613,8 @@ function traceRows(
     const candidates = data.candidates ?? [];
     let hits = 0;
     for (const list of data.lists ?? []) hits += list.hits.length;
-    const returned = candidates.filter(
-      (item) => item.status === "returned",
-    ).length;
+    // 真正交给回答模型的来源数：并入父块的分片不单独成源，不能算成一条来源。
+    const returned = splitReturned(candidates).owners.length;
     const pooled = candidates.filter(
       (item) => item.status !== "not_in_pool",
     ).length;
@@ -4615,6 +4614,12 @@ const STATUS_INFO: Record<
     label: "已返回",
     hint: "通过相关性阈值，作为来源交给回答模型",
   },
+  // 并入父块的分片：内容已经在上一条来源里，不单独成源，也不占返回名额。
+  merged: {
+    icon: "⇢",
+    label: "已并入",
+    hint: "和上一条命中在同一小节，内容已并入那条来源，不单独成源",
+  },
   // 去向列展示最终处理结果；用“被过滤排除”说明它没有进入来源，而不是只暴露内部数量限制。
   beyond_limit: {
     icon: "…",
@@ -4652,9 +4657,11 @@ function formatNumber(value: number | null | undefined, digits = 4) {
   return value.toFixed(digits);
 }
 
-// 诊断表只展示 ID 前十位以节省横向空间，完整 ID 放在 title 中供悬停查看。
+// 分片 ID 是「版本 id:序号」（app/storage.py），版本 id 是 36 位 uuid，同一版本的所有分片前缀完全一样，
+// 截前几位会让不同分片显示成同一个 ID。这里只显示序号段，完整 ID 放在 title 中供悬停查看。
 function shortChunkId(chunkId: string) {
-  return chunkId.slice(0, 10);
+  const index = chunkId.match(/:(\d+)$/)?.[1];
+  return index === undefined ? chunkId : `第 ${Number(index) + 1} 片`;
 }
 
 // 候选明细每页六条：表格在弹窗里自己上下滚，表头吸在框顶，分页翻得少一点。
@@ -4718,8 +4725,8 @@ function RetrievalDiagnostics({
   }
   let pooled = 0;
   let passed = 0;
-  let returned = 0;
   let filtered = 0;
+  let beyondLimit = 0;
   let graphOnly = 0;
   let graphOnlyOutOfPool = 0;
   // 被哪几路找到：按召回方式的组合计数，融合那一段用。
@@ -4728,7 +4735,7 @@ function RetrievalDiagnostics({
     if (item.status !== "not_in_pool") pooled += 1;
     if (item.status === "returned" || item.status === "beyond_limit")
       passed += 1;
-    if (item.status === "returned") returned += 1;
+    if (item.status === "beyond_limit") beyondLimit += 1;
     if (item.status === "filtered_low_score") filtered += 1;
     const methods = ["dense", "keyword", "graph"].filter((method) =>
       item.retrieval_methods.includes(method),
@@ -4746,6 +4753,10 @@ function RetrievalDiagnostics({
   const rerankPool = poolCandidates(data);
   // 最终返回的分片：漏斗最后一步留下的那几片，按重排名次排。
   const returnedChunks = returnedCandidates(data);
+  // 真正交给回答模型的来源数：并入父块的分片不单独成源，不能算成一条来源。
+  const returned = returnedChunks.length;
+  // 并入父块的分片数：内容已经在某条来源里，不单独成源，也不占返回名额。
+  const mergedCount = splitReturned(candidates).merged.size;
   // 入口上写清楚这两批各多少，别让人以为池子就是 RRF 前几个。
   const poolBreakdown = poolBreakdownText(rerankPool);
   // 漏斗每一行表示"这一步之后剩下多少"，名称里直接写出关键参数（RRF 前几名、阈值、返回上限），
@@ -4824,8 +4835,15 @@ function RetrievalDiagnostics({
     {
       label: `最终返回（上限 ${config.return_limit}）`,
       value: returned,
-      dropped: removed(passedCount - returned, "超过上限", "未超过上限"),
-      hint: `最多返回 ${config.return_limit} 条来源`,
+      // 过了阈值的分片里，超过上限的被排除，并入父块的不单独成源，两种都不在返回的来源里。
+      dropped:
+        [
+          beyondLimit > 0 ? `去掉 ${beyondLimit} 个超过上限` : "",
+          mergedCount > 0 ? `去掉 ${mergedCount} 个并入父块` : "",
+        ]
+          .filter(Boolean)
+          .join("，") || "没有分片被排除",
+      hint: `最多返回 ${config.return_limit} 条来源；并入父块的分片不单独成源，也不占名额`,
     },
   ];
   const funnelMax = Math.max(1, ...funnel.map((stage) => stage.value));
@@ -5427,10 +5445,13 @@ function RetrievalDiagnostics({
             <b>3</b>
           </span>
           <div>
-            <strong>返回</strong>：上限 {config.return_limit} 个，返回{" "}
-            {returned} 个分片，交给回答模型
-            {passedCount - returned > 0 && (
-              <small>另有 {passedCount - returned} 个超过上限，没有返回</small>
+            <strong>返回</strong>：上限 {config.return_limit} 条来源，返回{" "}
+            {returned} 条来源，交给回答模型
+            {beyondLimit > 0 && (
+              <small>另有 {beyondLimit} 个超过上限，没有返回</small>
+            )}
+            {mergedCount > 0 && (
+              <small>另有 {mergedCount} 个并入父块，不单独成源</small>
             )}
           </div>
         </li>
@@ -5566,11 +5587,33 @@ function poolCandidates(data: RetrievalDiagnosticsData) {
     .sort((a, b) => a.rrf_rank - b.rrf_rank);
 }
 
-// 最终交给回答模型的分片，按重排名次排。
+// 一条来源可能包含多片（父子分块扩展）：第一片是来源本身，相邻的命中并进来共用同一个来源编号。
+// 后端给并进来的片标了 merged（app/tools/search.py 里 build_diagnostics）；旧记录没有这个标记，按同来源的顺序判断。
+// owners 是每条来源一行（来源编号去重后的代表片），merged 是并进来的那些片。
+function splitReturned(candidates: RetrievalCandidate[]) {
+  const groups = new Map<string, RetrievalCandidate[]>();
+  for (const item of candidates) {
+    if (item.status !== "returned" || !item.source_id) continue;
+    const list = groups.get(item.source_id);
+    if (list) list.push(item);
+    else groups.set(item.source_id, [item]);
+  }
+  const owners: RetrievalCandidate[] = [];
+  const merged = new Set<string>();
+  for (const list of groups.values()) {
+    owners.push(list[0]);
+    for (const item of list) {
+      if (item.merged || item !== list[0]) merged.add(item.chunk_id);
+    }
+  }
+  return { owners, merged };
+}
+
+// 最终交给回答模型的分片：一条来源一行，按重排名次排。
 function returnedCandidates(data: RetrievalDiagnosticsData) {
-  return (data.candidates ?? [])
-    .filter((item) => item.status === "returned")
-    .sort((a, b) => (a.rerank_rank ?? 0) - (b.rerank_rank ?? 0));
+  return splitReturned(data.candidates ?? []).owners.sort(
+    (a, b) => (a.rerank_rank ?? 0) - (b.rerank_rank ?? 0),
+  );
 }
 
 // 候选池两批各多少：RRF 名前面的，和 RRF 名次不够、靠图检索名额补进来的。
@@ -5970,15 +6013,17 @@ function CandidateRow({
   const linked = (item.graph_relation_ids ?? [])
     .map((id) => relations?.get(id) ?? id)
     .join("\n");
-  const status = STATUS_INFO[item.status] ?? STATUS_INFO.in_pool;
+  const status = item.merged
+    ? STATUS_INFO.merged
+    : (STATUS_INFO[item.status] ?? STATUS_INFO.in_pool);
   const probability = item.rerank_probability;
   const passes =
     probability !== null && minScore !== null && probability >= minScore;
   return (
-    <tr className={`diag-row status-${item.status}`}>
+    <tr className={`diag-row status-${item.merged ? "merged" : item.status}`}>
       <td>
         <span
-          className={`diag-status status-${item.status}`}
+          className={`diag-status status-${item.merged ? "merged" : item.status}`}
           title={status.hint}
         >
           <b>{status.icon}</b>

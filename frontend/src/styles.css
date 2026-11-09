@@ -3796,6 +3796,11 @@ label {
   background: var(--diag-warning);
 }
 
+/* 并入父块的分片不是独立来源，用和返回一样的绿色但淡一些，一眼看出它没单独成源。 */
+.diag-status.status-merged b {
+  background: var(--diag-muted);
+}
+
 .diag-status.status-filtered_low_score b {
   background: var(--diag-critical);
   color: #fff;

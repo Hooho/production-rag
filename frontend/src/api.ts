@@ -61,6 +61,8 @@ export type RetrievalCandidate = {
     | "in_pool"
     | "not_in_pool";
   source_id: string | null;
+  // 并入了前面某个父块：内容已经在那条来源里，不单独成源，也不占返回名额。旧记录没有。
+  merged?: boolean;
   retrieval_methods: string[];
   contributions: RetrievalContribution[];
   rrf_score: number;
