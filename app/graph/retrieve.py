@@ -130,6 +130,7 @@ def parse_keywords(text):
 
 # ① 提关键词。返回 {"source", "entities", "themes", ...}；source 是 agent / model / fallback。
 # question_source 是这次按哪个问题提的（固定流程的独立问题、Agent 的检索词…），调用方最清楚，诊断里记下来。
+# question 是这次图检索用的问题，关系打分用的也是它，所以三种来源都记下来（页面要说明分数是「问题 × 关系」）。
 def keywords(models, question, entities=None, themes=None, question_source=None):
     started = time.monotonic()
     given_entities = clean_keywords(entities, MAX_ENTITIES)
@@ -139,6 +140,8 @@ def keywords(models, question, entities=None, themes=None, question_source=None)
             "source": "agent",
             "entities": given_entities,
             "themes": given_themes,
+            "question": question,
+            "question_source": question_source,
             "duration_ms": 0,
         }
     result = {

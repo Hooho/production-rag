@@ -59,6 +59,8 @@ def test_retrieve_with_given_keywords(graph):
     assert result["keywords"]["source"] == "agent" and result["keywords"][
         "entities"
     ] == ["段永平"]
+    # 问题始终记在诊断里：关系相似度是「问题 × 关系」，页面要显示是哪个问题。
+    assert result["keywords"]["question"] == "段永平投资了什么"
     assert [item["document_id"] for item in result["scope"]] == [document_id]
     assert [entity["name"] for entity in result["entities"]] == ["段永平"]
     kept_names = {match["name"] for match in result["name_matches"] if match["kept"]}
@@ -303,9 +305,11 @@ def test_keywords_records_question_source(graph):
     )
     assert words["question"] == "段永平厉害吗"
     assert words["question_source"] == "Agent 的检索词"
-    # 调用方自己给了关键词就不问模型，没有问题可记。
+    # 调用方自己给了关键词就不问模型；但问题照样记下来：实体的关系就是按它打分的。
     given = graph_retrieve.keywords(models, "段永平厉害吗", entities=["段永平"])
-    assert given["source"] == "agent" and "question" not in given
+    assert given["source"] == "agent"
+    assert given["question"] == "段永平厉害吗"
+    assert "prompt" not in given
 
 
 # 提取失败或什么都没提出来：用整个问题当具体关键词，并写明原因。

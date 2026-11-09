@@ -160,7 +160,8 @@ export type GraphRetrievalTrace = {
     fallback?: boolean;
     prompt?: { role: string; content: string }[];
     raw_output?: string;
-    // 提关键词时用的是哪个问题、来自哪条流程（固定流程的独立问题、Agent 的检索词…）。
+    // 这次图检索用的问题：实体的关系按它打分（关系相似度 = 问题 × 关系），页面要显示出来。
+    // 关键词是 Agent 直接给的、没有模型提的时候，这个问题同样要记。
     question?: string;
     question_source?: string | null;
     input_tokens?: number | null;

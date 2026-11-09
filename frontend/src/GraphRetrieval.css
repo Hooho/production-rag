@@ -160,6 +160,12 @@
   color: var(--diag-muted, #6f8ba4);
 }
 
+/* 「关系相似度」是拿什么和什么比出来的：表格上方的一句说明，和表格之间留点空。 */
+.grt-hint {
+  margin-bottom: 6px;
+  line-height: 1.5;
+}
+
 .grt-status {
   margin: 0;
   color: var(--diag-muted, #6f8ba4);

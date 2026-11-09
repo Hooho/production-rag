@@ -513,6 +513,14 @@ function TraceDetail({
   } | null>(null);
   const openEntity = (entityId: string, documentId: string) =>
     setEntity({ id: entityId, documentId });
+  // 两张关系表里的「关系相似度」是不同东西在比：③ 是「问题 × 关系」，④ 是「概括关键词 × 关系」。
+  // 表头说不清，表格上方补一句，写明是哪两个在算。
+  const relationVectorText = "起点 → 终点（分类）：描述";
+  const question = graph.keywords?.question;
+  const entityScoreHint = question
+    ? `关系相似度 = 这次的问题「${question}」和这条关系的文字（${relationVectorText}）的相似度`
+    : `关系相似度 = 这次的问题和这条关系的文字（${relationVectorText}）的相似度`;
+  const relationScoreHint = `关系相似度 = 这一行的概括关键词和这条关系的文字（${relationVectorText}）的相似度`;
   return (
     <DetailDialog open title={title} className="grt-dialog" onClose={onClose}>
       {/* 抽屉可能挂在别的弹窗里，不在 .diag 下面：自己带上 .diag，表格颜色变量才对。 */}
@@ -529,6 +537,7 @@ function TraceDetail({
             first="实体"
             firstValue={(row) => row.entity_name ?? ""}
             chunks={chunks}
+            scoreHint={entityScoreHint}
             onEntity={openEntity}
           />
         )}
@@ -542,6 +551,7 @@ function TraceDetail({
             firstValue={(row) => row.keyword ?? ""}
             chunks={chunks}
             extra={(row) => (row.also_entity ? "和 ③ 重复" : undefined)}
+            scoreHint={relationScoreHint}
             onEntity={openEntity}
           />
         )}
@@ -668,6 +678,7 @@ function RelationsDetail({
   firstValue,
   chunks,
   extra,
+  scoreHint,
   onEntity,
 }: {
   rows: RelationRow[];
@@ -678,6 +689,7 @@ function RelationsDetail({
   firstValue: (row: RelationRow) => string;
   chunks: Map<string, ChunkInfo>;
   extra?: (row: RelationRow) => string | undefined;
+  scoreHint?: string;
   onEntity?: (entityId: string, documentId: string) => void;
 }) {
   const list = useDetailList(rows, dims, detail.dim, detail.value);
@@ -690,6 +702,7 @@ function RelationsDetail({
         firstValue={firstValue}
         chunks={chunks}
         extra={extra}
+        scoreHint={scoreHint}
         onEntity={onEntity}
       />
       <Pager page={list.page} total={list.total} onPage={list.setPage} />
@@ -772,9 +785,15 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
             {words?.prompt_tag ? ` · ${words.prompt_tag}` : ""}
           </small>
         </h5>
-        {words?.question && (
+        {words?.question && words.source === "model" && (
           <p className="grt-question">
             根据问题「{words.question}」提取关键词
+            {words.question_source ? ` · ${words.question_source}` : ""}
+          </p>
+        )}
+        {words?.question && words.source !== "model" && (
+          <p className="grt-question">
+            这次检索用的问题「{words.question}」
             {words.question_source ? ` · ${words.question_source}` : ""}
           </p>
         )}
@@ -1037,6 +1056,7 @@ function RelationTable({
   firstValue,
   chunks,
   extra,
+  scoreHint,
   onEntity,
 }: {
   rows: RelationRow[];
@@ -1044,51 +1064,56 @@ function RelationTable({
   firstValue: (row: RelationRow) => string;
   chunks: Map<string, ChunkInfo>;
   extra?: (row: RelationRow) => string | undefined;
+  // 这一列的分数是哪两个东西算出来的（问题 × 关系 / 关键词 × 关系），说清楚免得看不懂。
+  scoreHint?: string;
   onEntity?: (entityId: string, documentId: string) => void;
 }) {
   if (rows.length === 0) return <p className="grt-empty">没有找到关系</p>;
   return (
-    <div className="diag-table-wrap">
-      <table className="diag-table grt-table">
-        <thead>
-          <tr>
-            <th>{first}</th>
-            <th>关系</th>
-            <th>关系相似度</th>
-            <th>出处</th>
-            <th>结果</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, index) => (
-            <tr
-              key={`${row.relation_id}-${index}`}
-              className={row.kept ? "" : "is-dropped"}
-            >
-              <td>{firstValue(row)}</td>
-              <td>
-                <RelationText relation={row} onEntity={onEntity} />
-              </td>
-              <td className="num">{score(row.score)}</td>
-              <td>
-                <Origin relation={row} />
-                <OriginalButton
-                  relation={row}
-                  chunk={chunks.get(row.chunk_id)}
-                />
-              </td>
-              <td>
-                <Result
-                  kept={row.kept}
-                  reason={row.reason}
-                  extra={extra?.(row)}
-                />
-              </td>
+    <>
+      {scoreHint && <p className="grt-hint">{scoreHint}</p>}
+      <div className="diag-table-wrap">
+        <table className="diag-table grt-table">
+          <thead>
+            <tr>
+              <th>{first}</th>
+              <th>关系</th>
+              <th>关系相似度</th>
+              <th>出处</th>
+              <th>结果</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr
+                key={`${row.relation_id}-${index}`}
+                className={row.kept ? "" : "is-dropped"}
+              >
+                <td>{firstValue(row)}</td>
+                <td>
+                  <RelationText relation={row} onEntity={onEntity} />
+                </td>
+                <td className="num">{score(row.score)}</td>
+                <td>
+                  <Origin relation={row} />
+                  <OriginalButton
+                    relation={row}
+                    chunk={chunks.get(row.chunk_id)}
+                  />
+                </td>
+                <td>
+                  <Result
+                    kept={row.kept}
+                    reason={row.reason}
+                    extra={extra?.(row)}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 
