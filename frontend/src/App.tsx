@@ -4707,6 +4707,8 @@ function RetrievalDiagnostics({
   const [chunkOpen, setChunkOpen] = useState<string | null>(null);
   // 交给重排的候选池单独看：页面上只留一个入口，内容在弹窗里。
   const [poolOpen, setPoolOpen] = useState(false);
+  // 「被哪几路找到」里的分片数字：点开看这一组具体是哪些分片、各路排第几。
+  const [comboOpen, setComboOpen] = useState<string | null>(null);
   // 当前这一页分片的原文：来源列显示原文预览，「更多」看全文。读过的留在里面，翻页不用重读。
   const [chunkOriginals, setChunkOriginals] = useState<
     Record<string, ChunkOriginal>
@@ -4729,8 +4731,8 @@ function RetrievalDiagnostics({
   let beyondLimit = 0;
   let graphOnly = 0;
   let graphOnlyOutOfPool = 0;
-  // 被哪几路找到：按召回方式的组合计数，融合那一段用。
-  const combos = new Map<string, number>();
+  // 被哪几路找到：按召回方式的组合分组，融合那一段用。分组里的分片可以点开看具体是哪些。
+  const combos = new Map<string, RetrievalCandidate[]>();
   for (const item of candidates) {
     if (item.status !== "not_in_pool") pooled += 1;
     if (item.status === "returned" || item.status === "beyond_limit")
@@ -4741,7 +4743,9 @@ function RetrievalDiagnostics({
       item.retrieval_methods.includes(method),
     );
     const key = methods.join("+");
-    combos.set(key, (combos.get(key) ?? 0) + 1);
+    const group = combos.get(key);
+    if (group) group.push(item);
+    else combos.set(key, [item]);
     if (key === "graph") {
       graphOnly += 1;
       if (item.status === "not_in_pool") graphOnlyOutOfPool += 1;
@@ -5254,6 +5258,35 @@ function RetrievalDiagnostics({
       .split("+")
       .map((method) => METHOD_LABELS[method] ?? method)
       .join(" + ");
+  // 组合的名字：表格里那一列和弹窗标题都用它。
+  const comboName = (key: string) =>
+    key.split("+").length === 3
+      ? "三路都找到"
+      : key.includes("+")
+        ? comboLabel(key)
+        : `只有${comboLabel(key)}`;
+
+  // 「被哪几路找到」里点分片数量：这一组具体是哪些分片，每片在各路的排名表里第几。
+  const comboGroup = comboOpen ? (combos.get(comboOpen) ?? []) : [];
+  const comboDialog = comboOpen && comboGroup.length > 0 && (
+    <CandidateChunksDialog
+      // 换一组就重新翻到第一页。
+      key={comboOpen}
+      open
+      title={`${comboName(comboOpen)}：${comboGroup.length} 个分片`}
+      lead={`这 ${comboGroup.length} 个分片被${comboLabel(comboOpen)}找到`}
+      leadNote="按 RRF 得分排；每行写清楚这片是在哪张排名表里第几名，点「原文」看分片正文"
+      candidates={[...comboGroup].sort(
+        (a, b) => (a.rrf_rank ?? 0) - (b.rrf_rank ?? 0),
+      )}
+      queries={queries}
+      scoreKind="rrf"
+      rrfK={config.rrf_k}
+      fusion={config.fusion}
+      onClose={() => setComboOpen(null)}
+    />
+  );
+
   const comboOrder = [
     "dense+keyword+graph",
     "dense+keyword",
@@ -5342,27 +5375,33 @@ function RetrievalDiagnostics({
             <thead>
               <tr>
                 <th>被哪几路找到</th>
-                <th>分片</th>
+                <th title="点分片数量，看这一组具体是哪些分片">分片</th>
               </tr>
             </thead>
             <tbody>
               {comboOrder
                 .filter((key) => combos.has(key))
-                .map((key) => (
-                  <tr
-                    key={key}
-                    className={key === "graph" ? "is-graph-only" : ""}
-                  >
-                    <td>
-                      {key.split("+").length === 3
-                        ? "三路都找到"
-                        : key.includes("+")
-                          ? comboLabel(key)
-                          : `只有${comboLabel(key)}`}
-                    </td>
-                    <td className="num">{combos.get(key)}</td>
-                  </tr>
-                ))}
+                .map((key) => {
+                  const group = combos.get(key) ?? [];
+                  return (
+                    <tr
+                      key={key}
+                      className={key === "graph" ? "is-graph-only" : ""}
+                    >
+                      <td>{comboName(key)}</td>
+                      <td className="num">
+                        <button
+                          type="button"
+                          className="link-button"
+                          title={`点开看这 ${group.length} 个分片`}
+                          onClick={() => setComboOpen(key)}
+                        >
+                          {group.length}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
             </tbody>
           </table>
         )}
@@ -5384,6 +5423,7 @@ function RetrievalDiagnostics({
       </div>
       {rankDialog}
       {poolDialog}
+      {comboDialog}
     </div>
   );
 
@@ -5666,10 +5706,34 @@ function CandidateChunksDialog({
   onClose: () => void;
 }) {
   const [chunkOpen, setChunkOpen] = useState<string | null>(null);
+  // 分片多的时候翻页看，一页六条，和候选明细一样。
+  const [page, setPage] = useState(1);
   const quota = splitQuota ? candidates.filter((item) => item.graph_quota) : [];
   const rest = splitQuota
     ? candidates.filter((item) => !item.graph_quota)
     : candidates;
+  // 每一行是一篇分片，或「图检索名额补进来的」那一段的分隔行；翻页按行翻。
+  type Entry =
+    | { kind: "chunk"; item: RetrievalCandidate }
+    | { kind: "group"; count: number };
+  const entries: Entry[] = [];
+  for (const item of rest) entries.push({ kind: "chunk", item });
+  if (quota.length > 0) {
+    entries.push({ kind: "group", count: quota.length });
+    for (const item of quota) entries.push({ kind: "chunk", item });
+  }
+  const pageCount = Math.max(
+    1,
+    Math.ceil(entries.length / DIAGNOSTICS_PAGE_SIZE),
+  );
+  const visiblePage = Math.min(page, pageCount);
+  const pageStart = (visiblePage - 1) * DIAGNOSTICS_PAGE_SIZE;
+  const visible = entries.slice(pageStart, pageStart + DIAGNOSTICS_PAGE_SIZE);
+  // 「图检索名额补进来的」那行分隔不算一条分片，翻页显示的条数要把它排除。
+  const groupIndex = quota.length > 0 ? rest.length : -1;
+  const firstChunk =
+    groupIndex >= 0 && groupIndex < pageStart ? pageStart - 1 : pageStart;
+  const chunkRows = visible.filter((entry) => entry.kind === "chunk").length;
   const row = (item: RetrievalCandidate) => {
     const methods = ["dense", "keyword", "graph"].filter((method) =>
       item.retrieval_methods.includes(method),
@@ -5790,19 +5854,46 @@ function CandidateChunksDialog({
               </tr>
             </thead>
             <tbody>
-              {rest.map(row)}
-              {/* 名额补进来的单独一段，别和 RRF 名前面几个混在一起。 */}
-              {quota.length > 0 && (
-                <tr className="diag-pool-group">
-                  <td colSpan={4}>
-                    图检索名额补进来的 {quota.length} 个：RRF
-                    名次不够，靠名额进池
-                  </td>
-                </tr>
+              {visible.map((entry, index) =>
+                entry.kind === "group" ? (
+                  // 名额补进来的单独一段，别和 RRF 名前面几个混在一起。
+                  <tr className="diag-pool-group" key={`group-${index}`}>
+                    <td colSpan={4}>
+                      图检索名额补进来的 {entry.count} 个：RRF
+                      名次不够，靠名额进池
+                    </td>
+                  </tr>
+                ) : (
+                  row(entry.item)
+                ),
               )}
-              {quota.map(row)}
             </tbody>
           </table>
+        </div>
+        <div className="diag-pagination" aria-label="分片明细分页">
+          <span aria-live="polite">
+            显示第 {firstChunk + 1}–{firstChunk + chunkRows} 条，共{" "}
+            {candidates.length} 条
+          </span>
+          <div className="diag-pagination-controls">
+            <button
+              type="button"
+              disabled={visiblePage === 1}
+              onClick={() => setPage(Math.max(1, visiblePage - 1))}
+            >
+              上一页
+            </button>
+            <span>
+              第 {visiblePage} / {pageCount} 页
+            </span>
+            <button
+              type="button"
+              disabled={visiblePage === pageCount}
+              onClick={() => setPage(Math.min(pageCount, visiblePage + 1))}
+            >
+              下一页
+            </button>
+          </div>
         </div>
         {/* 「原文」打开的内容是伴随浮窗，贴着按钮出现。 */}
         {chunkOpen && (
