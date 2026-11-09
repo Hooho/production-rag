@@ -1053,7 +1053,7 @@ function RelationTable({
           <tr>
             <th>{first}</th>
             <th>关系</th>
-            <th>相似度</th>
+            <th>关系相似度</th>
             <th>出处</th>
             <th>结果</th>
           </tr>
