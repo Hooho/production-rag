@@ -286,7 +286,7 @@ class DocumentSearchTool:
         limit = config["return_limit"] if return_limit is None else return_limit
         # 优秀阈值：重排得分不低于它的全部返回，不受上面的条数限制；不传就用设置页的（固定流程），Agent 传自己的。
         # 1.0 表示不启用。没有重排分（重排关闭或失败）、兜底返回时也不启用。ranked 已按得分从高到低排好，
-        # 优秀的都在最前面，所以只要把条数放宽到优秀的条数。
+        # 优秀的都在最前面，所以遇到优秀分片时直接放行，不用把条数整体放宽。
         excellent = (
             config["rerank_excellent_score"]
             if excellent_score is None
@@ -295,22 +295,26 @@ class DocumentSearchTool:
         if excellent >= 1 or not rerank_count or fallback_used:
             excellent = None
         base_limit = limit
-        if excellent is not None:
-            limit = max(
-                limit, sum(1 for item in ranked if item["final_score"] >= excellent)
-            )
         beyond_limit = 0
         parent_characters = 0
         injection_redacted = 0
-        for index, item in enumerate(ranked, start=1):
-            if index > limit:
+        for item in ranked:
+            # 已经被前面的父块包含：内容就在某条来源里，不单独成源，也不占返回名额。
+            # 诊断里它的来源编号指向那个父块，并标出「已并入」，免得看成重复返回。
+            if item["id"] in covered:
+                item["status"] = "returned"
+                item["source_id"] = covered[item["id"]]
+                item["merged"] = True
+                continue
+            # 返回条数按实际产出的来源数算：并进来的分片不占名额，所以这里数的是已产出的来源条数。
+            # 优秀阈值之上的分片不受条数限制，照样单独成源。
+            if len(sources) >= limit and not (
+                excellent is not None and item["final_score"] >= excellent
+            ):
                 item["status"] = "beyond_limit"
                 beyond_limit += 1
                 continue
             item["status"] = "returned"
-            if item["id"] in covered:
-                item["source_id"] = covered[item["id"]]
-                continue
             item["source_id"] = f"S{len(sources) + 1}"
             text = item["text"]
             chunk_ids = [item["id"]]
@@ -742,6 +746,8 @@ class DocumentSearchTool:
                     "preview": item["text"][:PREVIEW_CHARACTERS],
                     "status": item["status"],
                     "source_id": item.get("source_id"),
+                    # 并入了前面某个父块：内容已经在那条来源里，不单独成源，也不占返回名额。
+                    "merged": bool(item.get("merged")),
                     "retrieval_methods": item["retrieval_methods"],
                     "contributions": item["contributions"],
                     "rrf_score": round(item["rrf_score"], 6),
