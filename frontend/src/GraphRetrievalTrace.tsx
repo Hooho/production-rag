@@ -1261,132 +1261,150 @@ function GraphRetrievalMap({
     useState<GraphRetrievalRelation | null>(null);
   // 聚焦的实体：只看和它相连的关系，其他部分淡掉。
   const [focus, setFocus] = useState<string | null>(null);
-  const { elements, relations, entities } = useMemo(() => {
-    const routes = new Map<
-      string,
-      {
-        relation: GraphRetrievalRelation;
-        entity: boolean;
-        theme: boolean;
-        reason?: string | null;
-      }
-    >();
-    const add = (
-      relation: GraphRetrievalRelation,
-      kind: "entity" | "theme",
-    ) => {
-      const item = routes.get(relation.relation_id) ?? {
-        relation,
-        entity: false,
-        theme: false,
-        reason: relation.reason,
+  // 关系类型筛选：空 = 全部。
+  const [category, setCategory] = useState("");
+  // 筛选框收不收图，看当前有没有聚焦着实体。
+  const focusRef = useRef<string | null>(null);
+  focusRef.current = focus;
+  const { elements, relations, entities, categories, edgeCount } =
+    useMemo(() => {
+      const routes = new Map<
+        string,
+        {
+          relation: GraphRetrievalRelation;
+          entity: boolean;
+          theme: boolean;
+          reason?: string | null;
+        }
+      >();
+      const add = (
+        relation: GraphRetrievalRelation,
+        kind: "entity" | "theme",
+      ) => {
+        const item = routes.get(relation.relation_id) ?? {
+          relation,
+          entity: false,
+          theme: false,
+          reason: relation.reason,
+        };
+        if (relation.kept) item[kind] = true;
+        else if (!item.entity && !item.theme) item.reason = relation.reason;
+        routes.set(relation.relation_id, item);
       };
-      if (relation.kept) item[kind] = true;
-      else if (!item.entity && !item.theme) item.reason = relation.reason;
-      routes.set(relation.relation_id, item);
-    };
-    for (const row of graph.entity_relations) add(row, "entity");
-    for (const row of graph.relation_matches) add(row, "theme");
-    let droppedCount = 0;
-    const kept = [...routes.values()].filter(
-      (item) => item.entity || item.theme,
-    );
-    const dropped = [...routes.values()]
-      .filter((item) => !item.entity && !item.theme)
-      .filter(() => droppedCount++ < DROPPED_EDGES);
-    const found = new Set(graph.entities.map((entity) => entity.entity_id));
-    const nodes = new Map<string, ElementDefinition>();
-    const node = (
-      id: string,
-      name: string | null,
-      type: string | null,
-      faded: boolean,
-    ) => {
-      if (nodes.has(id)) {
-        if (!faded) nodes.get(id)!.data.faded = 0;
-        return;
+      for (const row of graph.entity_relations) add(row, "entity");
+      for (const row of graph.relation_matches) add(row, "theme");
+      let droppedCount = 0;
+      const kept = [...routes.values()].filter(
+        (item) => item.entity || item.theme,
+      );
+      const dropped = [...routes.values()]
+        .filter((item) => !item.entity && !item.theme)
+        .filter(() => droppedCount++ < DROPPED_EDGES);
+      const found = new Set(graph.entities.map((entity) => entity.entity_id));
+      const nodes = new Map<string, ElementDefinition>();
+      const node = (
+        id: string,
+        name: string | null,
+        type: string | null,
+        faded: boolean,
+      ) => {
+        if (nodes.has(id)) {
+          if (!faded) nodes.get(id)!.data.faded = 0;
+          return;
+        }
+        const color = typeColor(type ?? "其他");
+        nodes.set(id, {
+          group: "nodes",
+          data: {
+            id,
+            label: name ?? id,
+            fill: color.fill,
+            stroke: found.has(id) ? "#1d4ed8" : color.stroke,
+            border: found.has(id) ? 4 : 1.5,
+            text: color.text,
+            faded: faded ? 1 : 0,
+          },
+        });
+      };
+      const edges: ElementDefinition[] = [];
+      for (const item of [...kept, ...dropped]) {
+        const relation = item.relation;
+        const faded = !item.entity && !item.theme;
+        node(
+          relation.source_entity_id,
+          relation.source_entity ?? relation.source,
+          relation.source_type,
+          faded,
+        );
+        node(
+          relation.target_entity_id,
+          relation.target_entity ?? relation.target,
+          relation.target_type,
+          faded,
+        );
+        const route = faded
+          ? "dropped"
+          : item.entity && item.theme
+            ? "both"
+            : item.entity
+              ? "entity"
+              : "relation";
+        const text = relation.description || relation.category;
+        edges.push({
+          group: "edges",
+          data: {
+            id: relation.relation_id,
+            source: relation.source_entity_id,
+            target: relation.target_entity_id,
+            color: ROUTE_COLORS[route],
+            width: route === "both" ? 4 : faded ? 1.5 : 2.5,
+            dashed: faded ? 1 : 0,
+            // 关系只写类别，和知识图谱一样；完整描述在提示框和点开后的弹窗里。
+            label: relation.category || "关系",
+            category: relation.category || "关系",
+            title: faded
+              ? `${relation.category}：${text}（${item.reason ?? "去掉"}）`
+              : `${relation.category}：${text}`,
+          },
+        });
       }
-      const color = typeColor(type ?? "其他");
-      nodes.set(id, {
-        group: "nodes",
-        data: {
-          id,
-          label: name ?? id,
-          fill: color.fill,
-          stroke: found.has(id) ? "#1d4ed8" : color.stroke,
-          border: found.has(id) ? 4 : 1.5,
-          text: color.text,
-          faded: faded ? 1 : 0,
-        },
-      });
-    };
-    const edges: ElementDefinition[] = [];
-    for (const item of [...kept, ...dropped]) {
-      const relation = item.relation;
-      const faded = !item.entity && !item.theme;
-      node(
-        relation.source_entity_id,
-        relation.source_entity ?? relation.source,
-        relation.source_type,
-        faded,
-      );
-      node(
-        relation.target_entity_id,
-        relation.target_entity ?? relation.target,
-        relation.target_type,
-        faded,
-      );
-      const route = faded
-        ? "dropped"
-        : item.entity && item.theme
-          ? "both"
-          : item.entity
-            ? "entity"
-            : "relation";
-      const text = relation.description || relation.category;
-      edges.push({
-        group: "edges",
-        data: {
-          id: relation.relation_id,
-          source: relation.source_entity_id,
-          target: relation.target_entity_id,
-          color: ROUTE_COLORS[route],
-          width: route === "both" ? 4 : faded ? 1.5 : 2.5,
-          dashed: faded ? 1 : 0,
-          // 关系只写类别，和知识图谱一样；完整描述在提示框和点开后的弹窗里。
-          label: relation.category || "关系",
-          title: faded
-            ? `${relation.category}：${text}（${item.reason ?? "去掉"}）`
-            : `${relation.category}：${text}`,
-        },
-      });
-    }
-    // 列表只列 ② 找到的实体（关键词匹配上的），图里其他实体不占位置。
-    // 每个实体连了几条边标在后面，点之前先看得到规模。
-    const degree = new Map<string, number>();
-    for (const edge of edges) {
-      const source = String(edge.data.source);
-      const target = String(edge.data.target);
-      degree.set(source, (degree.get(source) ?? 0) + 1);
-      degree.set(target, (degree.get(target) ?? 0) + 1);
-    }
-    const entities: MapEntity[] = graph.entities.map((entity) => ({
-      id: entity.entity_id,
-      name: entity.name ?? entity.entity_id,
-      type: entity.type,
-      degree: degree.get(entity.entity_id) ?? 0,
-    }));
-    return {
-      elements: [...nodes.values(), ...edges],
-      relations: new Map(
-        [...routes.values()].map((item) => [
-          item.relation.relation_id,
-          item.relation,
-        ]),
-      ),
-      entities,
-    };
-  }, [graph]);
+      // 列表只列 ② 找到的实体（关键词匹配上的），图里其他实体不占位置。
+      // 每个实体连了几条边标在后面，点之前先看得到规模。
+      const degree = new Map<string, number>();
+      const categoryCount = new Map<string, number>();
+      for (const edge of edges) {
+        const source = String(edge.data.source);
+        const target = String(edge.data.target);
+        degree.set(source, (degree.get(source) ?? 0) + 1);
+        degree.set(target, (degree.get(target) ?? 0) + 1);
+        const name = String(edge.data.category);
+        categoryCount.set(name, (categoryCount.get(name) ?? 0) + 1);
+      }
+      const entities: MapEntity[] = graph.entities.map((entity) => ({
+        id: entity.entity_id,
+        name: entity.name ?? entity.entity_id,
+        type: entity.type,
+        degree: degree.get(entity.entity_id) ?? 0,
+      }));
+      // 关系类型：筛选框里的选项，按条数从多到少。
+      const categories = [...categoryCount.entries()]
+        .map(([name, count]) => ({ name, count }))
+        .sort(
+          (a, b) => b.count - a.count || a.name.localeCompare(b.name, "zh"),
+        );
+      return {
+        elements: [...nodes.values(), ...edges],
+        relations: new Map(
+          [...routes.values()].map((item) => [
+            item.relation.relation_id,
+            item.relation,
+          ]),
+        ),
+        entities,
+        categories,
+        edgeCount: edges.length,
+      };
+    }, [graph]);
 
   useEffect(() => {
     if (!container.current) return;
@@ -1465,6 +1483,11 @@ function GraphRetrievalMap({
           style: { "z-index": 20, opacity: 1 },
         },
         {
+          // 关系类型筛选：不是选中类型的边直接不画。
+          selector: ".is-hidden",
+          style: { display: "none" },
+        },
+        {
           selector: "edge[dashed = 1]",
           style: { "line-style": "dashed", color: "#94a3b8" },
         },
@@ -1511,37 +1534,85 @@ function GraphRetrievalMap({
   }, [elements]);
 
   // 聚焦的实体：它相邻的边留着并显示关系类别，其余淡掉。
+  // 关系类型筛选 + 聚焦实体，一起算，图上只留要看的部分。
   useEffect(() => {
     const instance = cy.current;
     if (!instance) return;
-    instance.elements().removeClass("is-dim is-focus is-focus-edge");
-    if (!focus) return;
-    const node = instance.getElementById(focus);
-    if (!node || node.empty()) return;
-    const edgeIds = new Set<string>();
-    node.connectedEdges().forEach((edge) => {
-      edgeIds.add(edge.id());
-    });
-    const nodeIds = new Set<string>([focus]);
-    node.connectedNodes().forEach((item) => {
-      nodeIds.add(item.id());
-    });
-    instance.nodes().forEach((item) => {
-      if (!nodeIds.has(item.id())) item.addClass("is-dim");
-    });
-    instance.edges().forEach((edge) => {
-      if (!edgeIds.has(edge.id())) edge.addClass("is-dim");
-    });
-    node.addClass("is-focus");
-    node.connectedEdges().addClass("is-focus-edge");
+    instance.elements().removeClass("is-dim is-focus is-focus-edge is-hidden");
+    // 不是选中类型的边不画。
+    if (category) {
+      instance.edges().forEach((edge) => {
+        if (edge.data("category") !== category) edge.addClass("is-hidden");
+      });
+    }
+    // 聚焦的实体：它相邻的边留着并显示关系类别，其余淡掉。
+    const node = focus ? instance.getElementById(focus) : null;
+    const hasFocus = Boolean(node && !node.empty());
+    if (hasFocus && node) {
+      const edgeIds = new Set<string>();
+      const nodeIds = new Set<string>([focus as string]);
+      node.connectedEdges().forEach((edge) => {
+        edgeIds.add(edge.id());
+      });
+      node.connectedNodes().forEach((item) => {
+        nodeIds.add(item.id());
+      });
+      instance.nodes().forEach((item) => {
+        if (!nodeIds.has(item.id())) item.addClass("is-dim");
+      });
+      instance.edges().forEach((edge) => {
+        if (!edgeIds.has(edge.id())) edge.addClass("is-dim");
+      });
+      node.addClass("is-focus");
+      node.connectedEdges().addClass("is-focus-edge");
+    }
+    // 边被藏掉之后，两头都不剩边的点也一起藏，不然会剩一堆孤零零的点。
+    let changed = true;
+    while (changed) {
+      changed = false;
+      instance.nodes().forEach((item) => {
+        if (item.hasClass("is-hidden") || item.hasClass("is-focus")) return;
+        const visible = item
+          .connectedEdges()
+          .filter(
+            (edge) =>
+              !edge.hasClass("is-hidden") &&
+              !edge.source().hasClass("is-hidden") &&
+              !edge.target().hasClass("is-hidden"),
+          );
+        if (!visible.length) {
+          item.addClass("is-hidden");
+          changed = true;
+        }
+      });
+    }
     // 选中的实体移到画布中间：它可能在边上，缩着图看不清楚。
-    instance.animate({
-      center: { eles: node },
-      zoom: instance.zoom(),
-      duration: 220,
-      easing: "ease-out",
+    if (hasFocus && node) {
+      instance.animate({
+        center: { eles: node },
+        zoom: instance.zoom(),
+        duration: 220,
+        easing: "ease-out",
+      });
+    }
+  }, [focus, category, elements]);
+
+  // 换了关系类型：把剩下的关系收进画布（聚焦实体时以它为中心，不重新收）。
+  useEffect(() => {
+    const instance = cy.current;
+    if (!instance || focusRef.current) return;
+    // 只收还画着的部分：藏起来的边和它们两头的点不算。
+    const visible = instance.elements().filter((ele) => {
+      if (ele.hasClass("is-hidden")) return false;
+      if (ele.isEdge())
+        return (
+          !ele.source().hasClass("is-hidden") &&
+          !ele.target().hasClass("is-hidden")
+        );
+      return true;
     });
-  }, [focus, elements]);
+    if (visible.length) instance.fit(visible, 20);
+  }, [category, elements]);
 
   // 面板展开/收起、窗口变宽变窄时重新按画布比例铺一次。
   useEffect(() => {
@@ -1592,6 +1663,21 @@ function GraphRetrievalMap({
             </button>
           ))}
         </div>
+        <label className="grt-map-filter">
+          <span>关系类型</span>
+          <select
+            className="input-sm"
+            value={category}
+            onChange={(event) => setCategory(event.target.value)}
+          >
+            <option value="">全部（{edgeCount}）</option>
+            {categories.map((item) => (
+              <option key={item.name} value={item.name}>
+                {item.name}（{item.count}）
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
       <div className="grt-map-legend">
         <span>
@@ -1617,7 +1703,7 @@ function GraphRetrievalMap({
       </div>
       <div className="grt-map-canvas" ref={container} />
       <p className="grt-hint">
-        点上面的实体只看和它相连的关系，再点一次或点空白处恢复；鼠标停在边上显示关系类别，点一条边在弹窗里看详情；滚轮缩放，可以拖动
+        点上面的实体只看和它相连的关系，再点一次或点空白处恢复；右边的下拉框按关系类型筛选；鼠标停在边上显示关系类别，点一条边在弹窗里看详情；滚轮缩放，可以拖动
       </p>
       {openRelation && (
         <DetailDialog

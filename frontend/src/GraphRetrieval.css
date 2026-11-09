@@ -282,9 +282,9 @@
 /* 关系图顶部的实体列表：点一个实体，图里只看和它相连的关系。 */
 .grt-map-entities {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto 1fr auto;
   gap: 8px;
-  align-items: baseline;
+  align-items: center;
 }
 
 .grt-map-entities-label {
@@ -313,6 +313,22 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
+}
+
+/* 关系类型筛选：和实体列表并排放在同一行。 */
+.grt-map-filter {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--diag-muted, #6f8ba4);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.grt-map-filter select {
+  width: auto;
+  min-width: 120px;
+  max-width: 190px;
 }
 
 /* 列表里都是 ② 找到的实体，在图里是粗蓝边框，这里用一圈蓝环对上。 */
