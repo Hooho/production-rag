@@ -197,6 +197,18 @@ SPECS = [
         "max": 50,
         "advanced": True,
     },
+    # 实体路径的分数线：实体的关系里，和问题相似度低于它的既不算也不占「每个实体最多几条」的名额。
+    # 关系路径有 graph_relation_min_score，实体路径原来只看条数不看相似度：关系少的实体（如误匹配的实体）
+    # 关系全留下，热门实体的低分关系反被条数上限砍掉，两个方向相反。默认和关系阈值一致。
+    {
+        "key": "graph_entity_min_score",
+        "group": "retrieval",
+        "type": "float",
+        "default": 0.5,
+        "min": 0,
+        "max": 1,
+        "advanced": True,
+    },
     # 每个实体最多几条关系：10 条时，「段永平投资了哪些公司」只覆盖 6 家公司，被去掉的里还有百度、茅台、创维等（2026-11-08 查）。
     {
         "key": "graph_entity_relation_limit",

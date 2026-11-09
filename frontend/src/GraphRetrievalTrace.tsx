@@ -866,8 +866,9 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
         <h5>
           ③ 实体的关系
           <small>
-            一跳：找到的实体直接相连的关系，按和问题的相似度排序，每个实体最多{" "}
-            {settings.graph_entity_relation_limit ?? 10}{" "}
+            一跳：找到的实体直接相连的关系，按和问题的相似度排序（相似度 ≥{" "}
+            {settings.graph_entity_min_score ?? 0.5}
+            ），每个实体最多 {settings.graph_entity_relation_limit ?? 30}{" "}
             条，连到同一个实体的只留一条
           </small>
           <DetailButton

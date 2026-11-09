@@ -47,7 +47,11 @@ def test_retrieve_with_given_keywords(graph):
         models,
         "段永平投资了什么",
         scope,
-        {"graph_name_min_score": 0.3, "graph_relation_min_score": 0.3},
+        {
+            "graph_name_min_score": 0.3,
+            "graph_relation_min_score": 0.3,
+            "graph_entity_min_score": 0.3,
+        },
         entities=["段永平"],
         themes=["投资"],
     )
@@ -115,7 +119,11 @@ def test_entity_relation_limit(graph):
         models,
         "段永平",
         store.readable_scope("alice"),
-        {"graph_name_min_score": 0.3, "graph_entity_relation_limit": 1},
+        {
+            "graph_name_min_score": 0.3,
+            "graph_entity_relation_limit": 1,
+            "graph_entity_min_score": 0,
+        },
         entities=["段永平"],
     )
     kept = [item for item in result["entity_relations"] if item["kept"]]
@@ -125,6 +133,28 @@ def test_entity_relation_limit(graph):
         and len(dropped) == 1
         and dropped[0]["reason"] == "超过每个实体 1 条"
     )
+
+
+# 实体路径的分数线：低于它的关系不算数，也不占「每个实体最多几条」的名额。
+# 替身向量算出来的相似度量级比真实嵌入低一档，0.4 正好卡在两条关系中间（0.42 / 0.34）。
+def test_entity_relation_threshold(graph):
+    client, store, models, document_id = graph
+    result = graph_retrieve.retrieve(
+        store,
+        models,
+        "段永平",
+        store.readable_scope("alice"),
+        {"graph_name_min_score": 0.3, "graph_entity_min_score": 0.4},
+        entities=["段永平"],
+    )
+    kept = [item for item in result["entity_relations"] if item["kept"]]
+    dropped = [item for item in result["entity_relations"] if not item["kept"]]
+    assert [(item["source"], item["target"]) for item in kept] == [("段永平", "步步高")]
+    assert [item["reason"] for item in dropped] == ["相似度低于 0.4"]
+    # 被拦下的关系不占名额，出处分片只留留下的那条。
+    assert result["sources"]["entity"]
+    assert all(item["relation_ids"] for item in result["sources"]["entity"])
+    assert result["settings"]["graph_entity_min_score"] == 0.4
 
 
 # 范围写进查询条件：看不到这份文档的人什么都查不到（不是先查出来再过滤）；已删除的关系也查不到。
@@ -312,7 +342,10 @@ def test_search_tool_with_graph(graph, runtime):
         "methods"
     ] == ["dense", "keyword"]
     runtime(
-        graph_retrieval=True, graph_name_min_score=0.3, graph_relation_min_score=0.3
+        graph_retrieval=True,
+        graph_name_min_score=0.3,
+        graph_relation_min_score=0.3,
+        graph_entity_min_score=0.3,
     )
     result = tool.execute(
         store,
@@ -370,7 +403,10 @@ def test_agent_search_knowledge_graph(graph, runtime):
     runtime(graph_retrieval=False)
     before = agent_tools.tool_definitions(ctx)
     runtime(
-        graph_retrieval=True, graph_name_min_score=0.3, graph_relation_min_score=0.3
+        graph_retrieval=True,
+        graph_name_min_score=0.3,
+        graph_relation_min_score=0.3,
+        graph_entity_min_score=0.3,
     )
     assert agent_tools.tool_definitions(ctx) == before
     models.chat_model = KeywordModel('{"entities": ["段永平"], "themes": ["投资"]}')
@@ -408,7 +444,7 @@ def test_entity_relations_dedupe_other_end(graph):
         models,
         "段永平",
         store.readable_scope("alice"),
-        {"graph_name_min_score": 0.3},
+        {"graph_name_min_score": 0.3, "graph_entity_min_score": 0},
         entities=["段永平"],
     )
     to_bbk = [
@@ -434,6 +470,7 @@ def test_graph_rerank_quota(graph, runtime):
         graph_retrieval=True,
         graph_name_min_score=0.3,
         graph_relation_min_score=0.3,
+        graph_entity_min_score=0.3,
         graph_rerank_quota=0,
     )
     off = tool.execute(
@@ -451,6 +488,7 @@ def test_graph_rerank_quota(graph, runtime):
         graph_retrieval=True,
         graph_name_min_score=0.3,
         graph_relation_min_score=0.3,
+        graph_entity_min_score=0.3,
         graph_rerank_quota=5,
     )
     on = tool.execute(
