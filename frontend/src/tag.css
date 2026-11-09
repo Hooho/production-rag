@@ -133,8 +133,12 @@
   --tag-border: var(--tone-slate-border);
 }
 
-/* 分类色：色相由 hues.ts 分配（--tag-h），配色公式和 Agent 执行链的工具卡片一致。 */
-.tag.is-hue {
+/* 分类色：色相由 hues.ts 分配（--tag-h），配色公式和 Agent 执行链的工具卡片一致。
+   .tag.is-hue 是标签本身；页面里其他分类色控件（图检索的关系类型筛选、关系类型徽标）
+   也带 is-hue 并内联同一个 --tag-h，用这套变量，关系类型和图谱里的颜色就对上了。
+   这里只给变量，具体控件自己决定形状（标签是胶囊，徽标是方角）。 */
+.tag.is-hue,
+.is-hue {
   --tag-text: hsl(var(--tag-h) 62% 30%);
   --tag-bg: hsl(var(--tag-h) 80% 96%);
   --tag-border: hsl(var(--tag-h) 45% 78%);

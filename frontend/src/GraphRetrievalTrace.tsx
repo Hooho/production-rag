@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import cytoscape, { type Core, type ElementDefinition } from "cytoscape";
 import type {
   GraphRetrievalRelation,
@@ -10,6 +17,7 @@ import { GraphEntityDialog } from "./GraphEntityDialog";
 import { typeColor } from "./GraphView";
 import { HighlightedText } from "./HighlightedText";
 import { InfoPopover } from "./Popover";
+import { labelHue } from "./hues";
 import "./GraphRetrieval.css";
 
 // 检索过程「混合检索」里的图检索模块（docs：claude/graph-retrieval-phase2-plan.md 第一部分第四节）：
@@ -75,6 +83,11 @@ function OriginalButton({
   );
 }
 
+// 关系类型的颜色和图谱里一致：同一个类型在图谱侧栏和这里是一个颜色（hues.ts 的 labelHue）。
+function categoryStyle(category: string) {
+  return { "--tag-h": labelHue(category) } as CSSProperties;
+}
+
 // 关系按三行显示：先是谁和谁之间有什么关系（起点 → 关系类型 → 终点），
 // 再是这条关系自己的描述，最后是原文引用。实体名字可以点开看详情。
 function RelationText({
@@ -113,7 +126,12 @@ function RelationText({
         )}
         {renamed(relation.source, relation.source_entity)}
         <span className="grt-arrow">→</span>
-        <small className="grt-category">{relation.category}</small>
+        <small
+          className="grt-category is-hue"
+          style={categoryStyle(relation.category)}
+        >
+          {relation.category}
+        </small>
         <span className="grt-arrow">→</span>
         {entityName(
           relation.target,
@@ -329,7 +347,13 @@ function Pager({
 }
 
 type NameMatch = GraphTrace["name_matches"][number];
-type Dim<T> = { key: string; label: string; value: (item: T) => string };
+// hue：这个维度的值是关系类型，按 hues.ts 的 labelHue 上色，和图谱里的关系类型一个颜色。
+type Dim<T> = {
+  key: string;
+  label: string;
+  value: (item: T) => string;
+  hue?: boolean;
+};
 
 const MATCH_LABELS = {
   exact: "字面相同",
@@ -355,11 +379,21 @@ const ENTITY_RELATION_DIMS: Dim<RelationRow>[] = [
     label: "按实体",
     value: (item) => item.entity_name ?? "—",
   },
-  { key: "category", label: "按关系类型", value: (item) => item.category },
+  {
+    key: "category",
+    label: "按关系类型",
+    value: (item) => item.category,
+    hue: true,
+  },
 ];
 const RELATION_MATCH_DIMS: Dim<RelationRow>[] = [
   { key: "keyword", label: "按关键词", value: (item) => item.keyword ?? "—" },
-  { key: "category", label: "按关系类型", value: (item) => item.category },
+  {
+    key: "category",
+    label: "按关系类型",
+    value: (item) => item.category,
+    hue: true,
+  },
 ];
 
 // 明细列表：上面选分类方式和分类值，可以带上去掉的项，下面分页。
@@ -429,6 +463,8 @@ function DetailFilters<T extends { kept: boolean }>({
   list: ReturnType<typeof useDetailList<T>>;
   more?: number;
 }) {
+  // 关系类型这一维按 hues.ts 的 labelHue 上色，和图谱里的关系类型一个颜色。
+  const hueDim = list.dims.find((item) => item.key === list.dimKey)?.hue;
   return (
     <div className="grt-filters">
       {list.dims.length > 1 && (
@@ -460,7 +496,12 @@ function DetailFilters<T extends { kept: boolean }>({
             <button
               key={name}
               type="button"
-              className={`grt-chip${list.value === name ? " is-active" : ""}`}
+              className={`grt-chip${list.value === name ? " is-active" : ""}${hueDim ? " is-hue" : ""}`}
+              style={
+                hueDim
+                  ? ({ "--tag-h": labelHue(name) } as CSSProperties)
+                  : undefined
+              }
               onClick={() => list.setValue(name)}
             >
               {name} <em>{count}</em>
@@ -1199,7 +1240,10 @@ function ChunkTable({
                             <span className="grt-rel-line">
                               {relation.source}
                               <span className="grt-arrow">→</span>
-                              <small className="grt-category">
+                              <small
+                                className="grt-category is-hue"
+                                style={categoryStyle(relation.category)}
+                              >
                                 {relation.category}
                               </small>
                               <span className="grt-arrow">→</span>

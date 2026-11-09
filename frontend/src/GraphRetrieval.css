@@ -79,6 +79,14 @@
   color: var(--diag-muted, #6f8ba4);
 }
 
+/* 关系类型的徽标：颜色跟着图谱里的关系类型走（同一份 labelHue 色相），两处一眼能对上。 */
+.grt-table td small.grt-category.is-hue,
+.grt-category.is-hue {
+  border-color: var(--tag-border);
+  background: var(--tag-bg);
+  color: var(--tag-text);
+}
+
 /* 关系类型在第一行中间，两边各留一点距离。 */
 .grt-rel-line .grt-category {
   margin-left: 0;
@@ -254,6 +262,30 @@
 
 .grt-chip.is-dim {
   border-radius: 4px;
+}
+
+/* 关系类型的筛选钮：色相和图谱里的关系类型一致（同一份 labelHue），两处一眼能对上。
+   选中时用同一个色相加深，不用蓝色盖掉分类色。 */
+.grt-chip.is-hue {
+  border-color: var(--tag-border);
+  background: var(--tag-bg);
+  color: var(--tag-text);
+}
+
+.grt-chip.is-hue em {
+  color: inherit;
+}
+
+.grt-chip.is-hue:hover {
+  border-color: hsl(var(--tag-h) 55% 45%);
+  color: var(--tag-text);
+}
+
+.grt-chip.is-hue.is-active {
+  border-color: hsl(var(--tag-h) 55% 45%);
+  background: hsl(var(--tag-h) 80% 90%);
+  color: var(--tag-text);
+  box-shadow: inset 0 0 0 1px hsl(var(--tag-h) 55% 45%);
 }
 
 .grt-dropped-toggle {
