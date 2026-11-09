@@ -1170,10 +1170,15 @@ function ChunkTable({
                       return (
                         <li key={id}>
                           {relation ? (
-                            <>
-                              {relation.source} → {relation.target}
-                              <small>（{relation.category}）</small>
-                            </>
+                            <span className="grt-rel-line">
+                              {relation.source}
+                              <span className="grt-arrow">→</span>
+                              <small className="grt-category">
+                                {relation.category}
+                              </small>
+                              <span className="grt-arrow">→</span>
+                              {relation.target}
+                            </span>
                           ) : (
                             id
                           )}
