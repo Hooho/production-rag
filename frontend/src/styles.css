@@ -3820,6 +3820,22 @@ label {
   white-space: normal;
 }
 
+/* 分片文字和「原文」按钮并排：按钮落在文字末尾，不单独占一列。 */
+.diag-snippet-body {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.diag-snippet-body .diag-preview {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.diag-snippet-body .link-button {
+  flex: none;
+}
+
 .diag-table code {
   color: var(--t-5c7893);
   font-size: 12px;

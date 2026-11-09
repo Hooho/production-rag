@@ -5650,8 +5650,18 @@ function CandidateChunksDialog({
               {sourceLocation(item.version, item.page_start, item.heading)}
             </small>
           </span>
-          <span className="diag-preview" title={item.preview}>
-            {item.preview}
+          {/* 原文按钮跟在分片文字末尾，不单独占一列。 */}
+          <span className="diag-snippet-body">
+            <span className="diag-preview" title={item.preview}>
+              {item.preview}
+            </span>
+            <button
+              type="button"
+              className="link-button button-sm"
+              onClick={() => setChunkOpen(item.chunk_id)}
+            >
+              原文
+            </button>
           </span>
           {item.graph_quota && (
             <span
@@ -5703,15 +5713,6 @@ function CandidateChunksDialog({
             ))}
           </div>
         </td>
-        <td>
-          <button
-            type="button"
-            className="link-button button-sm"
-            onClick={() => setChunkOpen(item.chunk_id)}
-          >
-            原文
-          </button>
-        </td>
       </tr>
     );
   };
@@ -5743,7 +5744,6 @@ function CandidateChunksDialog({
                   {scoreKind === "rerank" ? "重排概率" : "RRF 分"}
                 </th>
                 <th>各路名次</th>
-                <th>原文</th>
               </tr>
             </thead>
             <tbody>
@@ -5751,7 +5751,7 @@ function CandidateChunksDialog({
               {/* 名额补进来的单独一段，别和 RRF 名前面几个混在一起。 */}
               {quota.length > 0 && (
                 <tr className="diag-pool-group">
-                  <td colSpan={5}>
+                  <td colSpan={4}>
                     图检索名额补进来的 {quota.length} 个：RRF
                     名次不够，靠名额进池
                   </td>
