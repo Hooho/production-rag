@@ -58,19 +58,42 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+.sp-scoring-wrap {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
 .sp-scoring-editor {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* 每行卡片一样高，「添加计分项」卡片也跟着等高。 */
+  grid-auto-rows: 1fr;
   gap: 12px;
   min-width: 0;
 }
-.sp-scoring-editor > .secondary-button,
-.sp-scoring-editor > small {
-  grid-column: 1 / -1;
+/* 屏幕不够宽时降级成两列、一列。 */
+@media (max-width: 900px) {
+  .sp-scoring-editor {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
-/* 「添加计分项」保持按钮本身的宽度，不拉满整行。 */
-.sp-scoring-editor > .secondary-button {
-  justify-self: start;
+@media (max-width: 600px) {
+  .sp-scoring-editor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* 「添加计分项」也是一张同样大小的卡片，跟在计分项后面（网格里紧接着上一张计分项）。 */
+.sp-scoring-add {
+  display: grid;
+  align-content: center;
+  min-width: 0;
+  padding: 14px;
+  border: 1px dashed var(--t-d2e2f0, #d2e2f0);
+  border-radius: 8px;
+  background: var(--t-f2f7fc, #f2f7fc);
+}
+.sp-scoring-add > .secondary-button {
+  width: 100%;
 }
 /* 每个计分项一张带底色的卡片，和其他字段的边界对齐，一眼能分清哪一项是哪一项。 */
 .sp-scoring-item {
@@ -83,29 +106,26 @@
   border-radius: 8px;
   background: var(--t-f2f7fc, #f2f7fc);
 }
-/* 添加/编辑题目的表单里，计分项和其他字段共用同一条边界，改成一列排。 */
-.rg-form .sp-scoring-editor {
-  grid-template-columns: minmax(0, 1fr);
-}
-@media (max-width: 760px) {
-  .sp-scoring-editor {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
+/* 卡片变窄时，「移除计分项」换到下一行，标题和输入框不被挤扁。 */
 .sp-scoring-heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
 }
 .sp-scoring-heading label {
   display: grid;
-  flex: 1;
+  flex: 1 1 120px;
   gap: 6px;
   min-width: 0;
   margin: 0;
   color: var(--t-5e7a95);
   font-family: inherit;
   font-size: 13px;
+}
+/* 「移除计分项」靠右，换行时也保持靠右。 */
+.sp-scoring-heading > .rg-link {
+  margin-left: auto;
 }
 .sp-scoring-heading input {
   width: 100%;
