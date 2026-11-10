@@ -1,3 +1,7 @@
+import { errorText, useToast } from "./Toast";
+import EvalPreludeEditor from "./EvalPreludeEditor";
+import { saveEvalDatasetPrelude, type EvalPreludeTurn } from "./api";
+import UnifiedEvalLauncher from "./UnifiedEvalLauncher";
 import "./EvaluationNotes.css";
 import { ConfirmPopover } from "./ConfirmPopover";
 import { DetailDialog } from "./DetailDialog";
@@ -103,48 +107,6 @@ const MODE_TAB_LABELS: Record<ModeTab, string> = {
 };
 // memory 是以前单独的多轮对话评测，现在并入专项评测集，只用来显示旧记录。
 type EvalKind = "retrieval" | "generation" | "memory" | "special";
-type LaunchKind = "retrieval" | "generation";
-// 一次评测最多保存几组配置一起跑（后端 app/evaluation/batch.py 的 MAX_ARMS）。
-const MAX_SAVED_CONFIGS = 4;
-// 一组配置的比较用指纹：勾选顺序不同、参数项先后不同都算同一组配置。
-function configKey(body: EvalLaunchBody) {
-  const normalize = (value: unknown): unknown => {
-    if (Array.isArray(value))
-      return value
-        .map(normalize)
-        .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
-    if (value && typeof value === "object")
-      return Object.fromEntries(
-        Object.entries(value as Record<string, unknown>)
-          .filter(([, item]) => item !== undefined)
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([key, item]) => [key, normalize(item)]),
-      );
-    return value;
-  };
-  const { label: _label, ...rest } = body;
-  return JSON.stringify(normalize(rest));
-}
-
-// 保存配置时记下的发起表单状态，「载入到表单」时原样放回去。
-type LaunchForm = {
-  launchMode: "tuning" | "special";
-  launchKind: LaunchKind;
-  launchSplit: string;
-  launchSuites: string[];
-  launchModes: EvalMode[];
-  specialModes: EvalMode[];
-  pickedSuites: string[];
-  compareMemory: boolean;
-  pickedCorpus: string[];
-  launchParams: EvalParams;
-};
-type SavedConfig = {
-  label: string;
-  body: EvalLaunchBody;
-  form: LaunchForm;
-  summary: string[];
-};
 const KIND_LABELS: Record<EvalKind, string> = {
   retrieval: "检索",
   generation: "生成",
@@ -172,7 +134,7 @@ type Props = {
 const TOP_TAB_LABELS: Record<TopTab, string> = {
   history: "历史评测记录",
   dataset: "调参评测集",
-  special: "专项评测集",
+  special: "自建题集",
   regression: "巡检复测集",
   corpus: "评测语料库",
 };
@@ -719,34 +681,6 @@ function Evaluation({
   const [runsLoading, setRunsLoading] = useState(true);
   const [datasetLoading, setDatasetLoading] = useState(true);
   const [error, setError] = useState("");
-  // 发起评测：调参（开发集 / 留出集）或专项（勾选几个专项一起跑）。
-  const [launchMode, setLaunchMode] = useState<"tuning" | "special">("tuning");
-  const [specialSuites, setSpecialSuites] = useState<EvalSuiteBrief[] | null>(
-    null,
-  );
-  const [pickedSuites, setPickedSuites] = useState<string[]>([]);
-  const [compareMemory, setCompareMemory] = useState(false);
-  const [launchKind, setLaunchKind] = useState<LaunchKind>("retrieval");
-  const [launchSplit, setLaunchSplit] = useState("dev");
-  const [launchSuites, setLaunchSuites] = useState<string[]>([]);
-  // 检索评测跑哪些模式：固定流程、Agent，至少勾一个；只勾 Agent 时实验组（消融、参数对比）不跑。
-  const [launchModes, setLaunchModes] = useState<EvalMode[]>(["fixed"]);
-  // 专项也能选模式：只对检索方式的专项生效，回答和多轮对话方式照常只跑固定流程。
-  const [specialModes, setSpecialModes] = useState<EvalMode[]>(["fixed"]);
-  // 用评测语料库里的哪几份语料：每次打开历史记录页签重新读，默认全选。
-  const [corpusEntries, setCorpusEntries] = useState<EvalCorpusEntry[] | null>(
-    null,
-  );
-  const [pickedCorpus, setPickedCorpus] = useState<string[]>([]);
-  // 参数配置：只对这次评测生效的模型、运行参数和提示词版本；没改的项跟随系统设置（不提交）。
-  const [paramOptions, setParamOptions] = useState<EvalParamOptions | null>(
-    null,
-  );
-  const [launchParams, setLaunchParams] = useState<EvalParams>({});
-  // 保存的几组配置（最多 4 组，只在这次发起时用）：每组是保存那一刻发起表单的全部内容，点开始评测时按顺序都跑。
-  const [savedConfigs, setSavedConfigs] = useState<SavedConfig[]>([]);
-  const [launching, setLaunching] = useState(false);
-
   // 刷新评测列表时不再自动打开某条记录，让页面首次进入先展示历史表格。
   async function refreshRuns() {
     const data = await listEvalRuns();
@@ -830,204 +764,6 @@ function Evaluation({
     };
   }, [selectedId, runs.find((item) => item.id === selectedId)?.status]);
 
-  useEffect(() => {
-    if (section !== "history") return;
-    listEvalCorpus()
-      .then((data) => {
-        setCorpusEntries(data.items);
-        setPickedCorpus(
-          data.items.filter((item) => !item.missing).map((item) => item.id),
-        );
-      })
-      .catch((reason: Error) => setError(reason.message));
-  }, [section]);
-
-  // 参数配置里显示的「系统当前值」每次打开历史记录页签重新读，设置页刚改过也能看到新值。
-  useEffect(() => {
-    if (section !== "history") return;
-    getEvalParamOptions()
-      .then(setParamOptions)
-      .catch((reason: Error) => setError(reason.message));
-  }, [section]);
-
-  // 切到「专项」时读取专项列表（专项页签里可能刚新建过，每次切换都重新读）。
-  useEffect(() => {
-    if (section !== "history" || launchMode !== "special") return;
-    listEvalSuites()
-      .then((data) => setSpecialSuites(data.items))
-      .catch((reason: Error) => setError(reason.message));
-  }, [section, launchMode]);
-
-  async function launch() {
-    setLaunching(true);
-    setError("");
-    try {
-      if (savedConfigs.length) {
-        const started = await startEvalBatch(
-          "",
-          savedConfigs.map((item) => ({ ...item.body, label: item.label })),
-        );
-        setSavedConfigs([]);
-        onNavigate(`/eval/batches/${encodeURIComponent(started.id)}`);
-        await refreshRuns();
-        onToast("success", `${started.runs.length} 组配置已开始，按顺序跑。`);
-        return;
-      }
-      if (launchMode === "special") {
-        const started = await startSpecialRun(
-          pickedSuites,
-          compareMemory,
-          specialModes,
-          pickedCorpus,
-          visibleParams(
-            launchParams,
-            paramOptions,
-            specialParamGroups,
-            specialJudge,
-          ),
-        );
-        onNavigate(`/eval/runs/${encodeURIComponent(started.id)}`);
-        await refreshRuns();
-        onToast("success", "专项评测已启动。");
-        return;
-      }
-      const modes: EvalMode[] =
-        launchKind === "retrieval" ? launchModes : ["fixed"];
-      const suites =
-        launchKind !== "retrieval" || !modes.includes("fixed")
-          ? []
-          : launchSuites;
-      const started = await startEvalRun(
-        launchKind,
-        launchSplit,
-        suites,
-        modes,
-        pickedCorpus,
-        visibleParams(
-          launchParams,
-          paramOptions,
-          tuningParamGroups,
-          launchKind === "generation",
-        ),
-      );
-      onNavigate(`/eval/runs/${encodeURIComponent(started.id)}`);
-      setDetailTab("overview");
-      await refreshRuns();
-      // 评测进度继续留在页面内；Toast 只确认启动结果，避免把持续状态变成短暂提示。
-      onToast("success", `${KIND_LABELS[launchKind]}评测已启动。`);
-    } catch (reason) {
-      onToast("error", (reason as Error).message);
-    } finally {
-      setLaunching(false);
-    }
-  }
-
-  // 发起表单现在的全部内容，转成接口要的一组配置（和单独发起时提交的内容一样）。
-  function currentBody(): EvalLaunchBody {
-    if (launchMode === "special") {
-      return {
-        kind: "special",
-        suite_ids: pickedSuites,
-        compare_memory: compareMemory,
-        modes: specialModes,
-        corpus_ids: pickedCorpus,
-        params: visibleParams(
-          launchParams,
-          paramOptions,
-          specialParamGroups,
-          specialJudge,
-        ),
-      };
-    }
-    const modes: EvalMode[] =
-      launchKind === "retrieval" ? launchModes : ["fixed"];
-    return {
-      kind: launchKind,
-      split: launchSplit,
-      suites:
-        launchKind !== "retrieval" || !modes.includes("fixed")
-          ? []
-          : launchSuites,
-      modes,
-      corpus_ids: pickedCorpus,
-      params: visibleParams(
-        launchParams,
-        paramOptions,
-        tuningParamGroups,
-        launchKind === "generation",
-      ),
-    };
-  }
-
-  // 一组配置的几行说明：题目、运行模式、语料、改了哪些参数。
-  function configSummary(body: EvalLaunchBody): string[] {
-    const scope =
-      body.kind === "special"
-        ? `专项：${(specialSuites ?? [])
-            .filter((suite) => body.suite_ids?.includes(suite.id))
-            .map((suite) => suite.name)
-            .join("、")}`
-        : `${KIND_LABELS[body.kind]}评测 · ${SPLIT_LABELS[body.split ?? ""] ?? body.split}${body.suites?.length ? ` · 实验组 ${body.suites.length} 个` : ""}`;
-    const corpus = (corpusEntries ?? [])
-      .filter((entry) => body.corpus_ids.includes(entry.id))
-      .map((entry) => `《${entry.title}》`)
-      .join("、");
-    const params = paramsSummary(body.params);
-    return [
-      scope,
-      `运行模式：${body.modes.map((mode) => (mode === "agent" ? "Agent" : "固定流程")).join(" + ")}`,
-      `语料：${corpus || "—"}`,
-      ...(params.length ? params : ["参数全部跟随系统设置"]),
-    ];
-  }
-
-  function saveConfig() {
-    if (savedConfigs.length >= MAX_SAVED_CONFIGS) return;
-    const body = currentBody();
-    // 和已保存的某一组完全一样（题目、模式、语料、参数都相同）就不再存一份，跑两遍一样的配置没有意义。
-    const same = savedConfigs.find(
-      (item) => configKey(item.body) === configKey(body),
-    );
-    if (same) {
-      onToast("error", `和「${same.label}」的配置完全一样，没有保存。`);
-      return;
-    }
-    setSavedConfigs((items) => [
-      ...items,
-      {
-        label: `配置 ${"ABCD"[items.length]}`,
-        body,
-        summary: configSummary(body),
-        form: {
-          launchMode,
-          launchKind,
-          launchSplit,
-          launchSuites,
-          launchModes,
-          specialModes,
-          pickedSuites,
-          compareMemory,
-          pickedCorpus,
-          launchParams,
-        },
-      },
-    ]);
-  }
-
-  // 把保存的一组配置放回上面的表单，接着改了可以再保存成新的一组。
-  function loadConfig(form: LaunchForm) {
-    setLaunchMode(form.launchMode);
-    setLaunchKind(form.launchKind);
-    setLaunchSplit(form.launchSplit);
-    setLaunchSuites(form.launchSuites);
-    setLaunchModes(form.launchModes);
-    setSpecialModes(form.specialModes);
-    setPickedSuites(form.pickedSuites);
-    setCompareMemory(form.compareMemory);
-    setPickedCorpus(form.pickedCorpus);
-    setLaunchParams(form.launchParams);
-  }
-
   // 删除后刷新历史列表，并清理可能仍指向该记录的详情状态，避免页面继续显示已删除内容。
   // 历史列表「选项 → 重跑」：照这条记录的配置重新发起，打开新记录看进度。
   async function rerunRun(runId: string) {
@@ -1057,94 +793,14 @@ function Evaluation({
     }
   }
 
-  // 生成评测只跑基线；切换到生成时清空已选的检索实验，避免把无效组合提交给后端。
-  function changeLaunchKind(kind: LaunchKind) {
-    setLaunchKind(kind);
-    if (kind !== "retrieval") setLaunchSuites([]);
-  }
-
-  function toggleMode(mode: EvalMode) {
-    setLaunchModes((items) => {
-      const next = items.includes(mode)
-        ? items.filter((item) => item !== mode)
-        : [...items, mode];
-      if (!next.includes("fixed")) setLaunchSuites([]);
-      return next;
-    });
-  }
-
-  function toggleSuite(key: string) {
-    setLaunchSuites((items) =>
-      items.includes(key)
-        ? items.filter((item) => item !== key)
-        : [...items, key],
-    );
-  }
-
   const runningRun = runs.find((item) => item.id === running) ?? null;
   const questionCount = run?.questions?.length ?? 0;
-  // 调参评测集题数随题目增删变化，运行时计算后展示，避免操作栏的题数和实际可选范围不一致。
-  const splitCounts = useMemo(() => {
-    const counts = { dev: 0, holdout: 0 };
-    for (const item of dataset?.items ?? []) {
-      // 操作栏只显示真正可运行的题数，待审核草稿不会误导用户以为已经纳入评测。
-      if (item.reviewed !== true) continue;
-      if (item.split === "dev") counts.dev += 1;
-      if (item.split === "holdout") counts.holdout += 1;
-    }
-    return counts;
-  }, [dataset]);
   const detailCounts: Record<DetailTab, string | number> = {
     overview: "",
     questions: questionCount || "",
     sweep: run?.sweep?.length ? "" : "",
     variants: run?.variants?.length || "",
   };
-  // 表单还没填完整（没勾语料、没选专项、没勾模式）时不能开始，也不能保存成一组配置。
-  const formInvalid =
-    pickedCorpus.length === 0 ||
-    (launchMode === "special" &&
-      (pickedSuites.length === 0 || specialModes.length === 0)) ||
-    (launchMode === "tuning" &&
-      launchKind === "retrieval" &&
-      launchModes.length === 0);
-  const agentLaunch =
-    launchMode === "tuning" &&
-    launchKind === "retrieval" &&
-    launchModes.includes("agent");
-  // 参数配置显示哪几组：公共参数一直有；固定流程参数在跑固定流程（生成评测也走固定流程）时有；Agent 参数在勾了 Agent 时有。
-  const tuningParamGroups: EvalParamGroup[] = [
-    "common",
-    ...(launchKind === "generation" || launchModes.includes("fixed")
-      ? (["fixed"] as EvalParamGroup[])
-      : []),
-    ...(launchKind === "retrieval" && launchModes.includes("agent")
-      ? (["agent"] as EvalParamGroup[])
-      : []),
-  ];
-  const pickedSpecial = (specialSuites ?? []).filter((suite) =>
-    pickedSuites.includes(suite.id),
-  );
-  const specialParamGroups: EvalParamGroup[] = [
-    "common",
-    ...(pickedSpecial.some(
-      (suite) =>
-        suite.method === "answer" ||
-        suite.method === "dialogue" ||
-        (suite.method === "retrieval" && specialModes.includes("fixed")),
-    )
-      ? (["fixed"] as EvalParamGroup[])
-      : []),
-    ...(specialModes.includes("agent") &&
-    pickedSpecial.some((suite) => suite.method === "retrieval")
-      ? (["agent"] as EvalParamGroup[])
-      : []),
-  ];
-  // 回答、多轮对话方式的专项要评审打分，才显示评审模型。
-  const specialJudge = pickedSpecial.some(
-    (suite) => suite.method === "answer" || suite.method === "dialogue",
-  );
-
   return (
     <section className="ev-root">
       <div className="ev-heading">
@@ -1166,7 +822,7 @@ function Evaluation({
             {(key === "history" || key === "dataset") && (
               <span>
                 {key === "history"
-                  ? runs.length
+                  ? new Set(runs.map((item) => item.batch?.id ?? item.id)).size
                   : (dataset?.reviewed_count ??
                     dataset?.items.filter((item) => item.reviewed === true)
                       .length ??
@@ -1179,548 +835,13 @@ function Evaluation({
       {section === "history" && !selectedId && !batchId && (
         <>
           {/* 操作区只属于历史记录，评测集 Tab 保持为题目管理入口。 */}
-          <div className="ev-launch">
-            <div className="ev-launch-title">
-              操作：发起
-              {launchMode === "special" ? "专项" : KIND_LABELS[launchKind]}评测
-              <small>
-                {launchKind === "generation" && launchMode !== "special"
-                  ? "会调用大模型，有少量费用"
-                  : agentLaunch
-                    ? "Agent 每题调用大模型几轮，较慢"
-                    : "会调用大模型"}
-              </small>
-            </div>
-            <div className="ev-launch-options">
-              <div className="ev-launch-option is-stacked">
-                <div
-                  className="sp-mode"
-                  role="radiogroup"
-                  aria-label="评测目的"
-                >
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={launchMode === "tuning"}
-                    className={launchMode === "tuning" ? "is-selected" : ""}
-                    onClick={() => setLaunchMode("tuning")}
-                  >
-                    调参
-                  </button>
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={launchMode === "special"}
-                    className={launchMode === "special" ? "is-selected" : ""}
-                    onClick={() => setLaunchMode("special")}
-                  >
-                    专项
-                  </button>
-                </div>
-                <Hint
-                  text={
-                    launchMode === "special"
-                      ? "检查某个方向的问题，不计入调参分数；每个专项单独出结果。"
-                      : "用开发集或留出集比较参数好坏。"
-                  }
-                />
-              </div>
-              {launchMode === "special" ? (
-                <div className="ev-launch-option sp-pick-option">
-                  {specialSuites === null ? (
-                    <span className="ev-muted-note">正在读取专项…</span>
-                  ) : specialSuites.length === 0 ? (
-                    <span className="ev-muted-note">
-                      还没有专项，先到「专项评测集」新建。
-                    </span>
-                  ) : (
-                    <ul className="sp-pick-list">
-                      {specialSuites.map((suite) => (
-                        <li key={suite.id}>
-                          <label>
-                            <input
-                              type="checkbox"
-                              checked={pickedSuites.includes(suite.id)}
-                              disabled={suite.item_count === 0}
-                              onChange={() =>
-                                setPickedSuites((items) =>
-                                  items.includes(suite.id)
-                                    ? items.filter((item) => item !== suite.id)
-                                    : [...items, suite.id],
-                                )
-                              }
-                            />
-                            <span className="sp-pick-text">
-                              <span className="sp-pick-name">
-                                {suite.name}
-                                <HueTag size="sm" label={suite.method_label} />
-                                {suite.method !== "dialogue" && (
-                                  <Tag size="sm" outline plain>
-                                    {suite.search_mode_label}
-                                  </Tag>
-                                )}
-                                <em>{suite.item_count} 题</em>
-                              </span>
-                              {suite.description && (
-                                <small>{suite.description}</small>
-                              )}
-                            </span>
-                          </label>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {specialSuites?.some(
-                    (suite) =>
-                      suite.method === "retrieval" &&
-                      pickedSuites.includes(suite.id),
-                  ) && (
-                    <div className="sp-mode-line">
-                      <span className="ev-option-title">运行模式</span>
-                      <label
-                        className={`ev-radio-option ${specialModes.includes("fixed") ? "is-selected" : ""}`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={specialModes.includes("fixed")}
-                          onChange={() =>
-                            setSpecialModes((items) =>
-                              items.includes("fixed")
-                                ? items.filter((item) => item !== "fixed")
-                                : ["fixed", ...items],
-                            )
-                          }
-                        />
-                        固定流程
-                      </label>
-                      <label
-                        className={`ev-radio-option ${specialModes.includes("agent") ? "is-selected" : ""}`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={specialModes.includes("agent")}
-                          onChange={() =>
-                            setSpecialModes((items) =>
-                              items.includes("agent")
-                                ? items.filter((item) => item !== "agent")
-                                : [...items, "agent"],
-                            )
-                          }
-                        />
-                        Agent
-                      </label>
-                      <span className="ev-option-description is-below ev-hint">
-                        <span className="ev-info-icon" aria-hidden="true">
-                          i
-                        </span>
-                        只对检索方式的专项生效。
-                        {specialModes.includes("agent") &&
-                        specialSuites.some(
-                          (suite) =>
-                            suite.method === "retrieval" &&
-                            suite.search_mode !== "hybrid" &&
-                            pickedSuites.includes(suite.id),
-                        )
-                          ? "选中的专项有不是混合检索的，和 Agent 比不公平。"
-                          : ""}
-                      </span>
-                    </div>
-                  )}
-                  {specialSuites?.some(
-                    (suite) =>
-                      suite.method === "dialogue" &&
-                      pickedSuites.includes(suite.id),
-                  ) && (
-                    <div className="sp-switch-line">
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={compareMemory}
-                        className={`sp-switch ${compareMemory ? "is-on" : ""}`}
-                        onClick={() => setCompareMemory(!compareMemory)}
-                      >
-                        <span />
-                      </button>
-                      <span>
-                        对比记忆参数：压缩阈值、保留条数各调大调小再跑，共 5
-                        组，大模型调用是 5 倍。
-                      </span>
-                    </div>
-                  )}
-                  {pickedSpecial.length > 0 && (
-                    <div className="sp-mode-line evp-line">
-                      <span className="ev-option-title">参数配置</span>
-                      <EvalParamsPanel
-                        options={paramOptions}
-                        value={launchParams}
-                        onChange={setLaunchParams}
-                        groups={specialParamGroups}
-                        showJudge={specialJudge}
-                      />
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <>
-                  <div className="ev-launch-option is-stacked">
-                    <fieldset className="ev-radio-field">
-                      <legend>
-                        <span className="ev-option-title">评测类型</span>
-                      </legend>
-                      <div
-                        className="ev-radio-options"
-                        role="radiogroup"
-                        aria-label="评测类型"
-                      >
-                        <label
-                          className={`ev-radio-option ${launchKind === "retrieval" ? "is-selected" : ""}`}
-                        >
-                          <input
-                            type="radio"
-                            name="eval-kind"
-                            value="retrieval"
-                            checked={launchKind === "retrieval"}
-                            onChange={() => changeLaunchKind("retrieval")}
-                          />
-                          检索评测
-                        </label>
-                        <label
-                          className={`ev-radio-option ${launchKind === "generation" ? "is-selected" : ""}`}
-                        >
-                          <input
-                            type="radio"
-                            name="eval-kind"
-                            value="generation"
-                            checked={launchKind === "generation"}
-                            onChange={() => changeLaunchKind("generation")}
-                          />
-                          生成评测
-                        </label>
-                      </div>
-                      <Hint
-                        text={
-                          launchKind === "generation"
-                            ? "检索后生成回答，由评审模型打分。"
-                            : "改写 → 检索 → 充分性判断 → 补充检索，和线上一致。"
-                        }
-                      />
-                    </fieldset>
-                  </div>
-                  {launchKind === "retrieval" && (
-                    <div className="ev-launch-option is-stacked">
-                      <fieldset className="ev-radio-field">
-                        <legend>
-                          <span className="ev-option-title">运行模式</span>
-                        </legend>
-                        <div
-                          className="ev-radio-options"
-                          role="group"
-                          aria-label="运行模式"
-                        >
-                          <label
-                            className={`ev-radio-option ${launchModes.includes("fixed") ? "is-selected" : ""}`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={launchModes.includes("fixed")}
-                              onChange={() => toggleMode("fixed")}
-                            />
-                            固定流程
-                          </label>
-                          <label
-                            className={`ev-radio-option ${launchModes.includes("agent") ? "is-selected" : ""}`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={launchModes.includes("agent")}
-                              onChange={() => toggleMode("agent")}
-                            />
-                            Agent
-                          </label>
-                        </div>
-                        <Hint
-                          text={
-                            launchModes.length === 0
-                              ? "至少勾一个。"
-                              : launchModes.length === 2
-                                ? "两边逐题对比，点开看各自的检索日志。"
-                                : launchModes.includes("agent")
-                                  ? "只看 Agent 最后拿到的资料；实验组不跑。"
-                                  : ""
-                          }
-                        />
-                      </fieldset>
-                    </div>
-                  )}
-                  <div className="ev-launch-option is-stacked">
-                    <fieldset className="ev-radio-field">
-                      <legend>
-                        <span className="ev-option-title">参数配置</span>
-                      </legend>
-                      <EvalParamsPanel
-                        options={paramOptions}
-                        value={launchParams}
-                        onChange={setLaunchParams}
-                        groups={tuningParamGroups}
-                        showJudge={launchKind === "generation"}
-                      />
-                      <Hint text="默认全部跟随系统设置；改成自定义的项只对这次评测生效，不影响线上。" />
-                    </fieldset>
-                  </div>
-                  <div className="ev-launch-option is-stacked">
-                    <fieldset className="ev-radio-field">
-                      <legend>
-                        <span className="ev-option-title">题目范围</span>
-                      </legend>
-                      <div
-                        className="ev-radio-options"
-                        role="radiogroup"
-                        aria-label="题目范围"
-                      >
-                        <label
-                          className={`ev-radio-option ${launchSplit === "dev" ? "is-selected" : ""}`}
-                        >
-                          <input
-                            type="radio"
-                            name="eval-split"
-                            value="dev"
-                            checked={launchSplit === "dev"}
-                            onChange={() => setLaunchSplit("dev")}
-                          />
-                          开发集（日常调参）
-                        </label>
-                        <label
-                          className={`ev-radio-option ${launchSplit === "holdout" ? "is-selected" : ""}`}
-                        >
-                          <input
-                            type="radio"
-                            name="eval-split"
-                            value="holdout"
-                            checked={launchSplit === "holdout"}
-                            onChange={() => setLaunchSplit("holdout")}
-                          />
-                          留出集（最终验证）
-                        </label>
-                        <label
-                          className={`ev-radio-option ${launchSplit === "all" ? "is-selected" : ""}`}
-                        >
-                          <input
-                            type="radio"
-                            name="eval-split"
-                            value="all"
-                            checked={launchSplit === "all"}
-                            onChange={() => setLaunchSplit("all")}
-                          />
-                          全部题目
-                        </label>
-                      </div>
-                      <Hint
-                        text={
-                          launchSplit === "dev"
-                            ? `${splitCounts.dev || "—"} 题，调参时用。`
-                            : launchSplit === "holdout"
-                              ? `${splitCounts.holdout || "—"} 题，调参完成后验证。`
-                              : `${splitCounts.dev + splitCounts.holdout || "—"} 题，看总体，不用来定参数。`
-                        }
-                      />
-                    </fieldset>
-                  </div>
-                  {/* 生成评测只跑基线，先在界面层禁用检索实验组选项，避免用户提交无效组合。 */}
-                  {suites.map((suite) => {
-                    const suiteOff =
-                      launchKind !== "retrieval" ||
-                      !launchModes.includes("fixed");
-                    const suiteDescription =
-                      launchKind !== "retrieval"
-                        ? "只有检索评测能跑。"
-                        : !launchModes.includes("fixed")
-                          ? "要勾选固定流程才能跑。"
-                          : `${SUITE_DESCRIPTIONS[suite.key] ?? "和基线对比"}：${suite.variants.join("、")}。`;
-                    const suiteClass = suiteOff
-                      ? "ev-check is-disabled"
-                      : "ev-check";
-                    return (
-                      <div
-                        className="ev-launch-option is-stacked"
-                        key={suite.key}
-                      >
-                        <label
-                          className={suiteClass}
-                          title={
-                            launchKind !== "retrieval"
-                              ? "只有检索评测能运行这组实验"
-                              : suite.variants.join("、")
-                          }
-                        >
-                          <input
-                            type="checkbox"
-                            disabled={suiteOff}
-                            checked={launchSuites.includes(suite.key)}
-                            onChange={() => toggleSuite(suite.key)}
-                          />
-                          {suite.label}
-                          <small>{suite.variants.length} 组</small>
-                        </label>
-                        <Hint text={suiteDescription} />
-                      </div>
-                    );
-                  })}
-                </>
-              )}
-              <div className="ev-launch-option sp-pick-option">
-                <span className="ev-option-title">评测语料</span>
-                {corpusEntries === null ? (
-                  <span className="ev-muted-note">正在读取语料库…</span>
-                ) : corpusEntries.length === 0 ? (
-                  <span className="ev-muted-note">
-                    语料库是空的，先到「评测语料库」上传。
-                  </span>
-                ) : (
-                  <ul className="sp-pick-list cp-pick-list">
-                    {corpusEntries.map((entry) => (
-                      <li key={entry.id}>
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={pickedCorpus.includes(entry.id)}
-                            disabled={entry.missing}
-                            onChange={() =>
-                              setPickedCorpus((items) =>
-                                items.includes(entry.id)
-                                  ? items.filter((item) => item !== entry.id)
-                                  : [...items, entry.id],
-                              )
-                            }
-                          />
-                          <span className="sp-pick-text">
-                            <span className="sp-pick-name">
-                              {entry.title}
-                              <em>
-                                {entry.missing
-                                  ? "文件不存在"
-                                  : `${entry.char_count.toLocaleString()} 字`}
-                              </em>
-                            </span>
-                          </span>
-                        </label>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <Hint
-                  text={
-                    pickedCorpus.length === 0
-                      ? "至少勾一份。"
-                      : "只导入、只检索勾选的；计分项不在勾选语料里的题会找不到。"
-                  }
-                />
-              </div>
-            </div>
-            <div className="ev-launch-actions evb-launch-actions">
-              <small>
-                {savedConfigs.length
-                  ? `将按顺序跑已保存的 ${savedConfigs.length} 组配置，放进同一份批次报告；表单上没保存的修改不会跑。`
-                  : "想一次对比几组配置：调好一组点「保存为一组配置」，最多 4 组。"}
-              </small>
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={
-                  formInvalid || savedConfigs.length >= MAX_SAVED_CONFIGS
-                }
-                onClick={saveConfig}
-              >
-                保存为一组配置
-                {savedConfigs.length ? `（${savedConfigs.length}/4）` : ""}
-              </button>
-              <button
-                className="primary-button"
-                disabled={
-                  launching ||
-                  Boolean(running) ||
-                  (!savedConfigs.length && formInvalid)
-                }
-                onClick={() => void launch()}
-              >
-                {running
-                  ? "评测进行中…"
-                  : launching
-                    ? "正在启动…"
-                    : savedConfigs.length
-                      ? `开始评测（${savedConfigs.length} 组）`
-                      : "开始评测"}
-              </button>
-            </div>
-            {savedConfigs.length > 0 && (
-              <div className="evb-saved">
-                {savedConfigs.map((item, index) => (
-                  <article key={index} className="evb-saved-card">
-                    <input
-                      value={item.label}
-                      maxLength={40}
-                      aria-label="配置名称"
-                      onChange={(event) =>
-                        setSavedConfigs((items) =>
-                          items.map((entry, position) =>
-                            position === index
-                              ? { ...entry, label: event.target.value }
-                              : entry,
-                          ),
-                        )
-                      }
-                    />
-                    <ul>
-                      {item.summary.map((line, lineIndex) => (
-                        <li key={lineIndex}>{line}</li>
-                      ))}
-                    </ul>
-                    <div className="evb-saved-actions">
-                      <button
-                        type="button"
-                        className="ev-link"
-                        onClick={() => loadConfig(item.form)}
-                      >
-                        载入到表单
-                      </button>
-                      <button
-                        type="button"
-                        className="ev-link"
-                        onClick={() =>
-                          setSavedConfigs((items) =>
-                            items.filter((_, position) => position !== index),
-                          )
-                        }
-                      >
-                        删除
-                      </button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            )}
-            {runningRun && (
-              <div className="ev-progress" aria-live="polite">
-                <div className="ev-progress-track">
-                  <div
-                    className="ev-progress-fill"
-                    style={{ width: `${progressPercent(runningRun)}%` }}
-                  />
-                </div>
-                <span>
-                  {runningRun.progress?.done ?? 0} /{" "}
-                  {runningRun.progress?.total || "…"}{" "}
-                  {runningRun.kind === "special" ? "题" : "次检索"}
-                </span>
-              </div>
-            )}
-            {runningRun &&
-              runningRun.kind !== "special" &&
-              progressBreakdown(runningRun, suites) && (
-                <p className="ev-progress-note">
-                  {progressBreakdown(runningRun, suites)}
-                </p>
-              )}
-          </div>
+          <UnifiedEvalLauncher
+            disabled={Boolean(runningRun)}
+            onStarted={(id) => {
+              onNavigate(`/eval/batches/${encodeURIComponent(id)}`);
+              void refreshRuns();
+            }}
+          />
         </>
       )}
       {error && <div className="error-banner">{error}</div>}
@@ -4203,6 +3324,12 @@ function RunHistory({
   running: boolean;
   onRerun: (id: string) => void;
 }) {
+  const toast = useToast();
+  const historyRows = runs.filter(
+    (run, index) =>
+      !run.batch ||
+      runs.findIndex((item) => item.batch?.id === run.batch?.id) === index,
+  );
   const [noteTarget, setNoteTarget] = useState<EvalRunBrief | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [noteSaving, setNoteSaving] = useState(false);
@@ -4216,7 +3343,7 @@ function RunHistory({
       onNote(value.id, value.note);
       setNoteTarget(null);
     } catch (reason) {
-      setNoteError((reason as Error).message);
+      toast("error", errorText(reason));
     } finally {
       setNoteSaving(false);
     }
@@ -4326,7 +3453,61 @@ function RunHistory({
             </tr>
           </thead>
           <tbody>
-            {runs.map((item) => {
+            {historyRows.map((item) => {
+              if (item.batch) {
+                const members = runs.filter(
+                  (run) => run.batch?.id === item.batch?.id,
+                );
+                const done = members.filter(
+                  (run) => run.status === "completed",
+                ).length;
+                const active = members.find(
+                  (run) => run.status === "running" || run.status === "queued",
+                );
+                const status =
+                  active?.status ??
+                  (done === members.length ? "completed" : "failed");
+                return (
+                  <tr key={item.batch.id}>
+                    <td>—</td>
+                    <td>{formatTime(item.created)}</td>
+                    <td>评测报告</td>
+                    <td>{SPLIT_LABELS[item.config.split ?? ""] ?? "题集"}</td>
+                    <td>{item.config.dataset_size ?? "—"}</td>
+                    <td>
+                      {members.length} 组配置 · 完成 {done}/{members.length}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="link-button button-sm"
+                        onClick={() => {
+                          setNoteTarget(item);
+                          setNoteDraft(item.note || "");
+                          setNoteError("");
+                        }}
+                      >
+                        {item.note || "添加备注"}
+                      </button>
+                    </td>
+                    <td>—</td>
+                    <td>
+                      <Tag dot tone={runStatus(status).tone}>
+                        {runStatus(status).label}
+                      </Tag>
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="secondary-button button-sm"
+                        onClick={() => onOpenBatch(item.batch!.id)}
+                      >
+                        查看报告
+                      </button>
+                    </td>
+                  </tr>
+                );
+              }
               const metricsExpanded = expandedMetricRuns.includes(item.id);
               // 指标说明所需统计已随历史列表返回，展开行只做本地渲染，不再触发逐条详情请求。
               const stats = historyEvidenceStats(item.history_metrics);
@@ -4417,17 +3598,6 @@ function RunHistory({
                             title={`这次评测单独指定的参数：\n${paramsSummary(item.params).join("\n")}`}
                           >
                             自定义参数
-                          </Tag>
-                        )}
-                        {item.batch && (
-                          <Tag
-                            size="sm"
-                            tone="accent"
-                            title={`一次跑了 ${item.batch.size} 组配置，点开看批次报告`}
-                            onClick={() => onOpenBatch(item.batch!.id)}
-                          >
-                            批次 · {item.batch.label}（{item.batch.index + 1}/
-                            {item.batch.size}）
                           </Tag>
                         )}
                       </span>
@@ -4941,6 +4111,11 @@ function DatasetBrowser({
   const [referenceAnswer, setReferenceAnswer] = useState("");
   const [questionSplit, setQuestionSplit] = useState("dev");
   const [history, setHistory] = useState("");
+  const [prelude, setPrelude] = useState<EvalPreludeTurn[]>([]);
+  const [contextTarget, setContextTarget] = useState<EvalItem | null>(null);
+  const [contextDraft, setContextDraft] = useState<EvalPreludeTurn[]>([]);
+  const [contextSaving, setContextSaving] = useState(false);
+
   const [aiCount, setAiCount] = useState(1);
   const [aiType, setAiType] = useState("");
   const [aiSplit, setAiSplit] = useState("dev");
@@ -5067,7 +4242,8 @@ function DatasetBrowser({
           ...(answerable ? { evidence_groups: groups } : {}),
           reference_answer: referenceAnswer,
           split: questionSplit,
-          history: readLines(history),
+          history: [],
+          prelude,
         });
       }
       await onSaved();
@@ -5076,6 +4252,7 @@ function DatasetBrowser({
       setGroups([{ label: "", targets: [] }]);
       setReferenceAnswer("");
       setHistory("");
+      setPrelude([]);
       closeAddDialog();
       onToast(
         "success",
@@ -5309,20 +4486,13 @@ function DatasetBrowser({
                         required
                       />
                     </label>
-                    <label className="ev-form-field ev-form-wide">
-                      多轮追问历史 <small>可选，每行一条</small>
-                      <textarea
-                        value={history}
-                        onChange={(event) => setHistory(event.target.value)}
-                        disabled={questionType !== "多轮追问"}
-                        rows={2}
-                      />
-                    </label>
+                    <EvalPreludeEditor value={prelude} onChange={setPrelude} />
                     <button
                       className="primary-button ev-form-submit"
                       type="submit"
                       disabled={
                         saving ||
+                        prelude.some((turn) => !turn.confirmed) ||
                         (answerable &&
                           (!groups.length ||
                             groups.some(
@@ -5478,6 +4648,36 @@ function DatasetBrowser({
                 <p>{item.history.join(" → ")}</p>
               </div>
             )}
+            {item.prelude?.length ? (
+              <details>
+                <summary>已确认前置对话（{item.prelude.length} 轮）</summary>
+                {item.prelude.map((turn, index) => (
+                  <div key={index}>
+                    <p>问：{turn.question}</p>
+                    <p>答：{turn.answer}</p>
+                  </div>
+                ))}
+              </details>
+            ) : null}
+            <button
+              type="button"
+              className="secondary-button button-sm"
+              onClick={() => {
+                setContextTarget(item);
+                setContextDraft(
+                  structuredClone(
+                    item.prelude ??
+                      (item.history ?? []).map((question) => ({
+                        question,
+                        answer: "",
+                        confirmed: false,
+                      })),
+                  ),
+                );
+              }}
+            >
+              编辑前置对话
+            </button>
             <h4>问题：{item.question}</h4>
             {item.answerable ? (
               <ScoringItems items={item.evidence_groups ?? []} />
@@ -5505,6 +4705,69 @@ function DatasetBrowser({
           </article>
         ))}
       </div>
+      {contextTarget && (
+        <DetailDialog
+          open
+          title={`前置对话 · ${contextTarget.id}`}
+          onClose={() => {
+            if (contextSaving) return;
+            if (
+              JSON.stringify(contextDraft) !==
+              JSON.stringify(contextTarget.prelude ?? [])
+            ) {
+              onToast("error", "前置对话尚未保存，请保存或点击取消放弃修改。");
+              return;
+            }
+            setContextTarget(null);
+          }}
+        >
+          <p>{contextTarget.question}</p>
+          <EvalPreludeEditor value={contextDraft} onChange={setContextDraft} />
+          <div className="rg-buttons">
+            <ConfirmPopover
+              when={
+                JSON.stringify(contextDraft) !==
+                JSON.stringify(contextTarget.prelude ?? [])
+              }
+              message="当前前置问答的未保存修改将丢失。"
+              confirmText="放弃修改"
+              onConfirm={() => setContextTarget(null)}
+            >
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={contextSaving}
+              >
+                取消
+              </button>
+            </ConfirmPopover>
+            <button
+              type="button"
+              className={`primary-button${contextSaving ? " is-loading" : ""}`}
+              disabled={
+                contextSaving ||
+                contextDraft.some((turn) => !turn.confirmed) ||
+                (contextTarget.type === "多轮追问" && !contextDraft.length)
+              }
+              onClick={async () => {
+                setContextSaving(true);
+                try {
+                  await saveEvalDatasetPrelude(contextTarget.id, contextDraft);
+                  await onSaved();
+                  setContextTarget(null);
+                  onToast("success", "前置对话已保存");
+                } catch (reason) {
+                  onToast("error", errorText(reason));
+                } finally {
+                  setContextSaving(false);
+                }
+              }}
+            >
+              保存
+            </button>
+          </div>
+        </DetailDialog>
+      )}
     </div>
   );
 }

@@ -1,4 +1,11 @@
-import { Fragment, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import {
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from "react";
 import { ChunkOriginalDialog, type ChunkOriginal } from "./ChunkOriginalDialog";
 import { DetailDialog } from "./DetailDialog";
 import {
@@ -3090,7 +3097,9 @@ function AgentLog({ question }: { question: EvalQuestion }) {
                 ))}
                 <button
                   type="button"
-                  className={activeStep === rounds.length + 1 ? "is-active" : ""}
+                  className={
+                    activeStep === rounds.length + 1 ? "is-active" : ""
+                  }
                   aria-current={
                     activeStep === rounds.length + 1 ? "step" : undefined
                   }
@@ -4153,6 +4162,8 @@ export type BatchColumn = {
   key: string;
   title: string;
   mode: EvalMode;
+  kind?: EvalRun["kind"];
+  summary?: EvalSummary | null;
   config?: EvalConfig;
   // 这组配置单独指定的参数，卡片上标「自定义」。
   params?: EvalParams;
@@ -4223,8 +4234,10 @@ export function batchColumns(
         );
         columns.push({
           key: `${arm.id}:${mode}`,
-          title: `${arm.label} · ${MODE_NAMES[mode]}`,
+          title: `${arm.label} · ${run.kind === "generation" ? "生成评测 · " : ""}${MODE_NAMES[mode]}`,
           mode,
+          kind: run.kind,
+          summary: run.summary,
           config: run.config,
           params: run.params,
           questions,
@@ -4263,6 +4276,24 @@ export function BatchModeCards({ columns }: { columns: BatchColumn[] }) {
       column.mode === "agent",
       column.params,
     );
+    if (column.kind === "generation") {
+      const generationRows: ModeRow[] = (
+        [
+          ["correctness", "答案正确性"],
+          ["faithfulness", "忠实度"],
+          ["citation_validity", "引用有效性"],
+          ["refusal_accuracy", "拒答正确率"],
+        ] as const
+      ).map(([key, label]) => ({
+        label,
+        group: "result",
+        [column.mode]: {
+          value: percent(column.summary?.[key]),
+          note: "按生成评测规则统计",
+        },
+      }));
+      rows.unshift(...generationRows);
+    }
     return { column, questions, rows };
   });
   const best = new Map<string, number>();
@@ -4604,6 +4635,19 @@ export function BatchQuestionList({
   const verdictOf = (column: BatchColumn, key: string) => {
     const question = columnQuestion(column, key);
     if (!question) return null;
+    if (column.kind === "generation") {
+      const judgement = question.judgement;
+      if (!judgement) return { key: "none", label: "尚未评分" };
+      return {
+        key:
+          judgement.correctness === 1
+            ? "good"
+            : judgement.correctness > 0
+              ? "warn"
+              : "bad",
+        label: `回答${judgement.correctness === 1 ? "正确" : judgement.correctness > 0 ? "部分正确" : "未通过"} · ${judgement.correctness * 100} 分`,
+      };
+    }
     return column.mode === "fixed"
       ? fixedVerdict(question)
       : agentVerdict(question);
@@ -4708,6 +4752,25 @@ export function BatchQuestionList({
                 </button>
                 {open && (
                   <div className="ev-question-body">
+                    {question.prelude?.length ? (
+                      <details>
+                        <summary>
+                          前置对话（{question.prelude.length} 轮）
+                        </summary>
+                        {question.prelude.map((turn, index) => (
+                          <div key={index}>
+                            <p>
+                              <strong>问：</strong>
+                              {turn.question}
+                            </p>
+                            <p>
+                              <strong>答：</strong>
+                              {turn.answer}
+                            </p>
+                          </div>
+                        ))}
+                      </details>
+                    ) : null}
                     {question.answerable ? (
                       <ScoringItems items={texts} />
                     ) : (
@@ -4731,17 +4794,54 @@ export function BatchQuestionList({
                             {!item ? (
                               <p className="ev-muted-note">这一列没跑这题。</p>
                             ) : column.mode === "fixed" ? (
-                              <FixedLog
-                                question={item}
-                                params={
-                                  column.config
-                                    ? fixedParams(column.config)
-                                    : []
-                                }
-                                config={
-                                  (column.config ?? {}) as EvalRun["config"]
-                                }
-                              />
+                              <>
+                                {column.kind === "generation" && (
+                                  <section className="ag-evidence-card">
+                                    <h4>生成回答</h4>
+                                    <p style={{ whiteSpace: "pre-wrap" }}>
+                                      {item.answer || "尚无回答"}
+                                    </p>
+                                    {item.reference_answer && (
+                                      <details>
+                                        <summary>参考答案</summary>
+                                        <p>{item.reference_answer}</p>
+                                      </details>
+                                    )}
+                                    {item.judgement && (
+                                      <dl>
+                                        {(
+                                          [
+                                            ["correctness", "答案正确性"],
+                                            ["faithfulness", "忠实度"],
+                                            ["citation", "引用有效性"],
+                                          ] as const
+                                        ).map(([key, label]) => (
+                                          <div key={key}>
+                                            <dt>
+                                              {label}：
+                                              {item.judgement![key] * 100}%
+                                            </dt>
+                                            <dd>
+                                              {item.judgement![`${key}_reason`]}
+                                            </dd>
+                                          </div>
+                                        ))}
+                                      </dl>
+                                    )}
+                                  </section>
+                                )}
+                                <FixedLog
+                                  question={item}
+                                  params={
+                                    column.config
+                                      ? fixedParams(column.config)
+                                      : []
+                                  }
+                                  config={
+                                    (column.config ?? {}) as EvalRun["config"]
+                                  }
+                                />
+                              </>
                             ) : (
                               <>
                                 {item.agent?.error && (

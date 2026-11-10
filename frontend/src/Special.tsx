@@ -1,3 +1,6 @@
+import EvalPreludeEditor from "./EvalPreludeEditor";
+import type { EvalPreludeTurn } from "./api";
+import "./UnifiedEval.css";
 import { ScoringItems } from "./ScoringItems";
 import { useEffect, useState } from "react";
 import { SpecialAgentResults, rewriteLabel } from "./AgentEval";
@@ -9,7 +12,6 @@ import {
   getEvalRun,
   getEvalSuite,
   listEvalSuites,
-  startSpecialRun,
   updateEvalSuite,
   updateEvalSuiteItem,
   type EvalSpecialQuestion,
@@ -38,26 +40,6 @@ type Props = {
   onToast: ShowToast;
 };
 
-const METHOD_LABELS: Record<EvalSuiteMethod, string> = {
-  retrieval: "检索",
-  answer: "回答",
-  dialogue: "多轮对话",
-};
-const METHOD_HINTS: Record<EvalSuiteMethod, string> = {
-  retrieval: "和线上一样检索，全部计分项的目标分片交给模型算通过。",
-  answer: "检索后回答，和参考答案要点一致算通过。题目要有参考答案。",
-  dialogue: "按顺序问完一段对话，最后一问答对算通过。",
-};
-const SEARCH_LABELS: Record<EvalSuiteSearchMode, string> = {
-  hybrid: "混合检索",
-  dense: "只用向量",
-  keyword: "只用关键词",
-};
-const SEARCH_HINTS: Record<EvalSuiteSearchMode, string> = {
-  hybrid: "向量 + 关键词，和线上一样。",
-  dense: "只用向量，看向量本身找不找得到。",
-  keyword: "只用关键词（BM25），看字面匹配找不找得到。",
-};
 // 计分项最后的去向（检索诊断里的状态）。
 const EVIDENCE_STATUS: Record<string, string> = {
   returned: "交给了回答模型",
@@ -77,36 +59,6 @@ function formatTime(value: string | null | undefined) {
   return date.getFullYear() === new Date().getFullYear()
     ? text
     : `${date.getFullYear()}-${text}`;
-}
-
-// 检索方式选择：多轮对话方式不用（它走完整问答流程）。随时可以改，不影响已有题目。
-function SearchModeField({
-  value,
-  onChange,
-}: {
-  value: EvalSuiteSearchMode;
-  onChange: (value: EvalSuiteSearchMode) => void;
-}) {
-  return (
-    <label className="rg-field is-top">
-      <span>检索方式</span>
-      <div className="sp-method-field">
-        <select
-          value={value}
-          onChange={(event) =>
-            onChange(event.target.value as EvalSuiteSearchMode)
-          }
-        >
-          {(Object.keys(SEARCH_LABELS) as EvalSuiteSearchMode[]).map((key) => (
-            <option key={key} value={key}>
-              {SEARCH_LABELS[key]}
-            </option>
-          ))}
-        </select>
-        <small>{SEARCH_HINTS[value]} 随时可以改。</small>
-      </div>
-    </label>
-  );
 }
 
 function lines(text: string) {
@@ -142,8 +94,6 @@ function SuiteList({
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [method, setMethod] = useState<EvalSuiteMethod>("retrieval");
-  const [searchMode, setSearchMode] = useState<EvalSuiteSearchMode>("hybrid");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -158,8 +108,8 @@ function SuiteList({
       const created = await createEvalSuite({
         name: name.trim(),
         description: description.trim() || undefined,
-        method,
-        search_mode: searchMode,
+        method: "retrieval",
+        search_mode: "hybrid",
       });
       onOpen(created.id);
     } catch (reason) {
@@ -172,14 +122,14 @@ function SuiteList({
   return (
     <div className="rg-root">
       <div className="rg-intro">
-        <p>每个专项盯一个方向的难题，分数低正常，不计入调参分数。</p>
+        <p>管理自建题集；运行时在统一评测中选择题集和配置。</p>
         {!creating && (
           <button
             type="button"
             className="primary-button"
             onClick={() => setCreating(true)}
           >
-            新建专项
+            新建题集
           </button>
         )}
       </div>
@@ -204,29 +154,6 @@ function SuiteList({
               placeholder="这个专项检查什么方向（可选）"
             />
           </label>
-          <label className="rg-field is-top">
-            <span>评测方式</span>
-            <div className="sp-method-field">
-              <select
-                value={method}
-                onChange={(event) =>
-                  setMethod(event.target.value as EvalSuiteMethod)
-                }
-              >
-                {(Object.keys(METHOD_LABELS) as EvalSuiteMethod[]).map(
-                  (key) => (
-                    <option key={key} value={key}>
-                      {METHOD_LABELS[key]}
-                    </option>
-                  ),
-                )}
-              </select>
-              <small>{METHOD_HINTS[method]} 加了题目以后不能再改。</small>
-            </div>
-          </label>
-          {method !== "dialogue" && (
-            <SearchModeField value={searchMode} onChange={setSearchMode} />
-          )}
           <div className="rg-buttons">
             <button
               type="button"
@@ -263,17 +190,7 @@ function SuiteList({
                 className="rg-set"
                 onClick={() => onOpen(item.id)}
               >
-                <span className="rg-set-name">
-                  {item.name}
-                  <Tag size="sm" hue className="is-after">
-                    {item.method_label}
-                  </Tag>
-                  {item.method !== "dialogue" && (
-                    <Tag size="sm" outline plain className="is-after">
-                      {item.search_mode_label}
-                    </Tag>
-                  )}
-                </span>
+                <span className="rg-set-name">{item.name}</span>
                 {item.description && (
                   <span className="rg-set-description">{item.description}</span>
                 )}
@@ -321,13 +238,9 @@ function SuiteDetail({
   const [runId, setRunId] = useState<string | null>(null);
   const [section, setSection] = useState<EvalSpecialSection | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
-  const [starting, setStarting] = useState(false);
-  const [compareMemory, setCompareMemory] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [method, setMethod] = useState<EvalSuiteMethod>("retrieval");
-  const [searchMode, setSearchMode] = useState<EvalSuiteSearchMode>("hybrid");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -382,28 +295,14 @@ function SuiteDetail({
     };
   }, [runId, selectedStatus]);
 
-  async function start() {
-    setStarting(true);
-    try {
-      const created = await startSpecialRun([suiteId], compareMemory);
-      await load();
-      setRunId(created.id);
-      setTab("runs");
-    } catch (reason) {
-      onToast("error", (reason as Error).message);
-    } finally {
-      setStarting(false);
-    }
-  }
-
   async function saveInfo() {
     try {
       setData({
         ...(await updateEvalSuite(suiteId, {
           name: name.trim(),
           description: description.trim(),
-          method,
-          search_mode: searchMode,
+          method: data!.method,
+          search_mode: data!.search_mode,
         })),
       });
       setRenaming(false);
@@ -470,34 +369,6 @@ function SuiteDetail({
               placeholder="可选"
             />
           </label>
-          <label className="rg-field is-top">
-            <span>评测方式</span>
-            <div className="sp-method-field">
-              <select
-                value={method}
-                disabled={data.items.length > 0}
-                onChange={(event) =>
-                  setMethod(event.target.value as EvalSuiteMethod)
-                }
-              >
-                {(Object.keys(METHOD_LABELS) as EvalSuiteMethod[]).map(
-                  (key) => (
-                    <option key={key} value={key}>
-                      {METHOD_LABELS[key]}
-                    </option>
-                  ),
-                )}
-              </select>
-              <small>
-                {data.items.length > 0
-                  ? "已经有题目，不能再改评测方式。"
-                  : METHOD_HINTS[method]}
-              </small>
-            </div>
-          </label>
-          {method !== "dialogue" && (
-            <SearchModeField value={searchMode} onChange={setSearchMode} />
-          )}
           <div className="rg-buttons">
             <button
               type="button"
@@ -519,17 +390,7 @@ function SuiteDetail({
       ) : (
         <div className="rg-title">
           <div>
-            <h3>
-              {data.name}
-              <Tag size="sm" hue className="is-after">
-                {data.method_label}
-              </Tag>
-              {data.method !== "dialogue" && (
-                <Tag size="sm" outline plain className="is-after">
-                  {data.search_mode_label}
-                </Tag>
-              )}
-            </h3>
+            <h3>{data.name}</h3>
             {data.description && <p>{data.description}</p>}
           </div>
           <div className="rg-buttons">
@@ -539,8 +400,6 @@ function SuiteDetail({
               onClick={() => {
                 setName(data.name);
                 setDescription(data.description);
-                setMethod(data.method);
-                setSearchMode(data.search_mode);
                 setRenaming(true);
               }}
             >
@@ -576,38 +435,6 @@ function SuiteDetail({
         </div>
       )}
 
-      <div className="rg-launch">
-        <div className="rg-launch-option">
-          <button
-            type="button"
-            className="primary-button"
-            disabled={starting || Boolean(running) || data.items.length === 0}
-            onClick={() => void start()}
-          >
-            运行这个专项
-          </button>
-          <span>{METHOD_HINTS[data.method]}</span>
-        </div>
-        {data.method === "dialogue" && (
-          <div className="sp-switch-line">
-            <button
-              type="button"
-              role="switch"
-              aria-checked={compareMemory}
-              className={`sp-switch ${compareMemory ? "is-on" : ""}`}
-              onClick={() => setCompareMemory(!compareMemory)}
-            >
-              <span />
-            </button>
-            <span>
-              对比记忆参数：压缩阈值、保留条数各调大调小再跑，共 5
-              组，大模型调用是 5 倍。
-            </span>
-          </div>
-        )}
-        {running && <div className="rg-progress">正在运行…</div>}
-      </div>
-
       <div className="document-detail-tabs ev-tabs rg-tabs" role="tablist">
         <button
           type="button"
@@ -630,7 +457,9 @@ function SuiteDetail({
       </div>
 
       {tab === "runs" && data.runs.length === 0 && (
-        <p className="rg-muted">还没有运行过，点上面的「运行」按钮。</p>
+        <p className="rg-muted">
+          还没有历史运行记录。可在发起评测中选择此题集。
+        </p>
       )}
       {tab === "runs" && data.runs.length > 0 && (
         <section className="rg-section">
@@ -681,7 +510,6 @@ function SuiteDetail({
           {adding && (
             <ItemForm
               suiteId={suiteId}
-              method={data.method}
               types={types}
               onToast={onToast}
               onDone={(value) => {
@@ -699,7 +527,6 @@ function SuiteDetail({
                 <li key={item.id}>
                   <ItemForm
                     suiteId={suiteId}
-                    method={data.method}
                     initial={item}
                     types={types}
                     onToast={onToast}
@@ -815,14 +642,12 @@ function RunChip({
 // 计分项结构与题型无关；所有带检索资料的题统一填写名称和目标分片。
 function ItemForm({
   suiteId,
-  method,
   initial,
   types,
   onToast,
   onDone,
 }: {
   suiteId: string;
-  method: EvalSuiteMethod;
   initial?: EvalSuiteItem;
   types: string[];
   onToast: ShowToast;
@@ -830,27 +655,40 @@ function ItemForm({
 }) {
   const [type, setType] = useState(initial?.type ?? "");
   const hues = typeHues(types);
+  const [answerable, setAnswerable] = useState(initial?.answerable !== false);
   const [question, setQuestion] = useState(initial?.question ?? "");
   const [evidence, setEvidence] = useState(
     (initial?.evidence ?? []).join("\n"),
   );
   const [groups, setGroups] = useState<EvalScoringGroup[]>(
-    initial?.evidence_groups ??
-      (method === "answer" ? [] : [{ label: "", targets: [] }]),
+    initial?.evidence_groups ?? [{ label: "", targets: [] }],
   );
-  const grouped = method !== "dialogue";
+  const grouped = true;
   const [reference, setReference] = useState(initial?.reference_answer ?? "");
   const [turns, setTurns] = useState((initial?.turns ?? []).join("\n"));
+  const [prelude, setPrelude] = useState<EvalPreludeTurn[]>(
+    initial?.prelude ??
+      (initial?.turns ?? []).map((question) => ({
+        question,
+        answer: "",
+        confirmed: false,
+      })),
+  );
   const [busy, setBusy] = useState(false);
 
   async function submit() {
     setBusy(true);
     const payload = {
+      version: 2 as const,
       question: question.trim(),
-      evidence: grouped ? [] : method === "dialogue" ? [] : lines(evidence),
-      ...(grouped && groups.length > 0 ? { evidence_groups: groups } : {}),
+      answerable,
+      evidence: [],
+      ...(answerable && grouped && groups.length > 0
+        ? { evidence_groups: groups }
+        : {}),
       reference_answer: reference.trim() || null,
-      turns: method === "dialogue" ? lines(turns) : [],
+      turns: [],
+      prelude,
       type: type.trim() || null,
     };
     try {
@@ -868,49 +706,35 @@ function ItemForm({
 
   const ready =
     question.trim() &&
-    (method !== "retrieval" ||
-      (grouped
-        ? groups.length > 0 &&
-          groups.every(
-            (group) => group.label.trim() && group.targets.length > 0,
-          )
-        : lines(evidence).length > 0)) &&
-    (!grouped ||
-      groups.every(
+    (!answerable ||
+      (groups.every(
         (group) => group.label.trim() && group.targets.length > 0,
-      )) &&
-    (method === "retrieval" || reference.trim()) &&
-    (method !== "dialogue" || lines(turns).length > 0);
+      ) &&
+        (groups.length > 0 || reference.trim()))) &&
+    prelude.every((turn) => turn.confirmed);
   return (
     <div className="rg-form">
       <div className="rg-form-title">{initial ? "编辑题目" : "添加题目"}</div>
-      {method === "dialogue" && (
-        <label className="rg-field is-top">
-          <span>前面的提问</span>
-          <textarea
-            value={turns}
-            rows={4}
-            onChange={(event) => setTurns(event.target.value)}
-            placeholder="每行一轮，按顺序问"
-            autoFocus
-          />
-        </label>
-      )}
+      <EvalPreludeEditor value={prelude} onChange={setPrelude} />
       <label className="rg-field">
-        <span>{method === "dialogue" ? "最后一问" : "问题"}</span>
+        <span>问题</span>
         <input
           value={question}
           maxLength={500}
           onChange={(event) => setQuestion(event.target.value)}
-          placeholder={
-            method === "dialogue"
-              ? "要用到前面内容的问题，例如「回到我最开始问的那个」"
-              : "完整的问题"
-          }
-          autoFocus={method !== "dialogue"}
+          placeholder="本次评测的目标问题"
+          autoFocus
         />
       </label>
-      {grouped && (
+      <label className="rg-field">
+        <span>可回答</span>
+        <input
+          type="checkbox"
+          checked={answerable}
+          onChange={(event) => setAnswerable(event.target.checked)}
+        />
+      </label>
+      {answerable && grouped && (
         <div className="rg-field is-top">
           <span>计分项</span>
           <ScoringItemEditor groups={groups} onChange={setGroups} />
@@ -952,9 +776,7 @@ function ItemForm({
           maxLength={2000}
           rows={2}
           onChange={(event) => setReference(event.target.value)}
-          placeholder={
-            method === "retrieval" ? "可选" : "评审模型拿回答和它比对"
-          }
+          placeholder="生成评测时用来评审回答；检索评测可不填"
         />
       </label>
       <div className="rg-buttons">
@@ -968,7 +790,7 @@ function ItemForm({
         </button>
         <button
           type="button"
-          className="primary-button"
+          className={`primary-button${busy ? " is-loading" : ""}`}
           onClick={() => void submit()}
           disabled={busy || !ready}
         >

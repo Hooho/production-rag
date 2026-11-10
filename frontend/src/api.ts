@@ -1051,6 +1051,7 @@ export function getChunkOriginals(chunkIds: string[]) {
 
 // 评测：题目、单次评测结果、历次评测列表与两次对比，字段与后端 app/evaluation 保持一致。
 export type EvalItem = {
+  prelude?: EvalPreludeTurn[];
   evidence_groups?: EvalScoringGroup[];
   id: string;
   question: string;
@@ -1191,6 +1192,8 @@ export type EvalFlowFields = {
   flow_latency_ms?: number | null;
 };
 export type EvalQuestion = {
+  prelude?: EvalPreludeTurn[];
+  reference_answer?: string | null;
   id: string;
   question: string;
   type: string;
@@ -1751,6 +1754,11 @@ export type EvalBatchReport = {
     progress: { done: number; total: number } | null;
     error: string | null;
     params: EvalParams;
+    kind?: EvalRunBrief["kind"];
+    modes?: EvalMode[];
+    methods?: string[];
+    effective?: EvalEffective;
+    attempts?: { status: string; error?: string; finished?: string }[];
   }[];
   config_diff: { key: string; values: (RuntimeSettingValue | null)[] }[];
   runs: (EvalRun | null)[];
@@ -1917,6 +1925,8 @@ export function listEvalTargetChunks() {
   return request<{ items: EvalScoringTarget[] }>("/eval/target-chunks");
 }
 export type EvalSuiteItem = {
+  answerable?: boolean;
+  prelude?: EvalPreludeTurn[];
   evidence_groups?: EvalScoringGroup[];
   id: string;
   question: string;
@@ -1933,6 +1943,9 @@ export type EvalSuiteFull = EvalSuiteBrief & {
   runs: EvalSuiteRunEntry[];
 };
 export type EvalSuiteItemInput = {
+  version?: 1 | 2;
+  answerable?: boolean;
+  prelude?: EvalPreludeTurn[];
   evidence_groups?: EvalScoringGroup[];
   question: string;
   evidence?: string[];
@@ -4646,6 +4659,46 @@ export function decideCheck(
         decision,
         edit: edit ?? null,
       }),
+    },
+  );
+}
+
+export type EvalPreludeTurn = {
+  question: string;
+  answer: string;
+  confirmed: boolean;
+};
+export function generateEvalPrelude(
+  question: string,
+  prelude: EvalPreludeTurn[],
+  corpusIds: string[],
+) {
+  return request<{ answer: string; sources: Source[] }>(
+    "/eval/prelude/answer",
+    {
+      method: "POST",
+      body: JSON.stringify({ question, prelude, corpus_ids: corpusIds }),
+    },
+  );
+}
+
+export function retryEvalArm(batchId: string, runId: string) {
+  return request<{ id: string; run_id: string }>(
+    `/eval/batches/${batchId}/arms/${runId}/retry`,
+    { method: "POST" },
+  );
+}
+
+export function saveEvalDatasetPrelude(
+  itemId: string,
+  prelude: EvalPreludeTurn[],
+) {
+  return request<EvalItem>(
+    `/eval/dataset/items/${encodeURIComponent(itemId)}/prelude`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prelude }),
     },
   );
 }

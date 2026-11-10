@@ -1,0 +1,117 @@
+.unified-eval-launch {
+  border: 1px solid var(--border, var(--t-cdddec, #d0dfec));
+  padding: 16px;
+  background: var(--t-ffffff, #fff);
+}
+.unified-eval-launch header,
+.unified-eval-launch footer {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.unified-eval-launch header span,
+.unified-eval-launch footer span,
+.unified-eval-launch small {
+  color: var(--t-6b7f93, #6b849d);
+  font-size: 12px;
+}
+.unified-eval-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr);
+  gap: 24px;
+  margin: 16px 0;
+}
+.unified-eval-row {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  margin: 0;
+  padding: 9px 0;
+  font: inherit;
+  letter-spacing: normal;
+}
+.unified-eval-row > span {
+  padding-top: 5px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.unified-eval-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  align-items: center;
+  min-height: 32px;
+}
+.unified-eval-options label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  margin: 0;
+  font: inherit;
+  letter-spacing: normal;
+}
+.unified-eval-options input {
+  width: auto;
+}
+.unified-eval-row input,
+.unified-eval-row select {
+  min-width: 0;
+}
+.unified-eval-configs article {
+  border: 1px solid var(--t-cdddec, #d0dfec);
+  padding: 12px;
+  margin: 10px 0;
+}
+.unified-eval-configs article.is-current {
+  border-color: var(--t-2563eb, #2563eb);
+  background: var(--t-eff6ff, #f4f8ff);
+}
+.unified-eval-configs article p {
+  margin: 6px 0;
+}
+.unified-eval-configs article > div {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.unified-eval-editor footer {
+  margin-top: 12px;
+}
+@media (max-width: 1000px) {
+  .unified-eval-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.unified-eval-prelude-heading,
+.eval-prelude-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.eval-prelude-editor {
+  grid-column: 1/-1;
+}
+.eval-prelude-editor article {
+  border: 1px solid var(--t-cdddec, #d0dfec);
+  padding: 12px;
+  margin: 10px 0;
+}
+.eval-prelude-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+  font: inherit;
+  letter-spacing: normal;
+}
+.eval-prelude-editor details label {
+  flex-direction: row;
+  align-items: center;
+}
+.eval-prelude-editor details input {
+  width: auto;
+}

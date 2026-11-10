@@ -1,6 +1,10 @@
+import { SpecialSection } from "./Special";
+import { useToast, errorText } from "./Toast";
+import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import { useEffect, useState } from "react";
 import {
   getEvalBatch,
+  retryEvalArm,
   type EvalBatchReport,
   type RuntimeSettingValue,
 } from "./api";
@@ -50,8 +54,11 @@ export default function BatchReport({
   onBack: () => void;
   onOpenRun: (id: string) => void;
 }) {
+  const toast = useToast();
+  const [retrying, setRetrying] = useState<string | null>(null);
   const [report, setReport] = useState<EvalBatchReport | null>(null);
   const [error, setError] = useState("");
+  const [refresh, setRefresh] = useState(0);
   const live = Boolean(
     report?.arms.some(
       (arm) => arm.status === "running" || arm.status === "queued",
@@ -62,6 +69,7 @@ export default function BatchReport({
   useEffect(() => {
     let cancelled = false;
     let timer: number | undefined;
+    let warned = false;
     const load = () =>
       getEvalBatch(batchId)
         .then((data) => {
@@ -75,13 +83,21 @@ export default function BatchReport({
           )
             timer = window.setTimeout(load, 5000);
         })
-        .catch((reason: Error) => !cancelled && setError(reason.message));
+        .catch((reason) => {
+          if (cancelled) return;
+          setError(errorText(reason));
+          if (!warned) {
+            toast("error", errorText(reason));
+            warned = true;
+          }
+          timer = window.setTimeout(load, 5000);
+        });
     void load();
     return () => {
       cancelled = true;
       if (timer) window.clearTimeout(timer);
     };
-  }, [batchId]);
+  }, [batchId, refresh, toast]);
 
   if (error && !report) {
     return (
@@ -89,11 +105,28 @@ export default function BatchReport({
         <button className="ev-back-button" onClick={onBack}>
           ← 返回历次记录
         </button>
-        <p className="evb-error">{error}</p>
+        <p>报告暂时无法读取，请稍后重试。</p>
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={() => {
+            setError("");
+            setRefresh((value) => value + 1);
+          }}
+        >
+          重试
+        </button>
       </section>
     );
   }
-  if (!report) return <p className="ev-muted-note">正在读取批次报告…</p>;
+  if (!report)
+    return (
+      <LoadingSkeleton label="正在读取报告">
+        <SkeletonBlock />
+        <SkeletonBlock />
+        <SkeletonBlock />
+      </LoadingSkeleton>
+    );
 
   const columns = batchColumns(
     report.arms.map((arm, index) => ({
@@ -111,7 +144,7 @@ export default function BatchReport({
       </button>
       <header className="evb-head">
         <h3>
-          批次报告
+          评测对比报告
           {report.name ? ` · ${report.name}` : ""}
         </h3>
         <span>
@@ -127,7 +160,10 @@ export default function BatchReport({
           return (
             <article key={arm.id} className="evb-arm">
               <div className="evb-arm-title">
-                <strong>{arm.label}</strong>
+                <strong>
+                  {arm.label}
+                  {report.arms[0]?.id === arm.id ? " · 比较基准" : ""}
+                </strong>
                 <Tag size="sm" dot tone={status.tone}>
                   {status.label}
                   {arm.status === "running" && arm.progress?.total
@@ -135,15 +171,93 @@ export default function BatchReport({
                     : ""}
                 </Tag>
               </div>
-              <p>{lines.length ? lines.join("；") : "参数全部跟随系统设置"}</p>
+              <p>
+                {arm.kind === "generation"
+                  ? "生成评测"
+                  : arm.kind === "special"
+                    ? "历史专项"
+                    : "检索评测"}{" "}
+                ·{" "}
+                {arm.modes
+                  ?.map((mode) => (mode === "fixed" ? "固定流程" : "Agent"))
+                  .join("＋")}{" "}
+                ·{" "}
+                {arm.methods
+                  ?.map(
+                    (method) =>
+                      ({ dense: "向量", keyword: "关键词", graph: "图检索" })[
+                        method
+                      ] ?? method,
+                  )
+                  .join("＋")}
+              </p>
+              {arm.effective && (
+                <details>
+                  <summary>运行配置快照</summary>
+                  <p>
+                    大模型：{arm.effective.llm?.model} · 评审模型：
+                    {arm.effective.judge?.model}
+                  </p>
+                  <dl>
+                    {Object.entries(arm.effective.settings ?? {}).map(
+                      ([key, value]) => (
+                        <div key={key}>
+                          <dt>{settingLabel(key)}</dt>
+                          <dd>{String(value)}</dd>
+                        </div>
+                      ),
+                    )}
+                  </dl>
+                  <p>
+                    提示词：
+                    {Object.entries(arm.effective.prompts ?? {})
+                      .map(
+                        ([key, value]) =>
+                          `${PROMPT_LABELS[key] ?? key}: ${value}`,
+                      )
+                      .join(" · ")}
+                  </p>
+                </details>
+              )}
+              <p>
+                {lines.length
+                  ? lines.join("；")
+                  : "使用本次开始时固定的系统参数"}
+              </p>
               {arm.error && <p className="evb-error">{arm.error}</p>}
-              <button
-                type="button"
-                className="ev-link"
-                onClick={() => onOpenRun(arm.id)}
-              >
-                查看这组详情
-              </button>
+              {arm.attempts?.length ? (
+                <details>
+                  <summary>历史尝试（{arm.attempts.length} 次）</summary>
+                  {arm.attempts.map((attempt, index) => (
+                    <p key={index}>
+                      第 {index + 1} 次 · {runStatus(attempt.status).label} ·{" "}
+                      {attempt.error || attempt.finished}
+                    </p>
+                  ))}
+                </details>
+              ) : null}
+              {(arm.status === "failed" || arm.status === "interrupted") && (
+                <button
+                  type="button"
+                  className={`secondary-button button-sm${retrying === arm.id ? " is-loading" : ""}`}
+                  disabled={Boolean(retrying) || live}
+                  onClick={async () => {
+                    setRetrying(arm.id);
+                    try {
+                      await retryEvalArm(batchId, arm.id);
+                      setReport(await getEvalBatch(batchId));
+                      setRefresh((value) => value + 1);
+                      toast("success", "已在本报告内重试此配置");
+                    } catch (reason) {
+                      toast("error", errorText(reason));
+                    } finally {
+                      setRetrying(null);
+                    }
+                  }}
+                >
+                  重试此配置
+                </button>
+              )}
             </article>
           );
         })}
@@ -179,6 +293,46 @@ export default function BatchReport({
         </div>
       )}
 
+      {report.runs.some(
+        (run) => run?.kind === "special" || run?.variants?.length,
+      ) && (
+        <section className="evb-block">
+          <h4>历史评测结果</h4>
+          <p className="ev-muted-note">保留原计分规则与原结果。</p>
+          {report.runs.map((run, index) =>
+            run && (run.kind === "special" || run.variants?.length) ? (
+              <details key={run.id}>
+                <summary>{report.arms[index].label} · 原始评测详情</summary>
+                {run.special?.map((section) => (
+                  <SpecialSection key={section.suite_id} section={section} />
+                ))}
+                {run.variants?.length ? (
+                  <table className="ev-table">
+                    <thead>
+                      <tr>
+                        <th>变体</th>
+                        <th>原始统计</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {run.variants.map((variant) => (
+                        <tr key={variant.name}>
+                          <td>{variant.label}</td>
+                          <td>
+                            {Object.entries(variant.summary)
+                              .map(([key, value]) => `${key}: ${value ?? "—"}`)
+                              .join(" · ")}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : null}
+              </details>
+            ) : null,
+          )}
+        </section>
+      )}
       {columns.length === 0 ? (
         <p className="ev-muted-note">
           还没有跑完的组，跑完一组就会显示在下面。
