@@ -679,11 +679,21 @@ def execute_run(
                 store, models, items, split, suites, on_progress, on_item
             )
         result["config"]["modes"] = modes
+        if run["config"].get("version") == 2:
+            result["config"]["corpus"] = run["config"].get("corpus") or []
+        unified_config = {
+            key: run["config"][key]
+            for key in ("version", "methods", "suite_ids")
+            if key in run["config"]
+        }
         run.update(result)
+        run["config"].update(unified_config)
         if generate:
             generation = summarize_generation(result["questions"])
             run["summary"].update(generation)
-            for question_type in QUESTION_TYPES:
+            for question_type in dict.fromkeys(
+                row["type"] for row in result["questions"]
+            ):
                 selected = []
                 for row in result["questions"]:
                     if row["type"] == question_type:

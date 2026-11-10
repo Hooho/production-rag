@@ -752,6 +752,8 @@ _cache = {"at": 0.0, "state": None}
 _overrides = ContextVar("prompt_overrides", default=None)
 # 能在评测里换版本的提示词，以及它属于哪条流程（和 runtime_config.EVAL_GROUPS 同一套分组）。
 EVAL_PROMPTS = {
+    "graph_keywords": "common",
+    "memory_summary": "common",
     "intent": "fixed",
     "sufficiency": "fixed",
     "answer": "fixed",

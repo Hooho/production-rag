@@ -86,6 +86,8 @@ def test_eval_run_with_params(setup, eval_dir, monkeypatch, runtime):
         "sufficiency",
         "answer",
         "agent",
+        "graph_keywords",
+        "memory_summary",
     }
     assert client.get("/eval/params", headers=headers("alice")).status_code == 403
 

@@ -1,3 +1,5 @@
+from .flow import item_history
+
 """Agent 检索评测：同一套调参题让 Agent 跑一遍，看它最后拿到的资料里有没有题目预设的证据（最后命中）。
 
 固定流程的检索评测分三个阶段算命中（候选池 / 重排 / 过滤后），用来调检索参数；
@@ -237,11 +239,19 @@ def evaluate_agent(agent_mode, store, models, item, chunk_texts, positions=None)
     evidence = item.get("evidence") or []
     # 多轮追问题和固定流程一样，用规则补全后的完整问题（评测没有真实的上一轮对话）。
     _, question, _ = plan_queries(item)
+    if item.get("prelude"):
+        question = item["question"]
     started = time.monotonic()
     row = {"question_sent": question, "status": "completed", "error": None}
     try:
         result = agent_mode.run(
-            store, models, EVAL_OWNER, f"eval-{uuid4()}", question, [], None
+            store,
+            models,
+            EVAL_OWNER,
+            f"eval-{uuid4()}",
+            question,
+            item_history(item),
+            None,
         )
         outcome = result.get("agent") or {}
         answer = result.get("answer") or ""
@@ -386,6 +396,8 @@ def base_row(item):
     return {
         "id": item["id"],
         "question": item["question"],
+        "prelude": item.get("prelude") or [],
+        "reference_answer": item.get("reference_answer"),
         "type": item["type"],
         "pair_id": item.get("pair_id"),
         "pair_role": item.get("pair_role"),
@@ -633,7 +645,9 @@ def run_agent_retrieval(
         }
     result["config"]["agent"] = agent_config(models)
     result["summary"].update(summarize_agent(rows))
-    for question_type in QUESTION_TYPES:
+    for question_type in dict.fromkeys(
+        [*QUESTION_TYPES, *(row["type"] for row in rows)]
+    ):
         selected = [row for row in rows if row["type"] == question_type]
         if selected:
             result["by_type"].setdefault(question_type, {}).update(

@@ -1,3 +1,5 @@
+from contextvars import copy_context
+from ..retrieval_policy import selected_methods, selected_scope
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 import logging
@@ -85,6 +87,8 @@ class DocumentSearchTool:
         config = runtime_snapshot()
         # 召回方式：不传就是向量 + 关键词，设置页打开了图检索再加上图（固定流程、Agent 的 hybrid 都走这里）。
         # 调用方明确传了 methods（Agent 的 vector / keyword 模式、评测的消融）时，只有里面有 graph 才走图。
+        if selected_methods() is not None:
+            methods = selected_methods()
         if methods is None:
             methods = ("dense", "keyword") + (
                 ("graph",) if config.get("graph_retrieval") else ()
@@ -102,6 +106,8 @@ class DocumentSearchTool:
         # 测试和评测里的替身存储没有权限范围，这时退回各自查询、诊断里不记范围。
         # scope 只给知识巡检用：传入全库范围，判断"提问人看不到、但知识库里其实有"的权限缺口。线上问答不传。
         scope_started = time.monotonic()
+        if selected_scope() is not None:
+            scope = selected_scope()
         if scope is None:
             scope = (
                 store.readable_scope(owner)
@@ -123,6 +129,7 @@ class DocumentSearchTool:
         if "graph" in methods:
             graph_executor = ThreadPoolExecutor(max_workers=1)
             graph_future = graph_executor.submit(
+                copy_context().run,
                 self.graph_recall,
                 store,
                 models,

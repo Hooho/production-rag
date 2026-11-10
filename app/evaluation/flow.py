@@ -19,20 +19,30 @@ from .dataset import now_text
 
 
 def item_history(item):
+    if item.get("prelude"):
+        return [
+            {"question": turn["question"], "answer": turn["answer"]}
+            for turn in item["prelude"]
+        ]
     return [{"question": question} for question in item.get("history", [])]
 
 
 # 缓存键：题目、追问历史、意图提示词版本、模型、意图识别方式（小模型优先时走到大模型这一步的题不同）。
 def rewrite_key(question, history, prompt_tag, model, intent_mode):
-    raw = json.dumps([question, history, prompt_tag, model, intent_mode], ensure_ascii=False)
+    raw = json.dumps(
+        [question, history, prompt_tag, model, intent_mode], ensure_ascii=False
+    )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def rewrite_view(analysis, question):
-    view = {"queries": list(analysis.get("queries") or [question]),
+    view = {
+        "queries": list(analysis.get("queries") or [question]),
         "standalone_query": analysis.get("standalone_query") or question,
-        "route": analysis.get("route"), "intent": analysis.get("intent"),
-        "classifier": analysis.get("classifier") or "fallback"}
+        "route": analysis.get("route"),
+        "intent": analysis.get("intent"),
+        "classifier": analysis.get("classifier") or "fallback",
+    }
     reason = fallback_reason(analysis)
     if reason:
         view["fallback_reason"] = reason
@@ -62,26 +72,60 @@ def rewrite_item(store, models, item):
     history = item_history(item)
     prompt_tag = prompts.tag("intent")
     use_cache = models.mode == "openai"
-    key = rewrite_key(question, history, prompt_tag, models.llm_model, models.intent_mode) if use_cache else None
+    key = (
+        rewrite_key(question, history, prompt_tag, models.llm_model, models.intent_mode)
+        if use_cache
+        else None
+    )
     if use_cache:
         with store.engine.connect() as connection:
-            row = connection.execute(select(eval_query_cache).where(eval_query_cache.c.cache_key == key)).mappings().first()
+            row = (
+                connection.execute(
+                    select(eval_query_cache).where(eval_query_cache.c.cache_key == key)
+                )
+                .mappings()
+                .first()
+            )
         if row is not None:
-            return {**row["data"], "cached": True, "duration_ms": row["duration_ms"], "prompt_tag": prompt_tag}
+            return {
+                **row["data"],
+                "cached": True,
+                "duration_ms": row["duration_ms"],
+                "prompt_tag": prompt_tag,
+            }
     started = time.monotonic()
     try:
         analysis = models.analyze_query(question, history, None)
     except Exception as error:  # 意图识别出错时线上也会退回规则，评测不因此中断
-        analysis = {**Models.fallback_query(question, history, None), "error_reason": f"意图识别出错（{type(error).__name__}）"}
+        analysis = {
+            **Models.fallback_query(question, history, None),
+            "error_reason": f"意图识别出错（{type(error).__name__}）",
+        }
     duration_ms = round((time.monotonic() - started) * 1000)
     view = rewrite_view(analysis, question)
     # 只缓存大模型的改写：规则和小模型本来就稳定；大模型调用失败退回规则的也不缓存，下次再试。
     if use_cache and view["classifier"] == "llm":
         with store.engine.begin() as connection:
-            connection.execute(eval_query_cache.delete().where(eval_query_cache.c.cache_key == key))
-            connection.execute(eval_query_cache.insert().values(cache_key=key, question=question, prompt_tag=prompt_tag,
-                model=models.llm_model, data=view, duration_ms=duration_ms, created=now_text()))
-    return {**view, "cached": False, "duration_ms": duration_ms, "prompt_tag": prompt_tag}
+            connection.execute(
+                eval_query_cache.delete().where(eval_query_cache.c.cache_key == key)
+            )
+            connection.execute(
+                eval_query_cache.insert().values(
+                    cache_key=key,
+                    question=question,
+                    prompt_tag=prompt_tag,
+                    model=models.llm_model,
+                    data=view,
+                    duration_ms=duration_ms,
+                    created=now_text(),
+                )
+            )
+    return {
+        **view,
+        "cached": False,
+        "duration_ms": duration_ms,
+        "prompt_tag": prompt_tag,
+    }
 
 
 # 一次检索交给模型的分片：每个来源经过父块扩展拼进了相邻分片，都算"交给模型了"。
@@ -94,7 +138,16 @@ def given_chunk_ids(sources):
     return ids
 
 
-SOURCE_FIELDS = ("id", "title", "heading", "text", "chunk_id", "position", "parent_chunk_ids", "relevance")
+SOURCE_FIELDS = (
+    "id",
+    "title",
+    "heading",
+    "text",
+    "chunk_id",
+    "position",
+    "parent_chunk_ids",
+    "relevance",
+)
 
 
 def slim_sources(sources):
@@ -116,19 +169,40 @@ def apply_sufficiency(row, check, found, first_sources, evidence_count, keep_sou
         entry["given"] = index in final
     # 判断失败（超时、输出被截断等）时按"资料充分"处理，不补充检索；把失败原因一起记下，
     # 否则页面上只看到"资料充分"，分不清是模型判断的还是失败后的兜底。
-    judgements = [{"verdict": item["verdict"], "missing": item.get("missing", ""), "rewrite_query": item.get("rewrite_query", ""),
-        **({"error": item["error"]} if item.get("error") else {})} for item in check["judgements"]]
-    row["sufficiency"] = {"checked": check["checked"], "verdict": check["verdict"], "missing": check["missing"],
-        "judgements": judgements, "calls": len(judgements), "errors": sum(1 for item in judgements if item.get("error")),
+    judgements = [
+        {
+            "verdict": item["verdict"],
+            "missing": item.get("missing", ""),
+            "rewrite_query": item.get("rewrite_query", ""),
+            **({"error": item["error"]} if item.get("error") else {}),
+        }
+        for item in check["judgements"]
+    ]
+    row["sufficiency"] = {
+        "checked": check["checked"],
+        "verdict": check["verdict"],
+        "missing": check["missing"],
+        "judgements": judgements,
+        "calls": len(judgements),
+        "errors": sum(1 for item in judgements if item.get("error")),
         "retried": check["retried"],
-        "retry_query": check["retry_query"], "retry_used": check.get("retry_used", False),
-        "refused": check["refused"], "source_count": len(check["sources"])}
+        "retry_query": check["retry_query"],
+        "retry_used": check.get("retry_used", False),
+        "refused": check["refused"],
+        "source_count": len(check["sources"]),
+    }
     if check["retried"]:
         retry = check["retry_retrieval"]
         retry_found = found(retry["sources"])
-        row["retry"] = {"latency_ms": check.get("retry_ms"), "returned": len(retry["sources"]), "used": check.get("retry_used", False),
-            "given_recall": len(retry_found) / evidence_count if evidence_count else None,
-            "found": sorted(retry_found)}
+        row["retry"] = {
+            "latency_ms": check.get("retry_ms"),
+            "returned": len(retry["sources"]),
+            "used": check.get("retry_used", False),
+            "given_recall": len(retry_found) / evidence_count
+            if evidence_count
+            else None,
+            "found": sorted(retry_found),
+        }
         if keep_sources:
             row["retry"]["sources"] = slim_sources(retry["sources"])
     row["cleared"] = bool(check["refused"])

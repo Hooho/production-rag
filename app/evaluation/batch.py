@@ -49,6 +49,10 @@ def config_values(run):
     values = {
         "题目": scope,
         "运行模式": "+".join(config.get("modes") or ["fixed"]),
+        "检索方式": "、".join(
+            {"dense": "向量", "keyword": "关键词", "graph": "图检索"}.get(item, item)
+            for item in config.get("methods") or []
+        ),
         "评测语料": "、".join(
             item.get("title", "") for item in config.get("corpus") or []
         )
@@ -116,6 +120,15 @@ def rerun_body(run, entries):
         "corpus_ids": corpus_ids,
         "params": run.get("params") or {},
     }
+    if config.get("version") == 2:
+        body.update(
+            version=2,
+            mode=(config.get("modes") or ["fixed"])[0],
+            methods=config.get("methods") or ["dense", "keyword"],
+            suite_ids=config.get("suite_ids") or [],
+            split=config.get("split") or "all",
+        )
+        return body
     if kind == "special":
         special = config.get("special") or {}
         body["suite_ids"] = [item["id"] for item in special.get("suites") or []]
@@ -140,6 +153,18 @@ def report(batch_id, runs):
                 "progress": run.get("progress"),
                 "error": run.get("error"),
                 "params": run.get("params") or {},
+                "kind": run.get("kind"),
+                "methods": (run.get("config") or {}).get("methods") or [],
+                "modes": (run.get("config") or {}).get("modes") or ["fixed"],
+                "effective": run.get("effective"),
+                "attempts": [
+                    {
+                        "status": item.get("status"),
+                        "error": item.get("error"),
+                        "finished": item.get("finished"),
+                    }
+                    for item in run.get("attempts") or []
+                ],
             }
         )
     first = runs[0] if runs else {}

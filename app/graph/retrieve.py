@@ -14,6 +14,8 @@
 已删除的关系从头就查不到，看不到的文档里的名字也不会参与匹配。所以诊断里只有检索本身的取舍（低于阈值、超过条数）。
 """
 
+from ..retrieval_policy import selected_graph_versions
+
 import json
 import logging
 import re
@@ -83,7 +85,9 @@ def scope_versions(engine, scope, space=ONLINE_SPACE):
                     graph_versions.c.number,
                 ).where(
                     graph_versions.c.space == space,
-                    graph_versions.c.active.is_(True),
+                    graph_versions.c.id.in_(selected_graph_versions())
+                    if selected_graph_versions() is not None
+                    else graph_versions.c.active.is_(True),
                     graph_versions.c.document_id.in_(list(documents)),
                 )
             )

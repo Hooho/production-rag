@@ -1,3 +1,4 @@
+from ..retrieval_policy import selected_methods, selected_scope
 import hashlib
 import math
 import os
@@ -13,7 +14,7 @@ from ..tools.search import DocumentSearchTool, title_limit
 from .corpus import documents_for as corpus_documents
 from .dataset import QUESTION_TYPES, evidence_variants, normalize, select_split
 from .grouped_evidence import bind_groups, evidence_fields, match_evidence
-from .flow import apply_sufficiency, given_chunk_ids, rewrite_item
+from .flow import apply_sufficiency, given_chunk_ids, rewrite_item, item_history
 
 
 # 评测语料导入到专门的评测用户下，和 alice、bob 的真实知识库完全隔离：
@@ -55,6 +56,16 @@ SUITES = {"ablation": "消融实验", "params": "参数对比"}
 # 内容没变时 sha256 去重直接跳过，所以每次评测前都可以放心调用：语料改了才会重新切分和向量化。
 # 评测开跑时勾选了几份语料（limit_titles）就只导入这几份，没勾的不用花时间切分和向量化。
 def import_corpus(store, models):
+    frozen = selected_scope()
+    if frozen is not None:
+        return [
+            {
+                "document_id": item["document_id"],
+                "title": item.get("title"),
+                "status": "frozen",
+            }
+            for item in frozen.get("documents", [])
+        ]
     report = []
     for entry in corpus_documents(title_limit(EVAL_OWNER), store.engine):
         title = entry["title"]
@@ -170,9 +181,7 @@ def scoring_item(store, item):
 # 按规则补全指代、用原问题检索（不调用模型）。固定流程现在和线上一样用大模型改写（见 app/evaluation/flow.py），
 # 这里只剩 Agent 评测用它算"实际提问"：Agent 收到的是按规则补全的问题。
 def plan_queries(item):
-    history = []
-    for question in item.get("history", []):
-        history.append({"question": question})
+    history = item_history(item)
     analysis = Models.fallback_query(item["question"], history, None)
     return analysis["queries"], analysis["standalone_query"], "rule"
 
@@ -382,6 +391,8 @@ def score_question(item, retrieval, chunk_texts, pool_size):
     return {
         "id": item["id"],
         "question": item["question"],
+        "prelude": item.get("prelude") or [],
+        "reference_answer": item.get("reference_answer"),
         "type": item["type"],
         # 题目仍独立计分；保留题对关系只用于评测结果中的成对分析。
         "pair_id": item.get("pair_id"),
@@ -667,7 +678,9 @@ def funnel(rows):
 # 按题目类型分别统计：整体分数可能掩盖某类题特别差，例如同义改写题更依赖向量召回。
 def summarize_by_type(rows):
     groups = {}
-    for question_type in QUESTION_TYPES:
+    for question_type in dict.fromkeys(
+        [*QUESTION_TYPES, *(row["type"] for row in rows)]
+    ):
         selected = []
         for row in rows:
             if row["type"] == question_type:
@@ -1062,7 +1075,7 @@ def run_retrieval(
         "min_score": min_score,
         "reranked": reranked,
         "fusion": "sum",
-        "methods": ["dense", "keyword"],
+        "methods": list(selected_methods() or ["dense", "keyword"]),
         "model_mode": models.mode,
         "embedding_mode": models.embedding_mode,
         "embedding_model": models.embedding_model,

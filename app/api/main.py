@@ -1,3 +1,4 @@
+from ..evaluation import configuration as eval_configuration
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import hashlib
@@ -179,6 +180,11 @@ class ChatInput(BaseModel):
 # 界面发起评测的参数：评测类型、题目范围和检索实验组（消融、参数对比）。
 class EvalRunInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    version: Literal[1, 2] = 1
+    mode: Literal["fixed", "agent"] = "fixed"
+    methods: list[Literal["dense", "keyword", "graph"]] = Field(
+        default_factory=lambda: ["dense", "keyword"], min_length=1, max_length=3
+    )
     # retrieval / generation 是调参评测（按 split 选开发集或留出集）；special 是专项评测（按 suite_ids 选专项）。
     kind: str = Field("retrieval", pattern="^(retrieval|generation|special)$")
     split: str = Field("dev", pattern="^(dev|holdout|all)$")
@@ -221,7 +227,22 @@ class EvalScoringGroupInput(BaseModel):
 
 
 # 手动录入一道评测题；编号、来源和审核状态由服务端统一生成，避免客户端伪造元数据。
+class EvalPreludeTurn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    question: str = Field(min_length=1, max_length=1000)
+    answer: str = Field(min_length=1, max_length=6000)
+    confirmed: Literal[True]
+
+
+class EvalPreludeAnswerInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    question: str = Field(min_length=1, max_length=1000)
+    prelude: list[EvalPreludeTurn] = Field(default_factory=list, max_length=20)
+    corpus_ids: list[str] = Field(default_factory=list, max_length=200)
+
+
 class EvalDatasetItemInput(BaseModel):
+    prelude: list[EvalPreludeTurn] = Field(default_factory=list, max_length=20)
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     question: str = Field(min_length=1, max_length=1000)
     type: str = Field(min_length=1, max_length=20)
@@ -314,6 +335,7 @@ class EvalSuiteInput(BaseModel):
 
 # 专项的一道题，字段随评测方式不同：检索要问题和证据，回答再加参考答案，多轮对话是前面几轮提问 + 最后一问 + 参考答案。
 class EvalSuiteItemInput(BaseModel):
+    prelude: list[EvalPreludeTurn] = Field(default_factory=list, max_length=20)
     model_config = ConfigDict(extra="forbid")
     question: str = Field(..., max_length=500)
     evidence: list[str] = Field(default_factory=list, max_length=10)
@@ -2821,7 +2843,7 @@ def create_app(store=None, models=None, jwt_secret=None):
     def add_eval_dataset_item(body: EvalDatasetItemInput, owner=Depends(identity)):
         if body.type not in QUESTION_TYPES:
             raise HTTPException(422, f"未知题型：{body.type}")
-        if body.type == "多轮追问" and not body.history:
+        if body.type == "多轮追问" and not (body.history or body.prelude):
             raise HTTPException(422, "多轮追问题必须填写追问历史")
         with app.state.eval_dataset_lock:
             existing = load_dataset()
@@ -3034,7 +3056,11 @@ def create_app(store=None, models=None, jwt_secret=None):
 
         def work():
             try:
+                freeze_launch_data([launch])
                 execute_launch(launch, run)
+            except Exception as error:
+                run.update(status="failed", error=f"冻结评测数据失败：{error}")
+                save_run(run)
             finally:
                 app.state.eval_running = None
                 app.state.eval_lock.release()
@@ -3070,6 +3096,15 @@ def create_app(store=None, models=None, jwt_secret=None):
     # 某一组失败不影响后面的组。
     @app.post("/eval/batches", status_code=202, dependencies=[Depends(require_admin)])
     def create_eval_batch(body: EvalBatchInput, owner=Depends(identity)):
+        if any(config.version == 2 for config in body.configs):
+            if not all(config.version == 2 for config in body.configs):
+                raise HTTPException(422, "不能混用新旧配置")
+            first = body.configs[0]
+            for config in body.configs[1:]:
+                config.split = first.split
+                config.suite_ids = list(first.suite_ids)
+                config.corpus_ids = list(first.corpus_ids)
+
         launches = []
         for index, config in enumerate(body.configs):
             try:
@@ -3103,11 +3138,17 @@ def create_app(store=None, models=None, jwt_secret=None):
 
         def work():
             try:
+                freeze_launch_data(launches)
                 for launch, run in zip(launches, runs):
                     app.state.eval_running = run["id"]
                     run["status"] = "running"
                     save_run(run)
                     execute_launch(launch, run)
+            except Exception as error:
+                for run in runs:
+                    if run["status"] == "queued":
+                        run.update(status="failed", error=f"冻结评测数据失败：{error}")
+                        save_run(run)
             finally:
                 app.state.eval_running = None
                 app.state.eval_batch = None
@@ -3115,6 +3156,92 @@ def create_app(store=None, models=None, jwt_secret=None):
 
         Thread(target=work, daemon=True).start()
         return {"id": batch_id, "runs": [run["id"] for run in runs]}
+
+    @app.post(
+        "/eval/batches/{batch_id}/arms/{run_id}/retry",
+        status_code=202,
+        dependencies=[Depends(require_admin)],
+    )
+    def retry_eval_arm(batch_id: str, run_id: str):
+        import copy
+
+        try:
+            source = load_run(run_id)
+        except ValueError:
+            raise HTTPException(404, "评测不存在")
+        if not source or (source.get("batch") or {}).get("id") != batch_id:
+            raise HTTPException(404, "配置不属于这份报告")
+        if current_status(source) not in ("failed", "interrupted"):
+            raise HTTPException(409, "只能重试失败或中断的配置")
+        try:
+            body = EvalRunInput(
+                **eval_batch.rerun_body(
+                    source, eval_corpus.list_entries(app.state.store.engine)
+                )
+            )
+            effective = source.get("effective") or {}
+            if source.get("config", {}).get("version") == 2:
+                body.params = {
+                    **body.params,
+                    **{
+                        key: {
+                            field: value
+                            for field, value in effective[key].items()
+                            if field in ("provider", "model")
+                        }
+                        for key in ("llm", "judge")
+                        if effective.get(key) and app.state.models.mode == "openai"
+                    },
+                }
+            launch = prepare_launch(body, source.get("question_snapshot"))
+            old_corpus = {
+                item.get("title"): item.get("sha256")
+                for item in source.get("config", {}).get("corpus") or []
+            }
+            if any(
+                old_corpus.get(item["title"])
+                and old_corpus[item["title"]] != item.get("sha256")
+                for item in launch["corpus"]
+            ):
+                raise ValueError("语料内容已改变，请创建新的评测报告")
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        if source.get("question_snapshot") is not None:
+            launch["questions"] = copy.deepcopy(source["question_snapshot"])
+        if source.get("frozen"):
+            launch["prepared"].update(copy.deepcopy(source["frozen"]))
+        acquire_eval_lock()
+        attempt = {key: value for key, value in source.items() if key != "attempts"}
+        source["attempts"] = [*(source.get("attempts") or []), attempt]
+        source.update(
+            status="running",
+            error=None,
+            finished=None,
+            summary=None,
+            questions=[],
+            by_type={},
+            progress={"done": 0, "total": 0},
+        )
+        app.state.eval_running = run_id
+        app.state.eval_batch = batch_id
+        try:
+            save_run(source)
+        except Exception:
+            app.state.eval_running = None
+            app.state.eval_batch = None
+            app.state.eval_lock.release()
+            raise
+
+        def work():
+            try:
+                execute_launch(launch, source)
+            finally:
+                app.state.eval_running = None
+                app.state.eval_batch = None
+                app.state.eval_lock.release()
+
+        Thread(target=work, daemon=True).start()
+        return {"id": batch_id, "run_id": run_id}
 
     # 批次报告：各组的状态、配置差异和完整结果，前端用单次评测同一套报告组件一列一列并排。
     @app.get("/eval/batches/{batch_id}", dependencies=[Depends(require_admin)])
@@ -3138,11 +3265,90 @@ def create_app(store=None, models=None, jwt_secret=None):
             runs.append(normalize_report(run) if run["status"] == "completed" else run)
         return eval_batch.report(batch_id, runs)
 
+    @app.post("/eval/prelude/answer", dependencies=[Depends(require_admin)])
+    def generate_eval_prelude(body: EvalPreludeAnswerInput):
+        from uuid import uuid4
+        from ..evaluation.flow import rewrite_item
+        from ..evaluation.generation import answer_question
+        from ..evaluation.retrieval import import_corpus
+        from ..tools.search import DocumentSearchTool
+
+        corpus = pick_corpus(body.corpus_ids)
+        item = {
+            "id": str(uuid4()),
+            "question": body.question,
+            "prelude": [turn.model_dump() for turn in body.prelude],
+        }
+        acquire_eval_lock()
+        responder = None
+        try:
+            responder = ResponseAgent(app.state.models, use_postgres=False)
+            with limit_titles(EVAL_OWNER, [entry["title"] for entry in corpus]):
+                import_corpus(app.state.store, app.state.models)
+                rewrite = rewrite_item(app.state.store, app.state.models, item)
+                tool = DocumentSearchTool()
+                retrieved = tool.execute(
+                    app.state.store,
+                    app.state.models,
+                    EVAL_OWNER,
+                    rewrite["queries"],
+                    rewrite["standalone_query"],
+                )
+                checked = tool.check_sufficiency(
+                    app.state.store,
+                    app.state.models,
+                    EVAL_OWNER,
+                    rewrite["queries"],
+                    rewrite["standalone_query"],
+                    retrieved,
+                )
+                sources = checked["sources"]
+                answer = answer_question(
+                    app.state.models,
+                    responder,
+                    "prelude-" + item["id"],
+                    item,
+                    rewrite["standalone_query"],
+                    sources,
+                    {"verdict": checked["verdict"], "missing": checked["missing"]},
+                )
+                return {"answer": answer, "sources": sources}
+        finally:
+            if responder is not None:
+                responder.close()
+            app.state.eval_lock.release()
+
     # 发起前的全部检查：题目、模式、模型、语料、参数都不对时直接拒绝，不留下失败的记录。返回开跑需要的全部内容。
-    def prepare_launch(body):
+    def prepare_launch(body, question_snapshot=None):
+        if body.version == 2:
+            if body.kind not in ("retrieval", "generation"):
+                raise HTTPException(422, "统一配置只支持检索评测和生成评测")
+            if body.kind == "generation" and body.mode == "agent":
+                raise HTTPException(422, "生成评测不支持 Agent")
+            if body.suites or body.compare_memory:
+                raise HTTPException(422, "请将不同方案保存为独立配置")
+            if len(set(body.methods)) != len(body.methods):
+                raise HTTPException(422, "检索方式不能重复")
+            body.modes = [body.mode]
+
         for suite in body.suites:
             if suite not in SUITES:
                 raise HTTPException(422, f"未知实验组：{suite}")
+        if body.version == 2 and question_snapshot is None:
+            try:
+                sources = (
+                    special_suites.load_for_run(app.state.store.engine, body.suite_ids)
+                    if body.suite_ids
+                    else []
+                )
+                question_snapshot = eval_configuration.validate_questions(
+                    eval_configuration.questions(load_dataset(), body.split, sources),
+                    body.kind,
+                )
+                if sources:
+                    body.split = "all"
+            except ValueError as error:
+                raise HTTPException(422, str(error)) from error
         special = None
         if body.kind == "special":
             # 专项评测：每个专项按自己的评测方式跑；回答和多轮对话要生成和评审，需要真实大模型。
@@ -3205,7 +3411,9 @@ def create_app(store=None, models=None, jwt_secret=None):
                     422, "生成评测只运行基线，消融实验和参数对比请切换为检索评测"
                 )
             # 启动前检查审核后的题目，避免所有题目都在待审核时创建一个必然失败的空评测。
-            if not select_split(load_dataset(), body.split):
+            if question_snapshot is None and not select_split(
+                load_dataset(), body.split
+            ):
                 raise HTTPException(422, "当前题目范围没有已审核题目，请先审核评测题")
         corpus = pick_corpus(body.corpus_ids)
         # 只对这次评测生效的参数，启动前先校验：参数范围、模型配置、提示词版本不对时直接拒绝，不留下失败的记录。
@@ -3215,8 +3423,12 @@ def create_app(store=None, models=None, jwt_secret=None):
             )
         except ValueError as error:
             raise HTTPException(422, str(error))
+        if body.version == 2:
+            prepared = eval_params.freeze(app.state.store, app.state.models, prepared)
+            prepared["methods"] = body.methods
         return {
             "body": body,
+            "questions": question_snapshot,
             "special": special,
             "needs_responder": needs_responder,
             "corpus": corpus,
@@ -3231,6 +3443,42 @@ def create_app(store=None, models=None, jwt_secret=None):
             raise HTTPException(409, "已有评测正在运行，请等待完成")
 
     # 建评测记录：单独发起的直接是运行中；批次里的先是排队中，轮到它时才改成运行中。
+    def freeze_launch_data(launches):
+        from ..evaluation.retrieval import import_corpus
+        from ..graph.retrieve import scope_versions
+        import copy
+
+        first = launches[0]
+        if first["body"].version != 2:
+            return
+        with limit_titles(EVAL_OWNER, [item["title"] for item in first["corpus"]]):
+            import_corpus(
+                app.state.store,
+                first["prepared"].get("base_models") or app.state.models,
+            )
+            scope = app.state.store.readable_scope(EVAL_OWNER)
+            titles = {item["title"] for item in first["corpus"]}
+            documents = [
+                item
+                for item in scope.get("documents", [])
+                if item.get("title") in titles
+            ]
+            scope = {
+                "documents": documents,
+                "versions": {
+                    item["document_id"]: item["version"] for item in documents
+                },
+            }
+            versions = [
+                item["version_id"]
+                for item in scope_versions(app.state.store.engine, scope)
+            ]
+        for launch in launches:
+            launch["prepared"].update(
+                data_scope=copy.deepcopy(scope), graph_versions=list(versions)
+            )
+            launch["questions"] = copy.deepcopy(first["questions"])
+
     def create_launch_run(launch, batch=None):
         body = launch["body"]
         run = start_run(
@@ -3242,6 +3490,34 @@ def create_app(store=None, models=None, jwt_secret=None):
             launch["corpus"],
             launch["params"],
         )
+        if body.version == 2:
+            run["config"].update(
+                version=2,
+                methods=body.methods,
+                modes=[body.mode],
+                suite_ids=body.suite_ids,
+            )
+            run["question_snapshot"] = launch["questions"]
+            with eval_params.applied(app.state.models, launch["prepared"]) as (
+                run_models,
+                judge_models,
+            ):
+                run["effective"] = eval_params.effective(run_models, judge_models)
+                if body.version == 2:
+                    run["frozen"] = {
+                        key: value
+                        for key, value in launch["prepared"].items()
+                        if key
+                        in (
+                            "settings",
+                            "prompts",
+                            "methods",
+                            "data_scope",
+                            "graph_versions",
+                        )
+                    }
+                    run["question_snapshot"] = launch["questions"]
+            save_run(run)
         if batch is not None:
             run["batch"] = batch
             run["status"] = "queued"
@@ -3260,6 +3536,20 @@ def create_app(store=None, models=None, jwt_secret=None):
                 judge_models,
             ):
                 run["effective"] = eval_params.effective(run_models, judge_models)
+                if body.version == 2:
+                    run["frozen"] = {
+                        key: value
+                        for key, value in launch["prepared"].items()
+                        if key
+                        in (
+                            "settings",
+                            "prompts",
+                            "methods",
+                            "data_scope",
+                            "graph_versions",
+                        )
+                    }
+                    run["question_snapshot"] = launch["questions"]
                 if launch["needs_responder"]:
                     # 生成评测只验证回答质量，不应把评测题写进线上会话的持久化记忆，回答 Agent 用进程内记忆。
                     responder = ResponseAgent(run_models, use_postgres=False)
@@ -3268,7 +3558,9 @@ def create_app(store=None, models=None, jwt_secret=None):
                     execute_run(
                         app.state.store,
                         run_models,
-                        [] if launch["special"] else load_dataset(),
+                        launch["questions"]
+                        if launch.get("questions") is not None
+                        else ([] if launch["special"] else load_dataset()),
                         run,
                         generate=body.kind == "generation",
                         responder=responder,

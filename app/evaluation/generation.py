@@ -31,6 +31,8 @@ def answer_question(
     models, responder, run_id, item, standalone_query, sources, coverage=None
 ):
     session_id = f"{run_id}:{item['id']}"
+    for turn in item.get("prelude") or []:
+        responder.remember_turn("eval", session_id, turn["question"], turn["answer"])
     answer, _ = responder.answer(
         "eval", session_id, standalone_query, sources, coverage=coverage
     )
@@ -52,7 +54,7 @@ def judge_answer(models, item, answer, sources):
     payload = json.dumps(
         {
             "question": item["question"],
-            "history": item.get("history", []),
+            "history": item.get("prelude") or item.get("history", []),
             "answerable": bool(item.get("answerable")),
             "reference_answer": item.get("reference_answer", ""),
             "sources": "\n".join(source_lines),

@@ -263,7 +263,7 @@ def text_value(value, label, limit, required=True):
 def check_item(method, data, corpus=None, catalog=None):
     question = text_value(data.get("question"), "问题", QUESTION_LIMIT)
     cleaned = {"question": question}
-    if method in ("retrieval", "answer") and data.get("evidence_groups") is not None:
+    if data.get("evidence_groups") is not None:
         from .grouped_evidence import validate_groups
 
         groups = validate_groups(data["evidence_groups"], catalog or [])
@@ -275,7 +275,7 @@ def check_item(method, data, corpus=None, catalog=None):
             for text in data.get("evidence") or []
             if isinstance(text, str) and text.strip()
         ]
-        if method == "retrieval" and not evidence:
+        if method == "retrieval" and not evidence and not data.get("reference_answer"):
             raise ValueError("检索方式的题目至少要有一条证据原文")
         folded = normalize(corpus if corpus is not None else corpus_text())
         for text in evidence:
@@ -283,7 +283,22 @@ def check_item(method, data, corpus=None, catalog=None):
             if missing:
                 raise ValueError(f"证据不在评测语料中：{missing[0][:60]}")
         cleaned["evidence"] = evidence
-    if method == "dialogue":
+    prelude = data.get("prelude") or []
+    if not isinstance(prelude, list) or len(prelude) > 20:
+        raise ValueError("前置问答最多20轮")
+    for turn in prelude:
+        if (
+            not isinstance(turn, dict)
+            or not all(
+                isinstance(turn.get(key), str) and turn[key].strip()
+                for key in ("question", "answer")
+            )
+            or turn.get("confirmed") is not True
+        ):
+            raise ValueError("请填写并确认每轮前置问答")
+    if prelude:
+        cleaned["prelude"] = prelude
+    if method == "dialogue" and not prelude:
         turns = [
             text.strip()
             for text in data.get("turns") or []
