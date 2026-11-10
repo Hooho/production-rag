@@ -122,6 +122,8 @@
   grid-column: 1/-1;
 }
 .eval-prelude-editor article {
+  display: grid;
+  gap: 12px;
   border: 1px solid var(--t-cdddec, #d0dfec);
   padding: 12px;
   margin: 10px 0;
@@ -133,6 +135,11 @@
   margin: 8px 0;
   font: inherit;
   letter-spacing: normal;
+}
+/* 每一轮内部的字段：标签和输入框之间留出间距，字段之间靠网格间距分开，不再挤成一团。 */
+.eval-prelude-editor article label {
+  gap: 8px;
+  margin: 0;
 }
 .eval-prelude-editor details label {
   flex-direction: row;
