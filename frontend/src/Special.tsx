@@ -713,7 +713,7 @@ function ItemForm({
         (groups.length > 0 || reference.trim()))) &&
     prelude.every((turn) => turn.confirmed);
   return (
-    <div className="rg-form">
+    <div className="rg-form is-wide">
       <div className="rg-form-title">{initial ? "编辑题目" : "添加题目"}</div>
       <EvalPreludeEditor value={prelude} onChange={setPrelude} />
       <label className="rg-field">

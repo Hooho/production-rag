@@ -99,7 +99,9 @@
   color: #b42318;
 }
 
-/* 表单整体：整块收在一个固定宽度里，标签列宽度固定，所有控件共用同一条左、右边界，宽屏上不再拉散。 */
+/* 表单整体：标签列宽度固定，所有控件共用同一条左、右边界。
+   名字、说明这类只有一两个短字段的小表单收在一个固定宽度里；
+   带计分项卡片网格的题目表单（is-wide）整块跟着页面宽度走。 */
 .rg-form {
   display: flex;
   flex-direction: column;
@@ -110,6 +112,9 @@
   border-radius: 6px;
   background: #fbfdff;
   padding: 16px 18px;
+}
+.rg-form.is-wide {
+  max-width: none;
 }
 
 .rg-field {
@@ -186,8 +191,9 @@
   color: var(--t-7d95ac);
   font-size: 12px;
 }
+/* 表单变宽后，「添加一轮」跟着标题和说明排在一起，不要被推到最右端。 */
 .rg-form .unified-eval-prelude-heading button {
-  margin-left: auto;
+  margin-left: 0;
 }
 .rg-form .eval-prelude-editor .eval-prelude-turn {
   margin: 0;
