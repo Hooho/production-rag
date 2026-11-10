@@ -4709,6 +4709,8 @@ function RetrievalDiagnostics({
   const [poolOpen, setPoolOpen] = useState(false);
   // 「被哪几路找到」里的分片数字：点开看这一组具体是哪些分片、各路排第几。
   const [comboOpen, setComboOpen] = useState<string | null>(null);
+  // 漏斗里「交给重排」「相关性 ≥ 阈值」「最终返回」三行的数字：点开看这一行具体留下了哪些分片。
+  const [funnelStage, setFunnelStage] = useState<string | null>(null);
   // 当前这一页分片的原文：来源列显示原文预览，「更多」看全文。读过的留在里面，翻页不用重读。
   const [chunkOriginals, setChunkOriginals] = useState<
     Record<string, ChunkOriginal>
@@ -4767,6 +4769,12 @@ function RetrievalDiagnostics({
   // 右侧列出这一步淘汰了多少、为什么。
   const rerankedCount = config.reranked ? pooled : candidates.length;
   const passedCount = config.reranked ? passed : candidates.length;
+  // 过了相关性阈值的那批分片：漏斗里「相关性 ≥ 阈值」这一行点开看的就是它们。
+  const passedChunks = candidates
+    .filter(
+      (item) => item.status === "returned" || item.status === "beyond_limit",
+    )
+    .sort((a, b) => (a.rerank_rank ?? 0) - (b.rerank_rank ?? 0));
   const removed = (count: number, reason: string, none: string) =>
     count > 0 ? `去掉 ${count} 个${reason}` : none;
   const byMethodText = ["dense", "keyword", "graph"]
@@ -4793,6 +4801,8 @@ function RetrievalDiagnostics({
             quotaCount > 0
               ? `交给重排（RRF 前 ${config.rerank_candidates} + 图检索名额 ${quotaCount}）`
               : `交给重排（RRF 前 ${config.rerank_candidates}）`,
+          // 这一行的数字能点开：看交给重排的是哪些分片。
+          kind: "pool",
           value: rerankedCount,
           dropped:
             removed(
@@ -4820,6 +4830,8 @@ function RetrievalDiagnostics({
     config.reranked && config.min_score !== null
       ? {
           label: `相关性 ≥ ${formatNumber(config.min_score, 2)}`,
+          // 这一行的数字能点开：看过阈值的具体是哪些分片。
+          kind: "passed",
           value: passedCount,
           dropped: removed(
             rerankedCount - passedCount,
@@ -4838,6 +4850,8 @@ function RetrievalDiagnostics({
         },
     {
       label: `最终返回（上限 ${config.return_limit}）`,
+      // 这一行的数字能点开：看最终交给回答模型的是哪些来源。
+      kind: "returned",
       value: returned,
       // 过了阈值的分片里，超过上限的被排除，并入父块的不单独成源，两种都不在返回的来源里。
       dropped:
@@ -4851,6 +4865,11 @@ function RetrievalDiagnostics({
     },
   ];
   const funnelMax = Math.max(1, ...funnel.map((stage) => stage.value));
+  // 漏斗里的数字点开：交给重排看候选池，另外两行各自看这一批分片。
+  const openFunnelStage = (kind: string) => {
+    if (kind === "pool") setPoolOpen(true);
+    else setFunnelStage(kind);
+  };
   // 多个检索词时用 Q1、Q2 标注每条召回贡献来自哪个检索词；图检索的两张表不按检索词分，不算进去。
   const queries: string[] = [];
   for (const list of lists)
@@ -5421,9 +5440,6 @@ function RetrievalDiagnostics({
           </div>
         )}
       </div>
-      {rankDialog}
-      {poolDialog}
-      {comboDialog}
     </div>
   );
 
@@ -5514,7 +5530,20 @@ function RetrievalDiagnostics({
                 style={{ width: `${(stage.value / funnelMax) * 100}%` }}
               />
             </div>
-            <strong>{stage.value} 个</strong>
+            <strong>
+              {stage.kind ? (
+                <button
+                  type="button"
+                  className="link-button"
+                  title={stage.hint}
+                  onClick={() => openFunnelStage(stage.kind)}
+                >
+                  {stage.value} 个
+                </button>
+              ) : (
+                `${stage.value} 个`
+              )}
+            </strong>
             <small
               className={`diag-funnel-dropped ${stage.dropped.startsWith("去掉") ? "is-removed" : ""}`}
             >
@@ -5552,6 +5581,16 @@ function RetrievalDiagnostics({
           </small>
         </div>
       )}
+    </div>
+  );
+
+  // 弹窗统一放在最后渲染：三个步骤分开显示时，入口在各自步骤里，弹窗本身不依赖当前步骤，
+  // 不然从「重排」那步点「交给重排」会开了个没内容的窗。
+  const dialogs = (
+    <>
+      {rankDialog}
+      {poolDialog}
+      {comboDialog}
       {candidatesOpen && (
         <CandidateDetailDialog
           open
@@ -5582,12 +5621,64 @@ function RetrievalDiagnostics({
           onClose={() => setReturnedOpen(false)}
         />
       )}
-    </div>
+      {/* 漏斗里「相关性 ≥ 阈值」这一行点开：过了阈值的具体是哪些分片。 */}
+      {funnelStage === "passed" && passedChunks.length > 0 && (
+        <CandidateChunksDialog
+          key="passed"
+          open
+          title={`过了相关性阈值的 ${passedChunks.length} 个分片`}
+          lead={`重排分不低于 ${formatNumber(config.min_score, 2)} 的 ${passedChunks.length} 个分片`}
+          leadNote={`其中 ${beyondLimit} 个超过上限没有返回${
+            mergedCount > 0 ? `，${mergedCount} 个并入父块` : ""
+          }，${returned} 条成了来源；按重排概率排，点「原文」看分片正文`}
+          candidates={passedChunks}
+          queries={queries}
+          scoreKind="rerank"
+          rrfK={config.rrf_k}
+          fusion={config.fusion}
+          onClose={() => setFunnelStage(null)}
+        />
+      )}
+      {/* 漏斗里「最终返回」这一行点开：交给回答模型的具体是哪些来源。 */}
+      {funnelStage === "returned" && returnedChunks.length > 0 && (
+        <CandidateChunksDialog
+          key="returned"
+          open
+          title={`最终返回的 ${returnedChunks.length} 条来源`}
+          lead={`交给回答模型的 ${returnedChunks.length} 条来源`}
+          leadNote="按重排概率排；并入父块的分片不单独成源，点「原文」看分片正文"
+          candidates={returnedChunks}
+          queries={queries}
+          scoreKind="rerank"
+          rrfK={config.rrf_k}
+          fusion={config.fusion}
+          onClose={() => setFunnelStage(null)}
+        />
+      )}
+    </>
   );
 
-  if (part === "scope") return <div className="diag">{scopeSection}</div>;
-  if (part === "recall") return <div className="diag">{recallSection}</div>;
-  if (part === "rerank") return <div className="diag">{rerankSection}</div>;
+  if (part === "scope")
+    return (
+      <div className="diag">
+        {scopeSection}
+        {dialogs}
+      </div>
+    );
+  if (part === "recall")
+    return (
+      <div className="diag">
+        {recallSection}
+        {dialogs}
+      </div>
+    );
+  if (part === "rerank")
+    return (
+      <div className="diag">
+        {rerankSection}
+        {dialogs}
+      </div>
+    );
   return (
     <div className="diag">
       {scope && (
@@ -5615,6 +5706,7 @@ function RetrievalDiagnostics({
         )}
       </div>
       {rerankSection}
+      {dialogs}
     </div>
   );
 }
