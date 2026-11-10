@@ -148,3 +148,24 @@
 .eval-prelude-editor details input {
   width: auto;
 }
+/* 已确认的轮次只读展示：标题 + 内容块，不使用输入框。 */
+.eval-prelude-field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.eval-prelude-field > span {
+  color: var(--t-6b849d);
+  font-size: 13px;
+}
+.eval-prelude-readonly {
+  margin: 0;
+  padding: 8px 11px;
+  border-radius: 4px;
+  background: #f5f8fb;
+  color: var(--t-1d3550);
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

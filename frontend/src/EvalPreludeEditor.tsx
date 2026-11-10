@@ -94,6 +94,22 @@ export default function EvalPreludeEditor({
     );
     setSources({});
   }
+  // 确认本轮：这一轮锁定为只读展示，后续轮次不受影响。
+  function confirmTurn(index: number) {
+    onChange(
+      value.map((turn, i) =>
+        i === index ? { ...turn, confirmed: true } : turn,
+      ),
+    );
+  }
+  // 重新编辑：解锁这一轮，本轮之后的轮次也要重新确认。
+  function reopen(index: number) {
+    onChange(
+      value.map((turn, i) =>
+        i < index ? turn : { ...turn, confirmed: false },
+      ),
+    );
+  }
   return (
     <div className="eval-prelude-editor">
       <div className="unified-eval-prelude-heading">
@@ -139,25 +155,40 @@ export default function EvalPreludeEditor({
           <strong>
             第 {index + 1} 轮 · {turn.confirmed ? "已确认" : "待确认"}
           </strong>
-          <label>
-            用户问题
-            <input
-              maxLength={1000}
-              value={turn.question}
-              disabled={busy !== null}
-              onChange={(e) => update(index, { question: e.target.value })}
-            />
-          </label>
-          <label>
-            助手回答
-            <textarea
-              maxLength={6000}
-              value={turn.answer}
-              rows={3}
-              disabled={busy !== null}
-              onChange={(e) => update(index, { answer: e.target.value })}
-            />
-          </label>
+          {turn.confirmed ? (
+            <>
+              <div className="eval-prelude-field">
+                <span>用户问题</span>
+                <p className="eval-prelude-readonly">{turn.question}</p>
+              </div>
+              <div className="eval-prelude-field">
+                <span>助手回答</span>
+                <p className="eval-prelude-readonly">{turn.answer}</p>
+              </div>
+            </>
+          ) : (
+            <>
+              <label>
+                用户问题
+                <input
+                  maxLength={1000}
+                  value={turn.question}
+                  disabled={busy !== null}
+                  onChange={(e) => update(index, { question: e.target.value })}
+                />
+              </label>
+              <label>
+                助手回答
+                <textarea
+                  maxLength={6000}
+                  value={turn.answer}
+                  rows={3}
+                  disabled={busy !== null}
+                  onChange={(e) => update(index, { answer: e.target.value })}
+                />
+              </label>
+            </>
+          )}
           <div className="eval-prelude-actions">
             <ConfirmPopover
               when={Boolean(turn.answer)}
@@ -182,25 +213,30 @@ export default function EvalPreludeEditor({
                 AI 回答
               </button>
             </ConfirmPopover>
-            <button
-              type="button"
-              className="secondary-button button-sm"
-              disabled={
-                busy !== null ||
-                !turn.question.trim() ||
-                !turn.answer.trim() ||
-                value.slice(0, index).some((item) => !item.confirmed)
-              }
-              onClick={() =>
-                onChange(
-                  value.map((item, i) =>
-                    i === index ? { ...item, confirmed: true } : item,
-                  ),
-                )
-              }
-            >
-              确认本轮
-            </button>
+            {turn.confirmed ? (
+              <button
+                type="button"
+                className="secondary-button button-sm"
+                disabled={busy !== null}
+                onClick={() => reopen(index)}
+              >
+                重新编辑
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="secondary-button button-sm"
+                disabled={
+                  busy !== null ||
+                  !turn.question.trim() ||
+                  !turn.answer.trim() ||
+                  value.slice(0, index).some((item) => !item.confirmed)
+                }
+                onClick={() => confirmTurn(index)}
+              >
+                确认本轮
+              </button>
+            )}
             <button
               type="button"
               className="secondary-button button-sm"
