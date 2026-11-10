@@ -127,7 +127,7 @@ export default function EvalPreludeEditor({
         </button>
       </div>
       {value.length > 0 && (
-        <details>
+        <details className="eval-prelude-corpus">
           <summary>AI 回答使用的语料</summary>
           {corpus?.items
             .filter((item) => !item.missing)
@@ -151,148 +151,162 @@ export default function EvalPreludeEditor({
         </details>
       )}
       {value.map((turn, index) => (
-        <article key={index}>
-          <strong>
+        <details
+          className="eval-prelude-turn"
+          key={index}
+          /* 确认后自动收起，重新编辑时再展开；标题行始终可以点开。 */
+          open={!turn.confirmed}
+        >
+          <summary>
             第 {index + 1} 轮 · {turn.confirmed ? "已确认" : "待确认"}
-          </strong>
-          {turn.confirmed ? (
-            <>
-              <div className="eval-prelude-field">
-                <span>用户问题</span>
-                <p className="eval-prelude-readonly">{turn.question}</p>
-              </div>
-              <div className="eval-prelude-field">
-                <span>助手回答</span>
-                <p className="eval-prelude-readonly">{turn.answer}</p>
-              </div>
-            </>
-          ) : (
-            <>
-              <label>
-                用户问题
-                <input
-                  maxLength={1000}
-                  value={turn.question}
-                  disabled={busy !== null}
-                  onChange={(e) => update(index, { question: e.target.value })}
-                />
-              </label>
-              <label>
-                助手回答
-                <textarea
-                  maxLength={6000}
-                  value={turn.answer}
-                  rows={3}
-                  disabled={busy !== null}
-                  onChange={(e) => update(index, { answer: e.target.value })}
-                />
-              </label>
-            </>
-          )}
-          <div className="eval-prelude-actions">
-            <ConfirmPopover
-              when={Boolean(turn.answer)}
-              message="生成新答案将覆盖当前答案，后续问答需重新确认。"
-              confirmText="生成 RAG 回答"
-              disabled={
-                busy !== null ||
-                !turn.question.trim() ||
-                value.slice(0, index).some((item) => !item.confirmed)
-              }
-              onConfirm={() => answer(index)}
-            >
-              <button
-                type="button"
-                className={`secondary-button button-sm${busy === index ? " is-loading" : ""}`}
-                disabled={
-                  busy !== null ||
-                  !turn.question.trim() ||
-                  value.slice(0, index).some((item) => !item.confirmed)
-                }
-              >
-                AI 回答
-              </button>
-            </ConfirmPopover>
-            {turn.confirmed ? (
-              <button
-                type="button"
-                className="secondary-button button-sm"
-                disabled={busy !== null}
-                onClick={() => reopen(index)}
-              >
-                重新编辑
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="secondary-button button-sm"
-                disabled={
-                  busy !== null ||
-                  !turn.question.trim() ||
-                  !turn.answer.trim() ||
-                  value.slice(0, index).some((item) => !item.confirmed)
-                }
-                onClick={() => confirmTurn(index)}
-              >
-                确认本轮
-              </button>
+            {turn.question && (
+              <span className="eval-prelude-summary-question">
+                {turn.question}
+              </span>
             )}
-            <button
-              type="button"
-              className="secondary-button button-sm"
-              disabled={busy !== null || index === 0}
-              onClick={() => move(index, -1)}
-            >
-              上移
-            </button>
-            <button
-              type="button"
-              className="secondary-button button-sm"
-              disabled={busy !== null || index === value.length - 1}
-              onClick={() => move(index, 1)}
-            >
-              下移
-            </button>
-            <ConfirmPopover
-              message="删除本轮后，后续问答需要重新确认。"
-              confirmText="删除本轮"
-              danger
-              onConfirm={() => {
-                onChange(
-                  value
-                    .filter((_, i) => i !== index)
-                    .map((item, i) =>
-                      i < index ? item : { ...item, confirmed: false },
-                    ),
-                );
-                setSources({});
-              }}
-            >
+          </summary>
+          <div className="eval-prelude-turn-body">
+            {turn.confirmed ? (
+              <>
+                <div className="eval-prelude-field">
+                  <span>用户问题</span>
+                  <p className="eval-prelude-readonly">{turn.question}</p>
+                </div>
+                <div className="eval-prelude-field">
+                  <span>助手回答</span>
+                  <p className="eval-prelude-readonly">{turn.answer}</p>
+                </div>
+              </>
+            ) : (
+              <>
+                <label>
+                  用户问题
+                  <input
+                    maxLength={1000}
+                    value={turn.question}
+                    disabled={busy !== null}
+                    onChange={(e) =>
+                      update(index, { question: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  助手回答
+                  <textarea
+                    maxLength={6000}
+                    value={turn.answer}
+                    rows={3}
+                    disabled={busy !== null}
+                    onChange={(e) => update(index, { answer: e.target.value })}
+                  />
+                </label>
+              </>
+            )}
+            <div className="eval-prelude-actions">
+              <ConfirmPopover
+                when={Boolean(turn.answer)}
+                message="生成新答案将覆盖当前答案，后续问答需重新确认。"
+                confirmText="生成 RAG 回答"
+                disabled={
+                  busy !== null ||
+                  !turn.question.trim() ||
+                  value.slice(0, index).some((item) => !item.confirmed)
+                }
+                onConfirm={() => answer(index)}
+              >
+                <button
+                  type="button"
+                  className={`secondary-button button-sm${busy === index ? " is-loading" : ""}`}
+                  disabled={
+                    busy !== null ||
+                    !turn.question.trim() ||
+                    value.slice(0, index).some((item) => !item.confirmed)
+                  }
+                >
+                  AI 回答
+                </button>
+              </ConfirmPopover>
+              {turn.confirmed ? (
+                <button
+                  type="button"
+                  className="secondary-button button-sm"
+                  disabled={busy !== null}
+                  onClick={() => reopen(index)}
+                >
+                  重新编辑
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="secondary-button button-sm"
+                  disabled={
+                    busy !== null ||
+                    !turn.question.trim() ||
+                    !turn.answer.trim() ||
+                    value.slice(0, index).some((item) => !item.confirmed)
+                  }
+                  onClick={() => confirmTurn(index)}
+                >
+                  确认本轮
+                </button>
+              )}
               <button
                 type="button"
-                className="delete-button button-sm"
-                disabled={busy !== null}
+                className="secondary-button button-sm"
+                disabled={busy !== null || index === 0}
+                onClick={() => move(index, -1)}
               >
-                删除
+                上移
               </button>
-            </ConfirmPopover>
-          </div>
-          {sources[index]?.length > 0 && (
-            <div>
-              检索出处：
-              {sources[index].map((source) => (
+              <button
+                type="button"
+                className="secondary-button button-sm"
+                disabled={busy !== null || index === value.length - 1}
+                onClick={() => move(index, 1)}
+              >
+                下移
+              </button>
+              <ConfirmPopover
+                message="删除本轮后，后续问答需要重新确认。"
+                confirmText="删除本轮"
+                danger
+                onConfirm={() => {
+                  onChange(
+                    value
+                      .filter((_, i) => i !== index)
+                      .map((item, i) =>
+                        i < index ? item : { ...item, confirmed: false },
+                      ),
+                  );
+                  setSources({});
+                }}
+              >
                 <button
-                  key={source.id}
                   type="button"
-                  className="link-button button-sm"
-                  onClick={() => setOriginal(source)}
+                  className="delete-button button-sm"
+                  disabled={busy !== null}
                 >
-                  {source.id} · {source.title}
+                  删除
                 </button>
-              ))}
+              </ConfirmPopover>
             </div>
-          )}
-        </article>
+            {sources[index]?.length > 0 && (
+              <div>
+                检索出处：
+                {sources[index].map((source) => (
+                  <button
+                    key={source.id}
+                    type="button"
+                    className="link-button button-sm"
+                    onClick={() => setOriginal(source)}
+                  >
+                    {source.id} · {source.title}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </details>
       ))}
       {original && (
         <DetailDialog

@@ -121,12 +121,33 @@
 .eval-prelude-editor {
   grid-column: 1/-1;
 }
-.eval-prelude-editor article {
-  display: grid;
-  gap: 12px;
+/* 每一轮是一个可折叠块：标题行点开/收起，确认后自动收起。 */
+.eval-prelude-editor .eval-prelude-turn {
   border: 1px solid var(--t-cdddec, #d0dfec);
   padding: 12px;
   margin: 10px 0;
+}
+.eval-prelude-editor .eval-prelude-turn > summary {
+  cursor: pointer;
+  color: var(--t-1d3550);
+  font-weight: 700;
+}
+.eval-prelude-editor .eval-prelude-turn-body {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+/* 收起时标题行里带上问题摘要，方便一眼看出是哪一轮。 */
+.eval-prelude-summary-question {
+  display: inline-block;
+  max-width: 50%;
+  margin-left: 10px;
+  overflow: hidden;
+  color: var(--t-7d95ac);
+  font-size: 12px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .eval-prelude-editor label {
   display: flex;
@@ -137,15 +158,16 @@
   letter-spacing: normal;
 }
 /* 每一轮内部的字段：标签和输入框之间留出间距，字段之间靠网格间距分开，不再挤成一团。 */
-.eval-prelude-editor article label {
+.eval-prelude-editor .eval-prelude-turn label {
   gap: 8px;
   margin: 0;
 }
-.eval-prelude-editor details label {
+/* 语料列表里的复选框按行排，只作用于语料那一个折叠块。 */
+.eval-prelude-editor .eval-prelude-corpus label {
   flex-direction: row;
   align-items: center;
 }
-.eval-prelude-editor details input {
+.eval-prelude-editor .eval-prelude-corpus input {
   width: auto;
 }
 /* 已确认的轮次只读展示：标题 + 内容块，不使用输入框。 */
