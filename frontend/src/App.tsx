@@ -5826,10 +5826,38 @@ function CandidateChunksDialog({
   const firstChunk =
     groupIndex >= 0 && groupIndex < pageStart ? pageStart - 1 : pageStart;
   const chunkRows = visible.filter((entry) => entry.kind === "chunk").length;
+  // 分片正文：候选里带的 preview 是「上下文说明 + 正文」拼起来的，看不出这一片到底写了什么。
+  // 原文接口返回的就是这一片自己的正文，按当前页取一次，读过的不再取。
+  const [originals, setOriginals] = useState<Record<string, ChunkOriginal>>({});
+  const missingOriginals = visible
+    .filter((entry) => entry.kind === "chunk")
+    .map((entry) => (entry.kind === "chunk" ? entry.item.chunk_id : ""))
+    .filter((id) => id && !originals[id])
+    .join(",");
+  useEffect(() => {
+    if (!missingOriginals) return;
+    let cancelled = false;
+    getChunkOriginals(missingOriginals.split(","))
+      .then((result) => {
+        if (cancelled) return;
+        setOriginals((previous) => {
+          const next = { ...previous };
+          for (const item of result.items) next[item.chunk_id] = item;
+          return next;
+        });
+      })
+      .catch(() => {
+        // 读不到正文就退回候选里带的预览，不打断这一页的查看。
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [missingOriginals]);
   const row = (item: RetrievalCandidate) => {
     const methods = ["dense", "keyword", "graph"].filter((method) =>
       item.retrieval_methods.includes(method),
     );
+    const body = originals[item.chunk_id]?.content;
     return (
       <tr key={item.chunk_id}>
         <td>
@@ -5842,18 +5870,30 @@ function CandidateChunksDialog({
             ))}
           </div>
         </td>
-        <td className="diag-snippet">
+        {/* 来源：这一片出自哪份文档、哪个版本、哪一页、哪一小节。 */}
+        <td className="diag-source">
           <span className="diag-title">
             {item.title}
             <small className="source-location">
               {sourceLocation(item.version, item.page_start, item.heading)}
             </small>
           </span>
-          {/* 原文按钮跟在分片文字末尾，不单独占一列。 */}
+        </td>
+        {/* 分片：这一片自己的正文，正文没取到时先占位。 */}
+        <td className="diag-snippet">
           <span className="diag-snippet-body">
-            <span className="diag-preview" title={item.preview}>
-              {item.preview}
-            </span>
+            {body === undefined ? (
+              <LoadingSkeleton
+                label="正在读取分片正文"
+                className="diag-body-loading"
+              >
+                <SkeletonBlock className="skeleton-line" />
+              </LoadingSkeleton>
+            ) : (
+              <span className="diag-preview" title={body}>
+                {body}
+              </span>
+            )}
             <button
               type="button"
               className="link-button button-sm"
@@ -5932,7 +5972,10 @@ function CandidateChunksDialog({
             <thead>
               <tr>
                 <th>召回方式</th>
-                <th>分片</th>
+                <th title="这一片出自哪份文档、哪个版本、哪一页、哪一小节">
+                  来源
+                </th>
+                <th title="这一片自己的正文">分片</th>
                 <th
                   title={
                     scoreKind === "rerank"
@@ -5950,7 +5993,7 @@ function CandidateChunksDialog({
                 entry.kind === "group" ? (
                   // 名额补进来的单独一段，别和 RRF 名前面几个混在一起。
                   <tr className="diag-pool-group" key={`group-${index}`}>
-                    <td colSpan={4}>
+                    <td colSpan={5}>
                       图检索名额补进来的 {entry.count} 个：RRF
                       名次不够，靠名额进池
                     </td>
@@ -5987,10 +6030,11 @@ function CandidateChunksDialog({
             </button>
           </div>
         </div>
-        {/* 「原文」打开的内容是伴随浮窗，贴着按钮出现。 */}
+        {/* 「原文」打开的内容是伴随浮窗，贴着按钮出现。正文这一页已经取过，直接传进去，不用再读一次。 */}
         {chunkOpen && (
           <ChunkOriginalPanel
             chunkId={chunkOpen}
+            chunk={originals[chunkOpen]}
             onClose={() => setChunkOpen(null)}
           />
         )}

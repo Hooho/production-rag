@@ -3811,6 +3811,21 @@ label {
   max-width: 220px;
 }
 
+/* 分片列表：来源单独一列（书名、版本、页码、所在小节），正文列放宽，让这一片写了什么看得清。 */
+.diag-table.diag-pool td.diag-source {
+  max-width: 160px;
+}
+
+.diag-table.diag-pool td.diag-snippet {
+  max-width: 260px;
+}
+
+/* 正文还没取到时的占位：形状接近正文一行，不让这一格先空着。 */
+.diag-body-loading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .diag-title {
   display: block;
   color: var(--diag-strong);
