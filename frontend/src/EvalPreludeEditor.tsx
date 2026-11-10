@@ -10,6 +10,15 @@ import { ConfirmPopover } from "./ConfirmPopover";
 import { DetailDialog } from "./DetailDialog";
 import { HighlightedText } from "./HighlightedText";
 
+// 收起时标题行里放一小段问题摘要，够认出是哪一轮就行。
+// 这里截断而不是用 CSS 省略号：省略号需要 overflow:hidden，那会让 inline-block
+// 的基线退化成盒底，摘要就会比标题浮高一行。
+const SUMMARY_LENGTH = 24;
+const summarize = (question: string) =>
+  question.length > SUMMARY_LENGTH
+    ? `${question.slice(0, SUMMARY_LENGTH)}…`
+    : question;
+
 export default function EvalPreludeEditor({
   value,
   onChange,
@@ -161,7 +170,7 @@ export default function EvalPreludeEditor({
             第 {index + 1} 轮 · {turn.confirmed ? "已确认" : "待确认"}
             {turn.question && (
               <span className="eval-prelude-summary-question">
-                {turn.question}
+                {summarize(turn.question)}
               </span>
             )}
           </summary>
