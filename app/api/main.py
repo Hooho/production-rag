@@ -3259,7 +3259,12 @@ def create_app(store=None, models=None, jwt_secret=None):
 
         def work():
             try:
+                if body.version == 2 and launch["prepared"].get("data_scope") is None:
+                    freeze_launch_data([launch])
                 execute_launch(launch, source)
+            except Exception as error:
+                source.update(status="failed", error=f"冻结评测数据失败：{error}")
+                save_run(source)
             finally:
                 app.state.eval_running = None
                 app.state.eval_batch = None

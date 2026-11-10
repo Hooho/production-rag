@@ -106,6 +106,9 @@ def test_unified_batch_freezes_common_questions_and_methods(
     client, store = setup
     monkeypatch.setattr(Models, "rerank", fake_rerank)
     runtime(rerank_min_score=0.3, contextual_retrieval=False)
+    from app.evaluation.retrieval import import_corpus
+
+    import_corpus(store, client.app.state.models)
     started = client.post(
         "/eval/batches",
         headers=headers(),
@@ -151,6 +154,9 @@ def test_retry_stays_inside_report_and_preserves_failure(
 
     client, store = setup
     runtime(contextual_retrieval=False)
+    from app.evaluation.retrieval import import_corpus
+
+    import_corpus(store, client.app.state.models)
     original = api_main.execute_run
 
     def fail(*args, **kwargs):
@@ -298,3 +304,40 @@ def test_new_question_format_does_not_inherit_legacy_suite_execution():
         corpus="",
     )
     assert item["question"] == "一个独立问题" and not item.get("turns")
+
+
+def test_retry_recovers_from_initial_data_freeze_failure(
+    setup, eval_dir, monkeypatch, runtime
+):
+    from app.evaluation import retrieval
+
+    client, store = setup
+    runtime(contextual_retrieval=False)
+    monkeypatch.setattr(Models, "rerank", fake_rerank)
+    original = retrieval.import_corpus
+    original(store, client.app.state.models)
+    calls = []
+
+    def import_with_first_failure(*args, **kwargs):
+        calls.append(True)
+        if len(calls) == 1:
+            raise RuntimeError("temporary import failure")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(retrieval, "import_corpus", import_with_first_failure)
+    started = client.post(
+        "/eval/batches",
+        headers=headers(),
+        json={"configs": [{"version": 2, "split": "all", "methods": ["keyword"]}]},
+    )
+    assert started.status_code == 202
+    report = wait_batch(client, started.json()["id"])
+    assert report["arms"][0]["status"] == "failed"
+    response = client.post(
+        f"/eval/batches/{report['id']}/arms/{report['arms'][0]['id']}/retry",
+        headers=headers(),
+    )
+    assert response.status_code == 202, response.text
+    retried = wait_batch(client, report["id"])
+    assert retried["arms"][0]["status"] == "completed", retried
+    assert retried["runs"][0]["frozen"]["data_scope"]["documents"]
