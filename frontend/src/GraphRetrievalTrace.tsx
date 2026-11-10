@@ -360,6 +360,9 @@ const MATCH_LABELS = {
   contains: "字面包含",
   vector: "向量",
 };
+// 结果这一维：留下的算一类，去掉的按原因分开（原因里带具体数字，但同一次检索里是稳定的）。
+const resultLabel = (item: { kept: boolean; reason?: string | null }) =>
+  item.kept ? "留下" : item.reason || "去掉";
 const NAME_DIMS: Dim<NameMatch>[] = [
   { key: "keyword", label: "按关键词", value: (item) => item.keyword },
   {
@@ -371,6 +374,11 @@ const NAME_DIMS: Dim<NameMatch>[] = [
     key: "entity",
     label: "按实体",
     value: (item) => item.entity_name ?? "—",
+  },
+  {
+    key: "result",
+    label: "按结果",
+    value: resultLabel,
   },
 ];
 const ENTITY_RELATION_DIMS: Dim<RelationRow>[] = [
@@ -385,6 +393,11 @@ const ENTITY_RELATION_DIMS: Dim<RelationRow>[] = [
     value: (item) => item.category,
     hue: true,
   },
+  {
+    key: "result",
+    label: "按结果",
+    value: resultLabel,
+  },
 ];
 const RELATION_MATCH_DIMS: Dim<RelationRow>[] = [
   { key: "keyword", label: "按关键词", value: (item) => item.keyword ?? "—" },
@@ -393,6 +406,11 @@ const RELATION_MATCH_DIMS: Dim<RelationRow>[] = [
     label: "按关系类型",
     value: (item) => item.category,
     hue: true,
+  },
+  {
+    key: "result",
+    label: "按结果",
+    value: resultLabel,
   },
 ];
 
