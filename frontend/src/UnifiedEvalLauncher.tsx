@@ -334,7 +334,7 @@ export default function UnifiedEvalLauncher({
           <footer>
             <span>{dirty ? "当前修改未保存" : "配置已保存"}</span>
             <button type="button" className="secondary-button" onClick={save}>
-              保存配置
+              保存一份配置
             </button>
           </footer>
         </div>
