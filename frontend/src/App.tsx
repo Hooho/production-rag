@@ -5870,15 +5870,6 @@ function CandidateChunksDialog({
             ))}
           </div>
         </td>
-        {/* 来源：这一片出自哪份文档、哪个版本、哪一页、哪一小节。 */}
-        <td className="diag-source">
-          <span className="diag-title">
-            {item.title}
-            <small className="source-location">
-              {sourceLocation(item.version, item.page_start, item.heading)}
-            </small>
-          </span>
-        </td>
         {/* 分片：这一片自己的正文，正文没取到时先占位。 */}
         <td className="diag-snippet">
           <span className="diag-snippet-body">
@@ -5952,6 +5943,15 @@ function CandidateChunksDialog({
             ))}
           </div>
         </td>
+        {/* 来源：这一片出自哪份文档、哪个版本、哪一页、哪一小节。 */}
+        <td className="diag-source">
+          <span className="diag-title">
+            {item.title}
+            <small className="source-location">
+              {sourceLocation(item.version, item.page_start, item.heading)}
+            </small>
+          </span>
+        </td>
       </tr>
     );
   };
@@ -5972,9 +5972,6 @@ function CandidateChunksDialog({
             <thead>
               <tr>
                 <th>召回方式</th>
-                <th title="这一片出自哪份文档、哪个版本、哪一页、哪一小节">
-                  来源
-                </th>
                 <th title="这一片自己的正文">分片</th>
                 <th
                   title={
@@ -5986,6 +5983,9 @@ function CandidateChunksDialog({
                   {scoreKind === "rerank" ? "重排概率" : "RRF 分"}
                 </th>
                 <th>各路名次</th>
+                <th title="这一片出自哪份文档、哪个版本、哪一页、哪一小节">
+                  来源
+                </th>
               </tr>
             </thead>
             <tbody>
