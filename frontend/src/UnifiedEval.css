@@ -60,14 +60,40 @@
 .unified-eval-row select {
   min-width: 0;
 }
+/* 右侧「本次运行配置」模块：整块用浅蓝底 + 边框和左侧表单分开，标题、说明、配置卡片、按钮之间统一留间距。 */
+.unified-eval-configs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-self: start;
+  padding: 14px;
+  border: 1px solid var(--t-d2e2f0, #d2e2f0);
+  border-radius: 8px;
+  background: var(--t-eaf3fb, #eaf3fb);
+}
+.unified-eval-configs > strong {
+  font-size: 14px;
+  color: var(--t-173b5b, #173b5b);
+}
+.unified-eval-configs > p {
+  margin: 0;
+  color: var(--t-6b7f93, #6b7f93);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.unified-eval-configs > button {
+  align-self: flex-start;
+}
 .unified-eval-configs article {
-  border: 1px solid var(--t-cdddec, #d0dfec);
+  border: 1px solid var(--t-d2e2f0, #d2e2f0);
+  border-radius: 6px;
   padding: 12px;
-  margin: 10px 0;
+  margin: 0;
+  background: var(--t-ffffff, #fff);
 }
 .unified-eval-configs article.is-current {
   border-color: var(--t-2563eb, #2563eb);
-  background: var(--t-eff6ff, #f4f8ff);
+  background: var(--t-eef5fb, #eef5fb);
 }
 .unified-eval-configs article p {
   margin: 6px 0;
