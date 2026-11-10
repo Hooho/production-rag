@@ -99,21 +99,24 @@
    color: #b42318;
 }
 
+/* 表单整体：整块收在一个固定宽度里，标签列宽度固定，所有控件共用同一条左、右边界，宽屏上不再拉散。 */
 .rg-form {
    display: flex;
    flex-direction: column;
-   gap: 10px;
+   gap: 14px;
+   width: 100%;
+   max-width: 760px;
    border: 1px solid var(--t-e3edf5);
    border-radius: 6px;
    background: #fbfdff;
-   padding: 14px 16px;
+   padding: 16px 18px;
 }
 
 .rg-field {
    display: grid;
-   grid-template-columns: 72px 1fr;
+   grid-template-columns: 84px minmax(0, 1fr);
    align-items: center;
-   gap: 10px;
+   gap: 12px;
 }
 
 /* 全局 label 是小号字，这里和其他行统一成 13px。 */
@@ -127,16 +130,22 @@
    color: var(--t-5e7a95);
 }
 
-/* 输入框、下拉框和巡检页的备注框同一套样式：浅色边框、圆角、白底。 */
-.rg-field input:not([type="radio"]),
+/* 输入框、下拉框和巡检页的备注框同一套样式：浅色边框、圆角、白底；宽度跟着内容列走，不再单独限宽。 */
+.rg-field input:not([type="radio"]):not([type="checkbox"]),
 .rg-field textarea,
 .rg-field select {
    box-sizing: border-box;
    width: 100%;
-   max-width: 520px;
+   max-width: 100%;
    margin: 0;
    color: var(--t-1d3550);
    font-family: inherit;
+}
+/* 复选框、单选框按控件本身的大小显示并靠左对齐，不要被拉成整行宽度后居中。 */
+.rg-field input[type="checkbox"],
+.rg-field input[type="radio"] {
+   justify-self: start;
+   margin: 0;
 }
 .rg-field textarea {
    resize: vertical;
@@ -155,6 +164,36 @@
 
 .rg-form-title {
    font-weight: 700;
+}
+
+/* 前置对话是表单里的一块可选项，当成小节：标题一行，下面用细线和其他字段分开。 */
+.rg-form .eval-prelude-editor {
+   display: grid;
+   gap: 12px;
+   padding-bottom: 14px;
+   border-bottom: 1px solid var(--t-e3edf5);
+}
+.rg-form .unified-eval-prelude-heading {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: 10px;
+}
+.rg-form .unified-eval-prelude-heading strong {
+   font-size: 13px;
+}
+.rg-form .unified-eval-prelude-heading small {
+   color: var(--t-7d95ac);
+   font-size: 12px;
+}
+.rg-form .unified-eval-prelude-heading button {
+   margin-left: auto;
+}
+.rg-form .eval-prelude-editor article {
+   margin: 0;
+}
+.rg-form .eval-prelude-editor label {
+   margin: 0;
 }
 
 .rg-documents {

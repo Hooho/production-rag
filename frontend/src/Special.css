@@ -14,13 +14,20 @@
 .sp-scoring-editor { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; min-width: 0; }
 .sp-scoring-editor > .secondary-button,
 .sp-scoring-editor > small { grid-column: 1 / -1; }
-.sp-scoring-item { display: grid; align-content: start; min-width: 0; gap: 10px; padding: 14px; border: 1px solid #d5e3d8; border-radius: 8px; }
+/* 「添加计分项」保持按钮本身的宽度，不拉满整行。 */
+.sp-scoring-editor > .secondary-button { justify-self: start; }
+/* 每个计分项一张带底色的卡片，和其他字段的边界对齐，一眼能分清哪一项是哪一项。 */
+.sp-scoring-item { display: grid; align-content: start; min-width: 0; gap: 10px; padding: 14px; border: 1px solid var(--t-d2e2f0, #d2e2f0); border-radius: 8px; background: var(--t-f2f7fc, #f2f7fc); }
+/* 添加/编辑题目的表单里，计分项和其他字段共用同一条边界，改成一列排。 */
+.rg-form .sp-scoring-editor { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 760px) {
   .sp-scoring-editor { grid-template-columns: minmax(0, 1fr); }
 }
 .sp-scoring-heading { display: flex; align-items: center; gap: 12px; }
-.sp-scoring-heading label { display: grid; flex: 1; gap: 6px; min-width: 0; }
+.sp-scoring-heading label { display: grid; flex: 1; gap: 6px; min-width: 0; margin: 0; color: var(--t-5e7a95); font-family: inherit; font-size: 13px; }
 .sp-scoring-heading input { width: 100%; box-sizing: border-box; }
+/* 「选择分片」链接跟着上面的输入框左对齐，不要被网格拉到中间。 */
+.sp-scoring-item > .rg-link { justify-self: start; }
 .sp-scoring-targets { display: flex; flex-wrap: wrap; gap: 8px; }
 .sp-scoring-target { display: flex; align-items: center; gap: 4px; }
 .sp-scoring-target .ag-evidence-target-tags { margin-top: 0; }
