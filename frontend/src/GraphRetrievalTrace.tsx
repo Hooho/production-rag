@@ -184,13 +184,40 @@ type Detail =
       dim?: string;
       value?: string;
     }
-  | { kind: "chunks"; table: "entity" | "relation" };
+  | { kind: "chunks"; table: "entity" | "relation" }
+  | { kind: "chunksAll" };
 
 const CHUNK_TABLES = {
   entity: "图 · 实体（来自 ③）",
   relation: "图 · 关系（来自 ④）",
 };
 const PAGE_SIZE = 20;
+
+// 两张表的分片合并去重：同一片在两张表里都出现过，取更高的分、合并两条表里的关系，
+// 名次按分重排（和后端 chunk_table 一样，分取这一片对应关系里最高的那条）。
+function mergeChunkTables(tables: GraphTrace["tables"]) {
+  const merged = new Map<string, GraphRetrievalTable>();
+  for (const table of [tables.entity ?? [], tables.relation ?? []]) {
+    for (const row of table) {
+      // 不在当前文档版本的分片没有进过来源，不算进合计。
+      if (row.kept === false) continue;
+      const previous = merged.get(row.chunk_id);
+      if (!previous) {
+        merged.set(row.chunk_id, {
+          ...row,
+          relation_ids: [...row.relation_ids],
+        });
+        continue;
+      }
+      previous.score = Math.max(previous.score, row.score);
+      for (const id of row.relation_ids)
+        if (!previous.relation_ids.includes(id)) previous.relation_ids.push(id);
+    }
+  }
+  return [...merged.values()]
+    .sort((a, b) => b.score - a.score)
+    .map((row, index) => ({ ...row, rank: index + 1 }));
+}
 
 type CountGroup = {
   key: string;
@@ -564,7 +591,9 @@ function TraceDetail({
   const title =
     detail.kind === "chunks"
       ? `⑤ 取分片 · ${CHUNK_TABLES[detail.table]}`
-      : DETAIL_TITLES[detail.kind];
+      : detail.kind === "chunksAll"
+        ? `⑤ 取分片 · 合计 ${graph.counts?.chunks ?? 0} 个分片`
+        : DETAIL_TITLES[detail.kind];
   // 实体详情：点匹配到的名字或关系里的实体打开，内容和图谱里点实体一样。
   const [entity, setEntity] = useState<{
     id: string;
@@ -617,6 +646,12 @@ function TraceDetail({
         {detail.kind === "chunks" && (
           <ChunksDetail
             rows={graph.tables[detail.table]}
+            relations={relations}
+          />
+        )}
+        {detail.kind === "chunksAll" && (
+          <ChunksDetail
+            rows={mergeChunkTables(graph.tables)}
             relations={relations}
           />
         )}
@@ -1056,7 +1091,15 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
           </tbody>
         </table>
         <p className="grt-summary">
-          合计 {graph.counts?.chunks ?? 0} 个分片
+          {/* 合计这行点开看这批分片：两张表的分片合并去重后的完整清单。 */}
+          <button
+            type="button"
+            className="link-button"
+            title="点开看这批分片的完整清单"
+            onClick={() => setDetail({ kind: "chunksAll" })}
+          >
+            合计 {graph.counts?.chunks ?? 0} 个分片
+          </button>
           {graph.counts &&
           graph.counts.entity_chunks + graph.counts.relation_chunks >
             graph.counts.chunks
