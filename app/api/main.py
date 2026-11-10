@@ -81,6 +81,7 @@ from ..evaluation.dataset import (
     generate_items,
     load_dataset,
     mark_reviewed,
+    update_prelude,
     next_item_id,
     next_pair_id,
     seed_eval_data,
@@ -241,6 +242,11 @@ class EvalPreludeAnswerInput(BaseModel):
     corpus_ids: list[str] = Field(default_factory=list, max_length=200)
 
 
+class EvalDatasetPreludeInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    prelude: list[EvalPreludeTurn] = Field(default_factory=list, max_length=20)
+
+
 class EvalDatasetItemInput(BaseModel):
     prelude: list[EvalPreludeTurn] = Field(default_factory=list, max_length=20)
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -329,12 +335,14 @@ class EvalSuiteInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(..., max_length=64)
     description: str | None = Field(None, max_length=500)
-    method: str = Field(..., pattern="^(retrieval|answer|dialogue)$")
+    method: str = Field("retrieval", pattern="^(retrieval|answer|dialogue)$")
     search_mode: str = Field("hybrid", pattern="^(hybrid|dense|keyword)$")
 
 
 # 专项的一道题，字段随评测方式不同：检索要问题和证据，回答再加参考答案，多轮对话是前面几轮提问 + 最后一问 + 参考答案。
 class EvalSuiteItemInput(BaseModel):
+    version: Literal[1, 2] = 1
+    answerable: bool = True
     prelude: list[EvalPreludeTurn] = Field(default_factory=list, max_length=20)
     model_config = ConfigDict(extra="forbid")
     question: str = Field(..., max_length=500)
@@ -2860,6 +2868,23 @@ def create_app(store=None, models=None, jwt_secret=None):
             if problems:
                 raise HTTPException(422, problems)
             append_items([item])
+        return item
+
+    @app.put(
+        "/eval/dataset/items/{item_id}/prelude", dependencies=[Depends(require_admin)]
+    )
+    def edit_eval_dataset_prelude(item_id: str, body: EvalDatasetPreludeInput):
+        with app.state.eval_dataset_lock:
+            try:
+                item = update_prelude(
+                    item_id,
+                    [turn.model_dump() for turn in body.prelude],
+                    app.state.store.engine,
+                )
+            except ValueError as error:
+                raise HTTPException(422, str(error)) from error
+        if item is None:
+            raise HTTPException(404, "题目不存在")
         return item
 
     # 同义改写题在编辑器里一次填写两个问法，但落盘为两条独立题目，检索评测仍逐题执行。

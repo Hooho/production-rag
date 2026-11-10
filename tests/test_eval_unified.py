@@ -232,3 +232,69 @@ def test_graph_worker_inherits_frozen_evaluation_context(
             store, client.app.state.models, "eval", ["腾讯"], "腾讯", methods=["dense"]
         )
     assert captured == [(("graph",), ("version-a",), scope)]
+
+
+def test_existing_question_prelude_is_saved_without_changing_evidence(setup, eval_dir):
+    client, _ = setup
+    old = client.get("/eval/dataset", headers=headers()).json()["items"][0]
+    body = {
+        "prelude": [
+            {"question": "我买了耳机", "answer": "请问售后问题", "confirmed": True}
+        ]
+    }
+    response = client.put(
+        f"/eval/dataset/items/{old['id']}/prelude", headers=headers(), json=body
+    )
+    assert response.status_code == 200, response.text
+    saved = response.json()
+    assert saved["prelude"] == body["prelude"]
+    assert saved["evidence"] == old["evidence"] and saved["question"] == old["question"]
+    body["prelude"][0]["confirmed"] = False
+    assert (
+        client.put(
+            f"/eval/dataset/items/{old['id']}/prelude", headers=headers(), json=body
+        ).status_code
+        == 422
+    )
+    assert (
+        client.put(
+            "/eval/dataset/items/missing/prelude",
+            headers=headers(),
+            json={"prelude": []},
+        ).status_code
+        == 404
+    )
+
+
+def test_unanswerable_custom_question_has_no_retrieval_configuration(setup, eval_dir):
+    client, _ = setup
+    suite = client.post(
+        "/eval/suites", headers=headers(), json={"name": "无法回答测试"}
+    ).json()
+    response = client.post(
+        f"/eval/suites/{suite['id']}/items",
+        headers=headers(),
+        json={"question": "天气怎么样？", "answerable": False},
+    )
+    assert response.status_code == 201, response.text
+    item = response.json()["items"][0]
+    assert item["answerable"] is False and item["evidence"] == []
+    assert configuration.validate_questions(
+        configuration.questions([], "all", [response.json()]), "retrieval"
+    )
+
+
+def test_new_question_format_does_not_inherit_legacy_suite_execution():
+    from app.evaluation.suites import check_item
+
+    item = check_item(
+        "dialogue",
+        {
+            "version": 2,
+            "question": "一个独立问题",
+            "reference_answer": "参考答案",
+            "prelude": [],
+        },
+        corpus="",
+    )
+    assert item["question"] == "一个独立问题" and not item.get("turns")

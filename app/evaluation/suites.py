@@ -261,9 +261,16 @@ def text_value(value, label, limit, required=True):
 
 # 按评测方式校验一道题，返回要保存的字段。证据必须能在评测语料里逐字找到，否则这道题永远判为没找到。
 def check_item(method, data, corpus=None, catalog=None):
+    if data.get("version") == 2:
+        method = "retrieval"
     question = text_value(data.get("question"), "问题", QUESTION_LIMIT)
-    cleaned = {"question": question}
-    if data.get("evidence_groups") is not None:
+    answerable = data.get("answerable", True)
+    cleaned = {"question": question, "answerable": answerable}
+    if not answerable:
+        if data.get("evidence") or data.get("evidence_groups"):
+            raise ValueError("无法回答题不应设置计分证据")
+        cleaned["evidence"] = []
+    elif data.get("evidence_groups") is not None:
         from .grouped_evidence import validate_groups
 
         groups = validate_groups(data["evidence_groups"], catalog or [])
@@ -313,7 +320,7 @@ def check_item(method, data, corpus=None, catalog=None):
         data.get("reference_answer"),
         "参考答案",
         ANSWER_LIMIT,
-        required=method in LLM_METHODS,
+        required=answerable and method in LLM_METHODS,
     )
     if reference:
         cleaned["reference_answer"] = reference
