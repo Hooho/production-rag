@@ -7,6 +7,7 @@ import type {
   RuntimeSettingValue,
 } from "./api";
 import { settingLabel } from "./SystemSettings";
+import { useAnchoredBubble } from "./Popover";
 import "./EvalParams.css";
 
 // 发起评测页的「参数配置」：模型、运行参数、提示词版本，每项默认跟随系统设置，改成自定义后只对这一次评测生效
@@ -14,6 +15,7 @@ import "./EvalParams.css";
 
 type SettingItem = EvalParamOptions["settings"][number];
 type PromptItem = EvalParamOptions["prompts"][number];
+type ParamGroup = EvalParamOptions["groups"][number];
 
 // 只保留要显示的组里的参数：例如没勾 Agent 时，之前改过的 Agent 参数不提交。
 export function visibleParams(
@@ -89,16 +91,20 @@ export default function EvalParamsPanel({
   groups: EvalParamGroup[];
   showJudge: boolean;
 }) {
-  const [open, setOpen] = useState<EvalParamGroup[]>([]);
+  const [openGroup, setOpenGroup] = useState<EvalParamGroup | null>(null);
+  const visible =
+    options?.groups.filter((group) => groups.includes(group.key)) ?? [];
+  const open = visible.find((group) => group.key === openGroup);
+  // 点开的参数组在标题按钮旁边弹一个气泡，不再把下面的表单撑开。
+  const { anchor, bubble, place, style } = useAnchoredBubble(
+    open !== undefined,
+    (next) => {
+      if (!next) setOpenGroup(null);
+    },
+  );
   if (!options) {
     return <span className="ev-muted-note">正在读取参数…</span>;
   }
-  const toggle = (group: EvalParamGroup) =>
-    setOpen((items) =>
-      items.includes(group)
-        ? items.filter((item) => item !== group)
-        : [...items, group],
-    );
   const setSetting = (key: string, next: RuntimeSettingValue | undefined) => {
     const settings = { ...(value.settings ?? {}) };
     if (next === undefined) delete settings[key];
@@ -121,46 +127,54 @@ export default function EvalParamsPanel({
     onChange(result);
   };
 
+  // 一组里有哪些参数：模型（只在公共参数组里）、运行参数、提示词版本。
+  const groupItems = (group: ParamGroup) => {
+    const settings = options.settings.filter((item) => item.eval === group.key);
+    const prompts = options.prompts.filter((item) => item.eval === group.key);
+    const models: ("llm" | "judge")[] =
+      group.key === "common"
+        ? options.llm.enabled
+          ? showJudge
+            ? ["llm", "judge"]
+            : ["llm"]
+          : []
+        : [];
+    return { models, settings, prompts };
+  };
+  // 标题行上写清这组改了哪几项，不打开气泡也能看出来。
+  const changedOf = (
+    models: ("llm" | "judge")[],
+    settings: SettingItem[],
+    prompts: PromptItem[],
+  ) => [
+    ...models
+      .filter((key) => value[key])
+      .map(
+        (key) =>
+          `${key === "llm" ? "大模型" : "评审模型"} ${value[key]?.model ?? value[key]?.provider}`,
+      ),
+    ...settings
+      .filter((item) => value.settings?.[item.key] !== undefined)
+      .map(
+        (item) =>
+          `${settingLabel(item.key)} ${formatValue(value.settings![item.key])}`,
+      ),
+    ...prompts
+      .filter((item) => value.prompts?.[item.id] !== undefined)
+      .map(
+        (item) =>
+          `${item.label} ${value.prompts![item.id] ? `v${value.prompts![item.id]}` : "内置"}`,
+      ),
+  ];
+  const openItems = open ? groupItems(open) : null;
+
   return (
-    <div className="evp-groups">
-      {options.groups
-        .filter((group) => groups.includes(group.key))
-        .map((group) => {
-          const settings = options.settings.filter(
-            (item) => item.eval === group.key,
-          );
-          const prompts = options.prompts.filter(
-            (item) => item.eval === group.key,
-          );
-          const models: ("llm" | "judge")[] =
-            group.key === "common"
-              ? options.llm.enabled
-                ? showJudge
-                  ? ["llm", "judge"]
-                  : ["llm"]
-                : []
-              : [];
-          const changed = [
-            ...models
-              .filter((key) => value[key])
-              .map(
-                (key) =>
-                  `${key === "llm" ? "大模型" : "评审模型"} ${value[key]?.model ?? value[key]?.provider}`,
-              ),
-            ...settings
-              .filter((item) => value.settings?.[item.key] !== undefined)
-              .map(
-                (item) =>
-                  `${settingLabel(item.key)} ${formatValue(value.settings![item.key])}`,
-              ),
-            ...prompts
-              .filter((item) => value.prompts?.[item.id] !== undefined)
-              .map(
-                (item) =>
-                  `${item.label} ${value.prompts![item.id] ? `v${value.prompts![item.id]}` : "内置"}`,
-              ),
-          ];
-          const expanded = open.includes(group.key);
+    <>
+      <div className="evp-groups">
+        {visible.map((group) => {
+          const { models, settings, prompts } = groupItems(group);
+          const changed = changedOf(models, settings, prompts);
+          const expanded = openGroup === group.key;
           return (
             <section
               key={group.key}
@@ -170,7 +184,15 @@ export default function EvalParamsPanel({
                 type="button"
                 className="evp-head"
                 aria-expanded={expanded}
-                onClick={() => toggle(group.key)}
+                aria-haspopup="dialog"
+                ref={
+                  expanded
+                    ? (node: HTMLButtonElement | null) => {
+                        anchor.current = node;
+                      }
+                    : undefined
+                }
+                onClick={() => setOpenGroup(expanded ? null : group.key)}
               >
                 <span className="evp-caret" aria-hidden="true">
                   {expanded ? "▾" : "▸"}
@@ -182,44 +204,71 @@ export default function EvalParamsPanel({
                     : "全部跟随系统"}
                 </span>
               </button>
-              {expanded && (
-                <div className="evp-rows">
-                  {models.map((key) => (
-                    <ModelRow
-                      key={key}
-                      label={key === "llm" ? "大模型" : "评审模型"}
-                      hint={
-                        key === "llm"
-                          ? "改写、充分性判断、Agent 和回答都用它。"
-                          : "生成评测给答案打分；不选就和回答用同一个模型。"
-                      }
-                      options={options}
-                      value={value[key]}
-                      onChange={(next) => setModel(key, next)}
-                    />
-                  ))}
-                  {settings.map((item) => (
-                    <SettingRow
-                      key={item.key}
-                      item={item}
-                      value={value.settings?.[item.key]}
-                      onChange={(next) => setSetting(item.key, next)}
-                    />
-                  ))}
-                  {prompts.map((item) => (
-                    <PromptRow
-                      key={item.id}
-                      item={item}
-                      value={value.prompts?.[item.id]}
-                      onChange={(next) => setPrompt(item.id, next)}
-                    />
-                  ))}
-                </div>
-              )}
             </section>
           );
         })}
-    </div>
+      </div>
+      {open && openItems && (
+        <div
+          ref={bubble}
+          popover="manual"
+          role="dialog"
+          aria-modal="false"
+          aria-label={open.label}
+          className={`anchored-popover evp-popover is-${place?.side ?? "top"}`}
+          onClick={(event) => event.stopPropagation()}
+          style={style}
+        >
+          <div className="evp-popover-head">
+            <strong>{open.label}</strong>
+            <button
+              type="button"
+              className="link-button button-sm"
+              onClick={() => setOpenGroup(null)}
+            >
+              关闭
+            </button>
+          </div>
+          <div className="evp-popover-body">
+            {openItems.models.map((key) => (
+              <ModelRow
+                key={key}
+                label={key === "llm" ? "大模型" : "评审模型"}
+                hint={
+                  key === "llm"
+                    ? "改写、充分性判断、Agent 和回答都用它。"
+                    : "生成评测给答案打分；不选就和回答用同一个模型。"
+                }
+                options={options}
+                value={value[key]}
+                onChange={(next) => setModel(key, next)}
+              />
+            ))}
+            {openItems.settings.map((item) => (
+              <SettingRow
+                key={item.key}
+                item={item}
+                value={value.settings?.[item.key]}
+                onChange={(next) => setSetting(item.key, next)}
+              />
+            ))}
+            {openItems.prompts.map((item) => (
+              <PromptRow
+                key={item.id}
+                item={item}
+                value={value.prompts?.[item.id]}
+                onChange={(next) => setPrompt(item.id, next)}
+              />
+            ))}
+          </div>
+          <span
+            className="anchored-popover-arrow"
+            style={{ left: place?.arrow ?? 0 }}
+            aria-hidden="true"
+          />
+        </div>
+      )}
+    </>
   );
 }
 

@@ -57,6 +57,30 @@
   padding: 4px 10px 8px 28px;
 }
 
+/* 参数组点开后弹在标题行旁边的气泡：可编辑，滚不动就内部滚。
+   选择器带上 .anchored-popover，用来盖过通用气泡 320px 的宽度限制。 */
+.anchored-popover.evp-popover {
+  width: min(560px, calc(100vw - 16px));
+  max-width: min(560px, calc(100vw - 16px));
+  padding: 10px 14px 12px;
+}
+
+.evp-popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.evp-popover-body {
+  display: flex;
+  flex-direction: column;
+  max-height: min(60vh, 520px);
+  overflow: auto;
+}
+
 .evp-row {
   display: grid;
   grid-template-columns: minmax(120px, 220px) minmax(0, 1fr);
