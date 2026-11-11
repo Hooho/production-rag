@@ -5150,7 +5150,6 @@ function RetrievalDiagnostics({
             <table className="diag-table diag-table-compact">
               <thead>
                 <tr>
-                  <th>序号</th>
                   <th>名次</th>
                   <th>来源</th>
                   <th>分片</th>
@@ -5159,11 +5158,10 @@ function RetrievalDiagnostics({
                 </tr>
               </thead>
               <tbody>
-                {visibleRankHits.map((hit, index) => {
+                {visibleRankHits.map((hit) => {
                   const body = chunkOriginals[hit.chunk_id]?.content;
                   return (
                     <tr key={hit.rank}>
-                      <td className="num">{rankStart + index + 1}</td>
                       <td className="num">{hit.rank}</td>
                       {/* 来源是这一片出自哪份文档；分片列是这一片的原文。 */}
                       <td className="rank-source">
