@@ -10081,8 +10081,20 @@ label {
   margin-bottom: 12px;
 }
 
+.diag-method-filters .method-keyword {
+  --filter-color: var(--diag-keyword);
+}
+
+.diag-method-filters .method-dense {
+  --filter-color: var(--diag-dense);
+}
+
+.diag-method-filters .method-graph {
+  --filter-color: var(--diag-graph);
+}
+
 .diag-method-filters button[aria-pressed="true"] {
-  color: #1677ff;
-  border-color: #1677ff;
-  background: #e6f4ff;
+  color: var(--filter-color);
+  border-color: var(--filter-color);
+  background: color-mix(in srgb, var(--filter-color) 10%, white);
 }

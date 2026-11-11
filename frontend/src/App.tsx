@@ -5808,7 +5808,7 @@ function RetrievalMethodFilter({
         <button
           key={method}
           type="button"
-          className="secondary-button button-sm"
+          className={`secondary-button button-sm method-${method}`}
           aria-pressed={selected.includes(method)}
           onClick={() =>
             onChange(
