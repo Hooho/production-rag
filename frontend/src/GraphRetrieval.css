@@ -514,7 +514,9 @@
 }
 .grt-table td small.grt-result-detail {
   display: block;
-  margin-top: 4px;
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.5;
   color: var(--diag-muted, #6f8ba4);
   white-space: normal;
 }
