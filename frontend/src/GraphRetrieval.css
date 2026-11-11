@@ -512,7 +512,7 @@
 .grt-result {
   min-width: 180px;
 }
-.grt-table td small.grt-result-detail {
+.grt .grt-table td .grt-result small.grt-result-detail {
   display: block;
   margin-top: 3px;
   font-size: 11px;
