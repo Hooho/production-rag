@@ -2374,12 +2374,14 @@ def create_app(store=None, models=None, jwt_secret=None):
         if count > 30:
             raise HTTPException(429, "每分钟最多 30 次问答")
         lock = store.cache.lock(
-            f"chat:{owner}:{session_id}", timeout=180, blocking_timeout=0
+            f"chat:{owner}:{session_id}", timeout=300, blocking_timeout=0
         )
 
         if not lock.acquire(blocking=False):
             raise HTTPException(409, "该会话正在回答，请稍后重试")
 
+        lock_started = time.monotonic()
+        preflight = {}
         try:
             # 获取锁后再次检查，避免并发重试重复生成。
             with store.engine.connect() as connection:
@@ -2397,12 +2399,34 @@ def create_app(store=None, models=None, jwt_secret=None):
                     raise HTTPException(409, "request_id 已用于其他请求")
                 return existing["response"]
             # 拿到会话锁、确认不是重放之后才开始记录进度（见 app/api/live.py）。
+            phase_started = time.monotonic()
             if on_start is not None:
                 on_start()
+            preflight["live_start_ms"] = round(
+                (time.monotonic() - phase_started) * 1000
+            )
+            phase_started = time.monotonic()
             # 先补写这个会话之前没写进会话记忆的问答（外箱里 pending 的任务），再读取记忆，两种模式都一样。
             catch_up_memory(owner, session_id, request)
+            preflight["memory_catch_up_ms"] = round(
+                (time.monotonic() - phase_started) * 1000
+            )
+            phase_started = time.monotonic()
             previous = app.state.memory.history(store, session_id, owner)
+            preflight["history_ms"] = round((time.monotonic() - phase_started) * 1000)
+            phase_started = time.monotonic()
             last_order = app.state.memory.last_order(store, owner, session_id, previous)
+            preflight["last_order_ms"] = round(
+                (time.monotonic() - phase_started) * 1000
+            )
+            phase_started = time.monotonic()
+            preflight["total_ms"] = round((time.monotonic() - lock_started) * 1000)
+            logger.info(
+                "chat_preflight trace_id=%s request_id=%s timings=%s",
+                request.state.trace_id,
+                request_id,
+                preflight,
+            )
             # 记下已完成的阶段，处理失败时据此判断失败发生在哪一步。
             completed_steps = []
             started = time.monotonic()
@@ -2473,9 +2497,29 @@ def create_app(store=None, models=None, jwt_secret=None):
             result.update(
                 {"request_id": request_id, "trace_id": request.state.trace_id}
             )
-            if not lock.owned():
-                # 会话锁已过期：结果不保存（runs、外箱、会话记忆都不写）。以前这里不留记录，现在记进 run_errors，方便排查。
-                error = HTTPException(409, "处理时间过长，请重试")
+            lock_owned = lock.owned()
+            # TTL 与归属为相邻采样，不记录锁令牌；诊断失败不影响保存判断。
+            try:
+                lock_ttl_ms = store.cache.pttl(lock.name)
+            except Exception:
+                lock_ttl_ms = None
+                logger.warning(
+                    "chat_lock_diagnostics_failed request_id=%s",
+                    request_id,
+                    exc_info=True,
+                )
+            logger.info(
+                "chat_lock_before_save trace_id=%s request_id=%s owned=%s ttl_ms=%s held_ms=%s workflow_ms=%s",
+                request.state.trace_id,
+                request_id,
+                lock_owned,
+                lock_ttl_ms,
+                round((time.monotonic() - lock_started) * 1000),
+                round((time.monotonic() - started) * 1000),
+            )
+            if not lock_owned:
+                # 会话锁已失效：结果不保存（runs、外箱、会话记忆都不写）。以前这里不留记录，现在记进 run_errors，方便排查。
+                error = HTTPException(409, "会话锁已失效，本次回答未保存，请重试")
                 record_run_error(
                     request,
                     owner,
