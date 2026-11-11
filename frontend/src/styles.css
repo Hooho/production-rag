@@ -10074,3 +10074,15 @@ label {
   font-size: 13px;
   line-height: 1.7;
 }
+
+.diag-method-filters {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.diag-method-filters button[aria-pressed="true"] {
+  color: #1677ff;
+  border-color: #1677ff;
+  background: #e6f4ff;
+}

@@ -5804,10 +5804,20 @@ function CandidateChunksDialog({
   const [chunkOpen, setChunkOpen] = useState<string | null>(null);
   // 分片多的时候翻页看，一页六条，和候选明细一样。
   const [page, setPage] = useState(1);
-  const quota = splitQuota ? candidates.filter((item) => item.graph_quota) : [];
+  const [selectedMethods, setSelectedMethods] = useState<string[]>([
+    "keyword",
+    "dense",
+    "graph",
+  ]);
+  const filteredCandidates = candidates.filter((item) =>
+    item.retrieval_methods.some((method) => selectedMethods.includes(method)),
+  );
+  const quota = splitQuota
+    ? filteredCandidates.filter((item) => item.graph_quota)
+    : [];
   const rest = splitQuota
-    ? candidates.filter((item) => !item.graph_quota)
-    : candidates;
+    ? filteredCandidates.filter((item) => !item.graph_quota)
+    : filteredCandidates;
   // 每一行是一篇分片，或「图检索名额补进来的」那一段的分隔行；翻页按行翻。
   type Entry =
     | { kind: "chunk"; item: RetrievalCandidate }
@@ -5972,6 +5982,31 @@ function CandidateChunksDialog({
           <strong>{lead}</strong>
           {leadNote ? <small>{leadNote}</small> : null}
         </p>
+        <div
+          className="diag-method-filters"
+          role="group"
+          aria-label="筛选召回方式"
+        >
+          {["keyword", "dense", "graph"].map((method) => (
+            <button
+              key={method}
+              type="button"
+              className="secondary-button button-sm"
+              aria-pressed={selectedMethods.includes(method)}
+              onClick={() => {
+                setSelectedMethods((previous) =>
+                  previous.includes(method)
+                    ? previous.filter((value) => value !== method)
+                    : [...previous, method],
+                );
+                setPage(1);
+              }}
+            >
+              {selectedMethods.includes(method) ? "✓ " : ""}
+              {METHOD_LABELS[method]}
+            </button>
+          ))}
+        </div>
         <div className="diag-table-wrap">
           <table className="diag-table diag-pool">
             <thead>
@@ -5995,6 +6030,11 @@ function CandidateChunksDialog({
               </tr>
             </thead>
             <tbody>
+              {filteredCandidates.length === 0 && (
+                <tr>
+                  <td colSpan={6}>没有符合筛选条件的分片</td>
+                </tr>
+              )}
               {visible.map((entry, index) =>
                 entry.kind === "group" ? (
                   // 名额补进来的单独一段，别和 RRF 名前面几个混在一起。
@@ -6018,8 +6058,8 @@ function CandidateChunksDialog({
         </div>
         <div className="diag-pagination" aria-label="分片明细分页">
           <span aria-live="polite">
-            显示第 {firstChunk + 1}–{firstChunk + chunkRows} 条，共{" "}
-            {candidates.length} 条
+            显示第 {chunkRows ? firstChunk + 1 : 0}–{firstChunk + chunkRows}{" "}
+            条，共 {filteredCandidates.length} 条
           </span>
           <div className="diag-pagination-controls">
             <button
