@@ -6158,6 +6158,7 @@ function CandidateDetailDialog({
   onClose: () => void;
 }) {
   const [page, setPage] = useState(1);
+  const [chunkOpen, setChunkOpen] = useState<string | null>(null);
   const [selectedMethods, setSelectedMethods] = useState<string[]>([
     "keyword",
     "dense",
@@ -6242,6 +6243,7 @@ function CandidateDetailDialog({
 
               {visible.map((item, index) => (
                 <CandidateRow
+                  onOpenOriginal={setChunkOpen}
                   serial={pageStart + index + 1}
                   item={item}
                   minScore={minScore}
@@ -6286,6 +6288,12 @@ function CandidateDetailDialog({
         ) : (
           <p className="diag-page-summary">暂无候选明细</p>
         )}
+        {chunkOpen && (
+          <ChunkOriginalPanel
+            chunkId={chunkOpen}
+            onClose={() => setChunkOpen(null)}
+          />
+        )}
       </div>
     </DetailDialog>
   );
@@ -6293,6 +6301,7 @@ function CandidateDetailDialog({
 
 // 单个候选的一行：去向、召回贡献、RRF、重排 logit 与带阈值刻度的概率条。
 function CandidateRow({
+  onOpenOriginal,
   serial,
   item,
   minScore,
@@ -6301,6 +6310,7 @@ function CandidateRow({
   rrfK = 60,
   fusion,
 }: {
+  onOpenOriginal: (chunkId: string) => void;
   serial: number;
   item: RetrievalCandidate;
   minScore: number | null;
@@ -6344,7 +6354,14 @@ function CandidateRow({
         <span className="diag-preview" title={item.preview}>
           {item.preview}
         </span>
-        <code title={item.chunk_id}>{shortChunkId(item.chunk_id)}</code>
+        <button
+          type="button"
+          className="link-button button-sm"
+          title="查看分片原文"
+          onClick={() => onOpenOriginal(item.chunk_id)}
+        >
+          {shortChunkId(item.chunk_id)}
+        </button>
         {graphOnly && (
           <span className="diag-graph-only" title={`通过关系找到：\n${linked}`}>
             只有图找到
