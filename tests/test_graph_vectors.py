@@ -253,7 +253,11 @@ def test_collections_loaded_with_long_timeout(setup):
     build(client, document_id)
     run_graph_jobs(store, models)
     target = store.graph_vectors
-    assert {name for name, _ in fake.load_calls} == {target.names, target.relations}
+    assert {name for name, _ in fake.load_calls} == {
+        target.names,
+        target.relations,
+        target.keyword_relations,
+    }
     assert all(timeout == LOAD_TIMEOUT for _, timeout in fake.load_calls)
     # 模拟加载超时后的状态：集合在，但没加载；新的进程（新的 GraphVectorStore）再写入时补加载。
     fake.loaded.clear()
@@ -261,7 +265,7 @@ def test_collections_loaded_with_long_timeout(setup):
     store.graph_vectors = fresh
     version = active_version(store, document_id)
     graph_vectors.index_version(store, models, version["id"])
-    assert fake.loaded == {fresh.names, fresh.relations}
+    assert fake.loaded == {fresh.names, fresh.relations, fresh.keyword_relations}
     assert len(fake.rows(fresh.names)) == 4
 
 

@@ -82,9 +82,20 @@ class FakeGraphClient:
         for row in self.collections.get(collection_name, {}).values():
             if not self.matches(row, filter):
                 continue
-            norm_a = sum(a * a for a in data[0]) ** 0.5 or 1
-            norm_b = sum(b * b for b in row["vector"]) ** 0.5 or 1
-            score = sum(a * b for a, b in zip(data[0], row["vector"])) / norm_a / norm_b
+            if anns_field == "sparse":
+                score = sum(
+                    1
+                    for char in set(data[0])
+                    if char.isalnum() and char in row.get("text", "")
+                )
+                if not score:
+                    continue
+            else:
+                norm_a = sum(a * a for a in data[0]) ** 0.5 or 1
+                norm_b = sum(b * b for b in row["vector"]) ** 0.5 or 1
+                score = (
+                    sum(a * b for a, b in zip(data[0], row["vector"])) / norm_a / norm_b
+                )
             hits.append(
                 {
                     "id": row["id"],

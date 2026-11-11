@@ -180,7 +180,11 @@ function Origin({ relation }: { relation: GraphRetrievalRelation }) {
 // 页面上每一步只列数量和类型；明细（名字、关系、分片列表）点「详情」在抽屉里分页看，可以按实体、关系类型、关键词分类。
 type Detail =
   | {
-      kind: "names" | "entityRelations" | "relationMatches";
+      kind:
+        | "names"
+        | "entityRelations"
+        | "relationMatches"
+        | "relationCandidates";
       dim?: string;
       value?: string;
     }
@@ -570,6 +574,7 @@ function DetailFilters<T extends { kept: boolean }>({
 }
 
 const DETAIL_TITLES = {
+  relationCandidates: "⑤ 候选合并与关系重排",
   names: "② 找实体 · 匹配到的名字",
   entityRelations: "③ 实体的关系",
   relationMatches: "④ 找关系",
@@ -590,9 +595,9 @@ function TraceDetail({
 }) {
   const title =
     detail.kind === "chunks"
-      ? `⑤ 取分片 · ${CHUNK_TABLES[detail.table]}`
+      ? `${graph.pipeline ? "⑥" : "⑤"} 取分片 · ${CHUNK_TABLES[detail.table]}`
       : detail.kind === "chunksAll"
-        ? `⑤ 取分片 · 合计 ${graph.counts?.chunks ?? 0} 个分片`
+        ? `${graph.pipeline ? "⑥" : "⑤"} 取分片 · 合计 ${graph.counts?.chunks ?? 0} 个分片`
         : DETAIL_TITLES[detail.kind];
   // 实体详情：点匹配到的名字或关系里的实体打开，内容和图谱里点实体一样。
   const [entity, setEntity] = useState<{
@@ -605,10 +610,14 @@ function TraceDetail({
   // 表头说不清，表格上方补一句，写明是哪两个在算。
   const relationVectorText = "起点 → 终点（分类）：描述";
   const question = graph.keywords?.question;
-  const entityScoreHint = question
-    ? `关系相似度 = 这次的问题「${question}」和这条关系的文字（${relationVectorText}）的相似度`
-    : `关系相似度 = 这次的问题和这条关系的文字（${relationVectorText}）的相似度`;
-  const relationScoreHint = `关系相似度 = 这一行的概括关键词和这条关系的文字（${relationVectorText}）的相似度`;
+  const entityScoreHint = graph.pipeline
+    ? "完整问题在每个实体的一跳关系内做向量和关键词检索，融合后参与统一关系重排。"
+    : question
+      ? `关系相似度 = 这次的问题「${question}」和这条关系的文字（${relationVectorText}）的相似度`
+      : `关系相似度 = 这次的问题和这条关系的文字（${relationVectorText}）的相似度`;
+  const relationScoreHint = graph.pipeline
+    ? "完整问题在可见关系库中检索；向量和关键词排名融合后参与统一重排。"
+    : `关系相似度 = 这一行的概括关键词和这条关系的文字（${relationVectorText}）的相似度`;
   return (
     <DetailDialog open title={title} className="grt-dialog" onClose={onClose}>
       {/* 抽屉可能挂在别的弹窗里，不在 .diag 下面：自己带上 .diag，表格颜色变量才对。 */}
@@ -635,11 +644,37 @@ function TraceDetail({
             dims={RELATION_MATCH_DIMS}
             detail={detail}
             more={graph.dropped_more?.relation_matches}
-            first="概括关键词"
+            first={graph.pipeline ? "完整问题" : "概括关键词"}
             firstValue={(row) => row.keyword ?? ""}
             chunks={chunks}
             extra={(row) => (row.also_entity ? "和 ③ 重复" : undefined)}
             scoreHint={relationScoreHint}
+            onEntity={openEntity}
+          />
+        )}
+        {detail.kind === "relationCandidates" && (
+          <RelationsDetail
+            rows={graph.relation_candidates ?? []}
+            more={graph.dropped_more?.relation_candidates}
+            dims={RELATION_MATCH_DIMS}
+            detail={detail}
+            first="召回来源"
+            firstValue={(row) =>
+              row.origins
+                ?.map((id) =>
+                  id === "global"
+                    ? "全局"
+                    : (graph.entities.find((item) => item.entity_id === id)
+                        ?.name ?? id),
+                )
+                .join("、") ?? "—"
+            }
+            chunks={chunks}
+            scoreHint={
+              graph.relation_rerank_error
+                ? `重排失败，按融合排名回退：${graph.relation_rerank_error}`
+                : "候选先分组保底，再按融合排名补齐；统一重排决定最终关系。"
+            }
             onEntity={openEntity}
           />
         )}
@@ -906,11 +941,13 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
               <td>{words?.entities.join("、") || "—"}</td>
               <td>找实体（名字向量）</td>
             </tr>
-            <tr>
-              <td>概括</td>
-              <td>{words?.themes.join("、") || "—"}</td>
-              <td>找关系（关系向量）</td>
-            </tr>
+            {!graph.pipeline && (
+              <tr>
+                <td>概括</td>
+                <td>{words?.themes.join("、") || "—"}</td>
+                <td>找关系（关系向量）</td>
+              </tr>
+            )}
           </tbody>
         </table>
         {words?.prompt && (
@@ -979,10 +1016,17 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
         <h5>
           ③ 实体的关系
           <small>
-            一跳：找到的实体直接相连的关系，按和问题的相似度排序（相似度 ≥{" "}
-            {settings.graph_entity_min_score ?? 0.5}
-            ），每个实体最多 {settings.graph_entity_relation_limit ?? 30}{" "}
-            条，连到同一个实体的只留一条
+            {graph.pipeline ? (
+              `完整问题 → 每个实体一跳关系内的向量＋关键词检索，每路最多 ${settings.graph_entity_relation_limit ?? 100} 条 → 融合排名`
+            ) : (
+              <>
+                一跳：找到的实体直接相连的关系，按和问题的相似度排序（相似度 ≥{" "}
+                {settings.graph_entity_min_score ?? 0.5}
+                ），每个实体最多 {settings.graph_entity_relation_limit ??
+                  30}{" "}
+                条，连到同一个实体的只留一条
+              </>
+            )}
           </small>
           <DetailButton
             count={graph.entity_relations.length}
@@ -1012,9 +1056,15 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
         <h5>
           ④ 找关系
           <small>
-            概括关键词 → 关系向量（相似度 ≥{" "}
-            {settings.graph_relation_min_score ?? 0.5}
-            ，每个关键词前 {settings.graph_relation_top_k ?? 20} 条）
+            {graph.pipeline ? (
+              `完整问题 → 可见关系库向量＋关键词检索，每路最多 ${settings.graph_relation_top_k ?? 100} 条 → 融合排名`
+            ) : (
+              <>
+                概括关键词 → 关系向量（相似度 ≥{" "}
+                {settings.graph_relation_min_score ?? 0.5}
+                ，每个关键词前 {settings.graph_relation_top_k ?? 20} 条）
+              </>
+            )}
           </small>
           <DetailButton
             count={graph.relation_matches.length}
@@ -1025,7 +1075,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
           <p className="grt-empty">没有找到关系</p>
         ) : (
           <CountTable
-            first="概括关键词"
+            first={graph.pipeline ? "完整问题" : "概括关键词"}
             groups={groupCounts(
               graph.relation_matches,
               (item) => item.keyword,
@@ -1040,11 +1090,55 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
         )}
       </section>
 
+      {graph.pipeline && (
+        <section className="grt-step">
+          <h5>
+            ⑤ 候选合并与关系重排
+            <DetailButton
+              count={
+                graph.relation_candidate_counts?.total ??
+                graph.relation_candidates?.length ??
+                0
+              }
+              onClick={() => setDetail({ kind: "relationCandidates" })}
+            />
+          </h5>
+          <p>
+            每实体保底 {settings.graph_entity_relation_quota ?? 5} 条，全局保底{" "}
+            {settings.graph_global_relation_quota ?? 10}{" "}
+            条；去重后公共竞争，最多{" "}
+            {settings.graph_relation_rerank_candidates ?? 100}{" "}
+            条进入重排，最多保留 {settings.graph_relation_return_limit ?? 30}{" "}
+            条。
+          </p>
+          <p>
+            候选{" "}
+            {graph.relation_candidate_counts?.total ??
+              graph.relation_candidates?.length ??
+              0}{" "}
+            条 · 进入重排{" "}
+            {graph.relation_candidates?.filter((row) => row.in_pool).length ??
+              0}{" "}
+            条 · 留下{" "}
+            {graph.relation_candidate_counts?.kept ??
+              graph.relation_candidates?.filter((row) => row.kept).length ??
+              0}{" "}
+            条
+          </p>
+          {graph.relation_rerank_error && (
+            <p>
+              关系重排未完成，已回退到融合排名：{graph.relation_rerank_error}
+            </p>
+          )}
+        </section>
+      )}
       <section className="grt-step">
         <h5>
-          ⑤ 取分片
+          {graph.pipeline ? "⑥ 取分片" : "⑤ 取分片"}
           <small>
-            关系的出处分片，同一片去重，名次按这一片对应的关系里相似度最高的那条
+            {graph.pipeline
+              ? "保留关系的出处分片，同一片去重并保留关系 ID；按关系重排后的优先级排列。"
+              : "关系的出处分片，同一片去重，名次按这一片对应的关系里相似度最高的那条"}
           </small>
         </h5>
         <table className="diag-table grt-table grt-count-table">
@@ -1110,7 +1204,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
 
       <section className="grt-step">
         <h5>
-          ⑥ 关系图
+          {graph.pipeline ? "⑦ 关系图" : "⑥ 关系图"}
           <small>只画这道题用到的部分</small>
         </h5>
         <GraphRetrievalMap graph={graph} chunks={chunks} />
@@ -1180,7 +1274,11 @@ function RelationTable({
             <tr>
               <th>{first}</th>
               <th>关系</th>
-              <th>关系相似度</th>
+              <th>
+                {rows.some((row) => row.fusion_rank !== undefined)
+                  ? "检索与重排名次"
+                  : "关系相似度"}
+              </th>
               <th>出处</th>
               <th>结果</th>
             </tr>
@@ -1195,7 +1293,29 @@ function RelationTable({
                 <td>
                   <RelationText relation={row} onEntity={onEntity} />
                 </td>
-                <td className="num">{score(row.score)}</td>
+                <td className="num">
+                  {row.fusion_rank !== undefined ? (
+                    <>
+                      <div>
+                        向量 {row.vector_rank ?? "—"} /{" "}
+                        {score(row.vector_score)}
+                      </div>
+                      <div>
+                        关键词 {row.keyword_rank ?? "—"} /{" "}
+                        {score(row.keyword_score)}
+                      </div>
+                      <div>
+                        融合 {row.fusion_rank} · {row.selection}
+                      </div>
+                      <div>
+                        重排 {row.rerank_rank ?? "—"} /{" "}
+                        {score(row.rerank_score)}
+                      </div>
+                    </>
+                  ) : (
+                    score(row.score)
+                  )}
+                </td>
                 <td>
                   <Origin relation={row} />
                   <OriginalButton
@@ -1850,8 +1970,10 @@ function GraphRetrievalMap({
           <div className="grt grt-map-detail">
             <RelationText relation={openRelation} />
             <span>
-              相似度 {score(openRelation.score)} ·{" "}
-              <Origin relation={openRelation} />
+              {graph.pipeline
+                ? `关系优先级 ${score(openRelation.score)} · 重排分数 ${score(openRelation.rerank_score)}`
+                : `相似度 ${score(openRelation.score)}`}{" "}
+              · <Origin relation={openRelation} />
             </span>
             {!openRelation.kept && openRelation.reason && (
               <p className="grt-dropped">没被留下：{openRelation.reason}</p>

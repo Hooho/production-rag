@@ -1,19 +1,3 @@
-"""图检索（参考 LightRAG，只走一跳）：
-
-① 提关键词：调用方给了（Agent 传入 entities / themes）就直接用，没给就用 graph_keywords 提示词从问题里提取。
-② 找实体（local）：每个具体关键词先做字面匹配（名字或标准名和关键词相同，或被关键词包含），再去名字向量里找相似的名字，
-   按名字的归属合并成实体；每个关键词只留排在前面的几个实体（字面命中的排最前，其余按相似度）。
-   参考：LlamaIndex 的 LLMSynonymRetriever 按名字精确匹配；RAGFlow 向量找实体后只留前 6 个（ent_topn）。
-③ 实体的关系：取找到的实体直接相连的关系，按关系和问题的相似度排序，低于分数线的既不算也不占名额，
-   每个实体最多留 N 条；同一个实体连到同一个另一端只留相似度最高的一条。
-④ 找关系（global）：每个概括关键词去关系向量里找相似的关系。
-⑤ 取分片：③ 的关系的出处分片 → 排名表「图 · 实体」；④ 的 → 排名表「图 · 关系」，两张表都进入 RRF。
-   进入重排时另有图检索名额（graph_rerank_quota，见 app/tools/search.py），不只靠 RRF 名次。
-
-范围（权限 + 生效版本）在一开始就算成版本 id 列表，所有查询都带着它：没权限的文档、不是生效版本的、
-已删除的关系从头就查不到，看不到的文档里的名字也不会参与匹配。所以诊断里只有检索本身的取舍（低于阈值、超过条数）。
-"""
-
 from ..retrieval_policy import selected_graph_versions
 
 import json
@@ -37,7 +21,8 @@ from ..mysql.tables import (
 from .extract import model_options
 from .resolve import normalize
 from .schemas import ONLINE_SPACE
-from .vectors import name_vector_texts, vector_store
+from .vectors import ensure_keyword_versions, name_vector_texts, vector_store
+from .relation_retrieval import hybrid_ranking, select_candidates, rerank_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +33,14 @@ DEFAULTS = {
     "graph_name_top_k": 10,
     "graph_entity_top_k": 6,
     "graph_entity_min_score": 0.5,
-    "graph_entity_relation_limit": 30,
+    "graph_entity_relation_limit": 100,
+    "graph_entity_relation_quota": 5,
+    "graph_global_relation_quota": 10,
+    "graph_relation_rerank_candidates": 100,
+    "graph_relation_return_limit": 30,
+    "graph_relation_rerank_min_score": 0.0,
     "graph_relation_min_score": 0.5,
-    "graph_relation_top_k": 20,
+    "graph_relation_top_k": 100,
 }
 MAX_ENTITIES = 8
 MAX_THEMES = 5
@@ -138,12 +128,11 @@ def parse_keywords(text):
 def keywords(models, question, entities=None, themes=None, question_source=None):
     started = time.monotonic()
     given_entities = clean_keywords(entities, MAX_ENTITIES)
-    given_themes = clean_keywords(themes, MAX_THEMES)
-    if given_entities or given_themes:
+    if given_entities:
         return {
             "source": "agent",
             "entities": given_entities,
-            "themes": given_themes,
+            "themes": [],
             "question": question,
             "question_source": question_source,
             "duration_ms": 0,
@@ -160,7 +149,7 @@ def keywords(models, question, entities=None, themes=None, question_source=None)
     if chat_model is None or getattr(models, "mode", "openai") != "openai":
         result.update(
             source="fallback",
-            reason="没有可用的聊天模型（演示模式），用整个问题当具体关键词",
+            reason="没有可用的实体提取模型，仅执行全局关系检索",
         )
     else:
         messages = [
@@ -190,16 +179,16 @@ def keywords(models, question, entities=None, themes=None, question_source=None)
                 output_tokens=usage.get("output_tokens"),
                 model=getattr(models, "llm_model", None),
             )
-            result["entities"], result["themes"] = parse_keywords(strip_think(content))
+            result["entities"], _ = parse_keywords(strip_think(content))
+            result["themes"] = []
         except Exception as error:
             logger.warning("graph_keywords_failed error=%s", error)
             result.update(error=str(error)[:500])
         if not result["entities"] and not result["themes"]:
             result["reason"] = (
-                "提关键词失败，" if result.get("error") else "没有提出关键词，"
-            ) + "用整个问题当具体关键词"
+                "实体提取失败，" if result.get("error") else "没有提取到实体，"
+            ) + "仅执行全局关系检索"
     if not result["entities"] and not result["themes"]:
-        result["entities"] = [question[: KEYWORD_LENGTH * 4]]
         result["fallback"] = True
     result["duration_ms"] = round((time.monotonic() - started) * 1000)
     return result
@@ -296,7 +285,10 @@ def relation_details(connection, relation_ids):
                 .outerjoin(source_entity, source_entity.c.id == source.c.entity_id)
                 .outerjoin(target_entity, target_entity.c.id == target.c.entity_id)
             )
-            .where(graph_relations.c.id.in_(list(relation_ids)))
+            .where(
+                graph_relations.c.id.in_(list(relation_ids)),
+                graph_relations.c.status == "active",
+            )
         )
         .mappings()
         .all()
@@ -391,7 +383,7 @@ def chunk_sources(engine, chunk_ids, document_versions):
     return result
 
 
-# ⑤ 一张排名表：关系按出处分片去重，名次按这一片对应的关系里相似度最高的那条排。
+# 关系按出处分片去重；score 是统一关系排序名次的倒数，分片沿用其最高优先级关系。
 def chunk_table(relations):
     by_chunk = {}
     for relation in relations:
@@ -458,11 +450,11 @@ def retrieve(
     timings["keywords_ms"] = words["duration_ms"]
 
     step = time.monotonic()
-    texts = [question] + words["entities"] + words["themes"]
+    texts = [question] + words["entities"]
     vectors = models.embed(texts)
     question_vector = vectors[0]
     entity_vectors = vectors[1 : 1 + len(words["entities"])]
-    theme_vectors = vectors[1 + len(words["entities"]) :]
+
     timings["embed_ms"] = round((time.monotonic() - step) * 1000)
 
     # ② 找实体：字面匹配 + 名字向量，同一个名字字面命中了就不再用向量那条；每个关键词只留前几个实体。
@@ -628,92 +620,95 @@ def retrieve(
                         linked.setdefault(entity_id, [])
                         if row["id"] not in linked[entity_id]:
                             linked[entity_id].append(row["id"])
-        scores = {}
-        all_ids = sorted(
-            {relation_id for ids in linked.values() for relation_id in ids}
-        )
-        if all_ids:
-            for hit in target.search_relations(
-                question_vector, version_ids, len(all_ids), ids=all_ids
-            ):
-                scores[hit["id"]] = hit["score"]
-        # 还没算向量的关系查不到相似度，记为 0，排在最后。
-        theme_hits = []
-        for keyword, vector in zip(words["themes"], theme_vectors):
-            hits = target.search_relations(
-                vector, version_ids, int(setting(settings, "graph_relation_top_k"))
-            )
-            theme_hits.append((keyword, hits))
-        detail_ids = set(all_ids) | {
-            hit["id"] for _, hits in theme_hits for hit in hits
-        }
-        details = relation_details(connection, detail_ids)
-    kept_entity_relations = set()
-    for entity_id in entity_ids:
-        ranked = sorted(
-            linked.get(entity_id, []),
-            key=lambda relation_id: scores.get(relation_id, 0),
-            reverse=True,
-        )
-        entity = entity_rows.get(entity_id) or {}
-        # 同一个实体连到同一个另一端（例如两条「段永平 → 通用电气」）只留相似度最高的一条，
-        # 名额留给不同的另一端：列举题能覆盖更多不同的公司。
-        counted = 0
-        others = set()
-        for relation_id in ranked:
-            row = details.get(relation_id)
-            if row is None:
-                continue
-            score = scores.get(relation_id, 0)
-            other = (
-                row["target_entity_id"]
-                if row["source_entity_id"] == entity_id
-                else row["source_entity_id"]
-            )
-            # 分数线先判：低于它的关系不算数，也不占名额，名额留给更像问题的那些。
-            if score < entity_min:
-                kept, reason = False, f"相似度低于 {entity_min}"
-            elif other in others:
-                kept, reason = False, "和前面一条连到同一个实体"
-            elif counted < per_entity:
-                kept, reason = True, None
-                counted += 1
-                others.add(other)
-            else:
-                kept, reason = False, f"超过每个实体 {per_entity} 条"
-            if kept:
-                kept_entity_relations.add(relation_id)
-            entity_relations.append(
-                {
-                    **relation_view(row, versions, score),
-                    "entity_id": entity_id,
-                    "entity_name": entity.get("name"),
-                    "kept": kept,
-                    "reason": reason,
-                }
-            )
-    timings["entity_relations_ms"] = round((time.monotonic() - step) * 1000)
+    # 两路都用完整问题：实体内按 ID 限定范围，全局按可见生效版本限定范围。
+    ensure_keyword_versions(store, models, version_ids)
+    groups = {}
+    rrf_k = int((settings or {}).get("rrf_k", 60))
 
-    # ④ 找关系（global）
+    def search_group(ids, limit, minimum):
+        dense = target.search_relations(question_vector, version_ids, limit, ids=ids)
+        lexical = target.search_relation_keywords(question, version_ids, limit, ids=ids)
+        return hybrid_ranking(dense, lexical, minimum, rrf_k)
+
+    for entity_id in entity_ids:
+        groups[entity_id] = search_group(
+            linked.get(entity_id, []), per_entity, entity_min
+        )
+    groups["global"] = search_group(
+        None,
+        int(setting(settings, "graph_relation_top_k")),
+        setting(settings, "graph_relation_min_score"),
+    )
+    # 索引候选必须回查活动关系，避免过期索引占用名额。
+    with store.engine.connect() as connection:
+        details = relation_details(
+            connection, {row["relation_id"] for rows in groups.values() for row in rows}
+        )
+    details = {key: row for key, row in details.items() if row["build_id"] in versions}
+    for group in groups:
+        groups[group] = [row for row in groups[group] if row["relation_id"] in details]
+    candidates = select_candidates(
+        groups,
+        int(setting(settings, "graph_relation_rerank_candidates")),
+        int(setting(settings, "graph_entity_relation_quota")),
+        int(setting(settings, "graph_global_relation_quota")),
+        rrf_k,
+    )
+    timings["entity_relations_ms"] = round((time.monotonic() - step) * 1000)
     step = time.monotonic()
-    relation_min = setting(settings, "graph_relation_min_score")
-    relation_matches = []
-    for keyword, hits in theme_hits:
-        for hit in hits:
-            row = details.get(hit["id"])
-            if row is None:
-                continue
-            kept = hit["score"] >= relation_min
-            relation_matches.append(
-                {
-                    **relation_view(row, versions, hit["score"]),
-                    "keyword": keyword,
-                    "kept": kept,
-                    "also_entity": hit["id"] in kept_entity_relations,
-                    "reason": None if kept else f"相似度低于 {relation_min}",
-                }
-            )
-    timings["relations_ms"] = round((time.monotonic() - step) * 1000)
+    rerank_error = rerank_candidates(
+        models,
+        question,
+        candidates,
+        details,
+        int(setting(settings, "graph_relation_return_limit")),
+        setting(settings, "graph_relation_rerank_min_score"),
+    )
+    timings["relation_rerank_ms"] = round((time.monotonic() - step) * 1000)
+    final_by_id = {item["relation_id"]: item for item in candidates}
+
+    def view_candidate(row):
+        final = final_by_id[row["relation_id"]]
+        # 分片排名采用关系统一重排后的名次；失败时采用融合名次。
+        score = 1 / (final.get("rerank_rank") or final["fusion_rank"])
+        return {
+            **relation_view(details[row["relation_id"]], versions, score),
+            **row,
+            **final,
+            "score": score,
+        }
+
+    entity_relations = [
+        {
+            **view_candidate(row),
+            "entity_id": group,
+            "entity_name": (entity_rows.get(group) or {}).get("name"),
+        }
+        for group, rows in groups.items()
+        if group != "global"
+        for row in rows
+    ]
+    entity_kept_ids = {item["relation_id"] for item in entity_relations if item["kept"]}
+    relation_matches = [
+        {
+            **view_candidate(row),
+            "keyword": question,
+            "also_entity": row["relation_id"] in entity_kept_ids,
+        }
+        for row in groups["global"]
+    ]
+    relation_candidates = [view_candidate(item) for item in candidates]
+    # 合并列表沿用一个最佳路径的检索名次，并保留各来源的完整排名。
+    for item in relation_candidates:
+        for method in ("vector", "keyword"):
+            matches = [
+                row for row in item["retrieval_ranks"] if method + "_rank" in row
+            ]
+            if matches:
+                best = min(matches, key=lambda row: row[method + "_rank"])
+                item[method + "_rank"] = best[method + "_rank"]
+                item[method + "_score"] = best[method + "_score"]
+    timings["relations_ms"] = timings["relation_rerank_ms"]
 
     # ⑤ 取分片
     step = time.monotonic()
@@ -762,8 +757,22 @@ def retrieve(
     relation_matches, relation_more = limit_dropped(relation_matches)
     timings["total_ms"] = round((time.monotonic() - started) * 1000)
     unique = {item["id"] for rows in sources.values() for item in rows}
+    candidate_counts = {
+        "total": len(relation_candidates),
+        "in_pool": sum(item["in_pool"] for item in relation_candidates),
+        "kept": sum(item["kept"] for item in relation_candidates),
+    }
+    # 保留所有实际进池的记录；进池前淘汰的明细只存前 50 条，完整数量单独记录。
+    outside = [item for item in relation_candidates if not item["in_pool"]]
+    relation_candidates = [
+        item for item in relation_candidates if item["in_pool"]
+    ] + outside[:DROPPED_DETAIL]
     return {
         "status": "ok",
+        "pipeline": "hybrid_relations_v2",
+        "relation_candidates": relation_candidates,
+        "relation_candidate_counts": candidate_counts,
+        "relation_rerank_error": rerank_error,
         "reason": None,
         "scope": graph_scope,
         "keywords": words,
@@ -774,6 +783,7 @@ def retrieve(
         "tables": tables,
         "sources": sources,
         "dropped_more": {
+            "relation_candidates": max(0, len(outside) - DROPPED_DETAIL),
             "names": names_more,
             "entity_relations": entity_more,
             "relation_matches": relation_more,

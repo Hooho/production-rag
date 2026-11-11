@@ -8,7 +8,7 @@
 - 集合名跟着分片集合走（分片集合名里带 embedding 模型和维度），换了 embedding 模型就是新集合，旧向量不会被误用。
 """
 
-from pymilvus import DataType, MilvusClient
+from pymilvus import DataType, Function, FunctionType, MilvusClient
 
 from .store import filter_literal
 
@@ -25,6 +25,7 @@ class GraphVectorStore:
         self.base = base_collection
         self.names = base_collection + "_gnames"
         self.relations = base_collection + "_grels"
+        self.keyword_relations = base_collection + "_greltext"
         self.dimension = dimension
         self._ready = set()
         self._loaded = set()
@@ -75,6 +76,73 @@ class GraphVectorStore:
         for collection in (self.names, self.relations):
             self.load(collection)
 
+    def ensure_keywords(self):
+        collection = self.keyword_relations
+        if not self.exists(collection):
+            schema = MilvusClient.create_schema(
+                auto_id=False, enable_dynamic_field=False
+            )
+            for field in RELATION_FIELDS:
+                schema.add_field(
+                    field,
+                    DataType.VARCHAR,
+                    max_length=64,
+                    **({"is_primary": True} if field == "id" else {}),
+                )
+            schema.add_field(
+                "text",
+                DataType.VARCHAR,
+                max_length=65535,
+                enable_analyzer=True,
+                analyzer_params={"tokenizer": "jieba", "filter": ["cnalphanumonly"]},
+            )
+            schema.add_field("sparse", DataType.SPARSE_FLOAT_VECTOR)
+            schema.add_function(
+                Function(
+                    name="relation_bm25",
+                    function_type=FunctionType.BM25,
+                    input_field_names=["text"],
+                    output_field_names=["sparse"],
+                )
+            )
+            self.client.create_collection(
+                collection_name=collection,
+                schema=schema,
+                consistency_level="Strong",
+                timeout=10,
+            )
+            params = self.client.prepare_index_params()
+            params.add_index(
+                field_name="sparse",
+                index_type="SPARSE_INVERTED_INDEX",
+                metric_type="BM25",
+            )
+            self.client.create_index(
+                collection_name=collection, index_params=params, timeout=30
+            )
+            self._ready.add(collection)
+        self.load(collection)
+
+    def upsert_relation_keywords(self, rows):
+        self.ensure_keywords()
+        for start in range(0, len(rows), 200):
+            self.client.upsert(
+                collection_name=self.keyword_relations,
+                data=rows[start : start + 200],
+                timeout=30,
+            )
+
+    def search_relation_keywords(self, query, version_ids, limit, ids=None):
+        return self._search(
+            self.keyword_relations,
+            RELATION_FIELDS,
+            query,
+            version_ids,
+            limit,
+            ids,
+            keyword=True,
+        )
+
     # 确保集合已加载：删除（按条件）和检索都要求集合在内存里。以前建集合时加载超时的集合也在这里补上。
     def load(self, collection):
         if collection in self._loaded:
@@ -114,7 +182,7 @@ class GraphVectorStore:
     def delete_versions(self, version_ids):
         if not version_ids:
             return
-        for collection in (self.names, self.relations):
+        for collection in (self.names, self.relations, self.keyword_relations):
             if self.exists(collection):
                 self.load(collection)
                 self.client.delete(
@@ -125,7 +193,7 @@ class GraphVectorStore:
 
     # 删掉一个文档版本的全部图向量（文档删除、被新版本取代时）。
     def delete_document(self, document_id):
-        for collection in (self.names, self.relations):
+        for collection in (self.names, self.relations, self.keyword_relations):
             if self.exists(collection):
                 self.load(collection)
                 self.client.delete(
@@ -144,7 +212,9 @@ class GraphVectorStore:
             self.relations, RELATION_FIELDS, vector, version_ids, limit, ids
         )
 
-    def _search(self, collection, fields, vector, version_ids, limit, ids=None):
+    def _search(
+        self, collection, fields, vector, version_ids, limit, ids=None, keyword=False
+    ):
         if not version_ids or not self.exists(collection) or ids == []:
             return []
         self.load(collection)
@@ -156,11 +226,11 @@ class GraphVectorStore:
         result = self.client.search(
             collection_name=collection,
             data=[vector],
-            anns_field="vector",
+            anns_field="sparse" if keyword else "vector",
             filter=expression,
             limit=limit,
             output_fields=fields,
-            search_params={"metric_type": "COSINE"},
+            search_params={"metric_type": "BM25" if keyword else "COSINE"},
             timeout=10,
         )
         hits = []
@@ -168,6 +238,8 @@ class GraphVectorStore:
             entity = hit["entity"]
             item = {field: entity.get(field) for field in fields}
             item["id"] = item.get("id") or hit.get("id")
-            item["score"] = float(hit["distance"])
+            item["score"] = (
+                abs(float(hit["distance"])) if keyword else float(hit["distance"])
+            )
             hits.append(item)
         return hits

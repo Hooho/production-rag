@@ -157,7 +157,7 @@ def name_vector_texts(engine, matches):
 
 
 # 关系的文字：「起点 → 终点（分类）：描述」，起点、终点用抽取时的原名。
-def relation_rows(connection, version_id):
+def relation_rows(connection, version_id, clip_text=True):
     source = graph_mentions.alias("source")
     target = graph_mentions.alias("target")
     rows = (
@@ -187,7 +187,7 @@ def relation_rows(connection, version_id):
         {
             "id": row["id"],
             "document_id": row["document_id"],
-            "text": clip(
+            "text": (clip if clip_text else str)(
                 f"{row['source']} → {row['target']}（{row['category']}）：{row['description'] or ''}"
             ),
         }
@@ -263,6 +263,60 @@ def set_marker(engine, version_id, value):
             update(graph_versions)
             .where(graph_versions.c.id == version_id)
             .values(summary={**summary, "vectors": value})
+        )
+
+
+def ensure_keyword_versions(store, models, version_ids):
+    """旧图谱只补全文索引，不重算向量；成功后再持久化集合标记。"""
+    target = vector_store(store, models)
+    collection_existed = target.exists(target.keyword_relations)
+    target.ensure_keywords()
+    with store.engine.connect() as connection:
+        versions = (
+            connection.execute(
+                select(graph_versions.c.id, graph_versions.c.summary).where(
+                    graph_versions.c.id.in_(version_ids)
+                )
+            )
+            .mappings()
+            .all()
+        )
+    for version in versions:
+        summary = version["summary"] or {}
+        if isinstance(summary, str):
+            summary = json.loads(summary)
+        if (
+            collection_existed
+            and summary.get("relation_keyword_collection") == target.keyword_relations
+        ):
+            continue
+        index_relation_keywords(store, target, version["id"])
+
+
+def index_relation_keywords(store, target, version_id):
+    with store.engine.connect() as connection:
+        rows = relation_rows(connection, version_id, clip_text=False)
+    target.upsert_relation_keywords([{**row, "version_id": version_id} for row in rows])
+    with store.engine.begin() as connection:
+        summary = (
+            connection.execute(
+                select(graph_versions.c.summary).where(
+                    graph_versions.c.id == version_id
+                )
+            ).scalar()
+            or {}
+        )
+        if isinstance(summary, str):
+            summary = json.loads(summary)
+        connection.execute(
+            update(graph_versions)
+            .where(graph_versions.c.id == version_id)
+            .values(
+                summary={
+                    **summary,
+                    "relation_keyword_collection": target.keyword_relations,
+                }
+            )
         )
 
 
@@ -342,6 +396,7 @@ def index_version(store, models, version_id):
             for item, vector in zip(relations, relation_vectors)
         ]
     )
+    index_relation_keywords(store, target, version_id)
     value = {
         **base,
         **progress,

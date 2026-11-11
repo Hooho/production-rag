@@ -80,13 +80,12 @@ def test_retrieve_with_given_keywords(graph):
         if item["kept"]
     }
     assert relations == {("段永平", "步步高"), ("阿段", "苹果公司")}
-    top = result["relation_matches"][0]
-    assert (top["source"], top["target"], top["keyword"]) == (
-        "阿段",
-        "苹果公司",
-        "投资",
-    )
-    assert top["source_entity"] == "段永平" and top["also_entity"] is True
+    assert {row["keyword"] for row in result["relation_matches"]} == {
+        "段永平投资了什么"
+    }
+    assert all(row["also_entity"] for row in result["relation_matches"])
+    assert result["keywords"]["themes"] == []
+    assert result["pipeline"] == "hybrid_relations_v2"
     assert result["sources"]["entity"] and result["sources"]["relation"]
     first = result["sources"]["entity"][0]
     assert (
@@ -128,13 +127,10 @@ def test_entity_relation_limit(graph):
         },
         entities=["段永平"],
     )
-    kept = [item for item in result["entity_relations"] if item["kept"]]
-    dropped = [item for item in result["entity_relations"] if not item["kept"]]
-    assert (
-        len(kept) == 1
-        and len(dropped) == 1
-        and dropped[0]["reason"] == "超过每个实体 1 条"
-    )
+    # 每路最多一条，融合后最多两条；全局路径仍能补回实体路径没有的关系。
+    assert len(result["entity_relations"]) <= 2
+    assert result["relation_candidates"]
+    assert all("fusion_rank" in row for row in result["entity_relations"])
 
 
 # 实体路径的分数线：低于它的关系不算数，也不占「每个实体最多几条」的名额。
@@ -149,13 +145,10 @@ def test_entity_relation_threshold(graph):
         {"graph_name_min_score": 0.3, "graph_entity_min_score": 0.4},
         entities=["段永平"],
     )
-    kept = [item for item in result["entity_relations"] if item["kept"]]
-    dropped = [item for item in result["entity_relations"] if not item["kept"]]
-    assert [(item["source"], item["target"]) for item in kept] == [("段永平", "步步高")]
-    assert [item["reason"] for item in dropped] == ["相似度低于 0.4"]
-    # 被拦下的关系不占名额，出处分片只留留下的那条。
+    # 向量分数线只作用于向量路径，关键词可以救回低向量分的关系。
     assert result["sources"]["entity"]
     assert all(item["relation_ids"] for item in result["sources"]["entity"])
+    assert any(item.get("keyword_rank") for item in result["entity_relations"])
     assert result["settings"]["graph_entity_min_score"] == 0.4
 
 
@@ -290,7 +283,7 @@ def test_keywords_from_model(graph):
     assert (
         words["source"] == "model"
         and words["entities"] == ["段永平"]
-        and words["themes"] == ["投资经历"]
+        and words["themes"] == []
     )
     assert words["input_tokens"] == 50 and words["prompt_tag"] == "graph_keywords@内置"
     assert json.loads(words["prompt"][1]["content"]) == {"question": "段永平厉害吗"}
@@ -318,20 +311,18 @@ def test_keywords_fallback(graph):
     models.chat_model = KeywordModel('{"entities": [], "themes": []}')
     words = graph_retrieve.keywords(models, "你好")
     assert (
-        words["entities"] == ["你好"]
+        words["entities"] == []
         and words["fallback"]
-        and "没有提出关键词" in words["reason"]
+        and "没有提取到实体" in words["reason"]
     )
     models.chat_model = KeywordModel("不是 JSON")
     words = graph_retrieve.keywords(models, "段永平")
     assert (
-        words["entities"] == ["段永平"]
-        and "提关键词失败" in words["reason"]
-        and words["error"]
+        words["entities"] == [] and "实体提取失败" in words["reason"] and words["error"]
     )
     models.mode = "demo"
     words = graph_retrieve.keywords(models, "段永平")
-    assert words["source"] == "fallback" and words["entities"] == ["段永平"]
+    assert words["source"] == "fallback" and words["entities"] == []
 
 
 # 接入混合检索：设置页打开图检索后，两张图排名表进入 RRF，候选记下通过哪些关系找到；诊断里有图检索明细和每一路耗时。
@@ -443,6 +434,11 @@ def test_entity_relations_dedupe_other_end(graph):
         )
         row.update(id="duplicate-relation", description="段永平又创办了步步高")
         connection.execute(insert(graph_relations).values(**row))
+    from app.graph.vectors import index_version
+
+    with store.engine.connect() as connection:
+        version_id = connection.execute(sql_select(graph_relations.c.build_id)).scalar()
+    index_version(store, models, version_id)
     result = graph_retrieve.retrieve(
         store,
         models,
@@ -456,11 +452,14 @@ def test_entity_relations_dedupe_other_end(graph):
         for item in result["entity_relations"]
         if item["entity_name"] == "段永平" and item["target"] == "步步高"
     ]
+    # 另一条相同端点但不同事实不提前删掉，交给关系重排；关系 ID 才是去重依据。
     assert len(to_bbk) == 2
-    assert sorted(item["kept"] for item in to_bbk) == [False, True]
-    assert [item["reason"] for item in to_bbk if not item["kept"]] == [
-        "和前面一条连到同一个实体"
-    ]
+    assert all(row["kept"] for row in to_bbk)
+    assert all(
+        row["relation_id"]
+        in {item["relation_id"] for item in result["relation_candidates"]}
+        for row in to_bbk
+    )
 
 
 # 图检索名额：RRF 名次不够进候选池时，按图排名表的名次补进来交给重排，诊断里标出来；名额为 0 时不补。
@@ -511,3 +510,134 @@ def test_graph_rerank_quota(graph, runtime):
     assert any(item["graph_quota"] for item in graph_items)
     assert all(item["rrf_rank"] > 1 for item in candidates if item["graph_quota"])
     assert on["diagnostics"]["config"]["graph_rerank_quota"] == 5
+
+
+def test_relation_rerank_happens_before_chunk_selection(graph, monkeypatch):
+    client, store, models, document_id = graph
+    calls = []
+
+    def rerank(question, texts):
+        calls.append((question, texts))
+        return [0.95 if "买入" in text else 0.1 for text in texts]
+
+    monkeypatch.setattr(models, "rerank", rerank)
+    result = graph_retrieve.retrieve(
+        store,
+        models,
+        "段永平投资了什么",
+        store.readable_scope("alice"),
+        {
+            "graph_entity_min_score": 0,
+            "graph_relation_min_score": 0,
+            "graph_relation_return_limit": 1,
+        },
+        entities=["段永平"],
+    )
+    assert len(calls) == 1
+    assert all("→" in text for text in calls[0][1])
+    kept = [row for row in result["relation_candidates"] if row["kept"]]
+    assert len(kept) == 1 and kept[0]["target"] == "苹果公司"
+    assert kept[0]["rerank_rank"] == 1 and kept[0]["rerank_score"] == 0.95
+    assert all(
+        kept[0]["relation_id"] in item["relation_ids"]
+        for rows in result["sources"].values()
+        for item in rows
+    )
+    assert all("原文" not in text for text in calls[0][1])
+
+
+def test_existing_graph_gets_keyword_index_without_embeddings(graph, monkeypatch):
+    from sqlalchemy import select
+    from app.graph import vectors
+    from app.mysql.tables import graph_versions
+
+    client, store, models, document_id = graph
+    with store.engine.begin() as connection:
+        row = (
+            connection.execute(select(graph_versions.c.id, graph_versions.c.summary))
+            .mappings()
+            .first()
+        )
+        summary = dict(row["summary"])
+        summary.pop("relation_keyword_collection", None)
+        connection.execute(
+            update(graph_versions)
+            .where(graph_versions.c.id == row["id"])
+            .values(summary=summary)
+        )
+    monkeypatch.setattr(
+        models,
+        "embed",
+        lambda *args: (_ for _ in ()).throw(AssertionError("不应重算向量")),
+    )
+    vectors.ensure_keyword_versions(store, models, [row["id"]])
+    assert store.graph_vectors.search_relation_keywords("苹果", [row["id"]], 10)
+    # 新的进程使用同一持久标记，不再次写索引。
+    monkeypatch.setattr(
+        store.graph_vectors,
+        "upsert_relation_keywords",
+        lambda *args: (_ for _ in ()).throw(AssertionError("不应重复补索引")),
+    )
+    vectors.ensure_keyword_versions(store, models, [row["id"]])
+
+
+def test_global_relations_work_without_extracted_entities(graph):
+    client, store, models, document_id = graph
+    models.chat_model = KeywordModel('{"entities": []}')
+    result = graph_retrieve.retrieve(
+        store,
+        models,
+        "苹果投资",
+        store.readable_scope("alice"),
+        {"graph_relation_min_score": 0},
+    )
+    assert result["entities"] == [] and result["entity_relations"] == []
+    assert result["relation_matches"] and result["sources"]["relation"]
+    assert result["keywords"]["themes"] == []
+
+
+def test_graph_chunk_pool_expands_without_changing_return_limit(graph, runtime):
+    from app.tools.search import DocumentSearchTool
+
+    client, store, models, document_id = graph
+    runtime(
+        graph_retrieval=True,
+        rerank_candidates=12,
+        graph_chunk_rerank_candidates=60,
+        return_limit=6,
+    )
+    result = DocumentSearchTool().execute(
+        store,
+        models,
+        "alice",
+        ["段永平"],
+        "段永平投资了什么",
+        graph_keywords={"entities": ["段永平"]},
+    )
+    assert result["diagnostics"]["config"]["rerank_candidates"] == 60
+    assert result["diagnostics"]["config"]["return_limit"] == 6
+
+
+def test_graph_hybrid_settings_persist_and_validate(graph):
+    from test_app import headers
+
+    client, store, models, document_id = graph
+    changes = {
+        "graph_entity_relation_quota": 5,
+        "graph_global_relation_quota": 10,
+        "graph_relation_rerank_candidates": 80,
+        "graph_relation_return_limit": 25,
+        "graph_chunk_rerank_candidates": 60,
+    }
+    response = client.put(
+        "/settings/runtime", headers=headers("admin"), json={"changes": changes}
+    )
+    assert response.status_code == 200
+    saved = {item["key"]: item for item in response.json()["items"]}
+    assert all(saved[key]["value"] == value for key, value in changes.items())
+    invalid = client.put(
+        "/settings/runtime",
+        headers=headers("admin"),
+        json={"changes": {"graph_relation_return_limit": 81}},
+    )
+    assert invalid.status_code == 422

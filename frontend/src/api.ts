@@ -116,6 +116,17 @@ export type GraphScopeVersion = {
 };
 // 图检索找到的一条关系（起点、终点用抽取时的原名，*_entity 是归到的实体）。
 export type GraphRetrievalRelation = {
+  vector_rank?: number;
+  keyword_rank?: number;
+  vector_score?: number;
+  keyword_score?: number;
+  fusion_rank?: number;
+  in_pool?: boolean;
+  selection?: string;
+  origins?: string[];
+  guaranteed_by?: string[];
+  rerank_rank?: number | null;
+  rerank_score?: number;
   relation_id: string;
   source: string;
   source_entity_id: string;
@@ -150,6 +161,10 @@ export type GraphRetrievalTable = {
   heading?: string | null;
 };
 export type GraphRetrievalTrace = {
+  pipeline?: string;
+  relation_candidates?: GraphRetrievalRelation[];
+  relation_candidate_counts?: { total: number; in_pool: number; kept: number };
+  relation_rerank_error?: string | null;
   status: "ok" | "skipped" | "failed";
   reason: string | null;
   scope: GraphScopeVersion[];

@@ -96,6 +96,8 @@ class DocumentSearchTool:
         methods = tuple(methods)
         if pool_size is None:
             pool_size = config["rerank_candidates"]
+            if "graph" in methods:
+                pool_size = max(pool_size, config["graph_chunk_rerank_candidates"])
         candidates = {}
         lists = []
         dense_hits = 0

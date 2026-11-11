@@ -113,7 +113,7 @@ SPECS = [
         "type": "int",
         "default": 12,
         "min": 5,
-        "max": 50,
+        "max": 200,
         "eval": "common",
     },
     {
@@ -197,9 +197,7 @@ SPECS = [
         "max": 50,
         "advanced": True,
     },
-    # 实体路径的分数线：实体的关系里，和问题相似度低于它的既不算也不占「每个实体最多几条」的名额。
-    # 关系路径有 graph_relation_min_score，实体路径原来只看条数不看相似度：关系少的实体（如误匹配的实体）
-    # 关系全留下，热门实体的低分关系反被条数上限砍掉，两个方向相反。默认和关系阈值一致。
+    # 向量路径分数线；关键词路径独立召回，最终按关系重排筛选。
     {
         "key": "graph_entity_min_score",
         "group": "retrieval",
@@ -209,14 +207,14 @@ SPECS = [
         "max": 1,
         "advanced": True,
     },
-    # 每个实体最多几条关系：10 条时，「段永平投资了哪些公司」只覆盖 6 家公司，被去掉的里还有百度、茅台、创维等（2026-11-08 查）。
+    # 每个实体内每一路粗召回的上限，不是最终保留名额。
     {
         "key": "graph_entity_relation_limit",
         "group": "retrieval",
         "type": "int",
-        "default": 30,
+        "default": 100,
         "min": 1,
-        "max": 100,
+        "max": 500,
         "advanced": True,
     },
     # 图检索名额：保证交给重排的候选里至少有几个图检索带回的分片。图只有 2 张排名表，向量、关键词每个检索词各 1 张，
@@ -244,9 +242,63 @@ SPECS = [
         "key": "graph_relation_top_k",
         "group": "retrieval",
         "type": "int",
-        "default": 20,
+        "default": 100,
         "min": 1,
+        "max": 500,
+        "advanced": True,
+    },
+    {
+        "key": "graph_entity_relation_quota",
+        "group": "retrieval",
+        "type": "int",
+        "default": 5,
+        "min": 0,
         "max": 100,
+        "advanced": True,
+    },
+    {
+        "key": "graph_global_relation_quota",
+        "group": "retrieval",
+        "type": "int",
+        "default": 10,
+        "min": 0,
+        "max": 100,
+        "advanced": True,
+    },
+    {
+        "key": "graph_relation_rerank_candidates",
+        "group": "retrieval",
+        "type": "int",
+        "default": 100,
+        "min": 1,
+        "max": 500,
+        "advanced": True,
+    },
+    {
+        "key": "graph_relation_return_limit",
+        "group": "retrieval",
+        "type": "int",
+        "default": 30,
+        "min": 1,
+        "max": 500,
+        "advanced": True,
+    },
+    {
+        "key": "graph_relation_rerank_min_score",
+        "group": "retrieval",
+        "type": "float",
+        "default": 0.0,
+        "min": 0,
+        "max": 1,
+        "advanced": True,
+    },
+    {
+        "key": "graph_chunk_rerank_candidates",
+        "group": "retrieval",
+        "type": "int",
+        "default": 50,
+        "min": 5,
+        "max": 200,
         "advanced": True,
     },
     # 分片大小和重叠只在切分文档时用，改了只影响之后导入的文档；已导入的分片不变。
@@ -653,6 +705,11 @@ def check(spec, raw, strict=True):
 # （否则压缩完仍然接近或超过阈值，下一轮又要压缩，等于每轮都多调一次大模型）；
 # 分片重叠最多是分片大小的三分之一（切分时也按这个上限截断），否则相邻分片大半内容重复。
 def check_relations(values):
+    if (
+        values["graph_relation_return_limit"]
+        > values["graph_relation_rerank_candidates"]
+    ):
+        raise ValueError("关系保留数不能超过关系重排候选数")
     if values["chunk_overlap"] * 3 > values["chunk_size"]:
         raise ValueError("分片重叠不能超过分片大小的三分之一")
     if values["rerank_fallback_min_score"] > values["rerank_min_score"]:
