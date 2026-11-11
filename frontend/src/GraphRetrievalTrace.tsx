@@ -70,7 +70,7 @@ function OriginalButton({
           />
         ) : (
           <div className="grt-original-missing">
-            <p>这一片没有交给检索（关系没留下），只显示原文引用：</p>
+            <p>此记录未保存完整分片，以下为抽取时记录的原文引用：</p>
             <blockquote>{relation.evidence || "（没有原文引用）"}</blockquote>
           </div>
         )
@@ -187,6 +187,7 @@ type Detail =
         | "relationCandidates";
       dim?: string;
       value?: string;
+      stage?: "candidates" | "pool" | "kept";
     }
   | { kind: "chunks"; table: "entity" | "relation" }
   | { kind: "chunksAll" };
@@ -195,7 +196,7 @@ const CHUNK_TABLES = {
   entity: "图 · 实体（来自 ③）",
   relation: "图 · 关系（来自 ④）",
 };
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 6;
 
 // 两张表的分片合并去重：同一片在两张表里都出现过，取更高的分、合并两条表里的关系，
 // 名次按分重排（和后端 chunk_table 一样，分取这一片对应关系里最高的那条）。
@@ -227,12 +228,15 @@ type CountGroup = {
   key: string;
   total: number;
   kept: number;
+  score: number;
   // 留下的项里，按第二个维度（实体、关系类型）各有几条
   distinct: Map<string, number>;
 };
 
 // 按第一个维度分组计数（保持第一次出现的顺序）。
-function groupCounts<T extends { kept: boolean }>(
+function groupCounts<
+  T extends { kept: boolean; score?: number | null; rerank_score?: number },
+>(
   items: T[],
   key: (item: T) => string,
   distinct: (item: T) => string,
@@ -244,9 +248,14 @@ function groupCounts<T extends { kept: boolean }>(
       key: name,
       total: 0,
       kept: 0,
+      score: -Infinity,
       distinct: new Map(),
     };
     group.total += 1;
+    group.score = Math.max(
+      group.score,
+      item.rerank_score ?? item.score ?? -Infinity,
+    );
     if (item.kept) {
       group.kept += 1;
       const value = distinct(item) || "—";
@@ -254,7 +263,7 @@ function groupCounts<T extends { kept: boolean }>(
     }
     groups.set(name, group);
   }
-  return [...groups.values()];
+  return [...groups.values()].sort((a, b) => b.score - a.score);
 }
 
 function DetailButton({
@@ -296,50 +305,62 @@ function CountTable({
   renderDistinct?: (group: CountGroup) => ReactNode;
   onDetail: (key: string) => void;
 }) {
+  const [page, setPage] = useState(1);
+  const current = Math.min(
+    page,
+    Math.max(1, Math.ceil(groups.length / PAGE_SIZE)),
+  );
   return (
-    <table className="diag-table grt-table grt-count-table">
-      <thead>
-        <tr>
-          <th>{first}</th>
-          <th>匹配到</th>
-          <th>留下</th>
-          <th>{distinctLabel}</th>
-          <th />
-        </tr>
-      </thead>
-      <tbody>
-        {groups.map((group) => (
-          <tr key={group.key}>
-            <td>{group.key}</td>
-            <td className="num">
-              {group.total} {unit}
-            </td>
-            <td className="num">{group.kept}</td>
-            <td>
-              {group.distinct.size === 0
-                ? "—"
-                : renderDistinct
-                  ? renderDistinct(group)
-                  : distinctUnit
-                    ? `${group.distinct.size} ${distinctUnit}`
-                    : [...group.distinct.entries()]
-                        .sort((a, b) => b[1] - a[1])
-                        .map(([name, count]) => `${name} ${count}`)
-                        .join(" · ")}
-            </td>
-            <td className="grt-count-action">
-              <button
-                type="button"
-                className="link-button button-sm"
-                onClick={() => onDetail(group.key)}
-              >
-                详情
-              </button>
-            </td>
+    <>
+      <table className="diag-table grt-table grt-count-table">
+        <thead>
+          <tr>
+            <th>{first}</th>
+            <th>匹配到</th>
+            <th>留下</th>
+            <th>{distinctLabel}</th>
+            <th />
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {groups
+            .slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE)
+            .map((group) => (
+              <tr key={group.key}>
+                <td>{group.key}</td>
+                <td className="num">
+                  {group.total} {unit}
+                </td>
+                <td className="num">{group.kept}</td>
+                <td>
+                  {group.distinct.size === 0
+                    ? "—"
+                    : renderDistinct
+                      ? renderDistinct(group)
+                      : distinctUnit
+                        ? `${group.distinct.size} ${distinctUnit}`
+                        : [...group.distinct.entries()]
+                            .sort((a, b) => b[1] - a[1])
+                            .map(([name, count]) => `${name} ${count}`)
+                            .join(" · ")}
+                </td>
+                <td className="grt-count-action">
+                  <button
+                    type="button"
+                    className="link-button button-sm"
+                    onClick={() => onDetail(group.key)}
+                  >
+                    详情
+                  </button>
+                </td>
+              </tr>
+            ))}
+        </tbody>
+      </table>
+      {groups.length > PAGE_SIZE && (
+        <Pager page={current} total={groups.length} onPage={setPage} />
+      )}
+    </>
   );
 }
 
@@ -446,15 +467,12 @@ const RELATION_MATCH_DIMS: Dim<RelationRow>[] = [
 ];
 
 // 明细列表：上面选分类方式和分类值，可以带上去掉的项，下面分页。
-function useDetailList<T extends { kept: boolean }>(
-  items: T[],
-  dims: Dim<T>[],
-  initialDim?: string,
-  initialValue?: string,
-) {
+function useDetailList<
+  T extends { kept: boolean; score?: number | null; sort_score?: number },
+>(items: T[], dims: Dim<T>[], initialDim?: string, initialValue?: string) {
   const [dimKey, setDimKey] = useState(initialDim ?? dims[0]?.key ?? "");
   const [value, setValue] = useState<string | null>(initialValue ?? null);
-  // 默认列出全部（包括去掉的，排在留下的后面），能看到匹配到的每一项和去掉的原因；可以取消勾选只看留下的。
+  // 默认列出全部（包括去掉的，按分数降序），能看到匹配到的每一项和去掉的原因；可以取消勾选只看留下的。
   const [dropped, setDropped] = useState(true);
   const [page, setPage] = useState(1);
   const dim = dims.find((item) => item.key === dimKey);
@@ -470,11 +488,11 @@ function useDetailList<T extends { kept: boolean }>(
     dim && value !== null
       ? pool.filter((item) => dim.value(item) === value)
       : pool;
-  // 留下的在前，去掉的在后。
-  const ordered = [
-    ...filtered.filter((item) => item.kept),
-    ...filtered.filter((item) => !item.kept),
-  ];
+  const ordered = [...filtered].sort(
+    (a, b) =>
+      (b.sort_score ?? b.score ?? -Infinity) -
+      (a.sort_score ?? a.score ?? -Infinity),
+  );
   const pages = Math.max(1, Math.ceil(ordered.length / PAGE_SIZE));
   const current = Math.min(page, pages);
   return {
@@ -598,7 +616,9 @@ function TraceDetail({
       ? `${graph.pipeline ? "⑥" : "⑤"} 取分片 · ${CHUNK_TABLES[detail.table]}`
       : detail.kind === "chunksAll"
         ? `${graph.pipeline ? "⑥" : "⑤"} 取分片 · 合计 ${graph.counts?.chunks ?? 0} 个分片`
-        : DETAIL_TITLES[detail.kind];
+        : detail.kind === "relationCandidates" && detail.stage
+          ? `⑤ ${detail.stage === "candidates" ? "全部候选" : detail.stage === "pool" ? "进入重排" : "最终留下"} · 关系与原文`
+          : DETAIL_TITLES[detail.kind];
   // 实体详情：点匹配到的名字或关系里的实体打开，内容和图谱里点实体一样。
   const [entity, setEntity] = useState<{
     id: string;
@@ -654,8 +674,26 @@ function TraceDetail({
         )}
         {detail.kind === "relationCandidates" && (
           <RelationsDetail
-            rows={graph.relation_candidates ?? []}
-            more={graph.dropped_more?.relation_candidates}
+            rows={(graph.relation_candidates ?? [])
+              .filter((row) =>
+                detail.stage === "pool"
+                  ? row.in_pool
+                  : detail.stage === "kept"
+                    ? row.kept
+                    : true,
+              )
+              .map((row) => ({
+                ...row,
+                sort_score:
+                  detail.stage === "kept"
+                    ? (row.rerank_score ?? row.score ?? 0)
+                    : (row.fusion_score ?? 1 / (row.fusion_rank ?? 1)),
+              }))}
+            more={
+              detail.stage === "candidates" || !detail.stage
+                ? graph.dropped_more?.relation_candidates
+                : 0
+            }
             dims={RELATION_MATCH_DIMS}
             detail={detail}
             first="召回来源"
@@ -673,7 +711,7 @@ function TraceDetail({
             scoreHint={
               graph.relation_rerank_error
                 ? `重排失败，按融合排名回退：${graph.relation_rerank_error}`
-                : "候选先分组保底，再按融合排名补齐；统一重排决定最终关系。"
+                : `${detail.stage === "kept" ? "按重排分数从高到低排列" : "按融合分数从高到低排列"}，每页 6 条；原文按钮查看对应完整分片。${graph.dropped_more?.relation_candidates ? "该历史记录未保存全部候选明细，以下只展示已保存记录。" : ""}`
             }
             onEntity={openEntity}
           />
@@ -821,7 +859,15 @@ function RelationsDetail({
   scoreHint?: string;
   onEntity?: (entityId: string, documentId: string) => void;
 }) {
-  const list = useDetailList(rows, dims, detail.dim, detail.value);
+  const list = useDetailList(
+    rows.map((row) => ({
+      ...row,
+      sort_score: row.sort_score ?? row.rerank_score ?? row.score ?? 0,
+    })),
+    dims,
+    detail.dim,
+    detail.value,
+  );
   return (
     <>
       <DetailFilters list={list} more={more} />
@@ -863,7 +909,11 @@ function ChunksDetail({
 export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
   const chunks = useMemo(() => {
     const map = new Map<string, ChunkInfo>();
-    for (const row of [...graph.tables.entity, ...graph.tables.relation])
+    for (const row of [
+      ...(graph.candidate_chunks ?? []),
+      ...graph.tables.entity,
+      ...graph.tables.relation,
+    ])
       if (row.text) map.set(row.chunk_id, row);
     return map;
   }, [graph]);
@@ -1111,20 +1161,57 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
             条进入重排，最多保留 {settings.graph_relation_return_limit ?? 30}{" "}
             条。
           </p>
-          <p>
-            候选{" "}
-            {graph.relation_candidate_counts?.total ??
-              graph.relation_candidates?.length ??
-              0}{" "}
-            条 · 进入重排{" "}
-            {graph.relation_candidates?.filter((row) => row.in_pool).length ??
-              0}{" "}
-            条 · 留下{" "}
-            {graph.relation_candidate_counts?.kept ??
-              graph.relation_candidates?.filter((row) => row.kept).length ??
-              0}{" "}
-            条
-          </p>
+          <ol className="grt-stages" aria-label="关系候选筛选步骤">
+            {(
+              [
+                {
+                  stage: "candidates",
+                  label: "候选",
+                  count:
+                    graph.relation_candidate_counts?.total ??
+                    graph.relation_candidates?.length ??
+                    0,
+                },
+                {
+                  stage: "pool",
+                  label: "进入重排",
+                  count:
+                    graph.relation_candidate_counts?.in_pool ??
+                    graph.relation_candidates?.filter((row) => row.in_pool)
+                      .length ??
+                    0,
+                },
+                {
+                  stage: "kept",
+                  label: "留下",
+                  count:
+                    graph.relation_candidate_counts?.kept ??
+                    graph.relation_candidates?.filter((row) => row.kept)
+                      .length ??
+                    0,
+                },
+              ] as const
+            ).map((item, index) => (
+              <li key={item.stage}>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  title={`查看${item.label}的 ${item.count} 条关系及对应分片`}
+                  onClick={() =>
+                    setDetail({ kind: "relationCandidates", stage: item.stage })
+                  }
+                >
+                  <span className="grt-stage-number">{index + 1}</span>
+                  {item.label} {item.count} 条
+                </button>
+                {index < 2 && (
+                  <span className="grt-stage-arrow" aria-hidden="true">
+                    →
+                  </span>
+                )}
+              </li>
+            ))}
+          </ol>
           {graph.relation_rerank_error && (
             <p>
               关系重排未完成，已回退到融合排名：{graph.relation_rerank_error}
@@ -1305,7 +1392,8 @@ function RelationTable({
                         {score(row.keyword_score)}
                       </div>
                       <div>
-                        融合 {row.fusion_rank} · {row.selection}
+                        融合 {row.fusion_rank} /{" "}
+                        {row.fusion_score?.toFixed(6) ?? "—"} · {row.selection}
                       </div>
                       <div>
                         重排 {row.rerank_rank ?? "—"} /{" "}

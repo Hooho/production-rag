@@ -641,3 +641,48 @@ def test_graph_hybrid_settings_persist_and_validate(graph):
         json={"changes": {"graph_relation_return_limit": 81}},
     )
     assert invalid.status_code == 422
+
+
+def test_all_candidates_and_original_chunks_are_saved(graph, monkeypatch):
+    from sqlalchemy import insert, select
+    from app.graph.vectors import index_version
+
+    client, store, models, document_id = graph
+    with store.engine.begin() as connection:
+        original = dict(connection.execute(select(graph_relations)).mappings().first())
+        connection.execute(
+            insert(graph_relations),
+            [
+                {
+                    **original,
+                    "id": f"candidate-{i}",
+                    "description": f"段永平投资公司{i}",
+                }
+                for i in range(188)
+            ],
+        )
+    index_version(store, models, original["build_id"])
+    monkeypatch.setattr(models, "rerank", lambda question, texts: [0.9] * len(texts))
+    result = graph_retrieve.retrieve(
+        store,
+        models,
+        "段永平投资哪些公司",
+        store.readable_scope("alice"),
+        {
+            "graph_entity_relation_limit": 300,
+            "graph_relation_top_k": 300,
+            "graph_entity_min_score": 0,
+            "graph_relation_min_score": 0,
+        },
+        entities=["段永平"],
+    )
+    assert result["relation_candidate_counts"] == {
+        "total": 190,
+        "in_pool": 100,
+        "kept": 30,
+    }
+    assert len(result["relation_candidates"]) == 190
+    assert result["dropped_more"]["relation_candidates"] == 0
+    originals = {row["chunk_id"]: row for row in result["candidate_chunks"]}
+    assert all(row["chunk_id"] in originals for row in result["relation_candidates"])
+    assert all(row["text"] for row in originals.values())

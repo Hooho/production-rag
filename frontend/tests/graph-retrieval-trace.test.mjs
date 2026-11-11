@@ -43,6 +43,7 @@ test("graph trace renders new relation pipeline and preserves legacy records", a
           ...graph,
           pipeline: "hybrid_relations_v2",
           relation_candidates: [],
+          relation_candidate_counts: { total: 188, in_pool: 100, kept: 30 },
         },
       }),
     );
@@ -98,6 +99,32 @@ test("graph trace renders new relation pipeline and preserves legacy records", a
     );
     assert.match(withEntities, /有关系的实体/);
     assert.doesNotMatch(withEntities, /零关系实体应隐藏/);
+    assert.match(modern, /aria-label="关系候选筛选步骤"/);
+    assert.match(modern, /title="查看候选的 188 条关系及对应分片"/);
+    assert.match(modern, /title="查看进入重排的 100 条关系及对应分片"/);
+    assert.match(modern, /title="查看留下的 30 条关系及对应分片"/);
+    const many = renderToStaticMarkup(
+      createElement(GraphRetrievalTrace, {
+        graph: {
+          ...graph,
+          name_matches: Array.from({ length: 8 }, (_, i) => ({
+            keyword: `关键词${i}`,
+            name: `名字${i}`,
+            entity_id: `e${i}`,
+            entity_name: `名字${i}`,
+            score: i / 10,
+            kept: true,
+          })),
+        },
+      }),
+    );
+    const summary = many.match(
+      /<table class="diag-table grt-table grt-count-table">([\s\S]*?)<\/table>/,
+    )?.[1];
+    assert.ok(summary);
+    assert.equal((summary.match(/<tr>/g) ?? []).length, 7); // 表头＋每页六条
+    assert.ok(summary.indexOf("关键词7") < summary.indexOf("关键词6"));
+    assert.doesNotMatch(summary, /关键词0|关键词1/);
     assert.match(modern, /候选合并与关系重排/);
     assert.doesNotMatch(modern, /<td>概括<\/td>/);
     assert.match(legacy, /<td>概括<\/td>/);

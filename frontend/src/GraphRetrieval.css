@@ -456,3 +456,36 @@
 .ag-delivery-dialog.grt-dialog .grt-chip {
   font-size: 14px;
 }
+
+.grt-stages {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+  margin: 14px 0;
+}
+.grt-stages li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.grt-stages button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.grt-stage-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #eaf1ff;
+  color: #2563eb;
+}
+.grt-stage-arrow {
+  color: #8494ab;
+}

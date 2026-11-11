@@ -121,6 +121,8 @@ export type GraphRetrievalRelation = {
   vector_score?: number;
   keyword_score?: number;
   fusion_rank?: number;
+  fusion_score?: number;
+  sort_score?: number;
   in_pool?: boolean;
   selection?: string;
   origins?: string[];
@@ -163,6 +165,10 @@ export type GraphRetrievalTable = {
 export type GraphRetrievalTrace = {
   pipeline?: string;
   relation_candidates?: GraphRetrievalRelation[];
+  candidate_chunks?: Pick<
+    GraphRetrievalTable,
+    "chunk_id" | "title" | "text" | "heading" | "version"
+  >[];
   relation_candidate_counts?: { total: number; in_pool: number; kept: number };
   relation_rerank_error?: string | null;
   status: "ok" | "skipped" | "failed";

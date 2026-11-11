@@ -50,8 +50,6 @@ KEYWORD_TIMEOUT = 30
 # 字面匹配：每个关键词最多取多少个名字；被包含的一方至少几个字（单字「段」会把一堆名字都算进来）。
 LITERAL_LIMIT = 30
 LITERAL_MIN_LENGTH = 2
-# 诊断里去掉的项最多存多少条明细，其余只记数量。
-DROPPED_DETAIL = 50
 
 
 def setting(settings, key):
@@ -318,12 +316,6 @@ def relation_view(row, versions, score):
         "version_number": version.get("number"),
         "score": round(float(score), 4) if score is not None else None,
     }
-
-
-def limit_dropped(items):
-    kept = [item for item in items if item.get("kept")]
-    dropped = [item for item in items if not item.get("kept")]
-    return kept + dropped[:DROPPED_DETAIL], max(0, len(dropped) - DROPPED_DETAIL)
 
 
 # 分片原文，组装成和向量、关键词检索一样的来源结构，交给 RRF。
@@ -752,26 +744,35 @@ def retrieve(
         sources[name] = rows
     timings["chunks_ms"] = round((time.monotonic() - step) * 1000)
 
-    name_matches, names_more = limit_dropped(name_matches)
-    entity_relations, entity_more = limit_dropped(entity_relations)
-    relation_matches, relation_more = limit_dropped(relation_matches)
-    timings["total_ms"] = round((time.monotonic() - started) * 1000)
     unique = {item["id"] for rows in sources.values() for item in rows}
     candidate_counts = {
         "total": len(relation_candidates),
         "in_pool": sum(item["in_pool"] for item in relation_candidates),
         "kept": sum(item["kept"] for item in relation_candidates),
     }
-    # 保留所有实际进池的记录；进池前淘汰的明细只存前 50 条，完整数量单独记录。
-    outside = [item for item in relation_candidates if not item["in_pool"]]
-    relation_candidates = [
-        item for item in relation_candidates if item["in_pool"]
-    ] + outside[:DROPPED_DETAIL]
+    # 所有候选及其原文按分片去重保存，步骤详情可查看完整候选，不截掉进池前淘汰的记录。
+    candidate_sources = chunk_sources(
+        store.engine,
+        {item["chunk_id"] for item in relation_candidates},
+        document_versions,
+    )
+    candidate_chunks = [
+        {
+            "chunk_id": key,
+            "title": row["title"],
+            "text": row["text"],
+            "heading": row.get("heading"),
+            "version": row.get("version"),
+        }
+        for key, row in candidate_sources.items()
+    ]
+    timings["total_ms"] = round((time.monotonic() - started) * 1000)
     return {
         "status": "ok",
         "pipeline": "hybrid_relations_v2",
         "relation_candidates": relation_candidates,
         "relation_candidate_counts": candidate_counts,
+        "candidate_chunks": candidate_chunks,
         "relation_rerank_error": rerank_error,
         "reason": None,
         "scope": graph_scope,
@@ -783,10 +784,10 @@ def retrieve(
         "tables": tables,
         "sources": sources,
         "dropped_more": {
-            "relation_candidates": max(0, len(outside) - DROPPED_DETAIL),
-            "names": names_more,
-            "entity_relations": entity_more,
-            "relation_matches": relation_more,
+            "relation_candidates": 0,
+            "names": 0,
+            "entity_relations": 0,
+            "relation_matches": 0,
         },
         "counts": {
             "entity_chunks": len(sources["entity"]),
