@@ -44,6 +44,17 @@ test("graph trace renders new relation pipeline and preserves legacy records", a
           pipeline: "hybrid_relations_v2",
           relation_candidates: [],
           relation_candidate_counts: { total: 188, in_pool: 100, kept: 30 },
+          tables: {
+            entity: [],
+            relation: [],
+            unified: Array.from({ length: 19 }, (_, i) => ({
+              chunk_id: `d:${i}`,
+              score: 1 / (i + 1),
+              rank: i + 1,
+              relation_ids: [],
+            })),
+          },
+          counts: { entity_chunks: 0, relation_chunks: 0, chunks: 19 },
         },
       }),
     );
@@ -125,6 +136,11 @@ test("graph trace renders new relation pipeline and preserves legacy records", a
     assert.equal((summary.match(/<tr>/g) ?? []).length, 7); // 表头＋每页六条
     assert.ok(summary.indexOf("关键词7") < summary.indexOf("关键词6"));
     assert.doesNotMatch(summary, /关键词0|关键词1/);
+    const cleanModern = modern.replace(/<!--.*?-->/g, "");
+    assert.match(cleanModern, /留下 30 条关系/);
+    assert.match(cleanModern, /去重得到 19 个分片/);
+    assert.doesNotMatch(modern, /图 · 实体（来自/);
+    assert.match(legacy, /图 · 实体（来自/);
     assert.match(modern, /候选合并与关系重排/);
     assert.doesNotMatch(modern, /<td>概括<\/td>/);
     assert.match(legacy, /<td>概括<\/td>/);

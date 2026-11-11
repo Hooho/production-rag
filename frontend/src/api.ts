@@ -43,8 +43,8 @@ export type RetrievalList = {
   query: string;
   method: string;
   hits: RetrievalListHit[];
-  // 图检索的两张表：entity（图 · 实体）、relation（图 · 关系）。
-  table?: "entity" | "relation";
+  // 新记录只有 unified；历史记录保留 entity / relation 两张表。
+  table?: "entity" | "relation" | "unified";
 };
 export type RetrievalCandidate = {
   chunk_id: string;
@@ -226,7 +226,11 @@ export type GraphRetrievalTrace = {
     keyword: string;
     also_entity: boolean;
   })[];
-  tables: { entity: GraphRetrievalTable[]; relation: GraphRetrievalTable[] };
+  tables: {
+    entity: GraphRetrievalTable[];
+    relation: GraphRetrievalTable[];
+    unified?: GraphRetrievalTable[];
+  };
   dropped_more: Record<string, number>;
   counts?: { entity_chunks: number; relation_chunks: number; chunks: number };
   settings?: Record<string, number>;

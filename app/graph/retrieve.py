@@ -704,16 +704,11 @@ def retrieve(
 
     # ⑤ 取分片
     step = time.monotonic()
-    entity_kept = [item for item in entity_relations if item["kept"]]
-    theme_kept = {}
-    for item in relation_matches:
-        if item["kept"]:
-            previous = theme_kept.get(item["relation_id"])
-            if previous is None or (item["score"] or 0) > (previous["score"] or 0):
-                theme_kept[item["relation_id"]] = item
+    # 统一重排留下的关系只生成一张分片排名表，不因召回路径重复贡献 RRF。
     tables = {
-        "entity": chunk_table(entity_kept),
-        "relation": chunk_table(list(theme_kept.values())),
+        "entity": [],
+        "relation": [],
+        "unified": chunk_table([item for item in relation_candidates if item["kept"]]),
     }
     sources_by_id = chunk_sources(
         store.engine,

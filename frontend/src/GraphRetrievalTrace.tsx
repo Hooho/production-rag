@@ -324,6 +324,10 @@ const PAGE_SIZE = 6;
 // 两张表的分片合并去重：同一片在两张表里都出现过，取更高的分、合并两条表里的关系，
 // 名次按分重排（和后端 chunk_table 一样，分取这一片对应关系里最高的那条）。
 function mergeChunkTables(tables: GraphTrace["tables"]) {
+  if (tables.unified)
+    return tables.unified
+      .filter((row) => row.kept !== false)
+      .sort((a, b) => b.score - a.score);
   const merged = new Map<string, GraphRetrievalTable>();
   for (const table of [tables.entity ?? [], tables.relation ?? []]) {
     for (const row of table) {
@@ -1053,6 +1057,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
     const map = new Map<string, ChunkInfo>();
     for (const row of [
       ...(graph.candidate_chunks ?? []),
+      ...(graph.tables.unified ?? []),
       ...graph.tables.entity,
       ...graph.tables.relation,
     ])
@@ -1370,65 +1375,90 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
               : "关系的出处分片，同一片去重，名次按这一片对应的关系里相似度最高的那条"}
           </small>
         </h5>
-        <table className="diag-table grt-table grt-count-table">
-          <thead>
-            <tr>
-              <th>排名表</th>
-              <th>分片</th>
-              <th>来自关系</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {(["entity", "relation"] as const).map((name) => {
-              const rows = graph.tables[name];
-              const kept = rows.filter((row) => row.kept !== false).length;
-              const linked = new Set(rows.flatMap((row) => row.relation_ids))
-                .size;
-              return (
-                <tr key={name}>
-                  <td>{CHUNK_TABLES[name]}</td>
-                  <td className="num">
-                    {kept} 个
-                    {rows.length > kept ? (
-                      <small>另有 {rows.length - kept} 个不在当前版本</small>
-                    ) : null}
-                  </td>
-                  <td className="num">{linked} 条</td>
-                  <td className="grt-count-action">
-                    {rows.length > 0 && (
-                      <button
-                        type="button"
-                        className="link-button button-sm"
-                        onClick={() =>
-                          setDetail({ kind: "chunks", table: name })
-                        }
-                      >
-                        详情
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        <p className="grt-summary">
-          {/* 合计这行点开看这批分片：两张表的分片合并去重后的完整清单。 */}
+        {graph.pipeline ? (
           <button
             type="button"
-            className="link-button"
-            title="点开看这批分片的完整清单"
+            className="secondary-button"
+            title="查看去重后的分片、对应关系和原文"
             onClick={() => setDetail({ kind: "chunksAll" })}
           >
-            合计 {graph.counts?.chunks ?? 0} 个分片
+            留下{" "}
+            {graph.relation_candidate_counts?.kept ??
+              new Set(
+                [...graph.entity_relations, ...graph.relation_matches]
+                  .filter((row) => row.kept)
+                  .map((row) => row.relation_id),
+              ).size}{" "}
+            条关系 → 去重得到{" "}
+            {graph.counts?.chunks ?? mergeChunkTables(graph.tables).length}{" "}
+            个分片　›
           </button>
-          {graph.counts &&
-          graph.counts.entity_chunks + graph.counts.relation_chunks >
-            graph.counts.chunks
-            ? `（两张表有 ${graph.counts.entity_chunks + graph.counts.relation_chunks - graph.counts.chunks} 个重复）`
-            : ""}
-        </p>
+        ) : (
+          <>
+            <table className="diag-table grt-table grt-count-table">
+              <thead>
+                <tr>
+                  <th>排名表</th>
+                  <th>分片</th>
+                  <th>来自关系</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {(["entity", "relation"] as const).map((name) => {
+                  const rows = graph.tables[name];
+                  const kept = rows.filter((row) => row.kept !== false).length;
+                  const linked = new Set(
+                    rows.flatMap((row) => row.relation_ids),
+                  ).size;
+                  return (
+                    <tr key={name}>
+                      <td>{CHUNK_TABLES[name]}</td>
+                      <td className="num">
+                        {kept} 个
+                        {rows.length > kept ? (
+                          <small>
+                            另有 {rows.length - kept} 个不在当前版本
+                          </small>
+                        ) : null}
+                      </td>
+                      <td className="num">{linked} 条</td>
+                      <td className="grt-count-action">
+                        {rows.length > 0 && (
+                          <button
+                            type="button"
+                            className="link-button button-sm"
+                            onClick={() =>
+                              setDetail({ kind: "chunks", table: name })
+                            }
+                          >
+                            详情
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <p className="grt-summary">
+              {/* 合计这行点开看这批分片：两张表的分片合并去重后的完整清单。 */}
+              <button
+                type="button"
+                className="link-button"
+                title="点开看这批分片的完整清单"
+                onClick={() => setDetail({ kind: "chunksAll" })}
+              >
+                合计 {graph.counts?.chunks ?? 0} 个分片
+              </button>
+              {graph.counts &&
+              graph.counts.entity_chunks + graph.counts.relation_chunks >
+                graph.counts.chunks
+                ? `（两张表有 ${graph.counts.entity_chunks + graph.counts.relation_chunks - graph.counts.chunks} 个重复）`
+                : ""}
+            </p>
+          </>
+        )}
       </section>
 
       <section className="grt-step">
@@ -1708,6 +1738,24 @@ function ChunkTable({
                               </small>
                               <span className="grt-arrow">→</span>
                               {relation.target}
+                              {relation.origins?.length ? (
+                                <small>
+                                  来源：
+                                  {relation.origins
+                                    .map((origin) =>
+                                      origin === "global"
+                                        ? "全局关系"
+                                        : origin === relation.source_entity_id
+                                          ? (relation.source_entity ??
+                                            relation.source)
+                                          : origin === relation.target_entity_id
+                                            ? (relation.target_entity ??
+                                              relation.target)
+                                            : "实体一跳",
+                                    )
+                                    .join("、")}
+                                </small>
+                              ) : null}
                             </span>
                           ) : (
                             id

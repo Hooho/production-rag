@@ -169,7 +169,12 @@ class DocumentSearchTool:
         if graph_future is not None:
             graph = graph_future.result()
             graph_executor.shutdown(wait=False)
-            for table, label in (("entity", "图 · 实体"), ("relation", "图 · 关系")):
+            graph_tables = (
+                (("unified", "图检索"),)
+                if "unified" in graph.get("sources", {})
+                else (("entity", "图 · 实体"), ("relation", "图 · 关系"))
+            )
+            for table, label in graph_tables:
                 rows = graph.get("sources", {}).get(table) or []
                 graph_hits += len(rows)
                 listing = self.add_candidates(

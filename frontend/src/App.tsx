@@ -6149,7 +6149,7 @@ function CandidateDetailDialog({
           {showGraph && (
             <span>
               <i className="diag-dot method-graph" />
-              图检索（实 = 图 · 实体，关 = 图 · 关系）
+              图检索
             </span>
           )}
           <span>

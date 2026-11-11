@@ -86,12 +86,12 @@ def test_retrieve_with_given_keywords(graph):
     assert all(row["also_entity"] for row in result["relation_matches"])
     assert result["keywords"]["themes"] == []
     assert result["pipeline"] == "hybrid_relations_v2"
-    assert result["sources"]["entity"] and result["sources"]["relation"]
-    first = result["sources"]["entity"][0]
+    assert result["sources"]["unified"] and result["sources"]["unified"]
+    first = result["sources"]["unified"][0]
     assert (
         first["document_id"] == document_id and first["text"] and first["relation_ids"]
     )
-    assert result["tables"]["entity"][0]["rank"] == 1
+    assert result["tables"]["unified"][0]["rank"] == 1
 
 
 # 低于阈值的名字留在诊断里，标明原因，不参与找实体。
@@ -146,8 +146,8 @@ def test_entity_relation_threshold(graph):
         entities=["段永平"],
     )
     # 向量分数线只作用于向量路径，关键词可以救回低向量分的关系。
-    assert result["sources"]["entity"]
-    assert all(item["relation_ids"] for item in result["sources"]["entity"])
+    assert result["sources"]["unified"]
+    assert all(item["relation_ids"] for item in result["sources"]["unified"])
     assert any(item.get("keyword_rank") for item in result["entity_relations"])
     assert result["settings"]["graph_entity_min_score"] == 0.4
 
@@ -357,7 +357,7 @@ def test_search_tool_with_graph(graph, runtime):
     )
     assert diagnostics["scope"]["graph_versions"][0]["document_id"] == document_id
     graph_lists = [item for item in diagnostics["lists"] if item["method"] == "graph"]
-    assert [item["query"] for item in graph_lists] == ["图 · 实体", "图 · 关系"]
+    assert [item["query"] for item in graph_lists] == ["图检索"]
     assert graph_lists[0]["hits"][0]["relation_ids"]
     with_graph = [
         row for row in diagnostics["candidates"] if "graph" in row["retrieval_methods"]
@@ -592,7 +592,7 @@ def test_global_relations_work_without_extracted_entities(graph):
         {"graph_relation_min_score": 0},
     )
     assert result["entities"] == [] and result["entity_relations"] == []
-    assert result["relation_matches"] and result["sources"]["relation"]
+    assert result["relation_matches"] and result["sources"]["unified"]
     assert result["keywords"]["themes"] == []
 
 
@@ -686,3 +686,29 @@ def test_all_candidates_and_original_chunks_are_saved(graph, monkeypatch):
     originals = {row["chunk_id"]: row for row in result["candidate_chunks"]}
     assert all(row["chunk_id"] in originals for row in result["relation_candidates"])
     assert all(row["text"] for row in originals.values())
+
+
+def test_unified_graph_chunks_have_one_rrf_contribution(graph, runtime):
+    from app.tools.search import DocumentSearchTool
+
+    client, store, models, document_id = graph
+    runtime(graph_retrieval=True, graph_entity_min_score=0, graph_relation_min_score=0)
+    result = DocumentSearchTool().execute(
+        store,
+        models,
+        "alice",
+        ["段永平投资"],
+        "段永平投资哪些公司",
+        graph_keywords={"entities": ["段永平"]},
+    )
+    diagnostics = result["diagnostics"]
+    lists = [row for row in diagnostics["lists"] if row["method"] == "graph"]
+    assert len(lists) == 1 and lists[0]["table"] == "unified"
+    chunks = diagnostics["graph"]["tables"]["unified"]
+    assert chunks and len({row["chunk_id"] for row in chunks}) == len(chunks)
+    for candidate in diagnostics["candidates"]:
+        contributions = [
+            row for row in candidate["contributions"] if row["method"] == "graph"
+        ]
+        assert len(contributions) <= 1
+    assert len(lists[0]["hits"]) == diagnostics["graph"]["counts"]["chunks"]
