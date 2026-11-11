@@ -117,17 +117,21 @@
   gap: 8px;
 }
 
+/* 分段开关和紧凑输入框一样高（26px），行高不因「自定义」多出来的输入框而变。 */
 .evp-switch {
   display: inline-flex;
+  height: 26px;
   border: 1px solid var(--ev-line);
 }
 
 .evp-switch button {
+  height: 24px;
+  padding: 0 10px;
   border: 0;
   background: transparent;
-  padding: 4px 10px;
   color: var(--t-536d86);
   font-size: 12px;
+  line-height: 24px;
 }
 
 .evp-switch button + button {

@@ -363,6 +363,7 @@ function SettingInput({
   if (item.type === "bool") {
     return (
       <select
+        className="input-sm"
         value={value ? "on" : "off"}
         onChange={(event) => onChange(event.target.value === "on")}
       >
@@ -374,6 +375,7 @@ function SettingInput({
   if (item.type === "choice") {
     return (
       <select
+        className="input-sm"
         value={String(value)}
         onChange={(event) => onChange(event.target.value)}
       >
@@ -388,6 +390,7 @@ function SettingInput({
   return (
     <>
       <input
+        className="input-sm"
         type="number"
         min={item.min}
         max={item.max}
@@ -426,6 +429,7 @@ function PromptRow({
       onCustom={() => onChange(item.active_version)}
     >
       <select
+        className="input-sm"
         value={String(value ?? item.active_version)}
         onChange={(event) => onChange(Number(event.target.value))}
       >
@@ -469,6 +473,7 @@ function ModelRow({
       onCustom={() => onChange(pick(current.provider))}
     >
       <select
+        className="input-sm"
         value={value?.provider ?? current.provider}
         onChange={(event) => onChange(pick(event.target.value))}
       >
@@ -480,6 +485,7 @@ function ModelRow({
         ))}
       </select>
       <input
+        className="input-sm"
         type="text"
         value={value?.model ?? ""}
         placeholder="模型名"
