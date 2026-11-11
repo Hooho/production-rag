@@ -1038,7 +1038,11 @@ function ChunksDetail({
   return (
     <>
       <DetailFilters list={list} />
-      <ChunkTable rows={list.rows} relations={relations} />
+      <ChunkTable
+        startIndex={(list.page - 1) * PAGE_SIZE}
+        rows={list.rows}
+        relations={relations}
+      />
       <Pager page={list.page} total={list.total} onPage={list.setPage} />
     </>
   );
@@ -1611,9 +1615,11 @@ function RelationTable({
 }
 
 function ChunkTable({
+  startIndex = 0,
   rows,
   relations,
 }: {
+  startIndex?: number;
   rows: GraphRetrievalTable[];
   relations: Map<string, GraphRetrievalRelation>;
 }) {
@@ -1625,6 +1631,7 @@ function ChunkTable({
         <table className="diag-table grt-table">
           <thead>
             <tr>
+              <th>序号</th>
               <th>名次</th>
               <th>分片</th>
               <th>来自哪些关系</th>
@@ -1632,11 +1639,12 @@ function ChunkTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {rows.map((row, index) => (
               <tr
                 key={row.chunk_id}
                 className={row.kept === false ? "is-dropped" : ""}
               >
+                <td className="num">{startIndex + index + 1}</td>
                 <td className="num">{row.kept === false ? "—" : row.rank}</td>
                 <td>
                   <span className="diag-title">

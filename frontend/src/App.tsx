@@ -5005,6 +5005,7 @@ function RetrievalDiagnostics({
         <table className="diag-table diag-table-compact">
           <thead>
             <tr>
+              <th>序号</th>
               <th>检索词</th>
               <th>返回分片</th>
               <th>
@@ -5014,8 +5015,9 @@ function RetrievalDiagnostics({
             </tr>
           </thead>
           <tbody>
-            {own.map((list) => (
+            {own.map((list, index) => (
               <tr key={list.query}>
+                <td className="num">{index + 1}</td>
                 <td title={list.query}>
                   <em className="diag-q">Q{queries.indexOf(list.query) + 1}</em>
                 </td>
@@ -5148,6 +5150,7 @@ function RetrievalDiagnostics({
             <table className="diag-table diag-table-compact">
               <thead>
                 <tr>
+                  <th>序号</th>
                   <th>名次</th>
                   <th>来源</th>
                   <th>分片</th>
@@ -5156,10 +5159,11 @@ function RetrievalDiagnostics({
                 </tr>
               </thead>
               <tbody>
-                {visibleRankHits.map((hit) => {
+                {visibleRankHits.map((hit, index) => {
                   const body = chunkOriginals[hit.chunk_id]?.content;
                   return (
                     <tr key={hit.rank}>
+                      <td className="num">{rankStart + index + 1}</td>
                       <td className="num">{hit.rank}</td>
                       {/* 来源是这一片出自哪份文档；分片列是这一片的原文。 */}
                       <td className="rank-source">
@@ -5393,6 +5397,7 @@ function RetrievalDiagnostics({
           <table className="diag-table diag-table-compact diag-combo">
             <thead>
               <tr>
+                <th>序号</th>
                 <th>被哪几路找到</th>
                 <th title="点分片数量，看这一组具体是哪些分片">分片</th>
               </tr>
@@ -5400,13 +5405,14 @@ function RetrievalDiagnostics({
             <tbody>
               {comboOrder
                 .filter((key) => combos.has(key))
-                .map((key) => {
+                .map((key, index) => {
                   const group = combos.get(key) ?? [];
                   return (
                     <tr
                       key={key}
                       className={key === "graph" ? "is-graph-only" : ""}
                     >
+                      <td className="num">{index + 1}</td>
                       <td>{comboName(key)}</td>
                       <td className="num">
                         <button
@@ -5853,13 +5859,14 @@ function CandidateChunksDialog({
       cancelled = true;
     };
   }, [missingOriginals]);
-  const row = (item: RetrievalCandidate) => {
+  const row = (item: RetrievalCandidate, serial: number) => {
     const methods = ["dense", "keyword", "graph"].filter((method) =>
       item.retrieval_methods.includes(method),
     );
     const body = originals[item.chunk_id]?.content;
     return (
       <tr key={item.chunk_id}>
+        <td className="num">{serial}</td>
         <td>
           <div className="diag-contribs">
             {methods.map((method) => (
@@ -5971,6 +5978,7 @@ function CandidateChunksDialog({
           <table className="diag-table diag-pool">
             <thead>
               <tr>
+                <th>序号</th>
                 <th>召回方式</th>
                 <th title="这一片自己的正文">分片</th>
                 <th
@@ -5993,13 +6001,18 @@ function CandidateChunksDialog({
                 entry.kind === "group" ? (
                   // 名额补进来的单独一段，别和 RRF 名前面几个混在一起。
                   <tr className="diag-pool-group" key={`group-${index}`}>
-                    <td colSpan={5}>
+                    <td colSpan={6}>
                       图检索名额补进来的 {entry.count} 个：RRF
                       名次不够，靠名额进池
                     </td>
                   </tr>
                 ) : (
-                  row(entry.item)
+                  row(
+                    entry.item,
+                    entries
+                      .slice(0, pageStart + index + 1)
+                      .filter((value) => value.kind === "chunk").length,
+                  )
                 ),
               )}
             </tbody>
@@ -6154,6 +6167,7 @@ function CandidateDetailDialog({
           <table className="diag-table diag-candidates">
             <thead>
               <tr>
+                <th>序号</th>
                 <th>去向</th>
                 <th>来源</th>
                 <th>分片</th>
@@ -6168,8 +6182,9 @@ function CandidateDetailDialog({
               </tr>
             </thead>
             <tbody>
-              {visible.map((item) => (
+              {visible.map((item, index) => (
                 <CandidateRow
+                  serial={pageStart + index + 1}
                   item={item}
                   minScore={minScore}
                   queries={queries}
@@ -6220,6 +6235,7 @@ function CandidateDetailDialog({
 
 // 单个候选的一行：去向、召回贡献、RRF、重排 logit 与带阈值刻度的概率条。
 function CandidateRow({
+  serial,
   item,
   minScore,
   queries,
@@ -6227,6 +6243,7 @@ function CandidateRow({
   rrfK = 60,
   fusion,
 }: {
+  serial: number;
   item: RetrievalCandidate;
   minScore: number | null;
   queries: string[];
@@ -6248,6 +6265,7 @@ function CandidateRow({
     probability !== null && minScore !== null && probability >= minScore;
   return (
     <tr className={`diag-row status-${item.merged ? "merged" : item.status}`}>
+      <td className="num">{serial}</td>
       <td>
         <span
           className={`diag-status status-${item.merged ? "merged" : item.status}`}
