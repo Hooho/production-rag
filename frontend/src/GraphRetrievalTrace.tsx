@@ -1636,12 +1636,14 @@ function GraphRetrievalMap({
         const name = String(edge.data.category);
         categoryCount.set(name, (categoryCount.get(name) ?? 0) + 1);
       }
-      const entities: MapEntity[] = graph.entities.map((entity) => ({
-        id: entity.entity_id,
-        name: entity.name ?? entity.entity_id,
-        type: entity.type,
-        degree: degree.get(entity.entity_id) ?? 0,
-      }));
+      const entities: MapEntity[] = graph.entities
+        .map((entity) => ({
+          id: entity.entity_id,
+          name: entity.name ?? entity.entity_id,
+          type: entity.type,
+          degree: degree.get(entity.entity_id) ?? 0,
+        }))
+        .filter((entity) => entity.degree > 0);
       // 关系类型：筛选框里的选项，按条数从多到少。
       const categories = [...categoryCount.entries()]
         .map(([name, count]) => ({ name, count }))

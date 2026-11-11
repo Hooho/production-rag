@@ -46,6 +46,58 @@ test("graph trace renders new relation pipeline and preserves legacy records", a
         },
       }),
     );
+    const withEntities = renderToStaticMarkup(
+      createElement(GraphRetrievalTrace, {
+        graph: {
+          ...graph,
+          pipeline: "hybrid_relations_v2",
+          entities: [
+            {
+              entity_id: "a",
+              name: "有关系的实体",
+              type: "人物",
+              names: [],
+              score: 1,
+            },
+            {
+              entity_id: "b",
+              name: "零关系实体应隐藏",
+              type: "人物",
+              names: [],
+              score: 1,
+            },
+          ],
+          entity_relations: [
+            {
+              relation_id: "r",
+              entity_id: "a",
+              entity_name: "有关系的实体",
+              source: "有关系的实体",
+              source_entity: "有关系的实体",
+              source_entity_id: "a",
+              source_type: "人物",
+              target: "公司",
+              target_entity: "公司",
+              target_entity_id: "c",
+              target_type: "组织",
+              category: "投资",
+              description: "买入股票",
+              evidence: "",
+              kept: true,
+              score: 1,
+              chunk_id: "d:1",
+              document_id: "d",
+              version_id: "v",
+              version_number: 1,
+              title: "文档",
+              reason: null,
+            },
+          ],
+        },
+      }),
+    );
+    assert.match(withEntities, /有关系的实体/);
+    assert.doesNotMatch(withEntities, /零关系实体应隐藏/);
     assert.match(modern, /候选合并与关系重排/);
     assert.doesNotMatch(modern, /<td>概括<\/td>/);
     assert.match(legacy, /<td>概括<\/td>/);
