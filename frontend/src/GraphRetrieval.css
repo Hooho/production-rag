@@ -528,10 +528,11 @@
   color: #996014;
 }
 
-.grt-table td small.grt-score-ranks {
+.grt .grt-table td small.grt-score-ranks {
   display: block;
-  margin-top: 4px;
-  font-size: 12px;
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.5;
   color: var(--diag-muted, #6f8ba4);
   white-space: nowrap;
 }
