@@ -5112,6 +5112,11 @@ function RetrievalDiagnostics({
   // 点开的排名表在弹窗里看：标签栏并排放每张表，点标签切换下面的表格；
   // 表格框高度固定，超出的行在框里滚，底部翻页。
   // 表格颜色变量在 .diag 上，弹窗不在 .diag 下面，要自己带上。
+  const [rankMethods, setRankMethods] = useState<string[]>([
+    "keyword",
+    "dense",
+    "graph",
+  ]);
   const rankDialog = rankOpen && activeList && (
     <DetailDialog
       open
@@ -5120,138 +5125,153 @@ function RetrievalDiagnostics({
       className="ag-dialog-rank"
     >
       <div className="diag">
-        <div
-          className="grt-chips rank-tabs"
-          role="tablist"
-          aria-label="原始排名表"
-        >
-          {lists.map((list, index) => (
-            <button
-              key={`${list.method}-${index}`}
-              type="button"
-              role="tab"
-              aria-selected={index === rankIndex}
-              className={`grt-chip${index === rankIndex ? " is-active" : ""}`}
-              onClick={() => setRankIndex(index)}
-            >
-              <i className={`diag-dot method-${list.method}`} />
-              {listTabLabel(list)} <em>{list.hits.length}</em>
-            </button>
-          ))}
-        </div>
-        <p className="diag-part-lead">
-          <strong>{listLabel(activeList)}</strong>
-          <small>按这一路召回的名次排列</small>
-        </p>
-        <div className="diag-table-wrap rank-table-wrap">
-          {activeHits.length === 0 ? (
-            <p className="diag-empty">没有找到分片</p>
-          ) : (
-            <table className="diag-table diag-table-compact">
-              <thead>
-                <tr>
-                  <th>名次</th>
-                  <th>来源</th>
-                  <th>分片</th>
-                  <th>{RAW_SCORE_LABELS[activeList.method] ?? "原始分"}</th>
-                  <th title={`1 / (${config.rrf_k} + 名次)`}>RRF 贡献</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleRankHits.map((hit) => {
-                  const body = chunkOriginals[hit.chunk_id]?.content;
-                  return (
-                    <tr key={hit.rank}>
-                      <td className="num">{hit.rank}</td>
-                      {/* 来源是这一片出自哪份文档；分片列是这一片的原文。 */}
-                      <td className="rank-source">
-                        <span className="rank-source-title" title={hit.title}>
-                          {hit.title}
-                        </span>
-                      </td>
-                      <td className="rank-chunk">
-                        <span className="rank-chunk-body">
-                          {body ? (
-                            <span
-                              className="diag-preview"
-                              title={body.slice(0, 160)}
+        <RetrievalMethodFilter
+          selected={rankMethods}
+          onChange={(methods) => {
+            setRankMethods(methods);
+            const index = lists.findIndex((list) =>
+              methods.includes(list.method),
+            );
+            if (index >= 0) setRankIndex(index);
+          }}
+        />
+        {!rankMethods.length && <p>没有符合筛选条件的排名表</p>}
+        <div hidden={!rankMethods.length}>
+          <div
+            className="grt-chips rank-tabs"
+            role="tablist"
+            aria-label="原始排名表"
+          >
+            {lists.map((list, index) =>
+              rankMethods.includes(list.method) ? (
+                <button
+                  key={`${list.method}-${index}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={index === rankIndex}
+                  className={`grt-chip${index === rankIndex ? " is-active" : ""}`}
+                  onClick={() => setRankIndex(index)}
+                >
+                  <i className={`diag-dot method-${list.method}`} />
+                  {listTabLabel(list)} <em>{list.hits.length}</em>
+                </button>
+              ) : null,
+            )}
+          </div>
+          <p className="diag-part-lead">
+            <strong>{listLabel(activeList)}</strong>
+            <small>按这一路召回的名次排列</small>
+          </p>
+          <div className="diag-table-wrap rank-table-wrap">
+            {activeHits.length === 0 ? (
+              <p className="diag-empty">没有找到分片</p>
+            ) : (
+              <table className="diag-table diag-table-compact">
+                <thead>
+                  <tr>
+                    <th>名次</th>
+                    <th>来源</th>
+                    <th>分片</th>
+                    <th>{RAW_SCORE_LABELS[activeList.method] ?? "原始分"}</th>
+                    <th title={`1 / (${config.rrf_k} + 名次)`}>RRF 贡献</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleRankHits.map((hit) => {
+                    const body = chunkOriginals[hit.chunk_id]?.content;
+                    return (
+                      <tr key={hit.rank}>
+                        <td className="num">{hit.rank}</td>
+                        {/* 来源是这一片出自哪份文档；分片列是这一片的原文。 */}
+                        <td className="rank-source">
+                          <span className="rank-source-title" title={hit.title}>
+                            {hit.title}
+                          </span>
+                        </td>
+                        <td className="rank-chunk">
+                          <span className="rank-chunk-body">
+                            {body ? (
+                              <span
+                                className="diag-preview"
+                                title={body.slice(0, 160)}
+                              >
+                                {body}
+                              </span>
+                            ) : (
+                              <SkeletonBlock className="rank-preview-skeleton" />
+                            )}
+                            <button
+                              type="button"
+                              className="link-button button-sm"
+                              onClick={() => setChunkOpen(hit.chunk_id)}
                             >
-                              {body}
-                            </span>
-                          ) : (
-                            <SkeletonBlock className="rank-preview-skeleton" />
-                          )}
-                          <button
-                            type="button"
-                            className="link-button button-sm"
-                            onClick={() => setChunkOpen(hit.chunk_id)}
-                          >
-                            更多
-                          </button>
-                        </span>
-                        {hit.relation_ids?.length ? (
+                              更多
+                            </button>
+                          </span>
+                          {hit.relation_ids?.length ? (
+                            <small className="diag-sub">
+                              通过关系：
+                              {hit.relation_ids
+                                .map((id) => graphRelations.get(id) ?? id)
+                                .join("；")}
+                            </small>
+                          ) : null}
+                        </td>
+                        <td className="num">{formatNumber(hit.raw_score)}</td>
+                        <td className="num">
+                          <RrfTerm
+                            method={activeList.method}
+                            rank={hit.rank}
+                            k={config.rrf_k}
+                          />
                           <small className="diag-sub">
-                            通过关系：
-                            {hit.relation_ids
-                              .map((id) => graphRelations.get(id) ?? id)
-                              .join("；")}
+                            {formatNumber(hit.rrf, 5)}
                           </small>
-                        ) : null}
-                      </td>
-                      <td className="num">{formatNumber(hit.raw_score)}</td>
-                      <td className="num">
-                        <RrfTerm
-                          method={activeList.method}
-                          rank={hit.rank}
-                          k={config.rrf_k}
-                        />
-                        <small className="diag-sub">
-                          {formatNumber(hit.rrf, 5)}
-                        </small>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+          <div className="diag-pagination" aria-label="排名表分页">
+            <span aria-live="polite">
+              {activeHits.length === 0
+                ? "这张表没有找到分片"
+                : `显示第 ${rankStart + 1}–${rankEnd} 名，共 ${activeHits.length} 个分片`}
+            </span>
+            <div className="diag-pagination-controls">
+              <button
+                type="button"
+                disabled={visibleRankPage === 1}
+                onClick={() => setRankPage((page) => Math.max(1, page - 1))}
+              >
+                上一页
+              </button>
+              <span>
+                第 {visibleRankPage} / {rankPageCount} 页
+              </span>
+              <button
+                type="button"
+                disabled={visibleRankPage === rankPageCount}
+                onClick={() =>
+                  setRankPage((page) => Math.min(rankPageCount, page + 1))
+                }
+              >
+                下一页
+              </button>
+            </div>
+          </div>
+          {/* 「更多」打开的原文：弹窗里再打开的内容是伴随浮窗，贴着「更多」出现。 */}
+          {chunkOpen && (
+            <ChunkOriginalPanel
+              chunkId={chunkOpen}
+              chunk={chunkOriginals[chunkOpen]}
+              onClose={() => setChunkOpen(null)}
+            />
           )}
         </div>
-        <div className="diag-pagination" aria-label="排名表分页">
-          <span aria-live="polite">
-            {activeHits.length === 0
-              ? "这张表没有找到分片"
-              : `显示第 ${rankStart + 1}–${rankEnd} 名，共 ${activeHits.length} 个分片`}
-          </span>
-          <div className="diag-pagination-controls">
-            <button
-              type="button"
-              disabled={visibleRankPage === 1}
-              onClick={() => setRankPage((page) => Math.max(1, page - 1))}
-            >
-              上一页
-            </button>
-            <span>
-              第 {visibleRankPage} / {rankPageCount} 页
-            </span>
-            <button
-              type="button"
-              disabled={visibleRankPage === rankPageCount}
-              onClick={() =>
-                setRankPage((page) => Math.min(rankPageCount, page + 1))
-              }
-            >
-              下一页
-            </button>
-          </div>
-        </div>
-        {/* 「更多」打开的原文：弹窗里再打开的内容是伴随浮窗，贴着「更多」出现。 */}
-        {chunkOpen && (
-          <ChunkOriginalPanel
-            chunkId={chunkOpen}
-            chunk={chunkOriginals[chunkOpen]}
-            onClose={() => setChunkOpen(null)}
-          />
-        )}
       </div>
     </DetailDialog>
   );
@@ -5775,6 +5795,37 @@ function textQueries(data: RetrievalDiagnosticsData) {
 // 「交给重排的候选池」和「最终返回给回答模型的分片」两处共用。
 // scoreKind 决定分数列写什么：rrf 是融合得分，rerank 是重排概率。
 // splitQuota 把「靠图检索名额补进来的」那几片单独分段，和候选池里一样。
+function RetrievalMethodFilter({
+  selected,
+  onChange,
+}: {
+  selected: string[];
+  onChange: (methods: string[]) => void;
+}) {
+  return (
+    <div className="diag-method-filters" role="group" aria-label="筛选召回方式">
+      {["keyword", "dense", "graph"].map((method) => (
+        <button
+          key={method}
+          type="button"
+          className="secondary-button button-sm"
+          aria-pressed={selected.includes(method)}
+          onClick={() =>
+            onChange(
+              selected.includes(method)
+                ? selected.filter((value) => value !== method)
+                : [...selected, method],
+            )
+          }
+        >
+          {selected.includes(method) ? "✓ " : ""}
+          {METHOD_LABELS[method]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function CandidateChunksDialog({
   open,
   title,
@@ -5982,31 +6033,13 @@ function CandidateChunksDialog({
           <strong>{lead}</strong>
           {leadNote ? <small>{leadNote}</small> : null}
         </p>
-        <div
-          className="diag-method-filters"
-          role="group"
-          aria-label="筛选召回方式"
-        >
-          {["keyword", "dense", "graph"].map((method) => (
-            <button
-              key={method}
-              type="button"
-              className="secondary-button button-sm"
-              aria-pressed={selectedMethods.includes(method)}
-              onClick={() => {
-                setSelectedMethods((previous) =>
-                  previous.includes(method)
-                    ? previous.filter((value) => value !== method)
-                    : [...previous, method],
-                );
-                setPage(1);
-              }}
-            >
-              {selectedMethods.includes(method) ? "✓ " : ""}
-              {METHOD_LABELS[method]}
-            </button>
-          ))}
-        </div>
+        <RetrievalMethodFilter
+          selected={selectedMethods}
+          onChange={(methods) => {
+            setSelectedMethods(methods);
+            setPage(1);
+          }}
+        />
         <div className="diag-table-wrap">
           <table className="diag-table diag-pool">
             <thead>
@@ -6125,16 +6158,14 @@ function CandidateDetailDialog({
   onClose: () => void;
 }) {
   const [page, setPage] = useState(1);
-  // 按召回方式过滤：向量、关键词、图检索。
-  const [method, setMethod] = useState<string | null>(null);
-  // 一个分片可能被多路找到，各路的数量会重叠。
-  const methodCounts: Record<string, number> = {};
-  for (const item of candidates)
-    for (const name of item.retrieval_methods)
-      methodCounts[name] = (methodCounts[name] ?? 0) + 1;
-  const filtered = method
-    ? candidates.filter((item) => item.retrieval_methods.includes(method))
-    : candidates;
+  const [selectedMethods, setSelectedMethods] = useState<string[]>([
+    "keyword",
+    "dense",
+    "graph",
+  ]);
+  const filtered = candidates.filter((item) =>
+    item.retrieval_methods.some((method) => selectedMethods.includes(method)),
+  );
   const pageCount = Math.max(
     1,
     Math.ceil(filtered.length / DIAGNOSTICS_PAGE_SIZE),
@@ -6146,35 +6177,18 @@ function CandidateDetailDialog({
   // 候选数量、过滤方式或检索问题变化时回到第一页，避免复用旧页码后看到空白明细。
   useEffect(() => {
     setPage(1);
-  }, [candidates.length, method, resetKey]);
+  }, [candidates.length, selectedMethods, resetKey]);
   return (
     <DetailDialog open={open} title={title} onClose={onClose}>
       {/* 弹窗不在 .diag 下面：自己带上，表格颜色变量才对。 */}
       <div className="diag">
-        {/* 召回方式筛选：复用图检索详情弹窗那排胶囊按钮。 */}
-        {candidates.length > 0 && (
-          <div className="grt-chips">
-            <button
-              type="button"
-              className={`grt-chip${method === null ? " is-active" : ""}`}
-              onClick={() => setMethod(null)}
-            >
-              全部 <em>{candidates.length}</em>
-            </button>
-            {(["dense", "keyword", "graph"] as const).map((name) =>
-              methodCounts[name] ? (
-                <button
-                  key={name}
-                  type="button"
-                  className={`grt-chip${method === name ? " is-active" : ""}`}
-                  onClick={() => setMethod(name)}
-                >
-                  {METHOD_LABELS[name] ?? name} <em>{methodCounts[name]}</em>
-                </button>
-              ) : null,
-            )}
-          </div>
-        )}
+        <RetrievalMethodFilter
+          selected={selectedMethods}
+          onChange={(methods) => {
+            setSelectedMethods(methods);
+            setPage(1);
+          }}
+        />
         <div className="diag-legend">
           <span>
             <i className="diag-dot method-dense" />
@@ -6220,6 +6234,12 @@ function CandidateDetailDialog({
               </tr>
             </thead>
             <tbody>
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={8}>没有符合筛选条件的分片</td>
+                </tr>
+              )}
+
               {visible.map((item, index) => (
                 <CandidateRow
                   serial={pageStart + index + 1}
@@ -6238,8 +6258,8 @@ function CandidateDetailDialog({
         {candidates.length > 0 ? (
           <div className="diag-pagination" aria-label="候选明细分页">
             <span aria-live="polite">
-              显示第 {pageStart + 1}–{pageEnd} 条，共 {filtered.length} 条
-              {method ? `（${METHOD_LABELS[method] ?? method}召回）` : ""}
+              显示第 {filtered.length ? pageStart + 1 : 0}–{pageEnd} 条，共{" "}
+              {filtered.length} 条
             </span>
             <div className="diag-pagination-controls">
               <button
