@@ -16,6 +16,7 @@ import {
   batchOrder,
 } from "./AgentEval";
 import { paramsSummary } from "./EvalParamsPanel";
+import { InfoPopover } from "./Popover";
 import { settingLabel } from "./SystemSettings";
 import { Tag } from "./Tag";
 import { runStatus } from "./tags";
@@ -192,32 +193,39 @@ export default function BatchReport({
                   .join("＋")}
               </p>
               {arm.effective && (
-                <details>
-                  <summary>运行配置快照</summary>
-                  <p>
-                    大模型：{arm.effective.llm?.model} · 评审模型：
-                    {arm.effective.judge?.model}
-                  </p>
-                  <dl>
-                    {Object.entries(arm.effective.settings ?? {}).map(
-                      ([key, value]) => (
-                        <div key={key}>
-                          <dt>{settingLabel(key)}</dt>
-                          <dd>{String(value)}</dd>
-                        </div>
-                      ),
-                    )}
-                  </dl>
-                  <p>
-                    提示词：
-                    {Object.entries(arm.effective.prompts ?? {})
-                      .map(
-                        ([key, value]) =>
-                          `${PROMPT_LABELS[key] ?? key}: ${value}`,
-                      )
-                      .join(" · ")}
-                  </p>
-                </details>
+                <InfoPopover
+                  title={`运行配置快照 · ${arm.label}`}
+                  content={() => (
+                    <>
+                      <p className="evb-snapshot-line">
+                        大模型：{arm.effective?.llm?.model} · 评审模型：
+                        {arm.effective?.judge?.model}
+                      </p>
+                      <dl className="evb-snapshot">
+                        {Object.entries(arm.effective?.settings ?? {}).flatMap(
+                          ([key, value]) => [
+                            <dt key={`${key}-name`}>{settingLabel(key)}</dt>,
+                            <dd key={`${key}-value`}>{formatValue(value)}</dd>,
+                          ],
+                        )}
+                        {Object.entries(arm.effective?.prompts ?? {}).flatMap(
+                          ([key, value]) => [
+                            <dt key={`prompt-${key}-name`}>
+                              {PROMPT_LABELS[key] ?? key}
+                            </dt>,
+                            <dd key={`prompt-${key}-value`}>
+                              {String(value)}
+                            </dd>,
+                          ],
+                        )}
+                      </dl>
+                    </>
+                  )}
+                >
+                  <button type="button" className="link-button button-sm">
+                    运行配置快照
+                  </button>
+                </InfoPopover>
               )}
               <p>
                 {lines.length

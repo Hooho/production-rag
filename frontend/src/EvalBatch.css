@@ -50,6 +50,39 @@
   line-height: 1.6;
 }
 
+/* 「运行配置快照」弹窗里的参数：名称和值并排一行，字号压到 12px。 */
+.evb-snapshot-line {
+  margin: 0 0 6px;
+  color: var(--ev-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.evb-snapshot {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 14px;
+  margin: 0 0 6px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.evb-snapshot dt {
+  color: var(--ev-muted);
+}
+
+.evb-snapshot dd {
+  margin: 0;
+  color: var(--ev-ink);
+  overflow-wrap: anywhere;
+}
+
+/* 参数快照的气泡比通用气泡窄一点，少压住左侧导航。 */
+.info-popover:has(.evb-snapshot) {
+  width: min(420px, calc(100vw - 16px));
+  max-width: min(420px, calc(100vw - 16px));
+}
+
 .evb-arm-title {
   display: flex;
   align-items: center;
