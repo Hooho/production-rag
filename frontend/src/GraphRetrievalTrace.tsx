@@ -1007,6 +1007,7 @@ function RelationsDetail({
     <>
       <DetailFilters list={list} more={more} />
       <RelationTable
+        startIndex={(list.page - 1) * PAGE_SIZE}
         trace={trace}
         rows={list.rows}
         first={first}
@@ -1472,6 +1473,7 @@ type RelationRow = GraphRetrievalRelation &
 
 function RelationTable({
   trace,
+  startIndex = 0,
   rows,
   first,
   firstValue,
@@ -1482,6 +1484,7 @@ function RelationTable({
   onEntity,
 }: {
   trace?: GraphTrace;
+  startIndex?: number;
   rows: RelationRow[];
   first: string;
   firstValue: (row: RelationRow) => string;
@@ -1500,6 +1503,7 @@ function RelationTable({
         <table className="diag-table grt-table">
           <thead>
             <tr>
+              <th>序号</th>
               <th>{first}</th>
               <th>关系</th>
               <th>
@@ -1521,6 +1525,7 @@ function RelationTable({
                 key={`${row.relation_id}-${index}`}
                 className={row.kept ? "" : "is-dropped"}
               >
+                <td className="num">{startIndex + index + 1}</td>
                 <td>{firstValue(row)}</td>
                 <td>
                   <RelationText relation={row} onEntity={onEntity} />
