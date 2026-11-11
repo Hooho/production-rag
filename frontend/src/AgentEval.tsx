@@ -1,3 +1,4 @@
+import TableScroll from "./TableScroll";
 import {
   Fragment,
   useEffect,
@@ -1419,7 +1420,7 @@ export function ComparePanel({ run }: { run: EvalRun }) {
       <div className="ev-section-title">
         按题目类型<small>得分和资料命中率</small>
       </div>
-      <div className="diag-table-wrap">
+      <TableScroll className="diag-table-wrap">
         <table className="diag-table ev-table">
           <thead>
             <tr>
@@ -1462,7 +1463,7 @@ export function ComparePanel({ run }: { run: EvalRun }) {
             ))}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
       <div className="ev-section-title">
         逐题<small>点开看两边的检索日志</small>
       </div>
@@ -1653,7 +1654,7 @@ export function AgentPanel({ run }: { run: EvalRun }) {
         />
       </div>
       <div className="ev-section-title">按题目类型</div>
-      <div className="diag-table-wrap">
+      <TableScroll className="diag-table-wrap">
         <table className="diag-table ev-table">
           <thead>
             <tr>
@@ -1676,7 +1677,7 @@ export function AgentPanel({ run }: { run: EvalRun }) {
             ))}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
       <div className="ev-section-title">
         逐题<small>点开看 Agent 的检索日志</small>
       </div>
@@ -4564,7 +4565,7 @@ export function BatchTypeStats({
     </tr>
   );
   return (
-    <div className="diag-table-wrap type-stats-wrap ag-batch-scroll">
+    <TableScroll className="diag-table-wrap type-stats-wrap ag-batch-scroll">
       <table className="diag-table ev-table type-stats">
         <thead>
           <tr>
@@ -4609,7 +4610,7 @@ export function BatchTypeStats({
           {types.length > 1 && row("合计", "合计", order, true)}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 }
 

@@ -1,3 +1,4 @@
+import TableScroll from "./TableScroll";
 import {
   useEffect,
   useMemo,
@@ -893,7 +894,7 @@ function NamesDetail({
   return (
     <>
       <DetailFilters list={list} more={graph.dropped_more?.names} />
-      <div className="diag-table-wrap">
+      <TableScroll className="diag-table-wrap">
         <table className="diag-table grt-table">
           <thead>
             <tr>
@@ -965,7 +966,7 @@ function NamesDetail({
             ))}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
       <Pager page={list.page} total={list.total} onPage={list.setPage} />
     </>
   );
@@ -1529,7 +1530,7 @@ function RelationTable({
   return (
     <>
       {scoreHint && <p className="grt-hint">{scoreHint}</p>}
-      <div className="diag-table-wrap">
+      <TableScroll className="diag-table-wrap">
         <table className="diag-table grt-table">
           <thead>
             <tr>
@@ -1635,7 +1636,7 @@ function RelationTable({
             ))}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
     </>
   );
 }
@@ -1648,7 +1649,7 @@ function ChunkTable({
   relations: Map<string, GraphRetrievalRelation>;
 }) {
   return (
-    <div className="diag-table-wrap">
+    <TableScroll className="diag-table-wrap">
       {rows.length === 0 ? (
         <p className="grt-empty">没有分片</p>
       ) : (
@@ -1763,7 +1764,7 @@ function ChunkTable({
           </tbody>
         </table>
       )}
-    </div>
+    </TableScroll>
   );
 }
 

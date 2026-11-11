@@ -1,3 +1,4 @@
+import TableScroll from "./TableScroll";
 // Agent 模式的执行链（设计稿：问答页 · Agent 模式执行链）。
 // 处理阶段里的「Agent 循环」这一步换成这里的视图：先是统计和每轮概览，再逐轮展开
 // ① 收到（模型收到的输入，原样）→ ② 输出（接口原始响应和提取出的字段）→ ③ 程序处理 → ④ 工具返回。
@@ -452,7 +453,7 @@ function Summary({ result }: { result: Record<string, unknown> }) {
 function Overview({ rounds }: { rounds: AgentRound[] }) {
   const seen = new Set<string>();
   return (
-    <div className="agent-table-wrap">
+    <TableScroll className="agent-table-wrap">
       <table className="agent-table">
         <thead>
           <tr>
@@ -581,7 +582,7 @@ function Overview({ rounds }: { rounds: AgentRound[] }) {
           })}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 }
 

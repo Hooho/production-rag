@@ -1,3 +1,4 @@
+import TableScroll from "./TableScroll";
 import { errorText, useToast } from "./Toast";
 import EvalPreludeEditor from "./EvalPreludeEditor";
 import { saveEvalDatasetPrelude, type EvalPreludeTurn } from "./api";
@@ -1188,7 +1189,7 @@ function MemoryResults({ run }: { run: EvalRun }) {
         共 {run.config.dataset_size ?? "—"}{" "}
         段对话，最后一问要用到开头的内容。正确性：1 一致，0.5 部分，0 错误。
       </p>
-      <div className="diag-table-wrap">
+      <TableScroll className="diag-table-wrap">
         <table className="diag-table ev-table">
           <thead>
             <tr>
@@ -1224,7 +1225,7 @@ function MemoryResults({ run }: { run: EvalRun }) {
             ))}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
       {variants.map((variant) => (
         <details key={variant.name} className="ev-table-view">
           <summary>{variant.label}：逐段对话</summary>
@@ -1966,7 +1967,7 @@ function TypeTable({ run }: { run: EvalRun }) {
   const toggleParaphrase = () => setParaphraseExpanded((expanded) => !expanded);
   const paraphrasePanelId = `paraphrase-analysis-${run.id}`;
   return (
-    <div className="diag-table-wrap">
+    <TableScroll className="diag-table-wrap">
       <table className="diag-table ev-table">
         <thead>
           <tr>
@@ -2032,7 +2033,7 @@ function TypeTable({ run }: { run: EvalRun }) {
           })}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 }
 
@@ -2102,7 +2103,7 @@ function ParaphraseAnalysis({
           <small>改写后独立检索结果</small>
         </div>
       </div>
-      <div className="diag-table-wrap">
+      <TableScroll className="diag-table-wrap">
         <table className="diag-table ev-table ev-paraphrase-table">
           <thead>
             <tr>
@@ -2132,7 +2133,7 @@ function ParaphraseAnalysis({
             })}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
       <details className="ev-paraphrase-details">
         <summary>查看题对明细</summary>
         <div className="ev-paraphrase-pairs">
@@ -2698,7 +2699,7 @@ function SweepPanel({ run }: { run: EvalRun }) {
       <SweepChart sweep={sweep} current={current} />
       <details className="ev-table-view">
         <summary>表格视图</summary>
-        <div className="diag-table-wrap">
+        <TableScroll className="diag-table-wrap">
           <table className="diag-table ev-table">
             <thead>
               <tr>
@@ -2731,7 +2732,7 @@ function SweepPanel({ run }: { run: EvalRun }) {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
       </details>
       <LimitSweep
         points={run.limit_sweep ?? []}
@@ -2767,7 +2768,7 @@ function LimitSweep({
         )}
         现在是 {current ?? "—"} 段。
       </p>
-      <div className="diag-table-wrap">
+      <TableScroll className="diag-table-wrap">
         <table className="diag-table ev-table">
           <thead>
             <tr>
@@ -2805,7 +2806,7 @@ function LimitSweep({
             ))}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
     </div>
   );
 }
@@ -3128,7 +3129,7 @@ function VariantPanel({ run }: { run: EvalRun }) {
       <p className="ev-muted-note">
         差值相对基线。没有重排的几组也没有阈值过滤，漏放率会偏高。
       </p>
-      <div className="diag-table-wrap">
+      <TableScroll className="diag-table-wrap">
         <table className="diag-table ev-table">
           <thead>
             <tr>
@@ -3166,7 +3167,7 @@ function VariantPanel({ run }: { run: EvalRun }) {
             ])}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
     </div>
   );
 }
@@ -3435,7 +3436,7 @@ function RunHistory({
           {comparing ? "正在对比…" : `对比（${picked.length}/2）`}
         </button>
       </div>
-      <div className="diag-table-wrap ev-history-table-wrap">
+      <TableScroll className="diag-table-wrap ev-history-table-wrap">
         <table className="diag-table ev-table ev-history-table">
           {/* 历史记录只保留运行结果相关字段；提交号属于构建元数据，移除后给题数、配置和状态留出空间。 */}
           <thead>
@@ -3913,7 +3914,7 @@ function RunHistory({
             })}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
       <DetailDialog
         open={noteTarget !== null}
         title={noteTarget?.note ? "编辑评测备注" : "添加评测备注"}
@@ -4040,7 +4041,7 @@ function RunHistory({
                   。分数变化可能来自这些改动。
                 </div>
               )}
-            <div className="diag-table-wrap">
+            <TableScroll className="diag-table-wrap">
               <table className="diag-table ev-table">
                 <thead>
                   <tr>
@@ -4080,7 +4081,7 @@ function RunHistory({
                   ))}
                 </tbody>
               </table>
-            </div>
+            </TableScroll>
           </div>
         </div>
       )}

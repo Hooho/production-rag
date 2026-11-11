@@ -1,3 +1,4 @@
+import TableScroll from "./TableScroll";
 import { DetailDialog } from "./DetailDialog";
 import { ChunkOriginalPanel } from "./ChunkOriginalPanel";
 import { ConfirmPopover } from "./ConfirmPopover";
@@ -5162,7 +5163,7 @@ function RetrievalDiagnostics({
             <strong>{listLabel(activeList)}</strong>
             <small>按这一路召回的名次排列</small>
           </p>
-          <div className="diag-table-wrap rank-table-wrap">
+          <TableScroll className="diag-table-wrap rank-table-wrap">
             {activeHits.length === 0 ? (
               <p className="diag-empty">没有找到分片</p>
             ) : (
@@ -5234,7 +5235,7 @@ function RetrievalDiagnostics({
                 </tbody>
               </table>
             )}
-          </div>
+          </TableScroll>
           <div className="diag-pagination" aria-label="排名表分页">
             <span aria-live="polite">
               {activeHits.length === 0
@@ -6040,7 +6041,7 @@ function CandidateChunksDialog({
             setPage(1);
           }}
         />
-        <div className="diag-table-wrap">
+        <TableScroll className="diag-table-wrap">
           <table className="diag-table diag-pool">
             <thead>
               <tr>
@@ -6088,7 +6089,7 @@ function CandidateChunksDialog({
               )}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
         <div className="diag-pagination" aria-label="分片明细分页">
           <span aria-live="polite">
             显示第 {chunkRows ? firstChunk + 1 : 0}–{firstChunk + chunkRows}{" "}
@@ -6216,7 +6217,7 @@ function CandidateDetailDialog({
           6 名，<code>0.700</code> 是这一路的原始分数
         </p>
         <p className="diag-scroll-hint">表格可左右滑动查看分数</p>
-        <div className="diag-table-wrap">
+        <TableScroll className="diag-table-wrap">
           <table className="diag-table diag-candidates">
             <thead>
               <tr>
@@ -6256,7 +6257,7 @@ function CandidateDetailDialog({
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
         {candidates.length > 0 ? (
           <div className="diag-pagination" aria-label="候选明细分页">
             <span aria-live="polite">
@@ -7628,7 +7629,7 @@ function DocumentMetadataPanel({ document }: { document: DocumentStatus }) {
   return (
     <details className="document-metadata-panel">
       <summary>文档与解析信息</summary>
-      <div className="document-metadata-table-wrap">
+      <TableScroll className="document-metadata-table-wrap">
         <table className="document-metadata-table">
           <thead>
             <tr>
@@ -7653,7 +7654,7 @@ function DocumentMetadataPanel({ document }: { document: DocumentStatus }) {
             ))}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
       {metadata.table_report && (
         <TableReportView report={metadata.table_report} />
       )}

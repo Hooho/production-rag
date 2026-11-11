@@ -1,3 +1,4 @@
+import TableScroll from "./TableScroll";
 import { SpecialSection } from "./Special";
 import { useToast, errorText } from "./Toast";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
@@ -274,7 +275,7 @@ export default function BatchReport({
       {report.config_diff.length > 0 && (
         <div className="evb-block">
           <h4>配置差异</h4>
-          <div className="diag-table-wrap">
+          <TableScroll className="diag-table-wrap">
             <table className="diag-table ev-table">
               <thead>
                 <tr>
@@ -297,7 +298,7 @@ export default function BatchReport({
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
         </div>
       )}
 
