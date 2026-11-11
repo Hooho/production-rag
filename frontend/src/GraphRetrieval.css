@@ -527,3 +527,11 @@
   background: #fff3df;
   color: #996014;
 }
+
+.grt-table td small.grt-score-ranks {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--diag-muted, #6f8ba4);
+  white-space: nowrap;
+}

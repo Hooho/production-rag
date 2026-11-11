@@ -1461,9 +1461,22 @@ function RelationTable({
                 </td>
                 <td className="num">
                   {scoreMode === "fusion" ? (
-                    (row.fusion_score?.toFixed(6) ?? "—")
+                    <>
+                      {row.fusion_score?.toFixed(6) ?? "—"}
+                      <small className="grt-score-ranks">
+                        向量排名 {row.vector_rank ?? "—"}
+                      </small>
+                      <small className="grt-score-ranks">
+                        关键词排名 {row.keyword_rank ?? "—"}
+                      </small>
+                    </>
                   ) : scoreMode === "rerank" ? (
-                    (row.rerank_score?.toFixed(4) ?? "—")
+                    <>
+                      {row.rerank_score?.toFixed(4) ?? "—"}
+                      <small className="grt-score-ranks">
+                        融合排名 {row.fusion_rank ?? "—"}
+                      </small>
+                    </>
                   ) : row.fusion_rank !== undefined ? (
                     <>
                       <div className="grt-score-vector">
