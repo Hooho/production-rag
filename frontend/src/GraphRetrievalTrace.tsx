@@ -674,6 +674,11 @@ function TraceDetail({
         )}
         {detail.kind === "relationCandidates" && (
           <RelationsDetail
+            scoreMode={
+              detail.stage === "kept" && !graph.relation_rerank_error
+                ? "rerank"
+                : "fusion"
+            }
             rows={(graph.relation_candidates ?? [])
               .filter((row) =>
                 detail.stage === "pool"
@@ -846,6 +851,7 @@ function RelationsDetail({
   chunks,
   extra,
   scoreHint,
+  scoreMode,
   onEntity,
 }: {
   rows: RelationRow[];
@@ -857,6 +863,7 @@ function RelationsDetail({
   chunks: Map<string, ChunkInfo>;
   extra?: (row: RelationRow) => string | undefined;
   scoreHint?: string;
+  scoreMode?: "fusion" | "rerank";
   onEntity?: (entityId: string, documentId: string) => void;
 }) {
   const list = useDetailList(
@@ -878,6 +885,7 @@ function RelationsDetail({
         chunks={chunks}
         extra={extra}
         scoreHint={scoreHint}
+        scoreMode={scoreMode}
         onEntity={onEntity}
       />
       <Pager page={list.page} total={list.total} onPage={list.setPage} />
@@ -1340,6 +1348,7 @@ function RelationTable({
   chunks,
   extra,
   scoreHint,
+  scoreMode,
   onEntity,
 }: {
   rows: RelationRow[];
@@ -1349,6 +1358,7 @@ function RelationTable({
   extra?: (row: RelationRow) => string | undefined;
   // 这一列的分数是哪两个东西算出来的（问题 × 关系 / 关键词 × 关系），说清楚免得看不懂。
   scoreHint?: string;
+  scoreMode?: "fusion" | "rerank";
   onEntity?: (entityId: string, documentId: string) => void;
 }) {
   if (rows.length === 0) return <p className="grt-empty">没有找到关系</p>;
@@ -1362,9 +1372,13 @@ function RelationTable({
               <th>{first}</th>
               <th>关系</th>
               <th>
-                {rows.some((row) => row.fusion_rank !== undefined)
-                  ? "检索与重排名次"
-                  : "关系相似度"}
+                {scoreMode
+                  ? scoreMode === "fusion"
+                    ? "融合分数"
+                    : "重排分数"
+                  : rows.some((row) => row.fusion_rank !== undefined)
+                    ? "检索与重排名次"
+                    : "关系相似度"}
               </th>
               <th>出处</th>
               <th>结果</th>
@@ -1381,21 +1395,39 @@ function RelationTable({
                   <RelationText relation={row} onEntity={onEntity} />
                 </td>
                 <td className="num">
-                  {row.fusion_rank !== undefined ? (
+                  {scoreMode === "fusion" ? (
+                    (row.fusion_score?.toFixed(6) ?? "—")
+                  ) : scoreMode === "rerank" ? (
+                    (row.rerank_score?.toFixed(4) ?? "—")
+                  ) : row.fusion_rank !== undefined ? (
                     <>
-                      <div>
+                      <div className="grt-score-vector">
                         向量 {row.vector_rank ?? "—"} /{" "}
                         {score(row.vector_score)}
                       </div>
-                      <div>
+                      <div className="grt-score-keyword">
                         关键词 {row.keyword_rank ?? "—"} /{" "}
                         {score(row.keyword_score)}
                       </div>
-                      <div>
+                      <div className="grt-score-fusion">
                         融合 {row.fusion_rank} /{" "}
-                        {row.fusion_score?.toFixed(6) ?? "—"} · {row.selection}
+                        {row.fusion_score?.toFixed(6) ?? "—"}{" "}
+                        {row.selection ? (
+                          <span
+                            className="grt-category is-hue"
+                            style={
+                              {
+                                "--tag-h": row.selection.includes("保底")
+                                  ? 145
+                                  : 275,
+                              } as CSSProperties
+                            }
+                          >
+                            {row.selection}
+                          </span>
+                        ) : null}
                       </div>
-                      <div>
+                      <div className="grt-score-rerank">
                         重排 {row.rerank_rank ?? "—"} /{" "}
                         {score(row.rerank_score)}
                       </div>

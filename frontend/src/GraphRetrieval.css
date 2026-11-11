@@ -494,3 +494,17 @@
 .grt-stage-arrow {
   color: #8494ab;
 }
+
+/* 检索与重排步骤：同一列内用固定颜色区分各阶段。 */
+.grt-score-vector {
+  color: #2563a6;
+}
+.grt-score-keyword {
+  color: #087e8b;
+}
+.grt-score-fusion {
+  color: #8055ad;
+}
+.grt-score-rerank {
+  color: #a56516;
+}
