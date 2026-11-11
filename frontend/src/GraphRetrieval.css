@@ -69,11 +69,16 @@
   color: var(--diag-muted, #6f8ba4);
 }
 
+/* 图检索各表格共用的紧凑关系类型标签。 */
 .grt-table td small.grt-category,
 .grt-category {
   display: inline-block;
-  margin-left: 6px;
-  padding: 0 4px;
+  margin-left: 4px;
+  padding: 0 3px;
+  font-size: 11px;
+  line-height: 16px;
+  vertical-align: middle;
+  white-space: nowrap;
   border: 1px solid var(--diag-line, #d6e2ee);
   border-radius: 3px;
   color: var(--diag-muted, #6f8ba4);
