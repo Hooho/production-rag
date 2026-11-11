@@ -535,3 +535,21 @@
   color: var(--diag-muted, #6f8ba4);
   white-space: nowrap;
 }
+
+.grt-result-steps {
+  display: grid;
+  gap: 5px;
+}
+.grt .grt-step-muted {
+  color: var(--diag-muted, #6f8ba4);
+  font-size: 11px;
+}
+.grt-table td small.grt-result-source {
+  display: inline-block;
+  justify-self: start;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #eef3f8;
+  color: var(--diag-muted, #6f8ba4);
+  font-size: 11px;
+}

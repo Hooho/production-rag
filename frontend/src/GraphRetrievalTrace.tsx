@@ -201,6 +201,72 @@ function Result({
         details.push(`融合排名第 ${row.fusion_rank} 名，最多保留 ${limit} 条`);
     }
   }
+  if (row && row.fusion_rank !== undefined) {
+    // 历史记录缺少 in_pool 时，只使用已有排名或最终结果判断，不推测步骤。
+    const entered =
+      row.in_pool ??
+      (row.rerank_rank != null || kept
+        ? true
+        : reason === "超过关系重排候选上限"
+          ? false
+          : undefined);
+    const detailLines = (
+      <>
+        {!kept && reason && reason !== "超过关系重排候选上限" && (
+          <small className="grt-result-detail">{reason}</small>
+        )}
+        {details.map((text, index) => (
+          <small className="grt-result-detail" key={index}>
+            {text}
+          </small>
+        ))}
+      </>
+    );
+    return (
+      <div className="grt-result grt-result-steps">
+        {extra && <small className="grt-result-source">{extra}</small>}
+        <div>
+          <span className="grt-kept">✓ 进入候选</span>
+        </div>
+        <div>
+          <span
+            className={
+              entered === true
+                ? "grt-kept"
+                : entered === false
+                  ? "grt-pool-dropped"
+                  : "grt-step-muted"
+            }
+          >
+            {entered === true
+              ? "✓ 进入重排"
+              : entered === false
+                ? "✕ 未进入重排"
+                : "— 重排状态未记录"}
+          </span>
+          {entered === false && detailLines}
+        </div>
+        <div>
+          <span
+            className={
+              entered === false
+                ? "grt-step-muted"
+                : kept
+                  ? "grt-kept"
+                  : "grt-dropped"
+            }
+          >
+            {entered === false
+              ? "— 最终留下（未进入）"
+              : kept
+                ? "✓ 最终留下"
+                : "✕ 最终未留下"}
+          </span>
+          {entered !== false && detailLines}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="grt-result">
       <span
