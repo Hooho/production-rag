@@ -156,15 +156,72 @@ function Result({
   kept,
   reason,
   extra,
+  row,
+  trace,
 }: {
+  row?: GraphRetrievalRelation;
+  trace?: GraphTrace;
   kept: boolean;
   reason?: string | null;
   extra?: string;
 }) {
-  return kept ? (
-    <span className="grt-kept">✓ 留下{extra ? ` · ${extra}` : ""}</span>
-  ) : (
-    <span className="grt-dropped">✕ {reason || "去掉"}</span>
+  const settings = trace?.settings;
+  const minimum = settings?.graph_relation_rerank_min_score;
+  const limit = settings?.graph_relation_return_limit;
+  const capacity = settings?.graph_relation_rerank_candidates;
+  const details: ReactNode[] = [];
+  if (row && row.fusion_rank !== undefined) {
+    if (
+      row.rerank_score != null &&
+      minimum != null &&
+      !trace?.relation_rerank_error
+    ) {
+      details.push(
+        `重排得分 ${score(row.rerank_score)} ${row.rerank_score >= minimum ? "≥" : "<"} ${score(minimum)}，${row.rerank_score >= minimum ? "已达标" : "未达标"}`,
+      );
+    }
+    if (
+      (kept || reason === "超过关系保留上限") &&
+      row.rerank_rank != null &&
+      limit != null
+    ) {
+      details.push(
+        `重排名次第 ${row.rerank_rank} 名，${kept ? "在保留的" : "超出保留的"}前 ${limit} 条${kept ? "内" : "上限"}`,
+      );
+    }
+    if (reason === "超过关系重排候选上限") {
+      details.push(`未被保底选入，融合排名第 ${row.fusion_rank} 名`);
+      details.push(
+        `重排候选池${capacity != null ? `最多 ${capacity} 条，` : "："}未参与重排`,
+      );
+    }
+    if (trace?.relation_rerank_error && kept) {
+      details.push("重排未成功，按融合排名保留");
+      if (limit != null)
+        details.push(`融合排名第 ${row.fusion_rank} 名，最多保留 ${limit} 条`);
+    }
+  }
+  return (
+    <div className="grt-result">
+      <span
+        className={
+          kept
+            ? "grt-kept"
+            : reason === "超过关系重排候选上限"
+              ? "grt-pool-dropped"
+              : "grt-dropped"
+        }
+      >
+        {kept
+          ? `✓ 留下${extra ? ` · ${extra}` : ""}`
+          : `✕ ${reason === "超过关系重排候选上限" ? "未进入重排候选池" : reason || "去掉"}`}
+      </span>
+      {details.map((text, index) => (
+        <small className="grt-result-detail" key={index}>
+          {text}
+        </small>
+      ))}
+    </div>
   );
 }
 
@@ -647,6 +704,7 @@ function TraceDetail({
         )}
         {detail.kind === "entityRelations" && (
           <RelationsDetail
+            trace={graph}
             rows={graph.entity_relations}
             dims={ENTITY_RELATION_DIMS}
             detail={detail}
@@ -660,6 +718,7 @@ function TraceDetail({
         )}
         {detail.kind === "relationMatches" && (
           <RelationsDetail
+            trace={graph}
             rows={graph.relation_matches}
             dims={RELATION_MATCH_DIMS}
             detail={detail}
@@ -674,6 +733,7 @@ function TraceDetail({
         )}
         {detail.kind === "relationCandidates" && (
           <RelationsDetail
+            trace={graph}
             scoreMode={
               detail.stage === "kept" && !graph.relation_rerank_error
                 ? "rerank"
@@ -842,6 +902,7 @@ function NamesDetail({
 }
 
 function RelationsDetail({
+  trace,
   rows,
   dims,
   detail,
@@ -854,6 +915,7 @@ function RelationsDetail({
   scoreMode,
   onEntity,
 }: {
+  trace?: GraphTrace;
   rows: RelationRow[];
   dims: Dim<RelationRow>[];
   detail: { dim?: string; value?: string };
@@ -879,6 +941,7 @@ function RelationsDetail({
     <>
       <DetailFilters list={list} more={more} />
       <RelationTable
+        trace={trace}
         rows={list.rows}
         first={first}
         firstValue={firstValue}
@@ -1342,6 +1405,7 @@ type RelationRow = GraphRetrievalRelation &
   }>;
 
 function RelationTable({
+  trace,
   rows,
   first,
   firstValue,
@@ -1351,6 +1415,7 @@ function RelationTable({
   scoreMode,
   onEntity,
 }: {
+  trace?: GraphTrace;
   rows: RelationRow[];
   first: string;
   firstValue: (row: RelationRow) => string;
@@ -1448,6 +1513,8 @@ function RelationTable({
                     kept={row.kept}
                     reason={row.reason}
                     extra={extra?.(row)}
+                    row={row}
+                    trace={trace}
                   />
                 </td>
               </tr>

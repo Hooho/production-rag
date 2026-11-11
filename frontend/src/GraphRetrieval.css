@@ -508,3 +508,20 @@
 .grt-score-rerank {
   color: #a56516;
 }
+
+.grt-result {
+  min-width: 180px;
+}
+.grt-table td small.grt-result-detail {
+  display: block;
+  margin-top: 4px;
+  color: var(--diag-muted, #6f8ba4);
+  white-space: normal;
+}
+.grt .grt-pool-dropped {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: #fff3df;
+  color: #996014;
+}
