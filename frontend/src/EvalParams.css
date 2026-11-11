@@ -1,7 +1,8 @@
 /* 发起评测页的「参数配置」（EvalParamsPanel.tsx）：三组参数默认收起，标题行显示改了哪几项。 */
+/* 各组并排放，窄了再自动叠成一列。 */
 .evp-groups {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 6px;
 }
 
