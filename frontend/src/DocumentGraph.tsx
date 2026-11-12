@@ -675,12 +675,11 @@ export function DocumentGraph({
                 {view === "network" ? (
                   <SkeletonBlock className="graph-switch-skeleton-canvas" />
                 ) : (
-                  Array.from({ length: 6 }, (_, index) => (
-                    <SkeletonBlock
-                      key={index}
-                      className="graph-switch-skeleton-row"
-                    />
-                  ))
+                  <Table
+                    loading
+                    columnCount={view === "entities" ? 5 : 6}
+                    className="graph-table"
+                  />
                 )}
               </LoadingSkeleton>
             )}

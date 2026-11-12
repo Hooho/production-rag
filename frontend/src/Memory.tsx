@@ -196,9 +196,7 @@ function MemoryList({
       </header>
       {error && <div className="field-error">{error}</div>}
       {!data && !error && (
-        <LoadingSkeleton label="正在加载会话记忆">
-          <SkeletonBlock className="mem-skeleton" />
-        </LoadingSkeleton>
+        <Table loading columnCount={7} className="mem-table" />
       )}
       {data &&
         (data.items.length === 0 ? (
@@ -330,9 +328,7 @@ function MemoryDetail({
       </button>
       {error && <div className="field-error">{error}</div>}
       {!data && !error && (
-        <LoadingSkeleton label="正在加载会话记忆">
-          <SkeletonBlock className="mem-skeleton" />
-        </LoadingSkeleton>
+        <Table loading columnCount={5} className="mem-table mem-timeline" />
       )}
       {data && current && (
         <>

@@ -81,6 +81,7 @@ export default function Overview() {
             ))}
           </div>
           <SkeletonBlock className="ov-skeleton-chart" />
+          <Table loading columnCount={5} className="ov-table" />
         </LoadingSkeleton>
       )}
       {data && totals && (

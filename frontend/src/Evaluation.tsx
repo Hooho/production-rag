@@ -946,27 +946,7 @@ function RunHistorySkeleton() {
         <SkeletonBlock className="skeleton-title" />
         <SkeletonBlock className="skeleton-button" />
       </div>
-      <div className="ev-skeleton-table">
-        <SkeletonBlock />
-        <SkeletonBlock />
-        <SkeletonBlock />
-        <SkeletonBlock />
-        <SkeletonBlock />
-      </div>
-      <div className="ev-skeleton-table">
-        <SkeletonBlock />
-        <SkeletonBlock />
-        <SkeletonBlock />
-        <SkeletonBlock />
-        <SkeletonBlock />
-      </div>
-      <div className="ev-skeleton-table">
-        <SkeletonBlock />
-        <SkeletonBlock />
-        <SkeletonBlock />
-        <SkeletonBlock />
-        <SkeletonBlock />
-      </div>
+      <Table loading columnCount={10} className="diag-table ev-table" />
     </LoadingSkeleton>
   );
 }

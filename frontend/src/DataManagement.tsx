@@ -375,24 +375,12 @@ function DataTable({ type, onToast }: { type: DataType; onToast: ShowToast }) {
 
 // 表格查询和筛选期间保持列宽与行高的占位结构，避免用一行“加载中…”替换整张表。
 function DataTableSkeleton({ columns }: { columns: number }) {
-  const rows = [];
-  for (let row = 0; row < 5; row += 1) {
-    const cells = [];
-    for (let column = 0; column < columns; column += 1) {
-      cells.push(
-        <td key={column}>
-          <SkeletonBlock
-            className={column === 0 ? "skeleton-line-short" : "skeleton-line"}
-          />
-        </td>,
-      );
-    }
-    rows.push(<tr key={row}>{cells}</tr>);
-  }
   return (
-    <Table className="data-table data-skeleton-table" aria-hidden="true">
-      <tbody>{rows}</tbody>
-    </Table>
+    <Table
+      loading
+      columnCount={columns}
+      className="data-table data-skeleton-table"
+    />
   );
 }
 
@@ -831,9 +819,11 @@ function GeneratePanel({
             label="正在生成数据预览"
           >
             <SkeletonBlock className="skeleton-line-short" />
-            <SkeletonBlock className="data-preview-skeleton-table" />
-            <SkeletonBlock className="data-preview-skeleton-table" />
-            <SkeletonBlock className="data-preview-skeleton-table" />
+            <Table
+              loading
+              columnCount={type.fields.length + 1}
+              className="data-table"
+            />
           </LoadingSkeleton>
         )}
         {preview && (

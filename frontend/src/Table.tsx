@@ -159,6 +159,9 @@ export default function Table({
         <table
           {...props}
           aria-busy={loading || undefined}
+          aria-label={
+            props["aria-label"] ?? (loading ? "正在加载表格" : undefined)
+          }
           className={`shared-table shared-table-${size} ${stickyHeader ? "shared-table-sticky" : ""} ${bordered ? "shared-table-bordered" : ""} ${hoverable ? "shared-table-hover" : ""} ${className}`}
         >
           {body

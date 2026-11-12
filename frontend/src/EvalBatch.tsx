@@ -124,9 +124,7 @@ export default function BatchReport({
   if (!report)
     return (
       <LoadingSkeleton label="正在读取报告">
-        <SkeletonBlock />
-        <SkeletonBlock />
-        <SkeletonBlock />
+        <Table loading columnCount={6} className="diag-table ev-table" />
       </LoadingSkeleton>
     );
 
