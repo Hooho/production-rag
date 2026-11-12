@@ -10106,41 +10106,36 @@ label {
   background: color-mix(in srgb, var(--filter-color) 10%, white);
 }
 
-/* Shared table scroll hints remain at the viewport edges, above cell backgrounds. */
+/* Shadows belong to the stationary frame, outside the scrolling content. */
+.table-frame {
+  position: relative;
+  min-width: 0;
+}
 .table-scroll {
   overflow-x: auto;
-  position: relative;
-  isolation: isolate;
 }
-.table-scroll::before,
-.table-scroll::after {
+.table-frame::before,
+.table-frame::after {
   content: "";
-  position: sticky;
+  position: absolute;
   top: 0;
   bottom: 0;
-  display: block;
   width: 12px;
-  height: var(--table-scroll-height, 0px);
-  margin-bottom: calc(-1 * var(--table-scroll-height, 0px));
   pointer-events: none;
   z-index: 3;
 }
-.table-scroll::before {
+.table-frame::before {
   left: 0;
   background: linear-gradient(to right, rgb(25 55 85 / 22%), transparent);
   opacity: var(--table-shadow-left, 0);
 }
-.table-scroll::after {
+.table-frame::after {
   right: 0;
-  margin-left: auto;
-  margin-bottom: 0;
-  margin-top: calc(-1 * var(--table-scroll-height, 0px));
   background: linear-gradient(to left, rgb(25 55 85 / 22%), transparent);
   opacity: var(--table-shadow-right, 0);
 }
-
-.table-scroll[data-shadow="false"]::before,
-.table-scroll[data-shadow="false"]::after {
+.table-frame[data-shadow="false"]::before,
+.table-frame[data-shadow="false"]::after {
   display: none;
 }
 .shared-table {

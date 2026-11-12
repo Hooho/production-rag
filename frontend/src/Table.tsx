@@ -93,13 +93,12 @@ export default function Table({
     const element = ref.current;
     if (!element) return;
     const update = () => {
-      element.style.setProperty(
-        "--table-scroll-height",
-        `${element.clientHeight}px`,
-      );
       const left = Math.max(0, element.scrollLeft);
-      element.style.setProperty("--table-shadow-left", left > 1 ? "1" : "0");
-      element.style.setProperty(
+      element.parentElement?.style.setProperty(
+        "--table-shadow-left",
+        left > 1 ? "1" : "0",
+      );
+      element.parentElement?.style.setProperty(
         "--table-shadow-right",
         element.scrollWidth - element.clientWidth - left > 1 ? "1" : "0",
       );
@@ -144,33 +143,36 @@ export default function Table({
   ) : null;
   return (
     <>
-      <div
-        {...containerProps}
-        ref={ref}
-        style={{
-          ...containerProps.style,
-          maxHeight: maxHeight ?? containerProps.style?.maxHeight,
-          overflowX: scrollable ? "auto" : "visible",
-          overflowY: maxHeight ? "auto" : undefined,
-        }}
-        data-shadow={scrollable && scrollShadow}
-        className={`table-scroll ${containerProps.className ?? ""}`}
-      >
-        <table
-          {...props}
-          aria-busy={loading || undefined}
-          aria-label={
-            props["aria-label"] ?? (loading ? "正在加载表格" : undefined)
-          }
-          className={`shared-table shared-table-${size} ${stickyHeader ? "shared-table-sticky" : ""} ${bordered ? "shared-table-bordered" : ""} ${hoverable ? "shared-table-hover" : ""} ${className}`}
+      <div className="table-frame" data-shadow={scrollable && scrollShadow}>
+        <div
+          {...containerProps}
+          ref={ref}
+          style={{
+            ...containerProps.style,
+            maxHeight: maxHeight ?? containerProps.style?.maxHeight,
+            overflowX: scrollable ? "auto" : "visible",
+            overflowY: maxHeight ? "auto" : undefined,
+          }}
+          className={`table-scroll ${containerProps.className ?? ""}`}
         >
-          {body
-            ? Children.map(children, (child) =>
-                isValidElement(child) && child.type === "tbody" ? null : child,
-              )
-            : children}
-          {body}
-        </table>
+          <table
+            {...props}
+            aria-busy={loading || undefined}
+            aria-label={
+              props["aria-label"] ?? (loading ? "正在加载表格" : undefined)
+            }
+            className={`shared-table shared-table-${size} ${stickyHeader ? "shared-table-sticky" : ""} ${bordered ? "shared-table-bordered" : ""} ${hoverable ? "shared-table-hover" : ""} ${className}`}
+          >
+            {body
+              ? Children.map(children, (child) =>
+                  isValidElement(child) && child.type === "tbody"
+                    ? null
+                    : child,
+                )
+              : children}
+            {body}
+          </table>
+        </div>
       </div>
       {pagination && (
         <TablePagination
