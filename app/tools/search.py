@@ -292,6 +292,14 @@ class DocumentSearchTool:
         # 重排关闭或调用失败时 ranked 保持 RRF 顺序且不做相关性过滤：此时没有可靠的分数可设阈值，
         # 统计中标记 relevance_filter 为 off，避免误以为结果已经过相关性检查。
         sources = []
+        budget_mode = config.get("source_selection_mode") == "tokens"
+        token_budget = config.get("source_token_budget", 8000)
+        tokens_used = 0
+        child_tokens = 0
+        expansion_skipped = 0
+        budget_skipped = 0
+        if budget_mode:
+            from ..memory.framework import text_tokens
         # 已被某个父块包含的分片 {分片 id: 来源编号}。两个命中分片在同一小节里相邻时，
         # 后一个直接归入前一个父块，不再重复给模型同一段文字；诊断里它的来源编号指向那个父块。
         covered = {}
@@ -322,12 +330,23 @@ class DocumentSearchTool:
                 continue
             # 返回条数按实际产出的来源数算：并进来的分片不占名额，所以这里数的是已产出的来源条数。
             # 优秀阈值之上的分片不受条数限制，照样单独成源。
-            if len(sources) >= limit and not (
-                excellent is not None and item["final_score"] >= excellent
+            if (
+                not budget_mode
+                and len(sources) >= limit
+                and not (excellent is not None and item["final_score"] >= excellent)
             ):
                 item["status"] = "beyond_limit"
                 beyond_limit += 1
                 continue
+            if budget_mode:
+                clean_text, _ = sanitize_source(item["text"])
+                size = text_tokens(clean_text)
+                item["source_tokens"] = size
+                if tokens_used + size > token_budget:
+                    item["status"] = "beyond_budget"
+                    budget_skipped += 1
+                    continue
+                tokens_used += size
             item["status"] = "returned"
             item["source_id"] = f"S{len(sources) + 1}"
             text = item["text"]
@@ -341,7 +360,7 @@ class DocumentSearchTool:
                     "context": item.get("context"),
                 }
             ]
-            if use_parent:
+            if use_parent and not budget_mode:
                 expanded = self.parent_context(
                     store,
                     item,
@@ -384,6 +403,48 @@ class DocumentSearchTool:
                     "low_relevance": bool(item.get("low_relevance")),
                 }
             )
+        if budget_mode:
+            child_tokens = tokens_used
+            # 所有原始命中先占预算、登记覆盖；第二轮扩展不能吞掉其他命中。
+            if use_parent:
+                by_id = {item["id"]: item for item in ranked}
+                for source in sources:
+                    expanded = self.parent_context(
+                        store,
+                        by_id[source["chunk_id"]],
+                        covered,
+                        config["parent_radius"],
+                        config["parent_max_chars"],
+                    )
+                    if not expanded:
+                        continue
+                    text, chunk_ids, parts = expanded
+                    if len(chunk_ids) <= 1:
+                        continue
+                    clean, injection_hits = sanitize_source(text)
+                    new_tokens = text_tokens(clean)
+                    old_tokens = text_tokens(source["text"])
+                    if tokens_used - old_tokens + new_tokens > token_budget:
+                        expansion_skipped += 1
+                        continue
+                    tokens_used += new_tokens - old_tokens
+                    source.update(
+                        text=clean,
+                        parent_chunk_ids=chunk_ids,
+                        parent_parts=parts,
+                        injection=injection_hits,
+                    )
+                    for chunk_id in chunk_ids:
+                        covered[chunk_id] = source["id"]
+                for item in ranked:
+                    if item["id"] in covered and item["status"] == "beyond_budget":
+                        item.update(
+                            status="returned",
+                            source_id=covered[item["id"]],
+                            merged=True,
+                        )
+                        budget_skipped -= 1
+            parent_characters = sum(len(source["text"]) for source in sources)
         stats = {
             "queries": len(queries),
             "dense_hits": dense_hits,
@@ -407,6 +468,13 @@ class DocumentSearchTool:
             "returned": len(sources),
             "parent_context": "on" if use_parent else "off",
             "source_characters": parent_characters,
+            "source_selection_mode": "tokens" if budget_mode else "count",
+            "source_token_budget": token_budget if budget_mode else None,
+            "source_tokens_used": tokens_used if budget_mode else None,
+            "source_child_tokens": child_tokens if budget_mode else None,
+            "source_tokens_estimated": budget_mode,
+            "source_budget_skipped": budget_skipped,
+            "source_expansion_skipped": expansion_skipped,
             "recall_ms": recall_ms,
             "rerank_ms": rerank_ms,
             "injection_redacted": injection_redacted,
@@ -732,6 +800,7 @@ class DocumentSearchTool:
         status_order = {
             "returned": 0,
             "beyond_limit": 1,
+            "beyond_budget": 1,
             "filtered_low_score": 2,
             "in_pool": 3,
             "not_in_pool": 4,
@@ -760,6 +829,7 @@ class DocumentSearchTool:
                     "preview": item["text"][:PREVIEW_CHARACTERS],
                     "status": item["status"],
                     "source_id": item.get("source_id"),
+                    "source_tokens": item.get("source_tokens"),
                     # 并入了前面某个父块：内容已经在那条来源里，不单独成源，也不占返回名额。
                     "merged": bool(item.get("merged")),
                     "retrieval_methods": item["retrieval_methods"],
@@ -786,6 +856,18 @@ class DocumentSearchTool:
             "fusion": fusion,
             "methods": list(methods),
             "return_limit": settings["return_limit"],
+            **{
+                key: stats.get(key)
+                for key in (
+                    "source_selection_mode",
+                    "source_token_budget",
+                    "source_tokens_used",
+                    "source_child_tokens",
+                    "source_tokens_estimated",
+                    "source_budget_skipped",
+                    "source_expansion_skipped",
+                )
+            },
             "reranked": reranked,
             "parent_context": settings["parent_context"],
             "parent_max_chars": settings["parent_max_chars"],

@@ -4623,6 +4623,11 @@ const STATUS_INFO: Record<
     hint: "和上一条命中在同一小节，内容已并入那条来源，不单独成源",
   },
   // 去向列展示最终处理结果；用“被过滤排除”说明它没有进入来源，而不是只暴露内部数量限制。
+  beyond_budget: {
+    icon: "…",
+    label: "预算不足",
+    hint: "原始分片超出剩余原文 token 预算，未单独入选",
+  },
   beyond_limit: {
     icon: "…",
     label: "被过滤排除",
@@ -4739,7 +4744,11 @@ function RetrievalDiagnostics({
   const combos = new Map<string, RetrievalCandidate[]>();
   for (const item of candidates) {
     if (item.status !== "not_in_pool") pooled += 1;
-    if (item.status === "returned" || item.status === "beyond_limit")
+    if (
+      item.status === "returned" ||
+      item.status === "beyond_limit" ||
+      item.status === "beyond_budget"
+    )
       passed += 1;
     if (item.status === "beyond_limit") beyondLimit += 1;
     if (item.status === "filtered_low_score") filtered += 1;
@@ -4774,7 +4783,10 @@ function RetrievalDiagnostics({
   // 过了相关性阈值的那批分片：漏斗里「相关性 ≥ 阈值」这一行点开看的就是它们。
   const passedChunks = candidates
     .filter(
-      (item) => item.status === "returned" || item.status === "beyond_limit",
+      (item) =>
+        item.status === "returned" ||
+        item.status === "beyond_limit" ||
+        item.status === "beyond_budget",
     )
     .sort((a, b) => (a.rerank_rank ?? 0) - (b.rerank_rank ?? 0));
   const removed = (count: number, reason: string, none: string) =>
@@ -4851,19 +4863,29 @@ function RetrievalDiagnostics({
             : "没有重排分数或未设置阈值，不做相关性过滤",
         },
     {
-      label: `最终返回（上限 ${config.return_limit}）`,
+      label:
+        config.source_selection_mode === "tokens"
+          ? `最终返回（估算 token ${config.source_tokens_used ?? 0} / ${config.source_token_budget ?? 0}）`
+          : `最终返回（上限 ${config.return_limit}）`,
       // 这一行的数字能点开：看最终交给回答模型的是哪些来源。
       kind: "returned",
       value: returned,
       // 过了阈值的分片里，超过上限的被排除，并入父块的不单独成源，两种都不在返回的来源里。
       dropped:
         [
-          beyondLimit > 0 ? `去掉 ${beyondLimit} 个超过上限` : "",
+          config.source_selection_mode === "tokens"
+            ? `${config.source_budget_skipped ?? 0} 个分片因预算不足跳过，${config.source_expansion_skipped ?? 0} 次父块扩展未放入`
+            : beyondLimit > 0
+              ? `去掉 ${beyondLimit} 个超过上限`
+              : "",
           mergedCount > 0 ? `去掉 ${mergedCount} 个并入父块` : "",
         ]
           .filter(Boolean)
           .join("，") || "没有分片被排除",
-      hint: `最多返回 ${config.return_limit} 条来源；并入父块的分片不单独成源，也不占名额`,
+      hint:
+        config.source_selection_mode === "tokens"
+          ? `先选原始命中（估算 ${config.source_child_tokens ?? 0} token），剩余预算再补父子扩展；分片不截断。预算仅包含原文，不含对话与提示词。`
+          : `最多返回 ${config.return_limit} 条来源；并入父块的分片不单独成源，也不占名额`,
     },
   ];
   const funnelMax = Math.max(1, ...funnel.map((stage) => stage.value));

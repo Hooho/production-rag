@@ -91,6 +91,24 @@ const META: Record<string, Meta> = {
       "调大不容易漏资料，但重排耗时大致按条数增加；调小更快，排名靠后的资料可能轮不到打分。",
     when: "之后的问答。",
   },
+  source_selection_mode: {
+    label: "原文选取方式",
+    impact: "judgement",
+    what: "按条数沿用原规则；按 token 预算先选原始命中，再用剩余容量补父子上下文。",
+    why: "避免条数限制截掉相关证据，或父块先占满容量。",
+    effect: "预算模式不应用返回条数和优秀阈值放行规则。",
+    when: "之后的检索。",
+  },
+  source_token_budget: {
+    label: "原文 token 预算（估算）",
+    unit: "token",
+    step: 500,
+    impact: "judgement",
+    what: "预算模式下原文总量上限。中文按字、其他文字按约四字符一个 token 估算，先原始命中后父子扩展。",
+    why: "没有回答模型专用 tokenizer，估算值不代表实际模型用量。",
+    effect: "不包含系统提示词、对话历史和回答空间，请根据模型上下文预留余量。",
+    when: "按 token 预算选取时。",
+  },
   return_limit: {
     label: "交给模型的段数",
     unit: "段",
@@ -614,6 +632,8 @@ const IMPACT_TAGS: Record<Impact, { label: string; tone: Tone }> = {
 const THEME_LABELS: Record<string, string> = {
   blue: "蓝调",
   green: "绿调（青绿）",
+  count: "按条数",
+  tokens: "按 token 预算",
   log: "只记录",
   block: "拦截",
 };

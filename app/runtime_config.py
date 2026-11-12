@@ -126,6 +126,23 @@ SPECS = [
         "eval": "fixed",
     },
     {
+        "key": "source_selection_mode",
+        "group": "retrieval",
+        "type": "choice",
+        "default": "count",
+        "choices": ["count", "tokens"],
+        "eval": "fixed",
+    },
+    {
+        "key": "source_token_budget",
+        "group": "retrieval",
+        "type": "int",
+        "default": 8000,
+        "min": 100,
+        "max": 128000,
+        "eval": "fixed",
+    },
+    {
         "key": "parent_context",
         "group": "retrieval",
         "type": "bool",
