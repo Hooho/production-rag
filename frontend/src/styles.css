@@ -3812,14 +3812,14 @@ label {
 }
 
 /* 候选池保留正文和来源的阅读宽度，窄容器通过横向滚动查看。 */
-.diag-table.diag-pool th:nth-child(3),
+.diag-table.diag-pool th:nth-child(2),
 .diag-table.diag-pool td.diag-snippet {
   width: 320px;
   min-width: 320px;
   max-width: 320px;
 }
 
-.diag-table.diag-pool th:nth-child(6),
+.diag-table.diag-pool th:nth-child(5),
 .diag-table.diag-pool td.diag-source {
   width: 240px;
   min-width: 240px;

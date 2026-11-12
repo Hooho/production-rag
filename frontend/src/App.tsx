@@ -5794,7 +5794,7 @@ function textQueries(data: RetrievalDiagnosticsData) {
   return queries;
 }
 
-// 一组候选分片的弹窗：召回方式、分片、分数、各路名次、原文。
+// 一组候选分片的弹窗：分片、分数、各路名次、原文。
 // 「交给重排的候选池」和「最终返回给回答模型的分片」两处共用。
 // scoreKind 决定分数列写什么：rrf 是融合得分，rerank 是重排概率。
 // splitQuota 把「靠图检索名额补进来的」那几片单独分段，和候选池里一样。
@@ -5922,23 +5922,10 @@ function CandidateChunksDialog({
     };
   }, [missingOriginals]);
   const row = (item: RetrievalCandidate, serial: number) => {
-    const methods = ["dense", "keyword", "graph"].filter((method) =>
-      item.retrieval_methods.includes(method),
-    );
     const body = originals[item.chunk_id]?.content;
     return (
       <tr key={item.chunk_id}>
         <td className="num">{serial}</td>
-        <td>
-          <div className="diag-contribs">
-            {methods.map((method) => (
-              <span className={`diag-contrib method-${method}`} key={method}>
-                <i className={`diag-dot method-${method}`} />
-                {METHOD_LABELS[method] ?? method}
-              </span>
-            ))}
-          </div>
-        </td>
         {/* 分片：这一片自己的正文，正文没取到时先占位。 */}
         <td className="diag-snippet">
           <span className="diag-snippet-body">
@@ -6050,7 +6037,6 @@ function CandidateChunksDialog({
           <thead>
             <tr>
               <th>序号</th>
-              <th>召回方式</th>
               <th title="这一片自己的正文">分片</th>
               <th
                 title={
@@ -6070,14 +6056,14 @@ function CandidateChunksDialog({
           <tbody>
             {filteredCandidates.length === 0 && (
               <tr>
-                <td colSpan={6}>没有符合筛选条件的分片</td>
+                <td colSpan={5}>没有符合筛选条件的分片</td>
               </tr>
             )}
             {visible.map((entry, index) =>
               entry.kind === "group" ? (
                 // 名额补进来的单独一段，别和 RRF 名前面几个混在一起。
                 <tr className="diag-pool-group" key={`group-${index}`}>
-                  <td colSpan={6}>
+                  <td colSpan={5}>
                     图检索名额补进来的 {entry.count} 个：RRF
                     名次不够，靠名额进池
                   </td>
