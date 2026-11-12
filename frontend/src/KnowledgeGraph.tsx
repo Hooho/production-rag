@@ -1,3 +1,4 @@
+import Table from "./Table";
 import { graphHops } from "./graphHops";
 import { GraphHistoryControls, useGraphHistory } from "./GraphHistory";
 import { DocumentChunkDialog, type ChunkTarget } from "./DocumentChunkDialog";
@@ -476,7 +477,7 @@ function Tasks({
           </button>
         </div>
       </div>
-      <table className="graph-table">
+      <Table className="graph-table">
         <thead>
           <tr>
             <th />
@@ -611,7 +612,7 @@ function Tasks({
             );
           })}
         </tbody>
-      </table>
+      </Table>
       {vectorItem?.vectors && (
         <GraphVectorDialog
           title={`《${vectorItem.title}》`}

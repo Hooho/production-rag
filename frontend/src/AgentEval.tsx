@@ -1,4 +1,4 @@
-import TableScroll from "./TableScroll";
+import Table from "./Table";
 import {
   Fragment,
   useEffect,
@@ -1420,50 +1420,51 @@ export function ComparePanel({ run }: { run: EvalRun }) {
       <div className="ev-section-title">
         按题目类型<small>得分和资料命中率</small>
       </div>
-      <TableScroll className="diag-table-wrap">
-        <table className="diag-table ev-table">
-          <thead>
-            <tr>
-              <th>题型</th>
-              <th className="num">题数</th>
-              <th className="num">固定流程得分</th>
-              <th className="num">Agent 得分</th>
-              <th className="num">固定流程命中率</th>
-              <th className="num">Agent 命中率</th>
-              <th className="num">固定流程资料</th>
-              <th className="num">Agent 资料</th>
-              <th className="num">Agent 平均检索次数</th>
+      <Table
+        containerProps={{ className: "diag-table-wrap" }}
+        className="diag-table ev-table"
+      >
+        <thead>
+          <tr>
+            <th>题型</th>
+            <th className="num">题数</th>
+            <th className="num">固定流程得分</th>
+            <th className="num">Agent 得分</th>
+            <th className="num">固定流程命中率</th>
+            <th className="num">Agent 命中率</th>
+            <th className="num">固定流程资料</th>
+            <th className="num">Agent 资料</th>
+            <th className="num">Agent 平均检索次数</th>
+          </tr>
+        </thead>
+        <tbody>
+          {Object.entries(run.by_type ?? {}).map(([type, row]) => (
+            <tr key={type}>
+              <td>{type}</td>
+              <td className="num">{row.count ?? row.agent_count ?? "—"}</td>
+              <td className="num">{formatPoints(row.score)}</td>
+              <td className="num">{formatPoints(row.agent_score)}</td>
+              <td className="num">
+                {percent(row.recall_given ?? row.recall_final)}
+              </td>
+              <td className="num">{percent(row.agent_recall)}</td>
+              <td className="num">
+                {row.material_avg_count === undefined ||
+                row.material_avg_count === null
+                  ? "—"
+                  : `${number(row.material_avg_count)} 段 · 约 ${Math.round(row.material_avg_tokens ?? 0).toLocaleString()} token`}
+              </td>
+              <td className="num">
+                {row.agent_material_avg_count === undefined ||
+                row.agent_material_avg_count === null
+                  ? "—"
+                  : `${number(row.agent_material_avg_count)} 段 · 约 ${Math.round(row.agent_material_avg_tokens ?? 0).toLocaleString()} token`}
+              </td>
+              <td className="num">{number(row.agent_avg_searches)}</td>
             </tr>
-          </thead>
-          <tbody>
-            {Object.entries(run.by_type ?? {}).map(([type, row]) => (
-              <tr key={type}>
-                <td>{type}</td>
-                <td className="num">{row.count ?? row.agent_count ?? "—"}</td>
-                <td className="num">{formatPoints(row.score)}</td>
-                <td className="num">{formatPoints(row.agent_score)}</td>
-                <td className="num">
-                  {percent(row.recall_given ?? row.recall_final)}
-                </td>
-                <td className="num">{percent(row.agent_recall)}</td>
-                <td className="num">
-                  {row.material_avg_count === undefined ||
-                  row.material_avg_count === null
-                    ? "—"
-                    : `${number(row.material_avg_count)} 段 · 约 ${Math.round(row.material_avg_tokens ?? 0).toLocaleString()} token`}
-                </td>
-                <td className="num">
-                  {row.agent_material_avg_count === undefined ||
-                  row.agent_material_avg_count === null
-                    ? "—"
-                    : `${number(row.agent_material_avg_count)} 段 · 约 ${Math.round(row.agent_material_avg_tokens ?? 0).toLocaleString()} token`}
-                </td>
-                <td className="num">{number(row.agent_avg_searches)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </TableScroll>
+          ))}
+        </tbody>
+      </Table>
       <div className="ev-section-title">
         逐题<small>点开看两边的检索日志</small>
       </div>
@@ -1654,30 +1655,31 @@ export function AgentPanel({ run }: { run: EvalRun }) {
         />
       </div>
       <div className="ev-section-title">按题目类型</div>
-      <TableScroll className="diag-table-wrap">
-        <table className="diag-table ev-table">
-          <thead>
-            <tr>
-              <th>题型</th>
-              <th className="num">题数</th>
-              <th className="num">资料命中率</th>
-              <th className="num">平均检索次数</th>
-              <th className="num">平均耗时</th>
+      <Table
+        containerProps={{ className: "diag-table-wrap" }}
+        className="diag-table ev-table"
+      >
+        <thead>
+          <tr>
+            <th>题型</th>
+            <th className="num">题数</th>
+            <th className="num">资料命中率</th>
+            <th className="num">平均检索次数</th>
+            <th className="num">平均耗时</th>
+          </tr>
+        </thead>
+        <tbody>
+          {Object.entries(run.by_type ?? {}).map(([type, row]) => (
+            <tr key={type}>
+              <td>{type}</td>
+              <td className="num">{row.count ?? row.agent_count ?? "—"}</td>
+              <td className="num">{percent(row.agent_recall)}</td>
+              <td className="num">{number(row.agent_avg_searches)}</td>
+              <td className="num">{formatMs(row.agent_latency_avg_ms)}</td>
             </tr>
-          </thead>
-          <tbody>
-            {Object.entries(run.by_type ?? {}).map(([type, row]) => (
-              <tr key={type}>
-                <td>{type}</td>
-                <td className="num">{row.count ?? row.agent_count ?? "—"}</td>
-                <td className="num">{percent(row.agent_recall)}</td>
-                <td className="num">{number(row.agent_avg_searches)}</td>
-                <td className="num">{formatMs(row.agent_latency_avg_ms)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </TableScroll>
+          ))}
+        </tbody>
+      </Table>
       <div className="ev-section-title">
         逐题<small>点开看 Agent 的检索日志</small>
       </div>
@@ -4565,52 +4567,55 @@ export function BatchTypeStats({
     </tr>
   );
   return (
-    <TableScroll className="diag-table-wrap type-stats-wrap ag-batch-scroll">
-      <table className="diag-table ev-table type-stats">
-        <thead>
-          <tr>
-            <th rowSpan={2}>类型</th>
-            <th className="num" rowSpan={2}>
-              题数
+    <Table
+      containerProps={{
+        className: "diag-table-wrap type-stats-wrap ag-batch-scroll",
+      }}
+      className="diag-table ev-table type-stats"
+    >
+      <thead>
+        <tr>
+          <th rowSpan={2}>类型</th>
+          <th className="num" rowSpan={2}>
+            题数
+          </th>
+          {columns.map((column) => (
+            <th
+              key={column.key}
+              colSpan={5}
+              className={`${column.mode === "fixed" ? "is-fixed" : "is-agent"} is-group is-col-start`}
+            >
+              {column.title}
             </th>
-            {columns.map((column) => (
-              <th
-                key={column.key}
-                colSpan={5}
-                className={`${column.mode === "fixed" ? "is-fixed" : "is-agent"} is-group is-col-start`}
-              >
-                {column.title}
-              </th>
-            ))}
-          </tr>
-          <tr>
-            {columns.map((column) => {
-              const side = column.mode === "fixed" ? "is-fixed" : "is-agent";
-              return (
-                <Fragment key={column.key}>
-                  <th className={`num ${side} is-col-start`}>得分</th>
-                  <th className={`num ${side}`}>通过</th>
-                  <th className={`num ${side}`}>证据命中率</th>
-                  <th
-                    className={`num ${side}`}
-                    title="直接检索命中的证据数 / 全部证据数，不计扩展和读前后文"
-                  >
-                    纯检索命中率
-                  </th>
-                  <th className={`num ${side}`}>交给模型的资料</th>
-                </Fragment>
-              );
-            })}
-          </tr>
-        </thead>
-        <tbody>
-          {types.map((type) =>
-            row(type, <TypeTag type={type} hues={hues} />, byType.get(type)!),
-          )}
-          {types.length > 1 && row("合计", "合计", order, true)}
-        </tbody>
-      </table>
-    </TableScroll>
+          ))}
+        </tr>
+        <tr>
+          {columns.map((column) => {
+            const side = column.mode === "fixed" ? "is-fixed" : "is-agent";
+            return (
+              <Fragment key={column.key}>
+                <th className={`num ${side} is-col-start`}>得分</th>
+                <th className={`num ${side}`}>通过</th>
+                <th className={`num ${side}`}>证据命中率</th>
+                <th
+                  className={`num ${side}`}
+                  title="直接检索命中的证据数 / 全部证据数，不计扩展和读前后文"
+                >
+                  纯检索命中率
+                </th>
+                <th className={`num ${side}`}>交给模型的资料</th>
+              </Fragment>
+            );
+          })}
+        </tr>
+      </thead>
+      <tbody>
+        {types.map((type) =>
+          row(type, <TypeTag type={type} hues={hues} />, byType.get(type)!),
+        )}
+        {types.length > 1 && row("合计", "合计", order, true)}
+      </tbody>
+    </Table>
   );
 }
 

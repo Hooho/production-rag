@@ -1,4 +1,4 @@
-import TableScroll from "./TableScroll";
+import Table from "./Table";
 import { useEffect, useState } from "react";
 import { ConfirmPopover } from "./ConfirmPopover";
 import { Tag } from "./Tag";
@@ -238,11 +238,11 @@ function DataTable({ type, onToast }: { type: DataType; onToast: ShowToast }) {
           )}
         </div>
       </div>
-      <TableScroll className="data-table-wrap">
+      <div className="data-table-wrap">
         {loading ? (
           <DataTableSkeleton columns={columns.length + 3} />
         ) : (
-          <table className="data-table">
+          <Table className="data-table">
             <thead>
               <tr>
                 <th>
@@ -348,9 +348,9 @@ function DataTable({ type, onToast }: { type: DataType; onToast: ShowToast }) {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
         )}
-      </TableScroll>
+      </div>
       <div className="data-pager">
         <span>
           共 {data?.total ?? 0} 条 · 第 {page} / {totalPages} 页
@@ -418,9 +418,9 @@ function DataTableSkeleton({ columns }: { columns: number }) {
     rows.push(<tr key={row}>{cells}</tr>);
   }
   return (
-    <table className="data-table data-skeleton-table" aria-hidden="true">
+    <Table className="data-table data-skeleton-table" aria-hidden="true">
       <tbody>{rows}</tbody>
-    </table>
+    </Table>
   );
 }
 
@@ -883,71 +883,72 @@ function GeneratePanel({
                 共 {preview.rows.length} 行，{validCount} 行可写入
               </span>
             </div>
-            <TableScroll className="data-table-wrap data-preview">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    {fields.map((field) => (
-                      <th key={field.name}>{field.label}</th>
-                    ))}
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {preview.rows.map((row, index) => {
-                    const invalid = Object.keys(row.errors).length > 0;
-                    return (
-                      <tr key={index} className={invalid ? "data-invalid" : ""}>
-                        <td>{index + 1}</td>
-                        {fields.map((field) => (
-                          <td key={field.name}>
-                            {field.type === "ref" ? (
-                              <span
-                                className="data-ref-label"
-                                title={String(row.values[field.name] ?? "")}
-                              >
-                                {row.values[field.name]
-                                  ? `${row.labels[field.name] ?? ""}（${row.values[field.name]}）`
-                                  : "—"}
-                              </span>
-                            ) : (
-                              <FieldInput
-                                field={field}
-                                value={row.values[field.name] ?? null}
-                                label=""
-                                onChange={(value) =>
-                                  editCell(index, field.name, value)
-                                }
-                              />
-                            )}
-                            {row.errors[field.name] && (
-                              <small className="data-field-error">
-                                {row.errors[field.name]}
-                              </small>
-                            )}
-                          </td>
-                        ))}
-                        <td>
-                          <button
-                            type="button"
-                            className="delete-button"
-                            onClick={() => removeRow(index)}
-                          >
-                            移除
-                          </button>
-                          {row.errors._row && (
+            <Table
+              containerProps={{ className: "data-table-wrap data-preview" }}
+              className="data-table"
+            >
+              <thead>
+                <tr>
+                  <th>#</th>
+                  {fields.map((field) => (
+                    <th key={field.name}>{field.label}</th>
+                  ))}
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {preview.rows.map((row, index) => {
+                  const invalid = Object.keys(row.errors).length > 0;
+                  return (
+                    <tr key={index} className={invalid ? "data-invalid" : ""}>
+                      <td>{index + 1}</td>
+                      {fields.map((field) => (
+                        <td key={field.name}>
+                          {field.type === "ref" ? (
+                            <span
+                              className="data-ref-label"
+                              title={String(row.values[field.name] ?? "")}
+                            >
+                              {row.values[field.name]
+                                ? `${row.labels[field.name] ?? ""}（${row.values[field.name]}）`
+                                : "—"}
+                            </span>
+                          ) : (
+                            <FieldInput
+                              field={field}
+                              value={row.values[field.name] ?? null}
+                              label=""
+                              onChange={(value) =>
+                                editCell(index, field.name, value)
+                              }
+                            />
+                          )}
+                          {row.errors[field.name] && (
                             <small className="data-field-error">
-                              {row.errors._row}
+                              {row.errors[field.name]}
                             </small>
                           )}
                         </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </TableScroll>
+                      ))}
+                      <td>
+                        <button
+                          type="button"
+                          className="delete-button"
+                          onClick={() => removeRow(index)}
+                        >
+                          移除
+                        </button>
+                        {row.errors._row && (
+                          <small className="data-field-error">
+                            {row.errors._row}
+                          </small>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </Table>
           </>
         )}
         <footer>

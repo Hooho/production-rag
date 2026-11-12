@@ -1,4 +1,4 @@
-import TableScroll from "./TableScroll";
+import Table from "./Table";
 import {
   useEffect,
   useRef,
@@ -206,59 +206,60 @@ function MemoryList({
             还没有对话。到「知识问答」里聊几句，这里就会出现。
           </div>
         ) : (
-          <TableScroll className="mem-table-wrap">
-            <table className="mem-table">
-              <thead>
-                <tr>
-                  <th>会话</th>
-                  <th className="num">轮数</th>
-                  <th className="num">
-                    压缩 <Hint text={HINTS.compressions} />
-                  </th>
-                  <th>
-                    当前记忆 <Hint text={HINTS.memory} />
-                  </th>
-                  <th className="num">
-                    快照 <Hint text={HINTS.snapshots} />
-                  </th>
-                  <th className="num">
-                    占用 <Hint text={HINTS.bytes} />
-                  </th>
-                  <th>最后活动</th>
+          <Table
+            containerProps={{ className: "mem-table-wrap" }}
+            className="mem-table"
+          >
+            <thead>
+              <tr>
+                <th>会话</th>
+                <th className="num">轮数</th>
+                <th className="num">
+                  压缩 <Hint text={HINTS.compressions} />
+                </th>
+                <th>
+                  当前记忆 <Hint text={HINTS.memory} />
+                </th>
+                <th className="num">
+                  快照 <Hint text={HINTS.snapshots} />
+                </th>
+                <th className="num">
+                  占用 <Hint text={HINTS.bytes} />
+                </th>
+                <th>最后活动</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.items.map((item) => (
+                <tr
+                  key={item.session_id}
+                  onClick={() => onOpen(item.session_id)}
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") onOpen(item.session_id);
+                  }}
+                >
+                  <td className="mem-title-cell">
+                    <strong>{item.title || "未命名对话"}</strong>
+                  </td>
+                  <td className="num">{item.turns}</td>
+                  <td className="num">
+                    {item.compressions ? `${item.compressions} 次` : "未压缩"}
+                  </td>
+                  <td>
+                    <Usage
+                      used={item.memory_tokens}
+                      limit={data.trigger_tokens}
+                      compact
+                    />
+                  </td>
+                  <td className="num">{item.snapshots ?? "—"}</td>
+                  <td className="num">{formatBytes(item.bytes)}</td>
+                  <td>{formatTime(item.last_active)}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {data.items.map((item) => (
-                  <tr
-                    key={item.session_id}
-                    onClick={() => onOpen(item.session_id)}
-                    tabIndex={0}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") onOpen(item.session_id);
-                    }}
-                  >
-                    <td className="mem-title-cell">
-                      <strong>{item.title || "未命名对话"}</strong>
-                    </td>
-                    <td className="num">{item.turns}</td>
-                    <td className="num">
-                      {item.compressions ? `${item.compressions} 次` : "未压缩"}
-                    </td>
-                    <td>
-                      <Usage
-                        used={item.memory_tokens}
-                        limit={data.trigger_tokens}
-                        compact
-                      />
-                    </td>
-                    <td className="num">{item.snapshots ?? "—"}</td>
-                    <td className="num">{formatBytes(item.bytes)}</td>
-                    <td>{formatTime(item.last_active)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </TableScroll>
+              ))}
+            </tbody>
+          </Table>
         ))}
     </div>
   );
@@ -400,26 +401,27 @@ function MemoryDetail({
             <p className="mem-note">
               每一轮的问题、检索前被补成了什么、回答前记忆有多大。点「压缩」或「追加」展开，看这一轮回答时模型拿到的记忆：摘要和保留的原文；压缩的那一轮还能看到被压掉了哪些原文。
             </p>
-            <TableScroll className="mem-table-wrap">
-              <table className="mem-table mem-timeline">
-                <thead>
-                  <tr>
-                    <th className="num">轮次</th>
-                    <th>问题</th>
-                    <th>
-                      改写成 <Hint text={HINTS.rewritten} />
-                    </th>
-                    <th className="num">回答前记忆</th>
-                    <th>记忆变化</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.timeline.map((turn) => (
-                    <TimelineRow key={turn.run_id} turn={turn} />
-                  ))}
-                </tbody>
-              </table>
-            </TableScroll>
+            <Table
+              containerProps={{ className: "mem-table-wrap" }}
+              className="mem-table mem-timeline"
+            >
+              <thead>
+                <tr>
+                  <th className="num">轮次</th>
+                  <th>问题</th>
+                  <th>
+                    改写成 <Hint text={HINTS.rewritten} />
+                  </th>
+                  <th className="num">回答前记忆</th>
+                  <th>记忆变化</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.timeline.map((turn) => (
+                  <TimelineRow key={turn.run_id} turn={turn} />
+                ))}
+              </tbody>
+            </Table>
           </section>
 
           <details className="mem-card mem-storage">

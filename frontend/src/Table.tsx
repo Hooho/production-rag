@@ -1,11 +1,16 @@
 import { useLayoutEffect, useRef, type ComponentProps } from "react";
 
-/** Shared horizontal scrolling and edge hints for tables. */
-export default function TableScroll({
+type TableProps = ComponentProps<"table"> & {
+  containerProps?: ComponentProps<"div">;
+};
+
+/** Public table with a shared scroll container and edge hints. */
+export default function Table({
   className = "",
   children,
+  containerProps = {},
   ...props
-}: ComponentProps<"div">) {
+}: TableProps) {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const element = ref.current;
@@ -33,8 +38,14 @@ export default function TableScroll({
     };
   }, [children]);
   return (
-    <div {...props} ref={ref} className={`table-scroll ${className}`}>
-      {children}
+    <div
+      {...containerProps}
+      ref={ref}
+      className={`table-scroll ${containerProps.className ?? ""}`}
+    >
+      <table {...props} className={className}>
+        {children}
+      </table>
     </div>
   );
 }

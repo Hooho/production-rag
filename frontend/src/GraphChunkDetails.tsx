@@ -1,3 +1,4 @@
+import Table from "./Table";
 import { useEffect, useId, useState } from "react";
 import {
   listDocumentChunks,
@@ -383,7 +384,7 @@ function ExtractionTables({
               role="region"
               aria-label="实体表"
             >
-              <table className="graph-table graph-chunk-entity-table">
+              <Table className="graph-table graph-chunk-entity-table">
                 <thead>
                   <tr>
                     <th scope="col" className="graph-row-number">
@@ -412,7 +413,7 @@ function ExtractionTables({
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </Table>
             </div>
           ) : (
             <p className="graph-note">本片抽取成功，没有抽出实体。</p>
@@ -424,7 +425,7 @@ function ExtractionTables({
             role="region"
             aria-label="关系表"
           >
-            <table className="graph-table graph-chunk-relation-table">
+            <Table className="graph-table graph-chunk-relation-table">
               <thead>
                 <tr>
                   <th scope="col" className="graph-row-number">
@@ -465,7 +466,7 @@ function ExtractionTables({
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           </div>
         ) : (
           <p className="graph-note">没有抽出关系。</p>

@@ -1,4 +1,4 @@
-import TableScroll from "./TableScroll";
+import Table from "./Table";
 import {
   useEffect,
   useMemo,
@@ -440,7 +440,7 @@ function CountTable({
   );
   return (
     <>
-      <table className="diag-table grt-table grt-count-table">
+      <Table className="diag-table grt-table grt-count-table">
         <thead>
           <tr>
             <th>{first}</th>
@@ -484,7 +484,7 @@ function CountTable({
               </tr>
             ))}
         </tbody>
-      </table>
+      </Table>
       {groups.length > PAGE_SIZE && (
         <Pager page={current} total={groups.length} onPage={setPage} />
       )}
@@ -894,79 +894,78 @@ function NamesDetail({
   return (
     <>
       <DetailFilters list={list} more={graph.dropped_more?.names} />
-      <TableScroll className="diag-table-wrap">
-        <table className="diag-table grt-table">
-          <thead>
-            <tr>
-              <th>具体关键词</th>
-              <th>匹配到的名字</th>
-              <th>算向量用的文字</th>
-              <th>出自</th>
-              <th>匹配方式</th>
-              <th>归到实体</th>
-              <th>结果</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.rows.map((match, index) => (
-              <tr
-                key={`${match.keyword}-${match.entity_id}-${match.name}-${index}`}
-                className={match.kept ? "" : "is-dropped"}
-              >
-                <td>{match.keyword}</td>
-                <td>
-                  {/* 匹配到的名字点开看实体详情，和图谱里点实体一样。 */}
-                  {onEntity && match.entity_id ? (
-                    <button
-                      type="button"
-                      className="link-button button-sm"
-                      title={`看实体「${match.entity_name ?? match.name}」的详情`}
-                      onClick={() =>
-                        onEntity(match.entity_id, match.document_id)
-                      }
-                    >
-                      {match.name}
-                    </button>
-                  ) : (
-                    match.name
-                  )}
-                </td>
-                <td>
-                  {/* 名字向量是用这段文字算的：名字（类型）：描述1；描述2 */}
-                  <span
-                    className="grt-vector-text"
-                    title={match.vector_text ?? ""}
+      <Table
+        containerProps={{ className: "diag-table-wrap" }}
+        className="diag-table grt-table"
+      >
+        <thead>
+          <tr>
+            <th>具体关键词</th>
+            <th>匹配到的名字</th>
+            <th>算向量用的文字</th>
+            <th>出自</th>
+            <th>匹配方式</th>
+            <th>归到实体</th>
+            <th>结果</th>
+          </tr>
+        </thead>
+        <tbody>
+          {list.rows.map((match, index) => (
+            <tr
+              key={`${match.keyword}-${match.entity_id}-${match.name}-${index}`}
+              className={match.kept ? "" : "is-dropped"}
+            >
+              <td>{match.keyword}</td>
+              <td>
+                {/* 匹配到的名字点开看实体详情，和图谱里点实体一样。 */}
+                {onEntity && match.entity_id ? (
+                  <button
+                    type="button"
+                    className="link-button button-sm"
+                    title={`看实体「${match.entity_name ?? match.name}」的详情`}
+                    onClick={() => onEntity(match.entity_id, match.document_id)}
                   >
-                    {match.vector_text ?? "—"}
-                  </span>
-                </td>
-                <td>
-                  {match.title ?? "—"}
-                  {match.version_number ? (
-                    <em className="grt-v">图 v{match.version_number}</em>
-                  ) : null}
-                </td>
-                <td className="num">
-                  {match.match === "exact"
-                    ? "字面相同"
-                    : match.match === "contains"
-                      ? "字面包含"
-                      : `向量 ${score(match.score)}`}
-                </td>
-                <td>
-                  {match.entity_name ?? "—"}
-                  {match.entity_type ? (
-                    <small>（{match.entity_type}）</small>
-                  ) : null}
-                </td>
-                <td>
-                  <Result kept={match.kept} reason={match.reason} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </TableScroll>
+                    {match.name}
+                  </button>
+                ) : (
+                  match.name
+                )}
+              </td>
+              <td>
+                {/* 名字向量是用这段文字算的：名字（类型）：描述1；描述2 */}
+                <span
+                  className="grt-vector-text"
+                  title={match.vector_text ?? ""}
+                >
+                  {match.vector_text ?? "—"}
+                </span>
+              </td>
+              <td>
+                {match.title ?? "—"}
+                {match.version_number ? (
+                  <em className="grt-v">图 v{match.version_number}</em>
+                ) : null}
+              </td>
+              <td className="num">
+                {match.match === "exact"
+                  ? "字面相同"
+                  : match.match === "contains"
+                    ? "字面包含"
+                    : `向量 ${score(match.score)}`}
+              </td>
+              <td>
+                {match.entity_name ?? "—"}
+                {match.entity_type ? (
+                  <small>（{match.entity_type}）</small>
+                ) : null}
+              </td>
+              <td>
+                <Result kept={match.kept} reason={match.reason} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </Table>
       <Pager page={list.page} total={list.total} onPage={list.setPage} />
     </>
   );
@@ -1121,7 +1120,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
           </p>
         )}
         {words?.reason && <p className="grt-note">{words.reason}</p>}
-        <table className="diag-table grt-table">
+        <Table className="diag-table grt-table">
           <thead>
             <tr>
               <th>类型</th>
@@ -1143,7 +1142,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
               </tr>
             )}
           </tbody>
-        </table>
+        </Table>
         {words?.prompt && (
           <button
             type="button"
@@ -1392,7 +1391,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
           </button>
         ) : (
           <>
-            <table className="diag-table grt-table grt-count-table">
+            <Table className="diag-table grt-table grt-count-table">
               <thead>
                 <tr>
                   <th>排名表</th>
@@ -1437,7 +1436,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
                   );
                 })}
               </tbody>
-            </table>
+            </Table>
             <p className="grt-summary">
               {/* 合计这行点开看这批分片：两张表的分片合并去重后的完整清单。 */}
               <button
@@ -1530,113 +1529,112 @@ function RelationTable({
   return (
     <>
       {scoreHint && <p className="grt-hint">{scoreHint}</p>}
-      <TableScroll className="diag-table-wrap">
-        <table className="diag-table grt-table">
-          <thead>
-            <tr>
-              <th>序号</th>
-              <th>{first}</th>
-              <th>关系</th>
-              <th>
-                {scoreMode
-                  ? scoreMode === "fusion"
-                    ? "融合分数"
-                    : "重排分数"
-                  : rows.some((row) => row.fusion_rank !== undefined)
-                    ? "检索与重排名次"
-                    : "关系相似度"}
-              </th>
-              <th>出处</th>
-              <th>结果</th>
+      <Table
+        containerProps={{ className: "diag-table-wrap" }}
+        className="diag-table grt-table"
+      >
+        <thead>
+          <tr>
+            <th>序号</th>
+            <th>{first}</th>
+            <th>关系</th>
+            <th>
+              {scoreMode
+                ? scoreMode === "fusion"
+                  ? "融合分数"
+                  : "重排分数"
+                : rows.some((row) => row.fusion_rank !== undefined)
+                  ? "检索与重排名次"
+                  : "关系相似度"}
+            </th>
+            <th>出处</th>
+            <th>结果</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr
+              key={`${row.relation_id}-${index}`}
+              className={row.kept ? "" : "is-dropped"}
+            >
+              <td className="num">{startIndex + index + 1}</td>
+              <td>{firstValue(row)}</td>
+              <td>
+                <RelationText relation={row} onEntity={onEntity} />
+              </td>
+              <td className="num">
+                {scoreMode === "fusion" ? (
+                  <>
+                    {row.fusion_score?.toFixed(6) ?? "—"}
+                    <small className="grt-score-ranks">
+                      向量排名 {row.vector_rank ?? "—"}
+                    </small>
+                    <small className="grt-score-ranks">
+                      关键词排名 {row.keyword_rank ?? "—"}
+                    </small>
+                  </>
+                ) : scoreMode === "rerank" ? (
+                  <>
+                    {row.rerank_score?.toFixed(4) ?? "—"}
+                    <small className="grt-score-ranks">
+                      融合排名 {row.fusion_rank ?? "—"}
+                    </small>
+                  </>
+                ) : row.fusion_rank !== undefined ? (
+                  <>
+                    <div className="grt-score-vector">
+                      向量 {row.vector_rank ?? "—"} / {score(row.vector_score)}
+                    </div>
+                    <div className="grt-score-keyword">
+                      关键词 {row.keyword_rank ?? "—"} /{" "}
+                      {score(row.keyword_score)}
+                    </div>
+                    <div className="grt-score-fusion">
+                      融合 {row.fusion_rank} /{" "}
+                      {row.fusion_score?.toFixed(6) ?? "—"}{" "}
+                      {row.selection ? (
+                        <span
+                          className="grt-category is-hue"
+                          style={
+                            {
+                              "--tag-h": row.selection.includes("保底")
+                                ? 145
+                                : 275,
+                            } as CSSProperties
+                          }
+                        >
+                          {row.selection}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="grt-score-rerank">
+                      重排 {row.rerank_rank ?? "—"} / {score(row.rerank_score)}
+                    </div>
+                  </>
+                ) : (
+                  score(row.score)
+                )}
+              </td>
+              <td>
+                <Origin relation={row} />
+                <OriginalButton
+                  relation={row}
+                  chunk={chunks.get(row.chunk_id)}
+                />
+              </td>
+              <td>
+                <Result
+                  kept={row.kept}
+                  reason={row.reason}
+                  extra={extra?.(row)}
+                  row={row}
+                  trace={trace}
+                />
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, index) => (
-              <tr
-                key={`${row.relation_id}-${index}`}
-                className={row.kept ? "" : "is-dropped"}
-              >
-                <td className="num">{startIndex + index + 1}</td>
-                <td>{firstValue(row)}</td>
-                <td>
-                  <RelationText relation={row} onEntity={onEntity} />
-                </td>
-                <td className="num">
-                  {scoreMode === "fusion" ? (
-                    <>
-                      {row.fusion_score?.toFixed(6) ?? "—"}
-                      <small className="grt-score-ranks">
-                        向量排名 {row.vector_rank ?? "—"}
-                      </small>
-                      <small className="grt-score-ranks">
-                        关键词排名 {row.keyword_rank ?? "—"}
-                      </small>
-                    </>
-                  ) : scoreMode === "rerank" ? (
-                    <>
-                      {row.rerank_score?.toFixed(4) ?? "—"}
-                      <small className="grt-score-ranks">
-                        融合排名 {row.fusion_rank ?? "—"}
-                      </small>
-                    </>
-                  ) : row.fusion_rank !== undefined ? (
-                    <>
-                      <div className="grt-score-vector">
-                        向量 {row.vector_rank ?? "—"} /{" "}
-                        {score(row.vector_score)}
-                      </div>
-                      <div className="grt-score-keyword">
-                        关键词 {row.keyword_rank ?? "—"} /{" "}
-                        {score(row.keyword_score)}
-                      </div>
-                      <div className="grt-score-fusion">
-                        融合 {row.fusion_rank} /{" "}
-                        {row.fusion_score?.toFixed(6) ?? "—"}{" "}
-                        {row.selection ? (
-                          <span
-                            className="grt-category is-hue"
-                            style={
-                              {
-                                "--tag-h": row.selection.includes("保底")
-                                  ? 145
-                                  : 275,
-                              } as CSSProperties
-                            }
-                          >
-                            {row.selection}
-                          </span>
-                        ) : null}
-                      </div>
-                      <div className="grt-score-rerank">
-                        重排 {row.rerank_rank ?? "—"} /{" "}
-                        {score(row.rerank_score)}
-                      </div>
-                    </>
-                  ) : (
-                    score(row.score)
-                  )}
-                </td>
-                <td>
-                  <Origin relation={row} />
-                  <OriginalButton
-                    relation={row}
-                    chunk={chunks.get(row.chunk_id)}
-                  />
-                </td>
-                <td>
-                  <Result
-                    kept={row.kept}
-                    reason={row.reason}
-                    extra={extra?.(row)}
-                    row={row}
-                    trace={trace}
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </TableScroll>
+          ))}
+        </tbody>
+      </Table>
     </>
   );
 }
@@ -1649,11 +1647,11 @@ function ChunkTable({
   relations: Map<string, GraphRetrievalRelation>;
 }) {
   return (
-    <TableScroll className="diag-table-wrap">
+    <div className="diag-table-wrap">
       {rows.length === 0 ? (
         <p className="grt-empty">没有分片</p>
       ) : (
-        <table className="diag-table grt-table">
+        <Table className="diag-table grt-table">
           <thead>
             <tr>
               <th>名次</th>
@@ -1762,9 +1760,9 @@ function ChunkTable({
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
       )}
-    </TableScroll>
+    </div>
   );
 }
 

@@ -1,4 +1,4 @@
-import TableScroll from "./TableScroll";
+import Table from "./Table";
 import { SpecialSection } from "./Special";
 import { useToast, errorText } from "./Toast";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
@@ -275,30 +275,31 @@ export default function BatchReport({
       {report.config_diff.length > 0 && (
         <div className="evb-block">
           <h4>配置差异</h4>
-          <TableScroll className="diag-table-wrap">
-            <table className="diag-table ev-table">
-              <thead>
-                <tr>
-                  <th>配置项</th>
-                  {report.arms.map((arm) => (
-                    <th key={arm.id}>{arm.label}</th>
+          <Table
+            containerProps={{ className: "diag-table-wrap" }}
+            className="diag-table ev-table"
+          >
+            <thead>
+              <tr>
+                <th>配置项</th>
+                {report.arms.map((arm) => (
+                  <th key={arm.id}>{arm.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {report.config_diff.map((row) => (
+                <tr key={row.key}>
+                  <td>{diffLabel(row.key)}</td>
+                  {row.values.map((value, index) => (
+                    <td key={report.arms[index]?.id ?? index}>
+                      {formatValue(value)}
+                    </td>
                   ))}
                 </tr>
-              </thead>
-              <tbody>
-                {report.config_diff.map((row) => (
-                  <tr key={row.key}>
-                    <td>{diffLabel(row.key)}</td>
-                    {row.values.map((value, index) => (
-                      <td key={report.arms[index]?.id ?? index}>
-                        {formatValue(value)}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </TableScroll>
+              ))}
+            </tbody>
+          </Table>
         </div>
       )}
 
@@ -316,7 +317,7 @@ export default function BatchReport({
                   <SpecialSection key={section.suite_id} section={section} />
                 ))}
                 {run.variants?.length ? (
-                  <table className="ev-table">
+                  <Table className="ev-table">
                     <thead>
                       <tr>
                         <th>变体</th>
@@ -335,7 +336,7 @@ export default function BatchReport({
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </Table>
                 ) : null}
               </details>
             ) : null,

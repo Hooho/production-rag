@@ -1,3 +1,4 @@
+import Table from "./Table";
 import {
   useEffect,
   useMemo,
@@ -473,7 +474,7 @@ export function GraphReviewDetails({
             才放在一起；名字相同的记 1。
           </p>
           {candidate.pairs && (
-            <table className="gr-pairs">
+            <Table className="gr-pairs">
               <tbody>
                 {[...candidate.pairs]
                   .sort((x, y) => y[2] - x[2])
@@ -486,7 +487,7 @@ export function GraphReviewDetails({
                     </tr>
                   ))}
               </tbody>
-            </table>
+            </Table>
           )}
           <p className="gr-small">
             实际拿去算向量的文字（格式：

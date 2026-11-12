@@ -1,3 +1,4 @@
+import Table from "./Table";
 import { useEffect, useMemo, useState } from "react";
 import { DetailDialog } from "./DetailDialog";
 import {
@@ -136,7 +137,7 @@ export function GraphOptions({
           {schema.note && <p className="graph-note">{schema.note}</p>}
           <section>
             <h4 className="graph-drawer-title">实体类型</h4>
-            <table className="graph-table">
+            <Table className="graph-table">
               <thead>
                 <tr>
                   <th>类型</th>
@@ -153,12 +154,12 @@ export function GraphOptions({
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           </section>
           <section>
             <h4 className="graph-drawer-title">关系分类</h4>
             <p className="graph-note">关系本身用一句话描述，分类只用来筛选。</p>
-            <table className="graph-table">
+            <Table className="graph-table">
               <tbody>
                 {schema.relation_categories.map((item) => (
                   <tr key={item.name}>
@@ -167,7 +168,7 @@ export function GraphOptions({
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           </section>
         </DetailDialog>
       )}

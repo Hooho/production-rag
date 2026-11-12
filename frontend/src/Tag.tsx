@@ -1,4 +1,4 @@
-import TableScroll from "./TableScroll";
+import Table from "./Table";
 import type { CSSProperties, ReactNode } from "react";
 import { PRESET_HUES, hueMap, labelHue } from "./hues";
 import type { Tone } from "./tags";
@@ -360,89 +360,86 @@ export function TypeStats({
     </tr>
   );
   return (
-    <TableScroll className="diag-table-wrap type-stats-wrap">
-      <table className="diag-table ev-table type-stats">
-        {/* 两种模式一起跑时表头分两行：上面一行写模式，下面是各自的得分、通过、证据命中率；两边用不同底色区分。 */}
-        <thead>
-          {both ? (
-            <>
-              <tr>
-                <th rowSpan={2}>类型</th>
-                <th className="num" rowSpan={2}>
-                  题数
-                </th>
-                <th
-                  className="is-fixed is-group"
-                  colSpan={
-                    1 +
-                    (hasScore ? 1 : 0) +
-                    (hasEvidence ? 1 : 0) +
-                    (hasDirect ? 1 : 0) +
-                    (hasMaterial ? 1 : 0)
-                  }
-                >
-                  固定流程
-                </th>
-                <th
-                  className="is-agent is-group"
-                  colSpan={
-                    1 +
-                    (hasScore ? 1 : 0) +
-                    (hasEvidence ? 1 : 0) +
-                    (hasDirect ? 1 : 0) +
-                    (hasMaterial ? 1 : 0)
-                  }
-                >
-                  Agent
-                </th>
-              </tr>
-              <tr>
-                {hasScore && <th className="num is-fixed">得分</th>}
-                <th className="num is-fixed">通过</th>
-                {hasEvidence && <th className="num is-fixed">证据命中率</th>}
-                {hasDirect && (
-                  <th
-                    className="num is-fixed"
-                    title="直接检索命中的证据数 / 全部证据数，不计扩展和读前后文"
-                  >
-                    纯检索命中率
-                  </th>
-                )}
-                {hasMaterial && (
-                  <th className="num is-fixed">交给模型的资料</th>
-                )}
-                {hasScore && <th className="num is-agent">得分</th>}
-                <th className="num is-agent">通过</th>
-                {hasEvidence && <th className="num is-agent">证据命中率</th>}
-                {hasDirect && (
-                  <th
-                    className="num is-agent"
-                    title="直接检索命中的证据数 / 全部证据数，不计扩展和读前后文"
-                  >
-                    纯检索命中率
-                  </th>
-                )}
-                {hasMaterial && (
-                  <th className="num is-agent">交给模型的资料</th>
-                )}
-              </tr>
-            </>
-          ) : (
+    <Table
+      containerProps={{ className: "diag-table-wrap type-stats-wrap" }}
+      className="diag-table ev-table type-stats"
+    >
+      {/* 两种模式一起跑时表头分两行：上面一行写模式，下面是各自的得分、通过、证据命中率；两边用不同底色区分。 */}
+      <thead>
+        {both ? (
+          <>
             <tr>
-              <th>类型</th>
-              <th className="num">题数</th>
-              {hasScore && <th className="num">得分</th>}
-              <th className="num">通过</th>
-              {hasEvidence && <th className="num">证据命中率</th>}
-              {hasDirect && <th className="num">纯检索命中率</th>}
+              <th rowSpan={2}>类型</th>
+              <th className="num" rowSpan={2}>
+                题数
+              </th>
+              <th
+                className="is-fixed is-group"
+                colSpan={
+                  1 +
+                  (hasScore ? 1 : 0) +
+                  (hasEvidence ? 1 : 0) +
+                  (hasDirect ? 1 : 0) +
+                  (hasMaterial ? 1 : 0)
+                }
+              >
+                固定流程
+              </th>
+              <th
+                className="is-agent is-group"
+                colSpan={
+                  1 +
+                  (hasScore ? 1 : 0) +
+                  (hasEvidence ? 1 : 0) +
+                  (hasDirect ? 1 : 0) +
+                  (hasMaterial ? 1 : 0)
+                }
+              >
+                Agent
+              </th>
             </tr>
-          )}
-        </thead>
-        <tbody>
-          {stats.map((item) => row(item))}
-          {stats.length > 1 && row(total, true)}
-        </tbody>
-      </table>
-    </TableScroll>
+            <tr>
+              {hasScore && <th className="num is-fixed">得分</th>}
+              <th className="num is-fixed">通过</th>
+              {hasEvidence && <th className="num is-fixed">证据命中率</th>}
+              {hasDirect && (
+                <th
+                  className="num is-fixed"
+                  title="直接检索命中的证据数 / 全部证据数，不计扩展和读前后文"
+                >
+                  纯检索命中率
+                </th>
+              )}
+              {hasMaterial && <th className="num is-fixed">交给模型的资料</th>}
+              {hasScore && <th className="num is-agent">得分</th>}
+              <th className="num is-agent">通过</th>
+              {hasEvidence && <th className="num is-agent">证据命中率</th>}
+              {hasDirect && (
+                <th
+                  className="num is-agent"
+                  title="直接检索命中的证据数 / 全部证据数，不计扩展和读前后文"
+                >
+                  纯检索命中率
+                </th>
+              )}
+              {hasMaterial && <th className="num is-agent">交给模型的资料</th>}
+            </tr>
+          </>
+        ) : (
+          <tr>
+            <th>类型</th>
+            <th className="num">题数</th>
+            {hasScore && <th className="num">得分</th>}
+            <th className="num">通过</th>
+            {hasEvidence && <th className="num">证据命中率</th>}
+            {hasDirect && <th className="num">纯检索命中率</th>}
+          </tr>
+        )}
+      </thead>
+      <tbody>
+        {stats.map((item) => row(item))}
+        {stats.length > 1 && row(total, true)}
+      </tbody>
+    </Table>
   );
 }

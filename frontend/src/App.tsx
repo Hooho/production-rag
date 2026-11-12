@@ -1,4 +1,4 @@
-import TableScroll from "./TableScroll";
+import Table from "./Table";
 import { DetailDialog } from "./DetailDialog";
 import { ChunkOriginalPanel } from "./ChunkOriginalPanel";
 import { ConfirmPopover } from "./ConfirmPopover";
@@ -1533,7 +1533,7 @@ function MarkdownBody({ content }: { content: string }) {
       const rows = tableLines.slice(2).map(tableCells);
       blocks.push(
         <div className="answer-table" key={`table-${blocks.length}`}>
-          <table>
+          <Table>
             <thead>
               <tr>
                 {header.map((cell, index) => (
@@ -1560,7 +1560,7 @@ function MarkdownBody({ content }: { content: string }) {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
         </div>,
       );
     } else {
@@ -5003,7 +5003,7 @@ function RetrievalDiagnostics({
             </>
           )}
         </small>
-        <table className="diag-table diag-table-compact">
+        <Table className="diag-table diag-table-compact">
           <thead>
             <tr>
               <th>序号</th>
@@ -5034,7 +5034,7 @@ function RetrievalDiagnostics({
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
         {method === "keyword" &&
           own.some((list) => list.hits.length < limit) && (
             <small className="diag-module-desc">
@@ -5163,11 +5163,11 @@ function RetrievalDiagnostics({
             <strong>{listLabel(activeList)}</strong>
             <small>按这一路召回的名次排列</small>
           </p>
-          <TableScroll className="diag-table-wrap rank-table-wrap">
+          <div className="diag-table-wrap rank-table-wrap">
             {activeHits.length === 0 ? (
               <p className="diag-empty">没有找到分片</p>
             ) : (
-              <table className="diag-table diag-table-compact">
+              <Table className="diag-table diag-table-compact">
                 <thead>
                   <tr>
                     <th>名次</th>
@@ -5233,9 +5233,9 @@ function RetrievalDiagnostics({
                     );
                   })}
                 </tbody>
-              </table>
+              </Table>
             )}
-          </TableScroll>
+          </div>
           <div className="diag-pagination" aria-label="排名表分页">
             <span aria-live="polite">
               {activeHits.length === 0
@@ -5413,7 +5413,7 @@ function RetrievalDiagnostics({
           </small>
         </p>
         {combos.size > 0 && (
-          <table className="diag-table diag-table-compact diag-combo">
+          <Table className="diag-table diag-table-compact diag-combo">
             <thead>
               <tr>
                 <th>序号</th>
@@ -5447,7 +5447,7 @@ function RetrievalDiagnostics({
                   );
                 })}
             </tbody>
-          </table>
+          </Table>
         )}
         {rankingTables}
         {/* 交给重排的候选池单独看：每片是哪几路找到的、在各路排第几，一张表看完。
@@ -6041,55 +6041,56 @@ function CandidateChunksDialog({
             setPage(1);
           }}
         />
-        <TableScroll className="diag-table-wrap">
-          <table className="diag-table diag-pool">
-            <thead>
+        <Table
+          containerProps={{ className: "diag-table-wrap" }}
+          className="diag-table diag-pool"
+        >
+          <thead>
+            <tr>
+              <th>序号</th>
+              <th>召回方式</th>
+              <th title="这一片自己的正文">分片</th>
+              <th
+                title={
+                  scoreKind === "rerank"
+                    ? "重排模型给的概率"
+                    : `RRF 得分 = Σ 1 / (${rrfK} + 名次)`
+                }
+              >
+                {scoreKind === "rerank" ? "重排概率" : "RRF 分"}
+              </th>
+              <th>各路名次</th>
+              <th title="这一片出自哪份文档、哪个版本、哪一页、哪一小节">
+                来源
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredCandidates.length === 0 && (
               <tr>
-                <th>序号</th>
-                <th>召回方式</th>
-                <th title="这一片自己的正文">分片</th>
-                <th
-                  title={
-                    scoreKind === "rerank"
-                      ? "重排模型给的概率"
-                      : `RRF 得分 = Σ 1 / (${rrfK} + 名次)`
-                  }
-                >
-                  {scoreKind === "rerank" ? "重排概率" : "RRF 分"}
-                </th>
-                <th>各路名次</th>
-                <th title="这一片出自哪份文档、哪个版本、哪一页、哪一小节">
-                  来源
-                </th>
+                <td colSpan={6}>没有符合筛选条件的分片</td>
               </tr>
-            </thead>
-            <tbody>
-              {filteredCandidates.length === 0 && (
-                <tr>
-                  <td colSpan={6}>没有符合筛选条件的分片</td>
+            )}
+            {visible.map((entry, index) =>
+              entry.kind === "group" ? (
+                // 名额补进来的单独一段，别和 RRF 名前面几个混在一起。
+                <tr className="diag-pool-group" key={`group-${index}`}>
+                  <td colSpan={6}>
+                    图检索名额补进来的 {entry.count} 个：RRF
+                    名次不够，靠名额进池
+                  </td>
                 </tr>
-              )}
-              {visible.map((entry, index) =>
-                entry.kind === "group" ? (
-                  // 名额补进来的单独一段，别和 RRF 名前面几个混在一起。
-                  <tr className="diag-pool-group" key={`group-${index}`}>
-                    <td colSpan={6}>
-                      图检索名额补进来的 {entry.count} 个：RRF
-                      名次不够，靠名额进池
-                    </td>
-                  </tr>
-                ) : (
-                  row(
-                    entry.item,
-                    entries
-                      .slice(0, pageStart + index + 1)
-                      .filter((value) => value.kind === "chunk").length,
-                  )
-                ),
-              )}
-            </tbody>
-          </table>
-        </TableScroll>
+              ) : (
+                row(
+                  entry.item,
+                  entries
+                    .slice(0, pageStart + index + 1)
+                    .filter((value) => value.kind === "chunk").length,
+                )
+              ),
+            )}
+          </tbody>
+        </Table>
         <div className="diag-pagination" aria-label="分片明细分页">
           <span aria-live="polite">
             显示第 {chunkRows ? firstChunk + 1 : 0}–{firstChunk + chunkRows}{" "}
@@ -6217,47 +6218,46 @@ function CandidateDetailDialog({
           6 名，<code>0.700</code> 是这一路的原始分数
         </p>
         <p className="diag-scroll-hint">表格可左右滑动查看分数</p>
-        <TableScroll className="diag-table-wrap">
-          <table className="diag-table diag-candidates">
-            <thead>
+        <Table
+          containerProps={{ className: "diag-table-wrap" }}
+          className="diag-table diag-candidates"
+        >
+          <thead>
+            <tr>
+              <th>序号</th>
+              <th>去向</th>
+              <th>来源</th>
+              <th>分片</th>
+              <th title="每张排名表中的名次、原始分数，以及贡献的 RRF 分">
+                召回贡献
+              </th>
+              <th title={`RRF 得分 = Σ 1 / (${rrfK} + 名次)`}>RRF 分 / 名次</th>
+              <th title="重排模型原始输出与重排后名次">重排 logit / 名次</th>
+              <th title="sigmoid(logit)，与阈值比较">重排概率</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && (
               <tr>
-                <th>序号</th>
-                <th>去向</th>
-                <th>来源</th>
-                <th>分片</th>
-                <th title="每张排名表中的名次、原始分数，以及贡献的 RRF 分">
-                  召回贡献
-                </th>
-                <th title={`RRF 得分 = Σ 1 / (${rrfK} + 名次)`}>
-                  RRF 分 / 名次
-                </th>
-                <th title="重排模型原始输出与重排后名次">重排 logit / 名次</th>
-                <th title="sigmoid(logit)，与阈值比较">重排概率</th>
+                <td colSpan={8}>没有符合筛选条件的分片</td>
               </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={8}>没有符合筛选条件的分片</td>
-                </tr>
-              )}
+            )}
 
-              {visible.map((item, index) => (
-                <CandidateRow
-                  onOpenOriginal={setChunkOpen}
-                  serial={pageStart + index + 1}
-                  item={item}
-                  minScore={minScore}
-                  queries={queries}
-                  relations={relations}
-                  rrfK={rrfK}
-                  fusion={fusion}
-                  key={item.chunk_id + item.rrf_rank}
-                />
-              ))}
-            </tbody>
-          </table>
-        </TableScroll>
+            {visible.map((item, index) => (
+              <CandidateRow
+                onOpenOriginal={setChunkOpen}
+                serial={pageStart + index + 1}
+                item={item}
+                minScore={minScore}
+                queries={queries}
+                relations={relations}
+                rrfK={rrfK}
+                fusion={fusion}
+                key={item.chunk_id + item.rrf_rank}
+              />
+            ))}
+          </tbody>
+        </Table>
         {candidates.length > 0 ? (
           <div className="diag-pagination" aria-label="候选明细分页">
             <span aria-live="polite">
@@ -7629,32 +7629,33 @@ function DocumentMetadataPanel({ document }: { document: DocumentStatus }) {
   return (
     <details className="document-metadata-panel">
       <summary>文档与解析信息</summary>
-      <TableScroll className="document-metadata-table-wrap">
-        <table className="document-metadata-table">
-          <thead>
-            <tr>
-              <th scope="col">信息项</th>
-              <th scope="col">内容</th>
-              <th scope="col">说明</th>
+      <Table
+        containerProps={{ className: "document-metadata-table-wrap" }}
+        className="document-metadata-table"
+      >
+        <thead>
+          <tr>
+            <th scope="col">信息项</th>
+            <th scope="col">内容</th>
+            <th scope="col">说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([label, value, note]) => (
+            <tr key={label}>
+              <th scope="row">{label}</th>
+              <td className="document-metadata-value">{value}</td>
+              <td>
+                {note ? (
+                  <small>{note}</small>
+                ) : (
+                  <span className="document-metadata-empty">—</span>
+                )}
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {rows.map(([label, value, note]) => (
-              <tr key={label}>
-                <th scope="row">{label}</th>
-                <td className="document-metadata-value">{value}</td>
-                <td>
-                  {note ? (
-                    <small>{note}</small>
-                  ) : (
-                    <span className="document-metadata-empty">—</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </TableScroll>
+          ))}
+        </tbody>
+      </Table>
       {metadata.table_report && (
         <TableReportView report={metadata.table_report} />
       )}

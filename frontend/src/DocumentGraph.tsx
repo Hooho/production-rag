@@ -1,3 +1,4 @@
+import Table from "./Table";
 import { graphHops } from "./graphHops";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import { GraphReviewPanel, type ReviewStep } from "./GraphReviewPanel";
@@ -536,7 +537,7 @@ export function DocumentGraph({
       {data.history.length > 1 && (
         <details className="graph-history">
           <summary>建图记录（{data.history.length} 次，只有一次生效）</summary>
-          <table className="graph-table">
+          <Table className="graph-table">
             <thead>
               <tr>
                 <th>时间</th>
@@ -578,7 +579,7 @@ export function DocumentGraph({
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
         </details>
       )}
 
@@ -749,7 +750,7 @@ export function DocumentGraph({
                 size={data.entities.page_size}
                 onPage={setPage}
               >
-                <table className="graph-table">
+                <Table className="graph-table">
                   <thead>
                     <tr>
                       <th className="graph-row-number">序号</th>
@@ -784,7 +785,7 @@ export function DocumentGraph({
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </Table>
               </Paged>
             )}
             {!switching && view === "relations" && data.relations && (
@@ -794,7 +795,7 @@ export function DocumentGraph({
                 size={data.relations.page_size}
                 onPage={setPage}
               >
-                <table className="graph-table">
+                <Table className="graph-table">
                   <thead>
                     <tr>
                       <th className="graph-row-number">序号</th>
@@ -860,7 +861,7 @@ export function DocumentGraph({
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </Table>
               </Paged>
             )}
             {!switching && view === "merges" && data.merges && (
@@ -891,7 +892,7 @@ export function DocumentGraph({
                     </button>
                   </div>
                 )}
-                <table className="graph-table graph-merge-table">
+                <Table className="graph-table graph-merge-table">
                   <colgroup>
                     <col />
                     <col />
@@ -1006,7 +1007,7 @@ export function DocumentGraph({
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </Table>
               </Paged>
             )}
           </div>

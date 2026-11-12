@@ -1,4 +1,4 @@
-import TableScroll from "./TableScroll";
+import Table from "./Table";
 // Agent 模式的执行链（设计稿：问答页 · Agent 模式执行链）。
 // 处理阶段里的「Agent 循环」这一步换成这里的视图：先是统计和每轮概览，再逐轮展开
 // ① 收到（模型收到的输入，原样）→ ② 输出（接口原始响应和提取出的字段）→ ③ 程序处理 → ④ 工具返回。
@@ -453,136 +453,137 @@ function Summary({ result }: { result: Record<string, unknown> }) {
 function Overview({ rounds }: { rounds: AgentRound[] }) {
   const seen = new Set<string>();
   return (
-    <TableScroll className="agent-table-wrap">
-      <table className="agent-table">
-        <thead>
-          <tr>
-            <th>轮次</th>
-            <th>模型的决定</th>
-            <th>工具调用参数</th>
-            <th>结果</th>
-            <th>耗时</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rounds.map((round) => {
-            const results = round.tool_results ?? [];
-            if (results.length === 0) {
-              const label = round.error
-                ? "调用失败"
-                : round.kind === "forced"
-                  ? "强制回答"
-                  : round.kind === "citation_retry"
-                    ? "重写回答"
-                    : "直接回答";
-              return (
-                <tr key={round.round} className="round-start">
-                  <td>第 {round.round} 轮</td>
-                  <td>
-                    <Tag size="sm" mono outline>
-                      {label}
-                    </Tag>
-                  </td>
-                  <td>
-                    <span className="agent-muted">无（没有调用工具）</span>
-                  </td>
-                  <td>
-                    {round.citation_check ? (
-                      <>
-                        {round.citation_check.passed
-                          ? "引用 "
-                          : "引用检查没通过 "}
-                        {round.citation_check.cited.map((id) => (
-                          <EvidenceId key={id} id={id} />
-                        ))}
-                      </>
-                    ) : round.error ? (
-                      <span className="agent-warn">{round.error}</span>
-                    ) : (
-                      ""
-                    )}
-                  </td>
-                  <td>{formatDuration(round.duration_ms)}</td>
-                </tr>
-              );
-            }
-            return results.map((result, index) => {
-              const ids = evidenceIds(result);
-              const args = parseArguments(result.arguments);
-              return (
-                <tr
-                  key={`${round.round}-${index}`}
-                  className={index === 0 ? "round-start" : undefined}
-                >
-                  {index === 0 && (
-                    <td rowSpan={results.length}>
-                      第 {round.round} 轮
-                      {results.length > 1 && (
-                        <small>同时调用 {results.length} 个</small>
-                      )}
-                    </td>
+    <Table
+      containerProps={{ className: "agent-table-wrap" }}
+      className="agent-table"
+    >
+      <thead>
+        <tr>
+          <th>轮次</th>
+          <th>模型的决定</th>
+          <th>工具调用参数</th>
+          <th>结果</th>
+          <th>耗时</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rounds.map((round) => {
+          const results = round.tool_results ?? [];
+          if (results.length === 0) {
+            const label = round.error
+              ? "调用失败"
+              : round.kind === "forced"
+                ? "强制回答"
+                : round.kind === "citation_retry"
+                  ? "重写回答"
+                  : "直接回答";
+            return (
+              <tr key={round.round} className="round-start">
+                <td>第 {round.round} 轮</td>
+                <td>
+                  <Tag size="sm" mono outline>
+                    {label}
+                  </Tag>
+                </td>
+                <td>
+                  <span className="agent-muted">无（没有调用工具）</span>
+                </td>
+                <td>
+                  {round.citation_check ? (
+                    <>
+                      {round.citation_check.passed
+                        ? "引用 "
+                        : "引用检查没通过 "}
+                      {round.citation_check.cited.map((id) => (
+                        <EvidenceId key={id} id={id} />
+                      ))}
+                    </>
+                  ) : round.error ? (
+                    <span className="agent-warn">{round.error}</span>
+                  ) : (
+                    ""
                   )}
-                  <td>
-                    <ToolTag name={result.name} />
-                  </td>
-                  <td>
-                    {args && typeof args === "object" ? (
-                      <table
-                        className="agent-param-table tool-tinted-table"
-                        style={
-                          {
-                            "--tool-h": toolHue(result.name),
-                          } as React.CSSProperties
-                        }
-                      >
-                        <tbody>
-                          {Object.entries(args as Record<string, unknown>).map(
-                            ([key, value]) => (
-                              <tr key={key}>
-                                <th>{key}</th>
-                                <td>
-                                  <code>
-                                    {typeof value === "string"
-                                      ? value
-                                      : JSON.stringify(value)}
-                                  </code>
-                                </td>
-                              </tr>
-                            ),
-                          )}
-                        </tbody>
-                      </table>
-                    ) : (
-                      <code>{String(args)}</code>
+                </td>
+                <td>{formatDuration(round.duration_ms)}</td>
+              </tr>
+            );
+          }
+          return results.map((result, index) => {
+            const ids = evidenceIds(result);
+            const args = parseArguments(result.arguments);
+            return (
+              <tr
+                key={`${round.round}-${index}`}
+                className={index === 0 ? "round-start" : undefined}
+              >
+                {index === 0 && (
+                  <td rowSpan={results.length}>
+                    第 {round.round} 轮
+                    {results.length > 1 && (
+                      <small>同时调用 {results.length} 个</small>
                     )}
                   </td>
-                  <td>
-                    {result.status !== "ok" ? (
-                      <span className="agent-warn">
-                        {STATUS_LABELS[result.status]}
-                      </span>
-                    ) : ids.length ? (
-                      ids.map((id) => {
-                        const fresh = !seen.has(id);
-                        seen.add(id);
-                        return <EvidenceId key={id} id={id} fresh={fresh} />;
-                      })
-                    ) : (
-                      <span className="agent-muted">没有资料</span>
-                    )}
-                  </td>
-                  {index === 0 && (
-                    <td rowSpan={results.length}>
-                      {formatDuration(round.duration_ms)}
-                    </td>
+                )}
+                <td>
+                  <ToolTag name={result.name} />
+                </td>
+                <td>
+                  {args && typeof args === "object" ? (
+                    <Table
+                      className="agent-param-table tool-tinted-table"
+                      style={
+                        {
+                          "--tool-h": toolHue(result.name),
+                        } as React.CSSProperties
+                      }
+                    >
+                      <tbody>
+                        {Object.entries(args as Record<string, unknown>).map(
+                          ([key, value]) => (
+                            <tr key={key}>
+                              <th>{key}</th>
+                              <td>
+                                <code>
+                                  {typeof value === "string"
+                                    ? value
+                                    : JSON.stringify(value)}
+                                </code>
+                              </td>
+                            </tr>
+                          ),
+                        )}
+                      </tbody>
+                    </Table>
+                  ) : (
+                    <code>{String(args)}</code>
                   )}
-                </tr>
-              );
-            });
-          })}
-        </tbody>
-      </table>
-    </TableScroll>
+                </td>
+                <td>
+                  {result.status !== "ok" ? (
+                    <span className="agent-warn">
+                      {STATUS_LABELS[result.status]}
+                    </span>
+                  ) : ids.length ? (
+                    ids.map((id) => {
+                      const fresh = !seen.has(id);
+                      seen.add(id);
+                      return <EvidenceId key={id} id={id} fresh={fresh} />;
+                    })
+                  ) : (
+                    <span className="agent-muted">没有资料</span>
+                  )}
+                </td>
+                {index === 0 && (
+                  <td rowSpan={results.length}>
+                    {formatDuration(round.duration_ms)}
+                  </td>
+                )}
+              </tr>
+            );
+          });
+        })}
+      </tbody>
+    </Table>
   );
 }
 
