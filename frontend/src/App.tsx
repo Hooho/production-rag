@@ -5165,8 +5165,7 @@ function RetrievalDiagnostics({
           </p>
           <Table
             className="diag-table diag-table-compact"
-            containerProps={{ className: "diag-table-wrap rank-table-wrap" }}
-            maxHeight={340}
+            containerProps={{ className: "diag-table-wrap" }}
             stickyHeader
             empty={activeHits.length === 0}
             emptyContent="没有找到分片"

@@ -38,7 +38,7 @@
 }
 
 .ag-delivery-dialog[open] > .diag > .table-frame:has(> .diag-table-wrap) {
-  flex: 0 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -54,6 +54,16 @@
   flex: none;
 }
 
+/* 所有带表格的伴随浮窗使用统一可用高度，表格填充剩余区域。 */
+.ag-delivery-dialog.ag-dialog-companion:has(
+    > .diag > .table-frame > .diag-table-wrap
+  ),
+.ag-delivery-dialog.ag-dialog-movable:has(
+    > .diag > .table-frame > .diag-table-wrap
+  ) {
+  height: var(--companion-max-height, calc(80dvh - 26px));
+}
+
 /* 表格框自己滚时，表头吸在框顶，不用往上偏到弹窗内边缘。 */
 .ag-delivery-dialog .diag-table-wrap .diag-table th {
   top: 0;
@@ -61,27 +71,6 @@
 
 .ag-delivery-dialog::backdrop {
   background: #16362233;
-}
-
-/* 原始排名表弹窗：内容就这些（标签栏 + 固定高度表格 + 翻页），弹窗按内容收高，不留大片空白。
-   来源列要放得下原文预览，弹窗比默认的宽一点。
-   bottom 改成 auto，否则定位上下都钉死时高度会被拉满。
-   浮窗形态继续用自己的宽高规则。 */
-.ag-delivery-dialog.ag-dialog-rank:not(.ag-dialog-companion) {
-  width: min(780px, calc(100vw - 32px));
-  height: auto;
-  bottom: auto;
-  max-height: calc(100dvh - 32px);
-}
-
-/* 交给重排的候选池：五列（召回方式、分片、RRF 分、各路名次、原文），
-   默认宽度会把列挤扁，放宽一点，表格不用左右拉。
-   内容就这些：表格框自己滚，弹窗按内容收高，不留大片空白。 */
-.ag-delivery-dialog.ag-dialog-pool:not(.ag-dialog-companion) {
-  width: min(760px, calc(100vw - 32px));
-  height: auto;
-  bottom: auto;
-  max-height: calc(100dvh - 32px);
 }
 
 .ag-delivery-dialog-head {
