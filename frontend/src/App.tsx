@@ -4884,7 +4884,7 @@ function RetrievalDiagnostics({
           .join("，") || "没有分片被排除",
       hint:
         config.source_selection_mode === "tokens"
-          ? `先选原始命中（估算 ${config.source_child_tokens ?? 0} token），剩余预算再补父子扩展；分片不截断。预算仅包含原文，不含对话与提示词。`
+          ? `图保底上限 ${config.source_graph_budget_reserved ?? 0} token，实际保底 ${config.source_graph_budget_used ?? 0} token（${config.source_graph_budget_count ?? 0} 片）；其余公共竞争，原始命中合计估算 ${config.source_child_tokens ?? 0} token，剩余预算再补父子扩展；分片不截断。预算仅包含原文，不含对话与提示词。`
           : `最多返回 ${config.return_limit} 条来源；并入父块的分片不单独成源，也不占名额`,
     },
   ];
@@ -5570,6 +5570,16 @@ function RetrievalDiagnostics({
         </li>
       </ol>
       <div className="diag-section-title">检索漏斗</div>
+      {config.source_selection_mode === "tokens" && (
+        <p className="diag-contrib-hint">
+          图原文保底 {Math.round((config.source_graph_budget_ratio ?? 0) * 100)}
+          %： 上限 {config.source_graph_budget_reserved ??
+            0} token，实际使用 {config.source_graph_budget_used ?? 0} token（
+          {config.source_graph_budget_count ?? 0} 个分片）。
+          未用完的份额归还公共预算，图分片也可继续参与公共竞争。
+          {!config.reranked && "本次重排未成功，未启用图保底。"}
+        </p>
+      )}
       <div className="diag-funnel">
         <div className="diag-funnel-row diag-funnel-head">
           <span>阶段</span>

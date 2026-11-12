@@ -300,6 +300,24 @@ class DocumentSearchTool:
         budget_skipped = 0
         if budget_mode:
             from ..memory.framework import text_tokens
+        graph_budget = (
+            int(token_budget * config.get("source_graph_budget_ratio", 0.25))
+            if budget_mode
+            else 0
+        )
+        graph_guaranteed = set()
+        graph_budget_used = 0
+        # 只保底真正通过相关性过滤的图候选；没有可靠重排分数时仍按公共排名选取。
+        if graph_budget and rerank_count and not fallback_used:
+            for item in ranked:
+                if "graph" not in item["retrieval_methods"]:
+                    continue
+                clean_text, _ = sanitize_source(item["text"])
+                size = text_tokens(clean_text)
+                if graph_budget_used + size <= graph_budget:
+                    graph_guaranteed.add(item["id"])
+                    graph_budget_used += size
+            tokens_used = graph_budget_used
         # 已被某个父块包含的分片 {分片 id: 来源编号}。两个命中分片在同一小节里相邻时，
         # 后一个直接归入前一个父块，不再重复给模型同一段文字；诊断里它的来源编号指向那个父块。
         covered = {}
@@ -342,11 +360,13 @@ class DocumentSearchTool:
                 clean_text, _ = sanitize_source(item["text"])
                 size = text_tokens(clean_text)
                 item["source_tokens"] = size
-                if tokens_used + size > token_budget:
+                item["graph_budget_guaranteed"] = item["id"] in graph_guaranteed
+                additional = 0 if item["graph_budget_guaranteed"] else size
+                if tokens_used + additional > token_budget:
                     item["status"] = "beyond_budget"
                     budget_skipped += 1
                     continue
-                tokens_used += size
+                tokens_used += additional
             item["status"] = "returned"
             item["source_id"] = f"S{len(sources) + 1}"
             text = item["text"]
@@ -468,6 +488,10 @@ class DocumentSearchTool:
             "returned": len(sources),
             "parent_context": "on" if use_parent else "off",
             "source_characters": parent_characters,
+            "source_graph_budget_ratio": config.get("source_graph_budget_ratio", 0.25),
+            "source_graph_budget_reserved": graph_budget,
+            "source_graph_budget_used": graph_budget_used,
+            "source_graph_budget_count": len(graph_guaranteed),
             "source_selection_mode": "tokens" if budget_mode else "count",
             "source_token_budget": token_budget if budget_mode else None,
             "source_tokens_used": tokens_used if budget_mode else None,
@@ -830,6 +854,9 @@ class DocumentSearchTool:
                     "status": item["status"],
                     "source_id": item.get("source_id"),
                     "source_tokens": item.get("source_tokens"),
+                    "graph_budget_guaranteed": bool(
+                        item.get("graph_budget_guaranteed")
+                    ),
                     # 并入了前面某个父块：内容已经在那条来源里，不单独成源，也不占返回名额。
                     "merged": bool(item.get("merged")),
                     "retrieval_methods": item["retrieval_methods"],
@@ -859,6 +886,10 @@ class DocumentSearchTool:
             **{
                 key: stats.get(key)
                 for key in (
+                    "source_graph_budget_ratio",
+                    "source_graph_budget_reserved",
+                    "source_graph_budget_used",
+                    "source_graph_budget_count",
                     "source_selection_mode",
                     "source_token_budget",
                     "source_tokens_used",

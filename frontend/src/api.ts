@@ -63,6 +63,7 @@ export type RetrievalCandidate = {
     | "not_in_pool";
   source_id: string | null;
   source_tokens?: number | null;
+  graph_budget_guaranteed?: boolean;
   // 并入了前面某个父块：内容已经在那条来源里，不单独成源，也不占返回名额。旧记录没有。
   merged?: boolean;
   retrieval_methods: string[];
@@ -85,6 +86,10 @@ export type RetrievalDiagnosticsData = {
     rerank_candidates: number;
     // 图检索名额：交给重排的候选里至少几个图带回的分片；旧记录没有。
     graph_rerank_quota?: number;
+    source_graph_budget_ratio?: number;
+    source_graph_budget_reserved?: number;
+    source_graph_budget_used?: number;
+    source_graph_budget_count?: number;
     source_selection_mode?: "count" | "tokens";
     source_token_budget?: number | null;
     source_tokens_used?: number | null;

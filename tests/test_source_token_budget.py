@@ -117,3 +117,77 @@ def test_oversized_hit_does_not_block_smaller_later_hits(runtime):
     )
     assert [row["chunk_id"] for row in result["sources"]] == ["b", "c"]
     assert result["stats"]["source_tokens_used"] == 800
+
+
+def test_graph_budget_protects_evidence_and_zero_disables_it(runtime, monkeypatch):
+    normal = [
+        dict(id=f"p{i}", title=f"p{i}", text=char * 1000, score=1 - i / 100)
+        for i, char in enumerate("甲乙丙丁戊己庚")
+    ]
+    graph_rows = [
+        dict(id="g1", title="g1", text="图" * 1000, score=0.7),
+        dict(id="g2", title="g2", text="谱" * 1000, score=0.6),
+    ]
+
+    class Store:
+        def readable_scope(self, owner):
+            return {"versions": {}, "documents": []}
+
+        def search(self, *args, **kwargs):
+            return [dict(row) for row in normal]
+
+    def graph(*args, **kwargs):
+        return {
+            "status": "ok",
+            "sources": {"unified": [dict(row) for row in graph_rows]},
+            "timings": {},
+            "scope": [],
+        }
+
+    monkeypatch.setattr("app.tools.search.graph_retrieve.retrieve", graph)
+    scores = {row["text"]: 0.99 - i / 100 for i, row in enumerate(normal + graph_rows)}
+    models = SimpleNamespace(
+        rerank=lambda query, texts: [scores[text] for text in texts]
+    )
+    runtime(
+        source_selection_mode="tokens",
+        source_token_budget=8000,
+        source_graph_budget_ratio=0,
+        parent_context=False,
+        rerank_min_score=0.1,
+        rerank_fallback_min_score=0,
+    )
+
+    def run():
+        return DocumentSearchTool().execute(
+            Store(),
+            models,
+            "alice",
+            ["问题"],
+            "问题",
+            methods=("dense", "graph"),
+            pool_size=20,
+        )
+
+    shared = run()
+    assert [row["chunk_id"] for row in shared["sources"]] == [
+        row["id"] for row in normal
+    ] + ["g1"]
+    runtime(source_graph_budget_ratio=0.25)
+    protected = run()
+    assert [row["chunk_id"] for row in protected["sources"]] == [
+        row["id"] for row in normal[:6]
+    ] + ["g1", "g2"]
+    assert protected["stats"]["source_tokens_used"] == 8000
+    assert protected["stats"]["source_graph_budget_used"] == 2000
+    # 同一分片既被普通召回又被图召回，只计一次。
+    graph_rows[:] = [dict(normal[0])]
+    reused = run()
+    assert reused["stats"]["source_graph_budget_used"] == 1000
+    assert reused["stats"]["source_tokens_used"] == 7000
+    assert len({row["chunk_id"] for row in reused["sources"]}) == len(reused["sources"])
+    # 图内容低于相关度阈值时不因保底而入选，预算全部回归公共竞争。
+    scores[normal[0]["text"]] = 0.01
+    rejected = run()
+    assert rejected["stats"]["source_graph_budget_count"] == 0
+    assert all(row["chunk_id"] != "p0" for row in rejected["sources"])

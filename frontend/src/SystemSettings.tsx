@@ -99,6 +99,16 @@ const META: Record<string, Meta> = {
     effect: "预算模式不应用返回条数和优秀阈值放行规则。",
     when: "之后的检索。",
   },
+  source_graph_budget_ratio: {
+    label: "图检索原文保底比例",
+    step: 0.05,
+    impact: "judgement",
+    what: "仅在 token 预算模式且重排成功时生效。0.25 表示总原文预算的 25%；只保底通过相关度过滤的图分片。",
+    why: "减少图找到的独有证据在最终选取中被挤掉。",
+    effect:
+      "用不完自动归还公共预算；图分片仍可竞争公共空间，同一分片不重复计数。0 表示关闭。",
+    when: "之后的检索。",
+  },
   source_token_budget: {
     label: "原文 token 预算（估算）",
     unit: "token",

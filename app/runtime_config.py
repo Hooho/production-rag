@@ -134,6 +134,15 @@ SPECS = [
         "eval": "fixed",
     },
     {
+        "key": "source_graph_budget_ratio",
+        "group": "retrieval",
+        "type": "float",
+        "default": 0.25,
+        "min": 0,
+        "max": 1,
+        "eval": "fixed",
+    },
+    {
         "key": "source_token_budget",
         "group": "retrieval",
         "type": "int",
