@@ -770,6 +770,7 @@ def run_dialogue_suite(store, models, suite, run_id, compare, progress):
                 },
                 outcome["answer"],
                 outcome["sources"],
+                outcome.get("relations") or [],
             )
             rows.append(
                 {

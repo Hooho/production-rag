@@ -32,7 +32,9 @@ MARKER_MIN_LENGTH = 10
 
 def prompt_markers():
     clauses = re.split(r"[。，；：！？\n]", prompts.instructions("answer"))
-    return PROMPT_MARKERS + tuple(clause.strip() for clause in clauses if len(clause.strip()) >= MARKER_MIN_LENGTH)
+    return PROMPT_MARKERS + tuple(
+        clause.strip() for clause in clauses if len(clause.strip()) >= MARKER_MIN_LENGTH
+    )
 
 
 # 把一条来源格式化为 <source> 标签。标题同样来自上传文档，也要处理引号和伪造标签。
@@ -47,11 +49,58 @@ def format_source(source):
     return f'<source id="{source["id"]}" title="{title}"{extra}>\n{neutralize_tags(source["text"])}\n</source>'
 
 
+# 图谱关系放在检索来源后面单独一段，每条一个 <relation> 标签，编号 G1、G2；文字来自文档抽取，同样处理伪造标签。
+RELATION_HEADER = (
+    "本次图谱关系（由模型从原文抽取，可能有误；和检索来源冲突时以检索来源为准）："
+)
+
+
+def format_relation(relation):
+    return f'<relation id="{relation["id"]}">\n{neutralize_tags(relation["text"])}\n</relation>'
+
+
+def relation_block(relations):
+    if not relations:
+        return ""
+    return (
+        "\n\n"
+        + RELATION_HEADER
+        + "\n"
+        + "\n".join(format_relation(item) for item in relations)
+    )
+
+
+# 回答步骤和组装上下文步骤显示的图谱关系：编号、交给模型的原文和出处（出处不发给模型，只用于界面上点开原文）。
+def relation_layout(relation):
+    return {
+        key: relation.get(key)
+        for key in (
+            "id",
+            "relation_id",
+            "text",
+            "source",
+            "target",
+            "category",
+            "description",
+            "evidence",
+            "chunk_id",
+            "document_id",
+            "title",
+            "version",
+            "rerank_score",
+            "tokens",
+        )
+    }
+
+
 # 充分性判断认为资料只能回答一部分时，拼在系统说明后面的提示；回答步骤也用它显示模型实际收到了什么。
 def coverage_note(coverage):
     if coverage and coverage.get("verdict") == "partial":
-        return ("检索资料只能回答问题的一部分（缺少：" + (coverage.get("missing") or "部分信息") +
-            "）。只回答资料能支持的部分，并明确告诉用户哪些内容资料中没有。")
+        return (
+            "检索资料只能回答问题的一部分（缺少："
+            + (coverage.get("missing") or "部分信息")
+            + "）。只回答资料能支持的部分，并明确告诉用户哪些内容资料中没有。"
+        )
     return ""
 
 
@@ -62,17 +111,33 @@ def source_layout(source):
     parts = []
     for part in source.get("parent_parts") or []:
         context = part.get("context") or ""
-        parts.append({"chunk_id": part.get("chunk_id"), "position": part.get("position"),
-            "chars": part.get("chars"), "hit": part.get("chunk_id") == hit,
-            "context": None if not context or "<think" in context else context})
-    return {"id": source.get("id"), "title": source.get("title"), "heading": source.get("heading"),
-        "version": source.get("version"), "page_start": source.get("page_start"),
-        "chars": len(source.get("text") or ""), "chunk_id": hit, "position": source.get("position"),
-        "parts": parts, "injection": source.get("injection") or 0}
+        parts.append(
+            {
+                "chunk_id": part.get("chunk_id"),
+                "position": part.get("position"),
+                "chars": part.get("chars"),
+                "hit": part.get("chunk_id") == hit,
+                "context": None if not context or "<think" in context else context,
+            }
+        )
+    return {
+        "id": source.get("id"),
+        "title": source.get("title"),
+        "heading": source.get("heading"),
+        "version": source.get("version"),
+        "page_start": source.get("page_start"),
+        "chars": len(source.get("text") or ""),
+        "chunk_id": hit,
+        "position": source.get("position"),
+        "parts": parts,
+        "injection": source.get("injection") or 0,
+    }
 
 
 class ResponseContext(TypedDict, total=False):
     sources: list[dict[str, Any]]
+    # 图谱关系（G 编号），拼在检索来源后面。
+    relations: list[dict[str, Any]]
     # 检索充分性判断的结论；partial 时提示模型只回答资料支持的部分。
     coverage: dict[str, Any] | None
     # 用户的长期记忆（偏好、身份），拼在来源后面，只用于调整回答方式。
@@ -102,32 +167,64 @@ class ResponseAgent:
 
         @dynamic_prompt
         def source_prompt(request: ModelRequest) -> str:
-            sources = request.runtime.context.get("sources", []) if request.runtime else []
-            coverage = request.runtime.context.get("coverage") if request.runtime else None
-            profile = request.runtime.context.get("profile") if request.runtime else None
+            sources = (
+                request.runtime.context.get("sources", []) if request.runtime else []
+            )
+            relations = (
+                request.runtime.context.get("relations", []) if request.runtime else []
+            )
+            coverage = (
+                request.runtime.context.get("coverage") if request.runtime else None
+            )
+            profile = (
+                request.runtime.context.get("profile") if request.runtime else None
+            )
             source_lines = []
             for source in sources:
                 source_lines.append(format_source(source))
             # 充分性判断认为资料只能回答一部分时，明确告诉模型缺什么：
             # 原来只有一句"资料不足时明确拒答"，模型要么整体拒答，要么用常识把缺的部分补上。
             partial_note = coverage_note(coverage)
-            return prompts.compose("answer") + partial_note + "\n\n本次检索来源：\n" + "\n".join(source_lines) + profile_block(profile)
+            return (
+                prompts.compose("answer")
+                + partial_note
+                + "\n\n本次检索来源：\n"
+                + "\n".join(source_lines)
+                + relation_block(relations)
+                + profile_block(profile)
+            )
 
-        return create_agent(model=self.models.chat_model, tools=[], context_schema=ResponseContext,
-            middleware=[self.memory.middleware, source_prompt], checkpointer=self.memory.checkpointer,
-            name="rag_response_agent")
+        return create_agent(
+            model=self.models.chat_model,
+            tools=[],
+            context_schema=ResponseContext,
+            middleware=[self.memory.middleware, source_prompt],
+            checkpointer=self.memory.checkpointer,
+            name="rag_response_agent",
+        )
 
     # 设置页改了对话记忆的压缩阈值或保留 Token、或提示词页改了压缩提示词时，重建摘要中间件和回答 Agent；已有的会话记忆（Checkpoint）不受影响。
     def sync_memory_settings(self):
         if self.fixed_memory:
             return
-        trigger, keep = runtime_value("memory_trigger_tokens"), runtime_value("memory_keep_tokens")
+        trigger, keep = (
+            runtime_value("memory_trigger_tokens"),
+            runtime_value("memory_keep_tokens"),
+        )
         # 压缩提示词在「提示词」页改了版本也要重建。
         summary = prompts.identity("memory_summary")
-        if (trigger, keep, summary) == (self.memory.trigger_tokens, self.memory.keep_tokens, self.memory.summary_identity):
+        if (trigger, keep, summary) == (
+            self.memory.trigger_tokens,
+            self.memory.keep_tokens,
+            self.memory.summary_identity,
+        ):
             return
         with self.settings_lock:
-            if (trigger, keep, summary) == (self.memory.trigger_tokens, self.memory.keep_tokens, self.memory.summary_identity):
+            if (trigger, keep, summary) == (
+                self.memory.trigger_tokens,
+                self.memory.keep_tokens,
+                self.memory.summary_identity,
+            ):
                 return
             self.memory.trigger_tokens, self.memory.keep_tokens = trigger, keep
             self.rebuild()
@@ -139,29 +236,61 @@ class ResponseAgent:
         self.rebuild()
 
     # 调用带摘要中间件的回答 Agent，并返回模型实际使用的框架记忆；传入 on_token 时逐段转发模型输出。
-    def answer(self, owner, session_id, question, sources, on_token=None, coverage=None, profile=None):
+    def answer(
+        self,
+        owner,
+        session_id,
+        question,
+        sources,
+        on_token=None,
+        coverage=None,
+        profile=None,
+        relations=None,
+    ):
         if not sources:
             return "知识库中没有足够资料，请补充文档或具体问题。", {
-                "summary": "", "turns": [], "message_count": 0, "estimated_tokens": 0,
-                "summary_updated": False, "previous_message_count": 0,
+                "summary": "",
+                "turns": [],
+                "message_count": 0,
+                "estimated_tokens": 0,
+                "summary_updated": False,
+                "previous_message_count": 0,
             }
         if self.agent is None:
             parts = []
             for source in sources:
                 parts.append(f"[{source['id']}] {source['title']}：{source['text']}")
+            for relation in relations or []:
+                parts.append(f"[{relation['id']}] 图谱关系：{relation['text']}")
             answer = "演示模式：以下为检索原文，未调用生成模型。\n" + "\n".join(parts)
-            return answer, {"summary": "", "turns": [], "message_count": 0,
-                "estimated_tokens": 0, "summary_updated": False,
-                "previous_message_count": 0}
+            return answer, {
+                "summary": "",
+                "turns": [],
+                "message_count": 0,
+                "estimated_tokens": 0,
+                "summary_updated": False,
+                "previous_message_count": 0,
+            }
         self.sync_memory_settings()
-        config = {"configurable": {"thread_id": self.memory.thread_id(owner, session_id)}}
+        config = {
+            "configurable": {"thread_id": self.memory.thread_id(owner, session_id)}
+        }
         before = self.memory.inspect(owner, session_id)
         # 原来用 invoke 等整段回答生成完才返回，前端首字要等几秒；
         # 改用 stream 同时订阅 messages（模型逐段输出）和 values（每步完整状态），
         # 边生成边转发文字，最后一份 values 与原来 invoke 的返回值相同，记忆统计逻辑不变。
         result = None
-        for mode, chunk in self.agent.stream({"messages": [{"role": "user", "content": question}]},
-                config, context={"sources": sources, "coverage": coverage, "profile": profile or []}, stream_mode=["messages", "values"]):
+        for mode, chunk in self.agent.stream(
+            {"messages": [{"role": "user", "content": question}]},
+            config,
+            context={
+                "sources": sources,
+                "relations": relations or [],
+                "coverage": coverage,
+                "profile": profile or [],
+            },
+            stream_mode=["messages", "values"],
+        ):
             if mode == "values":
                 result = chunk
                 continue
@@ -187,8 +316,11 @@ class ResponseAgent:
         usage = getattr(message, "usage_metadata", None)
         if not usage:
             return None
-        return {"input": usage.get("input_tokens"), "output": usage.get("output_tokens"),
-            "total": usage.get("total_tokens")}
+        return {
+            "input": usage.get("input_tokens"),
+            "output": usage.get("output_tokens"),
+            "total": usage.get("total_tokens"),
+        }
 
     # 把一轮问答追加进会话记忆（Checkpointer），超过阈值时压缩；不生成回答（Agent 模式用：答案已经由 Agent 生成）。
     # 压缩规则不另写：直接调用回答 Agent 身上同一个摘要中间件（同样的阈值、Token 估算、切点对齐、去掉 <think>、
@@ -201,31 +333,50 @@ class ResponseAgent:
         if self.agent is None or self.memory.middleware is None:
             return None
         self.sync_memory_settings()
-        config = {"configurable": {"thread_id": self.memory.thread_id(owner, session_id)}}
+        config = {
+            "configurable": {"thread_id": self.memory.thread_id(owner, session_id)}
+        }
         before = self.memory.inspect(owner, session_id)
         state = self.agent.get_state(config)
         current = list(state.values.get("messages", []))
         if request_id and self.memory.applied(current, request_id):
-            return {"compressed": False, "summary_updated": False, "already_applied": True,
-                "message_count_before": before["message_count"], "message_count": before["message_count"],
-                "summary": before["summary"], "memory_trigger_tokens": self.memory.trigger_tokens,
-                "memory_keep_tokens": self.memory.keep_tokens}
+            return {
+                "compressed": False,
+                "summary_updated": False,
+                "already_applied": True,
+                "message_count_before": before["message_count"],
+                "message_count": before["message_count"],
+                "summary": before["summary"],
+                "memory_trigger_tokens": self.memory.trigger_tokens,
+                "memory_keep_tokens": self.memory.keep_tokens,
+            }
         marker = {"request_id": request_id} if request_id else {}
-        added = [HumanMessage(question, additional_kwargs=dict(marker)), AIMessage(answer, additional_kwargs=dict(marker))]
+        added = [
+            HumanMessage(question, additional_kwargs=dict(marker)),
+            AIMessage(answer, additional_kwargs=dict(marker)),
+        ]
         messages = current + added
         # 中间件判断要不要压缩：要压缩时返回“删除全部 + 新摘要 + 保留的原文”，不压缩时返回 None，只追加本轮。
         update = self.memory.middleware.before_model({"messages": messages}, None)
         if update and request_id:
             for message in update.get("messages", []):
                 kwargs = getattr(message, "additional_kwargs", None)
-                if isinstance(kwargs, dict) and kwargs.get("lc_source") == "summarization":
+                if (
+                    isinstance(kwargs, dict)
+                    and kwargs.get("lc_source") == "summarization"
+                ):
                     kwargs["last_request_id"] = request_id
         self.agent.update_state(config, update or {"messages": added}, as_node="model")
         after = self.memory.inspect(owner, session_id)
-        return {"compressed": update is not None, "summary_updated": after["summary"] != before["summary"],
-            "message_count_before": before["message_count"], "message_count": after["message_count"],
-            "summary": after["summary"], "memory_trigger_tokens": self.memory.trigger_tokens,
-            "memory_keep_tokens": self.memory.keep_tokens}
+        return {
+            "compressed": update is not None,
+            "summary_updated": after["summary"] != before["summary"],
+            "message_count_before": before["message_count"],
+            "message_count": after["message_count"],
+            "summary": after["summary"],
+            "memory_trigger_tokens": self.memory.trigger_tokens,
+            "memory_keep_tokens": self.memory.keep_tokens,
+        }
 
     def close(self):
         self.memory.close()

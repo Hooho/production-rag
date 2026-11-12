@@ -3371,6 +3371,7 @@ def create_app(store=None, models=None, jwt_secret=None):
                     retrieved,
                 )
                 sources = checked["sources"]
+                relations = checked.get("relations") or []
                 answer = answer_question(
                     app.state.models,
                     responder,
@@ -3379,8 +3380,9 @@ def create_app(store=None, models=None, jwt_secret=None):
                     rewrite["standalone_query"],
                     sources,
                     {"verdict": checked["verdict"], "missing": checked["missing"]},
+                    relations,
                 )
-                return {"answer": answer, "sources": sources}
+                return {"answer": answer, "sources": sources, "relations": relations}
         finally:
             if responder is not None:
                 responder.close()

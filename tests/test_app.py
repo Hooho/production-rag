@@ -2261,7 +2261,7 @@ def judging_models(verdicts):
         def __init__(self):
             self.questions = []
 
-        def judge_sufficiency(self, question, sources):
+        def judge_sufficiency(self, question, sources, relations=()):
             self.questions.append(question)
             return verdicts[len(self.questions) - 1]
 

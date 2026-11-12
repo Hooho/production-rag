@@ -784,7 +784,7 @@ class Models:
     # 或"主题相关却没有答案"（问 2025 年的数据，库里只有 2024 年）。这里做的是整组资料的绝对判断，
     # 不足或只能回答一部分时还让模型说明缺什么、给出一个补充检索用的短问题。
     # 调用失败时按 sufficient 处理：判断只是额外的保护，不能因为它失败就让正常问答变成拒答。
-    def judge_sufficiency(self, question, sources):
+    def judge_sufficiency(self, question, sources, relations=()):
         source_lines = []
         for source in sources:
             # 相关性是重排模型给的分数，低分的资料由判断模型自己看是否切题。
@@ -792,6 +792,11 @@ class Models:
             if source.get("relevance") is not None:
                 note = f"（相关性 {source['relevance']:.2f}{'，相关性较低' if source.get('low_relevance') else ''}）"
             source_lines.append(f"[{source['id']}]{note} {source['text']}")
+        # 图谱关系（G 编号）也是回答模型会看到的资料，一起交给判断；标明是模型抽取的，可能有误。
+        for relation in relations or ():
+            source_lines.append(
+                f"[{relation['id']}]（图谱关系，模型从原文抽取） {relation['text']}"
+            )
         prompt = ChatPromptTemplate.from_messages(
             [
                 ("system", prompts.compose("sufficiency", template=True)),
@@ -826,21 +831,24 @@ class Models:
 
     # 检查模型引用只指向本轮真实检索来源。
     @staticmethod
-    def validate_citations(answer, sources):
-        if not Models.check_citations(answer, sources)["passed"]:
+    def validate_citations(answer, sources, relations=()):
+        if not Models.check_citations(answer, sources, relations)["passed"]:
             return CITATION_REJECTED
         return answer
 
     # 引用检查的明细：没有标注任何引用（no_citation）或引用了本轮不存在的来源编号（unknown_source）都不通过。
     # 单独返回明细，是为了在回答被拦截时记下具体原因，排查时能分清是"忘了标"还是"标错了"。
     @staticmethod
-    def check_citations(answer, sources):
+    # 检索来源是 S 编号，图谱关系是 G 编号，两种都可以引用。
+    def check_citations(answer, sources, relations=()):
         allowed = []
         for source in sources:
             allowed.append(source["id"])
+        for relation in relations or ():
+            allowed.append(relation["id"])
         cited = sorted(
-            set(re.findall(r"\[(S\d+)\]", answer or "")),
-            key=lambda value: int(value[1:]),
+            set(re.findall(r"\[([SG]\d+)\]", answer or "")),
+            key=lambda value: ("SG".index(value[0]), int(value[1:])),
         )
         unknown = [value for value in cited if value not in allowed]
         reason = "no_citation" if not cited else "unknown_source" if unknown else None

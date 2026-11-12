@@ -51,6 +51,18 @@ def title_limit(owner):
         return _title_limits.get(owner)
 
 
+# 交给回答模型的一条图谱关系：起点 → 终点（分类）：描述。原文引用：「……」。不写出处，出处由 G 编号在界面上对应。
+def relation_context_text(row):
+    description = (row.get("description") or "").strip().rstrip("。")
+    text = f"{row.get('source')} → {row.get('target')}（{row.get('category')}）：{description}"
+    quotes = [
+        part.strip() for part in (row.get("evidence") or "").split("||") if part.strip()
+    ]
+    if quotes:
+        text += "。原文引用：" + "".join(f"「{quote}」" for quote in quotes)
+    return text
+
+
 class DocumentSearchTool:
     """执行向量、关键词召回和结果融合。"""
 
@@ -307,6 +319,16 @@ class DocumentSearchTool:
         )
         graph_guaranteed = set()
         graph_budget_used = 0
+        # 图谱关系：图检索统一重排后留下的关系，按关系重排名次先放进图保底额度（不设占比上限），
+        # 剩下的保底额度再给只有图找到的分片。放不下的关系跳过、试下一条，和分片的填充规则一致。
+        relations, relation_rows, relation_reason = self.select_relations(
+            graph,
+            budget_mode,
+            graph_budget,
+            bool(rerank_count) and not fallback_used,
+        )
+        for row in relations:
+            graph_budget_used += row["tokens"]
         # 只保底真正通过相关性过滤的图候选；没有可靠重排分数时仍按公共排名选取。
         # 只保底「仅图检索找到」的分片：向量 / 关键词也找到的分片本来就在公共竞争里，
         # 让它占保底等于把保底用在本来就能入选的内容上，挤掉图独有的证据。
@@ -494,6 +516,11 @@ class DocumentSearchTool:
             "source_graph_budget_reserved": graph_budget,
             "source_graph_budget_used": graph_budget_used,
             "source_graph_budget_count": len(graph_guaranteed),
+            "source_graph_relation_count": len(relations),
+            "source_graph_relation_tokens": sum(row["tokens"] for row in relations),
+            "source_graph_relation_skipped": sum(
+                1 for row in relation_rows if row["status"] == "beyond_budget"
+            ),
             "source_selection_mode": "tokens" if budget_mode else "count",
             "source_token_budget": token_budget if budget_mode else None,
             "source_tokens_used": tokens_used if budget_mode else None,
@@ -552,7 +579,92 @@ class DocumentSearchTool:
             }
             if scope:
                 diagnostics["scope"]["graph_versions"] = graph.get("scope") or []
-        return {"sources": sources, "stats": stats, "diagnostics": diagnostics}
+            # 图检索留下的关系和去向：放进上下文（G 编号）还是额度不够没放；没放任何关系时写明原因。
+            diagnostics["context_relations"] = {
+                "reason": relation_reason,
+                "items": relation_rows,
+            }
+        return {
+            "sources": sources,
+            "relations": relations,
+            "stats": stats,
+            "diagnostics": diagnostics,
+        }
+
+    # 选出放进上下文的图谱关系。返回 (交给模型的关系, 诊断里每条留下的关系及去向, 一条关系都没放时的原因)。
+    # 只在 token 预算模式、图保底比例大于 0、分片重排成功、关系重排成功时放；
+    # 关系的条数不单独设上限，由图检索留下的关系（关系重排分数线、关系保留上限）和图保底额度决定。
+    @staticmethod
+    def select_relations(graph, budget_mode, graph_budget, reranked):
+        if graph is None or graph.get("status") != "ok":
+            return [], [], None
+        kept = [
+            row for row in graph.get("relation_candidates") or [] if row.get("kept")
+        ]
+        kept.sort(
+            key=lambda row: (
+                row.get("rerank_rank") or float("inf"),
+                row.get("fusion_rank") or float("inf"),
+            )
+        )
+        if not budget_mode:
+            reason = "按条数选来源时不放图谱关系，只在 token 预算模式下放"
+        elif not graph_budget:
+            reason = "图保底比例为 0，不放图谱关系"
+        elif not reranked:
+            reason = "分片重排未成功或走了兜底，未启用图保底"
+        elif graph.get("relation_rerank_error"):
+            reason = "关系重排失败，不放图谱关系"
+        elif not kept:
+            reason = "图检索没有留下关系"
+        else:
+            reason = None
+        relations = []
+        rows = []
+        used = 0
+        if reason is None:
+            from ..memory.framework import text_tokens
+        for row in kept:
+            text, injection_hits = sanitize_source(relation_context_text(row))
+            item = {
+                "relation_id": row["relation_id"],
+                "source": row.get("source"),
+                "target": row.get("target"),
+                "category": row.get("category"),
+                "description": row.get("description"),
+                "evidence": row.get("evidence"),
+                "chunk_id": row.get("chunk_id"),
+                "document_id": row.get("document_id"),
+                "title": row.get("title"),
+                "version": row.get("version_number"),
+                "rerank_score": row.get("rerank_score"),
+                "rerank_rank": row.get("rerank_rank"),
+                "text": text,
+                "injection": injection_hits,
+                "tokens": None,
+                "context_id": None,
+                "status": "off",
+            }
+            if reason is None:
+                size = text_tokens(text)
+                item["tokens"] = size
+                if used + size <= graph_budget:
+                    used += size
+                    item.update(status="context", context_id=f"G{len(relations) + 1}")
+                    relations.append(
+                        {
+                            "id": item["context_id"],
+                            **{
+                                key: value
+                                for key, value in item.items()
+                                if key not in ("context_id", "status")
+                            },
+                        }
+                    )
+                else:
+                    item["status"] = "beyond_budget"
+            rows.append(item)
+        return relations, rows, reason
 
     # 图检索这一路：失败不影响向量、关键词两路，诊断里写明原因。
     @staticmethod
@@ -654,6 +766,14 @@ class DocumentSearchTool:
     # 演示模式没有聊天模型、或设置页关闭了充分性判断、或来源已为空（重排阈值已过滤光）时不判断。
     VERDICT_RANK = {"insufficient": 0, "partial": 1, "sufficient": 2}
 
+    # 有图谱关系时才把关系传给判断，没有时调用方式和以前一样。
+    @staticmethod
+    def judge(models, question, retrieval):
+        relations = retrieval.get("relations") or []
+        if relations:
+            return models.judge_sufficiency(question, retrieval["sources"], relations)
+        return models.judge_sufficiency(question, retrieval["sources"])
+
     # options 原样传给补充检索（评测的专项可以只用一路检索，补充检索也要用同样的方式）。
     def check_sufficiency(
         self, store, models, owner, queries, rerank_query, retrieval, **options
@@ -667,6 +787,7 @@ class DocumentSearchTool:
             "retry_query": None,
             "retrieval": retrieval,
             "sources": retrieval["sources"],
+            "relations": retrieval.get("relations") or [],
             "refused": False,
         }
         if (
@@ -676,7 +797,8 @@ class DocumentSearchTool:
         ):
             return result
         result["checked"] = True
-        judgement = models.judge_sufficiency(rerank_query, retrieval["sources"])
+        # 图谱关系和检索来源一起交给充分性判断：关系也是回答模型会看到的资料。
+        judgement = self.judge(models, rerank_query, retrieval)
         result["judgements"].append(judgement)
         rewrite = judgement["rewrite_query"]
         if (
@@ -705,7 +827,7 @@ class DocumentSearchTool:
                 {"retried": True, "retry_query": rewrite, "retry_retrieval": retry}
             )
             if retry["sources"]:
-                second = models.judge_sufficiency(rerank_query, retry["sources"])
+                second = self.judge(models, rerank_query, retry)
                 result["judgements"].append(second)
                 if (
                     self.VERDICT_RANK[second["verdict"]]
@@ -718,6 +840,9 @@ class DocumentSearchTool:
         result["missing"] = judgement["missing"]
         result["refused"] = judgement["verdict"] == "insufficient"
         result["sources"] = [] if result["refused"] else result["retrieval"]["sources"]
+        result["relations"] = (
+            [] if result["refused"] else result["retrieval"].get("relations") or []
+        )
         return result
 
     # 把命中的子块扩展为父块，返回 (父块文字, 组成父块的分片 id 列表, 每片的 id/序号/字数/上下文说明)；找不到分片记录时返回 None，沿用子块。
@@ -892,6 +1017,9 @@ class DocumentSearchTool:
                     "source_graph_budget_reserved",
                     "source_graph_budget_used",
                     "source_graph_budget_count",
+                    "source_graph_relation_count",
+                    "source_graph_relation_tokens",
+                    "source_graph_relation_skipped",
                     "source_selection_mode",
                     "source_token_budget",
                     "source_tokens_used",

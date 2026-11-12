@@ -5,10 +5,21 @@ import pytest
 
 from app.evaluation import dataset as dataset_module
 from app.evaluation import results as results_module
-from app.evaluation.dataset import load_dataset, normalize, replace_dataset, select_split, validate_dataset
+from app.evaluation.dataset import (
+    load_dataset,
+    normalize,
+    replace_dataset,
+    select_split,
+    validate_dataset,
+)
 from app.evaluation.generation import judge_answer, summarize_generation
 from app.evaluation.results import compare_runs, execute_run, previous_run, start_run
-from app.evaluation.retrieval import import_corpus, score_question, summarize_paraphrase_pairs, threshold_sweep
+from app.evaluation.retrieval import (
+    import_corpus,
+    score_question,
+    summarize_paraphrase_pairs,
+    threshold_sweep,
+)
 from app.models import Models
 from app.tools.search import DocumentSearchTool
 from test_app import headers as user_headers, setup  # noqa: F401  复用 API 测试的内存存储夹具
@@ -22,29 +33,69 @@ def headers(owner="admin"):
 # 规范化统一全角半角并去掉空白，OCR 或换行造成的差异不影响命中判断。
 def test_normalize_ignores_width_and_whitespace():
     assert normalize("ＰＥＧ 等于 １\n的时候") == normalize("PEG等于1的时候")
-    problems = validate_dataset([{"id": "x", "type": "事实", "answerable": True, "evidence": ["不存在的句子"]}], "语料")
+    problems = validate_dataset(
+        [{"id": "x", "type": "事实", "answerable": True, "evidence": ["不存在的句子"]}],
+        "语料",
+    )
     assert problems == ["x：证据不在语料中：不存在的句子"]
 
 
 # ---------- 检索评测 ----------
+
 
 # 用临时目录代替仓库的 eval 目录：两份小语料、四道题（一道无法回答），结果也写到临时目录。
 @pytest.fixture
 def eval_dir(setup, tmp_path, monkeypatch):
     corpus = tmp_path / "seed" / "corpus"
     corpus.mkdir(parents=True)
-    (corpus / "售后.md").write_text("# 退货\n\n耳机签收后七天内可以无理由退货。\n\n# 保修\n\n耳机保修期为一年，人为损坏不在保修范围。",
-        encoding="utf-8")
-    (corpus / "物流.md").write_text("# 配送\n\n订单付款后四十八小时内发货，偏远地区需要五天送达。", encoding="utf-8")
+    (corpus / "售后.md").write_text(
+        "# 退货\n\n耳机签收后七天内可以无理由退货。\n\n# 保修\n\n耳机保修期为一年，人为损坏不在保修范围。",
+        encoding="utf-8",
+    )
+    (corpus / "物流.md").write_text(
+        "# 配送\n\n订单付款后四十八小时内发货，偏远地区需要五天送达。", encoding="utf-8"
+    )
     rows = [
-        {"id": "a1", "question": "耳机几天内可以退货？", "type": "事实", "answerable": True,
-            "evidence": ["耳机签收后七天内可以无理由退货"], "reference_answer": "七天", "split": "dev", "reviewed": True},
-        {"id": "a2", "question": "耳机保修多久？", "type": "同义改写", "answerable": True,
-            "evidence": ["耳机保修期为一年"], "reference_answer": "一年", "split": "dev", "reviewed": True},
-        {"id": "a3", "question": "付款后多久发货？", "type": "关键词", "answerable": True,
-            "evidence": ["订单付款后四十八小时内发货"], "reference_answer": "48 小时", "split": "holdout", "reviewed": True},
-        {"id": "u1", "question": "明天东京天气怎么样？", "type": "无法回答", "answerable": False,
-            "evidence": [], "reference_answer": "拒答", "split": "dev", "reviewed": True},
+        {
+            "id": "a1",
+            "question": "耳机几天内可以退货？",
+            "type": "事实",
+            "answerable": True,
+            "evidence": ["耳机签收后七天内可以无理由退货"],
+            "reference_answer": "七天",
+            "split": "dev",
+            "reviewed": True,
+        },
+        {
+            "id": "a2",
+            "question": "耳机保修多久？",
+            "type": "同义改写",
+            "answerable": True,
+            "evidence": ["耳机保修期为一年"],
+            "reference_answer": "一年",
+            "split": "dev",
+            "reviewed": True,
+        },
+        {
+            "id": "a3",
+            "question": "付款后多久发货？",
+            "type": "关键词",
+            "answerable": True,
+            "evidence": ["订单付款后四十八小时内发货"],
+            "reference_answer": "48 小时",
+            "split": "holdout",
+            "reviewed": True,
+        },
+        {
+            "id": "u1",
+            "question": "明天东京天气怎么样？",
+            "type": "无法回答",
+            "answerable": False,
+            "evidence": [],
+            "reference_answer": "拒答",
+            "split": "dev",
+            "reviewed": True,
+        },
     ]
     replace_dataset(rows, setup[1].engine)
     monkeypatch.setattr(dataset_module, "EVAL_DIR", tmp_path)
@@ -67,29 +118,62 @@ def fake_rerank(self, query, documents):
 # 评测集接口只允许证据来自语料，AI 起草在演示模型下应明确拒绝，避免误以为生成成功。
 def test_eval_dataset_manual_entry_and_generation_guard(setup, eval_dir):
     client, _ = setup
-    response = client.post("/eval/dataset/items", headers=headers(), json={
-        "question": "耳机的保修期是多久？", "type": "事实", "answerable": True,
-        "evidence": ["耳机保修期为一年"], "reference_answer": "一年", "split": "dev",
-    })
+    response = client.post(
+        "/eval/dataset/items",
+        headers=headers(),
+        json={
+            "question": "耳机的保修期是多久？",
+            "type": "事实",
+            "answerable": True,
+            "evidence": ["耳机保修期为一年"],
+            "reference_answer": "一年",
+            "split": "dev",
+        },
+    )
     assert response.status_code == 201
     item = response.json()
-    assert item["origin"] == "manual" and item["reviewed"] is True and item["id"].startswith("q")
-    invalid = client.post("/eval/dataset/items", headers=headers(), json={
-        "question": "不存在的证据", "type": "事实", "answerable": True,
-        "evidence": ["这段话不在语料里"], "reference_answer": "未知", "split": "dev",
-    })
+    assert (
+        item["origin"] == "manual"
+        and item["reviewed"] is True
+        and item["id"].startswith("q")
+    )
+    invalid = client.post(
+        "/eval/dataset/items",
+        headers=headers(),
+        json={
+            "question": "不存在的证据",
+            "type": "事实",
+            "answerable": True,
+            "evidence": ["这段话不在语料里"],
+            "reference_answer": "未知",
+            "split": "dev",
+        },
+    )
     assert invalid.status_code == 422
-    generation = client.post("/eval/dataset/generate", headers=headers(), json={"count": 1})
-    assert generation.status_code == 422 and "MODEL_MODE=openai" in generation.json()["detail"]
+    generation = client.post(
+        "/eval/dataset/generate", headers=headers(), json={"count": 1}
+    )
+    assert (
+        generation.status_code == 422
+        and "MODEL_MODE=openai" in generation.json()["detail"]
+    )
 
 
 # 同义改写在编辑器里一次提交两个问法，但接口落盘后应是两条独立题目并共享题对编号、证据和答案。
 def test_eval_dataset_paraphrase_pair(setup, eval_dir):
     client, _ = setup
-    response = client.post("/eval/dataset/pairs", headers=headers(), json={
-        "original_question": "耳机保修期是多久？", "paraphrase_question": "耳机坏了还能保修多长时间？",
-        "answerable": True, "evidence": ["耳机保修期为一年"], "reference_answer": "一年", "split": "dev",
-    })
+    response = client.post(
+        "/eval/dataset/pairs",
+        headers=headers(),
+        json={
+            "original_question": "耳机保修期是多久？",
+            "paraphrase_question": "耳机坏了还能保修多长时间？",
+            "answerable": True,
+            "evidence": ["耳机保修期为一年"],
+            "reference_answer": "一年",
+            "split": "dev",
+        },
+    )
     assert response.status_code == 201
     body = response.json()
     assert body["pair_id"] == "pair_001"
@@ -101,12 +185,32 @@ def test_eval_dataset_paraphrase_pair(setup, eval_dir):
 # 成对统计复用单题检索结果，只新增原问题和改写问题之间的变化与保持率。
 def test_summarize_paraphrase_pairs():
     def row(item_id, role, final_recall):
-        stages = {stage: {"recall": final_recall if stage == "final" else 1.0, "rr": 1.0, "rank": 1} for stage in ("pool", "top", "final")}
-        return {"id": item_id, "pair_id": "pair_001", "pair_role": role, "question": item_id,
-            "type": "同义改写", "answerable": True, "evidence_count": 1, "stages": stages,
-            "returned": 1, "latency_ms": 1, "pool": [], "evidence": []}
+        stages = {
+            stage: {
+                "recall": final_recall if stage == "final" else 1.0,
+                "rr": 1.0,
+                "rank": 1,
+            }
+            for stage in ("pool", "top", "final")
+        }
+        return {
+            "id": item_id,
+            "pair_id": "pair_001",
+            "pair_role": role,
+            "question": item_id,
+            "type": "同义改写",
+            "answerable": True,
+            "evidence_count": 1,
+            "stages": stages,
+            "returned": 1,
+            "latency_ms": 1,
+            "pool": [],
+            "evidence": [],
+        }
 
-    result = summarize_paraphrase_pairs([row("q01", "original", 1.0), row("q02", "paraphrase", 0.0)])
+    result = summarize_paraphrase_pairs(
+        [row("q01", "original", 1.0), row("q02", "paraphrase", 0.0)]
+    )
     assert result["pair_count"] == 1 and result["question_count"] == 2
     assert result["metrics"]["recall_final"]["delta"] == -1.0
     assert result["retention"]["final"] == 0.0
@@ -116,31 +220,69 @@ def test_summarize_paraphrase_pairs():
 def test_eval_dataset_ai_generation(setup, eval_dir):
     client, _ = setup
     client.app.state.models.mode = "openai"
-    client.app.state.models.chat_completion = lambda messages, max_tokens: json.dumps({"items": [{
-        "type": "多轮追问", "answerable": True, "question": "那它保修多久？",
-        "history": ["耳机有什么售后政策？"], "evidence": ["耳机保修期为一年"],
-        "reference_answer": "一年",
-    }]}, ensure_ascii=False)
-    response = client.post("/eval/dataset/generate", headers=headers(), json={"count": 1, "type": "多轮追问"})
+    client.app.state.models.chat_completion = lambda messages, max_tokens: json.dumps(
+        {
+            "items": [
+                {
+                    "type": "多轮追问",
+                    "answerable": True,
+                    "question": "那它保修多久？",
+                    "history": ["耳机有什么售后政策？"],
+                    "evidence": ["耳机保修期为一年"],
+                    "reference_answer": "一年",
+                }
+            ]
+        },
+        ensure_ascii=False,
+    )
+    response = client.post(
+        "/eval/dataset/generate",
+        headers=headers(),
+        json={"count": 1, "type": "多轮追问"},
+    )
     assert response.status_code == 201
     item = response.json()["items"][0]
-    assert item["origin"] == "ai" and item["reviewed"] is False and item["history"] == ["耳机有什么售后政策？"]
-    assert item["id"] not in [candidate["id"] for candidate in select_split(load_dataset(), "dev")]
-    reviewed = client.post(f"/eval/dataset/items/{item['id']}/review", headers=headers())
+    assert (
+        item["origin"] == "ai"
+        and item["reviewed"] is False
+        and item["history"] == ["耳机有什么售后政策？"]
+    )
+    assert item["id"] not in [
+        candidate["id"] for candidate in select_split(load_dataset(), "dev")
+    ]
+    reviewed = client.post(
+        f"/eval/dataset/items/{item['id']}/review", headers=headers()
+    )
     assert reviewed.status_code == 200 and reviewed.json()["reviewed"] is True
-    assert item["id"] in [candidate["id"] for candidate in select_split(load_dataset(), "dev")]
+    assert item["id"] in [
+        candidate["id"] for candidate in select_split(load_dataset(), "dev")
+    ]
 
 
 # AI 同义改写允许模型把单条证据返回为字符串，并自动落盘为共享题对的两条独立题目。
 def test_eval_dataset_ai_paraphrase_generation(setup, eval_dir):
     client, _ = setup
     client.app.state.models.mode = "openai"
-    client.app.state.models.chat_completion = lambda messages, max_tokens: json.dumps({"items": [{
-        "type": "同义改写", "answerable": True, "question": "耳机保修期是多久？",
-        "paraphrase_question": "耳机坏了还能保修多长时间？", "evidence": "耳机保修期为一年",
-        "reference_answer": "一年",
-    }]}, ensure_ascii=False)
-    response = client.post("/eval/dataset/generate", headers=headers(), json={"count": 1, "type": "同义改写"})
+    client.app.state.models.chat_completion = lambda messages, max_tokens: json.dumps(
+        {
+            "items": [
+                {
+                    "type": "同义改写",
+                    "answerable": True,
+                    "question": "耳机保修期是多久？",
+                    "paraphrase_question": "耳机坏了还能保修多长时间？",
+                    "evidence": "耳机保修期为一年",
+                    "reference_answer": "一年",
+                }
+            ]
+        },
+        ensure_ascii=False,
+    )
+    response = client.post(
+        "/eval/dataset/generate",
+        headers=headers(),
+        json={"count": 1, "type": "同义改写"},
+    )
     assert response.status_code == 201
     items = response.json()["items"]
     assert len(items) == 2
@@ -165,7 +307,9 @@ def test_retrieval_run_end_to_end(setup, eval_dir, monkeypatch):
     client, store = setup
     monkeypatch.setattr(Models, "rerank", fake_rerank)
     run = start_run("retrieval", "dev", ["ablation", "params"])
-    run = execute_run(store, client.app.state.models, dataset_module.load_dataset(), run)
+    run = execute_run(
+        store, client.app.state.models, dataset_module.load_dataset(), run
+    )
     assert run["status"] == "completed"
     assert run["config"]["dataset_size"] == 3
     assert run["config"]["reranked"] is True
@@ -178,7 +322,14 @@ def test_retrieval_run_end_to_end(setup, eval_dir, monkeypatch):
     assert run["funnel"]["total"] == 2
     assert len(run["sweep"]) == 18
     names = [variant["name"] for variant in run["variants"]]
-    assert names == ["dense_only", "keyword_only", "hybrid_no_rerank", "pool_12", "pool_30", "fusion_best"]
+    assert names == [
+        "dense_only",
+        "keyword_only",
+        "hybrid_no_rerank",
+        "pool_12",
+        "pool_30",
+        "fusion_best",
+    ]
     no_rerank = run["variants"][2]["summary"]
     # 不重排就没有阈值过滤，无法回答的题一定会留下来源，漏放率是 100%。
     assert no_rerank["false_accept_rate"] == 1.0
@@ -194,20 +345,41 @@ def test_retrieval_run_end_to_end(setup, eval_dir, monkeypatch):
 def diagnostics_with(statuses):
     candidates = []
     for chunk_id, rrf_rank, rerank_rank, probability, status, source_id in statuses:
-        candidates.append({"chunk_id": chunk_id, "rrf_rank": rrf_rank, "rerank_rank": rerank_rank,
-            "rerank_probability": probability, "status": status, "source_id": source_id})
-    return {"diagnostics": {"config": {"return_limit": 2, "reranked": True, "min_score": 0.3},
-        "candidates": candidates}, "stats": {"returned": 1, "recall_ms": 3, "rerank_ms": 7}}
+        candidates.append(
+            {
+                "chunk_id": chunk_id,
+                "rrf_rank": rrf_rank,
+                "rerank_rank": rerank_rank,
+                "rerank_probability": probability,
+                "status": status,
+                "source_id": source_id,
+            }
+        )
+    return {
+        "diagnostics": {
+            "config": {"return_limit": 2, "reranked": True, "min_score": 0.3},
+            "candidates": candidates,
+        },
+        "stats": {"returned": 1, "recall_ms": 3, "rerank_ms": 7},
+    }
 
 
 def test_score_question_finds_lost_stage():
-    retrieval = diagnostics_with([
-        ("c1", 2, 1, 0.8, "returned", "S1"),
-        ("c2", 1, 2, 0.2, "filtered_low_score", None),
-        ("c3", 3, None, None, "not_in_pool", None),
-    ])
+    retrieval = diagnostics_with(
+        [
+            ("c1", 2, 1, 0.8, "returned", "S1"),
+            ("c2", 1, 2, 0.2, "filtered_low_score", None),
+            ("c3", 3, None, None, "not_in_pool", None),
+        ]
+    )
     texts = {"c1": "无关内容", "c2": "耳机签收后七天内可以无理由退货", "c3": "其他"}
-    item = {"id": "a1", "question": "q", "type": "事实", "answerable": True, "evidence": ["耳机签收后七天内可以无理由退货"]}
+    item = {
+        "id": "a1",
+        "question": "q",
+        "type": "事实",
+        "answerable": True,
+        "evidence": ["耳机签收后七天内可以无理由退货"],
+    }
     row = score_question(item, retrieval, texts, pool_size=2)
     assert row["stages"]["pool"] == {"recall": 1.0, "rr": 1.0, "rank": 1}
     assert row["stages"]["top"] == {"recall": 1.0, "rr": 0.5, "rank": 2}
@@ -226,22 +398,45 @@ def test_score_question_finds_lost_stage():
 # 交给模型的资料：最终来源是父块，拼进了相邻分片；证据在相邻分片里时，过滤后 Recall 不算，交给模型的资料命中率算。
 def test_score_question_counts_parent_parts():
     retrieval = diagnostics_with([("c1", 1, 1, 0.9, "returned", "S1")])
-    retrieval["sources"] = [{"id": "S1", "chunk_id": "c1", "parent_chunk_ids": ["c1", "c2"]}]
+    retrieval["sources"] = [
+        {"id": "S1", "chunk_id": "c1", "parent_chunk_ids": ["c1", "c2"]}
+    ]
     texts = {"c1": "退货规则", "c2": "耳机签收后七天内可以无理由退货"}
-    item = {"id": "a1", "question": "q", "type": "事实", "answerable": True, "evidence": ["耳机签收后七天内可以无理由退货"]}
+    item = {
+        "id": "a1",
+        "question": "q",
+        "type": "事实",
+        "answerable": True,
+        "evidence": ["耳机签收后七天内可以无理由退货"],
+    }
     row = score_question(item, retrieval, texts, pool_size=2)
-    assert row["stages"]["final"]["recall"] == 0.0 and row["given_recall"] == 1.0 and row["evidence"][0]["given"] is True
+    assert (
+        row["stages"]["final"]["recall"] == 0.0
+        and row["given_recall"] == 1.0
+        and row["evidence"][0]["given"] is True
+    )
     row["latency_ms"] = 1
     from app.evaluation.retrieval import summarize
+
     assert summarize([row])["recall_given"] == 1.0
 
 
 # 两次评测对比：召回上升算变好，误杀率上升算变差；previous_run 只找同类型、同 split 的更早一次。
 def test_compare_runs_marks_direction():
-    base = {"id": "20260101-000000_a", "kind": "retrieval", "status": "completed", "config": {"split": "dev"},
-        "summary": {"recall_pool": 0.5, "false_reject_rate": 0.1}}
-    target = {"id": "20260102-000000_b", "kind": "retrieval", "status": "completed", "config": {"split": "dev"},
-        "summary": {"recall_pool": 0.8, "false_reject_rate": 0.2}}
+    base = {
+        "id": "20260101-000000_a",
+        "kind": "retrieval",
+        "status": "completed",
+        "config": {"split": "dev"},
+        "summary": {"recall_pool": 0.5, "false_reject_rate": 0.1},
+    }
+    target = {
+        "id": "20260102-000000_b",
+        "kind": "retrieval",
+        "status": "completed",
+        "config": {"split": "dev"},
+        "summary": {"recall_pool": 0.8, "false_reject_rate": 0.2},
+    }
     rows = {}
     for row in compare_runs(base, target)["metrics"]:
         rows[row["key"]] = row
@@ -261,7 +456,9 @@ def test_eval_api(setup, eval_dir, monkeypatch):
     # 先在主线程导入语料：测试库是多线程共用的一个 SQLite 连接，后台线程导入时和轮询请求交错，
     # 偶尔读不到刚插入的文档（activate_version 拿到 None）。导入过之后后台线程只会判定“未变化”。
     import_corpus(setup[1], client.app.state.models)
-    started = client.post("/eval/runs", headers=headers(), json={"split": "all", "suites": []})
+    started = client.post(
+        "/eval/runs", headers=headers(), json={"split": "all", "suites": []}
+    )
     assert started.status_code == 202
     run_id = started.json()["id"]
     for _ in range(100):
@@ -275,7 +472,10 @@ def test_eval_api(setup, eval_dir, monkeypatch):
     assert listing["runs"][0]["id"] == run_id and "questions" not in listing["runs"][0]
     history_metrics = listing["runs"][0]["history_metrics"]
     assert history_metrics["answerable_questions"] == run["summary"]["answerable_count"]
-    assert history_metrics["unanswerable_questions"] == run["summary"]["unanswerable_count"]
+    assert (
+        history_metrics["unanswerable_questions"]
+        == run["summary"]["unanswerable_count"]
+    )
     evidence_total = 0
     for question in run["questions"]:
         if question["answerable"]:
@@ -283,40 +483,87 @@ def test_eval_api(setup, eval_dir, monkeypatch):
     assert history_metrics["evidence_total"] == evidence_total
     assert listing["suites"][0]["key"] == "ablation"
     assert client.get("/eval/runs/..%2Fsecret", headers=headers()).status_code == 404
-    assert client.post("/eval/runs", headers=headers(), json={"suites": ["unknown"]}).status_code == 422
+    assert (
+        client.post(
+            "/eval/runs", headers=headers(), json={"suites": ["unknown"]}
+        ).status_code
+        == 422
+    )
     # 测试环境没有真实大模型，生成评测应在入队前给出明确提示，不能误启动付费任务。
-    generation = client.post("/eval/runs", headers=headers(), json={"kind": "generation", "split": "dev", "suites": []})
-    assert generation.status_code == 422 and "MODEL_MODE=openai" in generation.json()["detail"]
-    compare = client.get(f"/eval/compare?base={run_id}&target={run_id}", headers=headers()).json()
+    generation = client.post(
+        "/eval/runs",
+        headers=headers(),
+        json={"kind": "generation", "split": "dev", "suites": []},
+    )
+    assert (
+        generation.status_code == 422
+        and "MODEL_MODE=openai" in generation.json()["detail"]
+    )
+    compare = client.get(
+        f"/eval/compare?base={run_id}&target={run_id}", headers=headers()
+    ).json()
     assert compare["metrics"][0]["change"] == "same"
     deleted = client.delete(f"/eval/runs/{run_id}", headers=headers())
-    assert deleted.status_code == 200 and deleted.json() == {"id": run_id, "deleted": True}
+    assert deleted.status_code == 200 and deleted.json() == {
+        "id": run_id,
+        "deleted": True,
+    }
     assert client.get(f"/eval/runs/{run_id}", headers=headers()).status_code == 404
     assert client.delete(f"/eval/runs/{run_id}", headers=headers()).status_code == 404
 
 
 # ---------- 生成评测 ----------
 
+
 # 评审模型的输出被限制在 0 / 0.5 / 1；固定拒答文本不调用评审，按是否可回答直接判定。
 def test_judge_and_generation_summary():
     class FakeJudge:
         def chat_completion(self, messages, max_tokens):
             self.prompt = messages[-1].content
-            return json.dumps({"refused": False, "faithfulness": 0.8, "correctness": 1,
-                "citation": 0.4, "faithfulness_reason": "大部分有依据"}, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "refused": False,
+                    "faithfulness": 0.8,
+                    "correctness": 1,
+                    "citation": 0.4,
+                    "faithfulness_reason": "大部分有依据",
+                },
+                ensure_ascii=False,
+            )
 
         parse_json = staticmethod(Models.parse_json)
 
     judge = FakeJudge()
-    answerable = {"id": "a1", "question": "耳机几天能退？", "answerable": True, "reference_answer": "七天"}
-    result = judge_answer(judge, answerable, "七天内可以退 [S1]", [{"id": "S1", "text": "七天内可以无理由退货"}])
-    assert result["faithfulness"] == 1.0 and result["citation"] == 0.5 and result["judge"] == "llm"
+    answerable = {
+        "id": "a1",
+        "question": "耳机几天能退？",
+        "answerable": True,
+        "reference_answer": "七天",
+    }
+    result = judge_answer(
+        judge,
+        answerable,
+        "七天内可以退 [S1]",
+        [{"id": "S1", "text": "七天内可以无理由退货"}],
+    )
+    assert (
+        result["faithfulness"] == 1.0
+        and result["citation"] == 0.5
+        and result["judge"] == "llm"
+    )
     assert "七天内可以无理由退货" in judge.prompt
-    refusal = judge_answer(judge, {"id": "u1", "answerable": False}, "知识库中没有足够资料，请补充文档或具体问题。", [])
+    refusal = judge_answer(
+        judge,
+        {"id": "u1", "answerable": False},
+        "知识库中没有足够资料，请补充文档或具体问题。",
+        [],
+    )
     assert refusal == {**refusal, "refused": True, "correctness": 1.0, "judge": "rule"}
-    rows = [{"answerable": True, "judgement": result},
+    rows = [
+        {"answerable": True, "judgement": result},
         {"answerable": False, "judgement": refusal},
-        {"answerable": True, "judgement": {**refusal, "correctness": 0.0}}]
+        {"answerable": True, "judgement": {**refusal, "correctness": 0.0}},
+    ]
     summary = summarize_generation(rows)
     # 忠实度只看没拒答的回答；正确性看能回答的两题（1 和 0）；拒答正确率 2/3。
     assert summary["faithfulness"] == 1.0
@@ -334,22 +581,40 @@ def test_generation_run_end_to_end(setup, eval_dir, monkeypatch, runtime):
     runtime(rerank_min_score=0.3)
 
     class FakeResponder:
-        def answer(self, owner, session_id, question, sources, coverage=None):
+        def answer(
+            self, owner, session_id, question, sources, coverage=None, relations=None
+        ):
             assert owner == "eval"
             if not sources:
                 return "知识库中没有足够资料，请补充文档或具体问题。", {}
             return f"根据资料 [S1]：{sources[0]['text'][:10]}", {}
 
     replies = []
-    monkeypatch.setattr(models, "chat_completion", lambda messages, max_tokens: replies.append(1) or json.dumps(
-        {"refused": False, "faithfulness": 1, "correctness": 1, "citation": 1}))
+    monkeypatch.setattr(
+        models,
+        "chat_completion",
+        lambda messages, max_tokens: replies.append(1)
+        or json.dumps(
+            {"refused": False, "faithfulness": 1, "correctness": 1, "citation": 1}
+        ),
+    )
     run = start_run("generation", "dev", [])
-    run = execute_run(store, models, dataset_module.load_dataset(), run, generate=True, responder=FakeResponder())
+    run = execute_run(
+        store,
+        models,
+        dataset_module.load_dataset(),
+        run,
+        generate=True,
+        responder=FakeResponder(),
+    )
     assert run["kind"] == "generation" and run["status"] == "completed"
     answered = run["questions"][0]
     assert answered["answer"].startswith("根据资料") and answered["cited"] == ["S1"]
     refused = run["questions"][2]
-    assert refused["judgement"]["judge"] == "rule" and refused["judgement"]["correctness"] == 1.0
+    assert (
+        refused["judgement"]["judge"] == "rule"
+        and refused["judgement"]["correctness"] == 1.0
+    )
     # 两道能回答的题调用了评审，无法回答的题被固定拒答，不花评审费用。
     assert len(replies) == 2
     assert run["summary"]["refusal_accuracy"] == 1.0
@@ -364,8 +629,10 @@ def test_search_variants():
 
         def search(self, owner, query, models, limit):
             self.calls.append("dense")
-            return [{"id": "a", "title": "A", "text": "a", "score": 0.9},
-                {"id": "b", "title": "B", "text": "b", "score": 0.8}]
+            return [
+                {"id": "a", "title": "A", "text": "a", "score": 0.9},
+                {"id": "b", "title": "B", "text": "b", "score": 0.8},
+            ]
 
         def search_keyword(self, owner, query, limit):
             self.calls.append("keyword")
@@ -393,12 +660,13 @@ def test_search_variants():
     assert rows["B"]["rrf_score"] == round(1 / 62 + 1 / 61, 6)
     assert summed["diagnostics"]["candidates"][0]["rrf_score"] > rows["B"]["rrf_score"]
     reranker = Reranker()
-    limited = tool.execute(Store(), reranker, "eval", ["q"], "q", pool_size=1, rerank=False)
+    limited = tool.execute(
+        Store(), reranker, "eval", ["q"], "q", pool_size=1, rerank=False
+    )
     assert reranker.called is False
     assert limited["stats"]["relevance_filter"] == "off"
     assert limited["diagnostics"]["config"]["rerank_candidates"] == 1
     assert "rerank_ms" in limited["stats"]
-
 
 
 # 普通用户调用评测接口一律 403，页面上也不显示评测入口。
@@ -406,13 +674,18 @@ def test_eval_api_requires_admin(setup):
     client, _ = setup
     assert client.get("/eval/dataset", headers=user_headers("alice")).status_code == 403
     assert client.get("/eval/runs", headers=user_headers("alice")).status_code == 403
-    assert client.post("/eval/runs", headers=user_headers("alice"), json={}).status_code == 403
+    assert (
+        client.post("/eval/runs", headers=user_headers("alice"), json={}).status_code
+        == 403
+    )
     assert client.get("/eval/runs", headers=headers()).status_code == 200
 
 
 # 固定流程和线上检索一致：大模型改写（按题目、提示词版本、模型缓存）→ 检索 → 充分性判断 → 补充检索。
 # 被判成资料不足的题来源被清空，最终交给模型的命中算 0；第一次检索的命中另外记着。
-def test_retrieval_full_flow_rewrite_cache_and_sufficiency(setup, eval_dir, monkeypatch, runtime):
+def test_retrieval_full_flow_rewrite_cache_and_sufficiency(
+    setup, eval_dir, monkeypatch, runtime
+):
     client, store = setup
     models = client.app.state.models
     monkeypatch.setattr(Models, "rerank", fake_rerank)
@@ -422,33 +695,56 @@ def test_retrieval_full_flow_rewrite_cache_and_sufficiency(setup, eval_dir, monk
 
     def analyze(question, history, last_order, **kwargs):
         rewrites.append(question)
-        return {"route": "knowledge", "intent": "knowledge_qa", "classifier": "llm", "standalone_query": question,
-            "queries": [question, f"耳机 {question}"]}
+        return {
+            "route": "knowledge",
+            "intent": "knowledge_qa",
+            "classifier": "llm",
+            "standalone_query": question,
+            "queries": [question, f"耳机 {question}"],
+        }
 
     def judge(question, sources):
         if "保修" in question:
-            return {"verdict": "insufficient", "missing": "保修范围", "rewrite_query": "人为损坏"}
+            return {
+                "verdict": "insufficient",
+                "missing": "保修范围",
+                "rewrite_query": "人为损坏",
+            }
         return {"verdict": "sufficient", "missing": "", "rewrite_query": ""}
 
     monkeypatch.setattr(models, "analyze_query", analyze)
     monkeypatch.setattr(models, "judge_sufficiency", judge)
-    run = execute_run(store, models, dataset_module.load_dataset(), start_run("retrieval", "dev", []))
+    run = execute_run(
+        store, models, dataset_module.load_dataset(), start_run("retrieval", "dev", [])
+    )
     assert run["status"] == "completed"
     rows = {row["id"]: row for row in run["questions"]}
     first = rows["a1"]
     assert first["queries"] == ["耳机几天内可以退货？", "耳机 耳机几天内可以退货？"]
-    assert first["rewrite"]["classifier"] == "llm" and first["rewrite"]["cached"] is False
-    assert first["sufficiency"]["verdict"] == "sufficient" and first["given_recall"] == 1
+    assert (
+        first["rewrite"]["classifier"] == "llm" and first["rewrite"]["cached"] is False
+    )
+    assert (
+        first["sufficiency"]["verdict"] == "sufficient" and first["given_recall"] == 1
+    )
     assert first["flow_latency_ms"] >= first["latency_ms"]
     # 两路检索词各自召回了什么：每一路都记了召回段数和含哪几条证据。
     routes = {route["query"]: route for route in first["query_routes"]}
-    assert set(routes) == set(first["queries"]) and all(route["recalled"] > 0 for route in routes.values())
+    assert set(routes) == set(first["queries"]) and all(
+        route["recalled"] > 0 for route in routes.values()
+    )
     assert any(route["evidence"] == [0] for route in routes.values())
     cleared = rows["a2"]
     assert cleared["first_given_recall"] == 1
-    assert cleared["sufficiency"]["retried"] and cleared["sufficiency"]["retry_query"] == "人为损坏"
+    assert (
+        cleared["sufficiency"]["retried"]
+        and cleared["sufficiency"]["retry_query"] == "人为损坏"
+    )
     assert cleared["cleared"] is True and cleared["given_recall"] == 0
-    assert cleared["evidence"][0]["first_given"] is True and cleared["evidence"][0]["given"] is False
+    assert (
+        cleared["evidence"][0]["first_given"] is True
+        and cleared["evidence"][0]["given"] is False
+    )
     assert cleared["retry"]["sources"]
     retry = cleared["retry"]
     assert retry["queries"] == [*cleared["queries"], "人为损坏"]
@@ -461,15 +757,27 @@ def test_retrieval_full_flow_rewrite_cache_and_sufficiency(setup, eval_dir, monk
     assert summary["recall_given_first"] == 1.0 and summary["recall_given"] == 0.5
     assert summary["wrong_clear_rate"] == 0.5
     # 证据都在检索命中的那一片里：扩展命中率是 0（被清空的题不算拿到）。
-    assert summary["ext_hit_rate"] == 0.0 and first["evidence"][0]["via"] == "direct" and cleared["given_hits"] == 0
+    assert (
+        summary["ext_hit_rate"] == 0.0
+        and first["evidence"][0]["via"] == "direct"
+        and cleared["given_hits"] == 0
+    )
     # 检索命中率 = 证据命中去掉扩展命中：没有靠扩展的，就等于资料命中率。
     assert summary["recall_direct"] == summary["recall_given"] == 0.5
-    assert run["config"]["flow"]["name"] == "full" and run["config"]["flow"]["rewrite_fresh"] == 3
+    assert (
+        run["config"]["flow"]["name"] == "full"
+        and run["config"]["flow"]["rewrite_fresh"] == 3
+    )
     # 第二次跑：改写全部用缓存，不再调用模型，检索词不变。
     called = len(rewrites)
-    again = execute_run(store, models, dataset_module.load_dataset(), start_run("retrieval", "dev", []))
+    again = execute_run(
+        store, models, dataset_module.load_dataset(), start_run("retrieval", "dev", [])
+    )
     assert len(rewrites) == called
-    assert again["config"]["flow"]["rewrite_cached"] == 3 and again["summary"]["rewrite_cache_rate"] == 1.0
+    assert (
+        again["config"]["flow"]["rewrite_cached"] == 3
+        and again["summary"]["rewrite_cache_rate"] == 1.0
+    )
     assert again["questions"][0]["queries"] == first["queries"]
     # 和旧记录（规则检索词、只检索）对比时提示检索口径不同。
     old = {**again, "config": {k: v for k, v in again["config"].items() if k != "flow"}}
@@ -479,8 +787,13 @@ def test_retrieval_full_flow_rewrite_cache_and_sufficiency(setup, eval_dir, monk
 
 def test_summary_target_scoring_includes_expansion_without_excerpt_matching():
     target = {"chunk_id": "c2", "position": 1, "title": "书", "quote": "仅供展示的摘录"}
-    item = {"id": "summary", "question": "q", "type": "汇总", "answerable": True,
-        "evidence": [{"text": "旧摘录", "label": "公司甲", "targets": [target]}]}
+    item = {
+        "id": "summary",
+        "question": "q",
+        "type": "汇总",
+        "answerable": True,
+        "evidence": [{"text": "旧摘录", "label": "公司甲", "targets": [target]}],
+    }
     retrieval = diagnostics_with([("c1", 1, 1, 0.9, "returned", "S1")])
     texts = {"c1": "仅供展示的摘录", "c2": "不依赖摘录内容"}
     retrieval["sources"] = [{"chunk_id": "c1"}]
@@ -496,14 +809,26 @@ def test_summary_target_scoring_includes_expansion_without_excerpt_matching():
 def test_summary_item_editor_saves_names_and_selected_chunks():
     from app.evaluation.suites import check_item
     from app.evaluation.grouped_evidence import fingerprint
-    target = {"title": "书", "position": 3, "quote": "公司甲的原文", "fingerprint": fingerprint("公司甲的原文")}
-    data = {"question": "列出公司", "type": "汇总", "evidence": [],
-        "evidence_groups": [{"label": "公司甲", "targets": [target]}]}
+
+    target = {
+        "title": "书",
+        "position": 3,
+        "quote": "公司甲的原文",
+        "fingerprint": fingerprint("公司甲的原文"),
+    }
+    data = {
+        "question": "列出公司",
+        "type": "汇总",
+        "evidence": [],
+        "evidence_groups": [{"label": "公司甲", "targets": [target]}],
+    }
     saved = check_item("retrieval", data, catalog=[target])
     assert saved["evidence"] == ["公司甲"]
     assert saved["evidence_groups"] == data["evidence_groups"]
-    data["evidence_groups"] = [{"label": "改名后的计分项", "targets": [target]},
-        {"label": "新增计分项", "targets": [target]}]
+    data["evidence_groups"] = [
+        {"label": "改名后的计分项", "targets": [target]},
+        {"label": "新增计分项", "targets": [target]},
+    ]
     saved = check_item("retrieval", data, catalog=[target])
     assert saved["evidence"] == ["改名后的计分项", "新增计分项"]
 
@@ -514,16 +839,32 @@ def test_all_question_types_share_scoring_item_api(setup, eval_dir):
     assert catalog.status_code == 200
     target = catalog.json()["items"][0]
     group = {"label": "自定义计分项名称", "targets": [target]}
-    added = client.post("/eval/dataset/items", headers=headers(), json={
-        "question": "测试事实题", "type": "事实", "answerable": True, "evidence_groups": [group],
-        "reference_answer": "参考答案", "split": "dev"})
+    added = client.post(
+        "/eval/dataset/items",
+        headers=headers(),
+        json={
+            "question": "测试事实题",
+            "type": "事实",
+            "answerable": True,
+            "evidence_groups": [group],
+            "reference_answer": "参考答案",
+            "split": "dev",
+        },
+    )
     assert added.status_code == 201
     assert added.json()["evidence_groups"] == [group]
     assert added.json()["evidence"] == [group["label"]]
-    suite = client.post("/eval/suites", headers=headers(), json={"name": "统一结构测试", "method": "retrieval"})
+    suite = client.post(
+        "/eval/suites",
+        headers=headers(),
+        json={"name": "统一结构测试", "method": "retrieval"},
+    )
     assert suite.status_code == 201
-    saved = client.post(f"/eval/suites/{suite.json()['id']}/items", headers=headers(), json={
-        "question": "不填写类型的专项题", "evidence_groups": [group]})
+    saved = client.post(
+        f"/eval/suites/{suite.json()['id']}/items",
+        headers=headers(),
+        json={"question": "不填写类型的专项题", "evidence_groups": [group]},
+    )
     assert saved.status_code == 201
     assert saved.json()["items"][0]["evidence_groups"] == [group]
     legacy = client.get("/eval/dataset", headers=headers()).json()["items"]

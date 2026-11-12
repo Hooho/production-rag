@@ -612,8 +612,16 @@ def answer_hook(store, models, responder, run_id):
             else None
         )
         sources = check["sources"]
+        relations = check.get("relations") or []
         answer = answer_question(
-            models, responder, run_id, item, row["rerank_query"], sources, coverage
+            models,
+            responder,
+            run_id,
+            item,
+            row["rerank_query"],
+            sources,
+            coverage,
+            relations,
         )
         row["answer"] = answer
         row["cited"] = cited_ids(answer)
@@ -626,8 +634,9 @@ def answer_hook(store, models, responder, run_id):
             "retry_used": check.get("retry_used", False),
             "refused": check["refused"],
             "source_count": len(sources),
+            "relation_count": len(relations),
         }
-        row["judgement"] = judge_answer(models, item, answer, sources)
+        row["judgement"] = judge_answer(models, item, answer, sources, relations)
 
     return on_item
 

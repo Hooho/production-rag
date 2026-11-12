@@ -23,8 +23,21 @@ from .response import (
     coverage_note,
     prompt_markers,
     prompt_version,
+    relation_layout,
     source_layout,
 )
+
+
+# 检索结果里一条图谱关系都没放时的原因；图检索没走（没打开或调用方没要图）时诊断里没有这一项。
+def relation_reason(retrieval):
+    info = (retrieval.get("diagnostics") or {}).get("context_relations")
+    if info is None:
+        return "图检索没有打开"
+    if info.get("reason"):
+        return info["reason"]
+    if not retrieval.get("relations"):
+        return "图保底额度放不下任何一条关系"
+    return None
 
 
 class AgentState(TypedDict, total=False):
@@ -46,6 +59,10 @@ class AgentState(TypedDict, total=False):
     queries: list[str]
     standalone_query: str
     sources: list[dict[str, Any]]
+    # 放进上下文的图谱关系（G 编号），只在 token 预算模式、图检索打开时才有。
+    relations: list[dict[str, Any]]
+    # 一条关系都没放时的原因（检索诊断里的 context_relations.reason），组装上下文步骤里显示。
+    relation_reason: str | None
     retrieval_stats: dict[str, Any]
     answer: str
     on_token: Any
@@ -182,6 +199,8 @@ class Agent:
             "answer": state["answer"],
             "route": state["route"],
             "sources": state.get("sources", []),
+            # 放进上下文的图谱关系（G 编号）：回答里的 [G1] 据此点开查看。
+            "relations": state.get("relations", []),
             "steps": state["steps"],
             "last_order": state.get("last_order"),
             "model_mode": models.mode,
@@ -695,6 +714,8 @@ class Agent:
         )
         return {
             "sources": retrieval["sources"],
+            "relations": retrieval.get("relations") or [],
+            "relation_reason": relation_reason(retrieval),
             "retrieval_stats": retrieval["stats"],
             "steps": state["steps"],
         }
@@ -736,7 +757,7 @@ class Agent:
             state["owner"],
             state["queries"],
             rerank_query,
-            {"sources": state["sources"]},
+            {"sources": state["sources"], "relations": state.get("relations") or []},
         )
         if not result["checked"]:
             reason = (
@@ -804,11 +825,13 @@ class Agent:
         )
         update = {
             "sources": result["sources"],
+            "relations": result["relations"],
             "steps": state["steps"],
             "coverage": {"verdict": result["verdict"], "missing": result["missing"]},
         }
         if result.get("retry_used"):
             update["retrieval_stats"] = result["retrieval"]["stats"]
+            update["relation_reason"] = relation_reason(result["retrieval"])
         return update
 
     # 展示进入回答 Agent 的来源和当前 Checkpoint 记忆状态。
@@ -817,13 +840,16 @@ class Agent:
         source_characters = 0
         for source in state["sources"]:
             source_characters += len(source.get("text", ""))
-        # 说明直接写出组装了哪三部分、交给谁；以前"按预算组合……"看不出这一步的产出是发给大模型的上下文。
+        relations = state.get("relations") or []
+        # 说明直接写出组装了哪几部分、交给谁；以前"按预算组合……"看不出这一步的产出是发给大模型的上下文。
         self.add_step(
             state,
             "context",
             "agent",
             "组装模型上下文",
-            "把【滚动摘要】【最近问答】【检索来源】组装成上下文发给大模型",
+            "把【滚动摘要】【最近问答】【检索来源】"
+            + ("【图谱关系】" if relations else "")
+            + "组装成上下文发给大模型",
             {
                 "memory_token_budget": self.response_agent.memory.trigger_tokens,
                 "estimated_memory_tokens": context["estimated_tokens"],
@@ -839,6 +865,15 @@ class Agent:
                 "source_characters": source_characters,
                 # 每段来源由哪几片拼成、命中哪一片、每片的上下文说明（不存全文），前端在"检索来源"下面展开查看。
                 "source_layout": [source_layout(source) for source in state["sources"]],
+                # 放进上下文的图谱关系；没有时 relation_reason 写明原因（图检索没开、不是 token 预算模式等）。
+                "relation_count": len(relations),
+                "relation_characters": sum(
+                    len(item.get("text") or "") for item in relations
+                ),
+                "relations": [relation_layout(item) for item in relations],
+                "relation_reason": None
+                if relations
+                else state.get("relation_reason") or "图检索没有打开",
                 "memory_managed_by": "SummarizationMiddleware",
                 **self.no_model_info(
                     "程序内拼接记忆和检索来源", "按预算组装回答模型的输入上下文"
@@ -859,12 +894,15 @@ class Agent:
             on_token=state.get("on_token"),
             coverage=state.get("coverage"),
             profile=(state.get("memory_context") or {}).get("profile"),
+            relations=state.get("relations") or [],
         )
         # 没有来源时回答是固定的拒答文本，本来就没有引用；原来也做引用校验，会把拒答替换成
         # "模型没有返回可校验的引用"，用户看到的像是出错而不是"知识库没有资料"。
         citation = None
         if state["models"].mode == "openai" and state["sources"]:
-            citation = state["models"].check_citations(answer, state["sources"])
+            citation = state["models"].check_citations(
+                answer, state["sources"], state.get("relations") or []
+            )
             if not citation["passed"]:
                 # 拦截前保存模型原话，知识巡检据此判断是忘了标引用还是编造了来源编号；原来直接丢弃，事后无从排查。
                 citation["raw_answer"] = answer[:4000]
@@ -891,7 +929,9 @@ class Agent:
         # 以前回头写进检索前的"应用框架记忆策略"步骤，时间顺序对不上。
         result = {
             **self.chat_model_info(
-                state, "依据检索来源生成回答并校验 [S1] 引用", bool(state["sources"])
+                state,
+                "依据检索来源和图谱关系生成回答并校验 [S1]、[G1] 引用",
+                bool(state["sources"]),
             ),
             # 追踪摘要据此区分回答出自哪一版提示词，并统计 Token 用量。
             "prompt_version": prompt_version(),
@@ -909,6 +949,10 @@ class Agent:
             result["answer_context"] = {
                 "note": coverage_note(state.get("coverage")),
                 "sources": [source_layout(source) for source in state["sources"]],
+                # 图谱关系拼在检索来源后面（G 编号）。
+                "relations": [
+                    relation_layout(item) for item in state.get("relations") or []
+                ],
                 "profile": [
                     {"category": item.get("category"), "content": item.get("content")}
                     for item in profile
