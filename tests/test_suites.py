@@ -5,36 +5,14 @@ from test_evaluation import eval_dir, fake_rerank, headers  # noqa: F401
 from test_app import setup  # noqa: F401
 
 
-# 首次启动时从 eval/seed 导入初始专项：截断（检索）和多轮对话。
-def test_seeded_suites(setup):
+# 仓库里没有初始题目：新库的专项和调参题都是空的，只能从评测页（接口）写入。
+def test_no_seeded_questions(setup):
     client, _ = setup
     listed = client.get("/eval/suites", headers=headers()).json()
-    by_name = {suite["name"]: suite for suite in listed["items"]}
-    assert by_name["截断"]["method"] == "retrieval" and by_name["截断"]["item_count"] == 9
-    assert by_name["多轮对话"]["method"] == "dialogue" and by_name["多轮对话"]["item_count"] == 3
+    assert listed["items"] == []
     assert listed["methods"] == {"retrieval": "检索", "answer": "回答", "dialogue": "多轮对话"}
     assert client.get("/eval/suites", headers=headers("alice")).status_code == 403
-    # 后来新增的初始专项：新库直接带上；12 道题，证据都在评测语料里（检索方式的校验规则）。
-    late = by_name["Agent 区分题"]
-    assert late["method"] == "retrieval" and late["search_mode"] == "hybrid" and late["item_count"] == 12
-
-
-# 已经初始化过的库：启动时补加后来新增的初始专项，只加一次；用户删掉后不会再加回来。
-def test_late_seed_suites(setup):
-    from app.evaluation.dataset import seed_late_suites, seed_suites
-    from app.evaluation.suites import check_item
-    client, store = setup
-    for suite in seed_suites():
-        if suite.get("late"):
-            for item in suite["items"]:
-                check_item(suite["method"], item)
-    listed = client.get("/eval/suites", headers=headers()).json()["items"]
-    late = next(suite for suite in listed if suite["name"] == "Agent 区分题")
-    assert seed_late_suites(store.engine) == []
-    assert client.delete(f"/eval/suites/{late['id']}", headers=headers()).status_code == 200
-    assert seed_late_suites(store.engine) == []
-    names = [suite["name"] for suite in client.get("/eval/suites", headers=headers()).json()["items"]]
-    assert "Agent 区分题" not in names
+    assert client.get("/eval/dataset", headers=headers()).json()["items"] == []
 
 
 # 新建、编辑专项和题目：证据必须在评测语料里；同名不行；有题目后不能改评测方式；回答方式必须有参考答案。
@@ -213,22 +191,6 @@ def test_special_retrieval_with_agent(setup, eval_dir, monkeypatch):
     assert response.status_code == 422 and "MODEL_MODE=openai" in response.json()["detail"]
 
 
-# 旧库（初始化时还没有这个专项、也没有补加记录）：启动时补加一次。
-def test_late_seed_adds_to_existing_database(setup):
-    from sqlalchemy import delete
-    from app.evaluation.dataset import LATE_SEED_KEY, seed_late_suites
-    from app.mysql.store import settings as settings_table
-    client, store = setup
-    late = next(suite for suite in client.get("/eval/suites", headers=headers()).json()["items"] if suite["name"] == "Agent 区分题")
-    client.delete(f"/eval/suites/{late['id']}", headers=headers())
-    with store.engine.begin() as connection:
-        connection.execute(delete(settings_table).where(settings_table.c.key == LATE_SEED_KEY))
-    assert seed_late_suites(store.engine) == ["Agent 区分题"]
-    assert seed_late_suites(store.engine) == []
-    names = [suite["name"] for suite in client.get("/eval/suites", headers=headers()).json()["items"]]
-    assert names.count("Agent 区分题") == 1
-
-
 # 题目类型：编辑时保留（以前保存会丢掉），结果按类型统计通过数，两种模式一起跑时各记一列。
 def test_item_type_is_kept_and_counted():
     from app.evaluation.suites import by_type, check_item
@@ -247,40 +209,6 @@ def test_item_type_is_kept_and_counted():
         "fixed_evidence": [{"given": True}, {"given": True}, {"given": False}],
         "agent": {"evidence": [{"found": True}, {"found": False}, {"found": False}]}}])
     assert stats[0]["evidence_total"] == 3 and stats[0]["fixed_hits"] == 2 and stats[0]["agent_hits"] == 1
-
-
-# 初始专项的题改过（revision 加 1）：旧库里用户没动过的题换成新版，用户改过的题不动，每个版本只换一次。
-def test_late_seed_revision_updates_untouched_items(setup):
-    from sqlalchemy import select, update
-    from app.evaluation.dataset import LATE_SEED_KEY, seed_late_suites, seed_suites
-    from app.mysql.store import settings as settings_table
-    from app.mysql.tables import eval_suite_items, eval_suites
-    _, store = setup
-    seed = next(suite for suite in seed_suites() if suite["name"] == "Agent 区分题")
-    assert seed.get("revision", 1) >= 2
-    with store.engine.begin() as connection:
-        suite_id = connection.execute(select(eval_suites.c.id).where(eval_suites.c.name == "Agent 区分题")).scalar_one()
-        rows = connection.execute(select(eval_suite_items.c.id, eval_suite_items.c.created).where(
-            eval_suite_items.c.suite_id == suite_id).order_by(eval_suite_items.c.position)).all()
-        # 第 1 题是系统原样的旧版，第 2 题用户改过（updated 和 created 不同）。
-        connection.execute(update(eval_suite_items).where(eval_suite_items.c.id == rows[0].id).values(data={"question": "旧题", "evidence": ["旧"]}))
-        connection.execute(update(eval_suite_items).where(eval_suite_items.c.id == rows[1].id).values(
-            data={"question": "用户的题", "evidence": ["改"]}, updated="2099-01-01"))
-        value = connection.execute(select(settings_table.c.value).where(settings_table.c.key == LATE_SEED_KEY)).scalar_one()
-        connection.execute(update(settings_table).where(settings_table.c.key == LATE_SEED_KEY).values(value={"names": value["names"]}))
-    seed_late_suites(store.engine)
-    with store.engine.connect() as connection:
-        data = connection.execute(select(eval_suite_items.c.data).where(eval_suite_items.c.suite_id == suite_id).order_by(
-            eval_suite_items.c.position)).scalars().all()
-    assert data[0] == seed["items"][0]
-    assert data[1]["question"] == "用户的题"
-    # 已经换过这个版本：再把第 1 题改回旧版也不会再换。
-    with store.engine.begin() as connection:
-        connection.execute(update(eval_suite_items).where(eval_suite_items.c.id == rows[0].id).values(data={"question": "旧题", "evidence": ["旧"]}))
-    seed_late_suites(store.engine)
-    with store.engine.connect() as connection:
-        first = connection.execute(select(eval_suite_items.c.data).where(eval_suite_items.c.id == rows[0].id)).scalar_one()
-    assert first["question"] == "旧题"
 
 
 # 一条证据写几处原文（用 || 隔开）：分片含任意一处就算拿到；保存时每处都要在语料里。
@@ -328,40 +256,6 @@ def test_special_scores():
     assert section["agent_score_bands"] == {"full": 1, "half": 1, "some": 0, "none": 0}
     stats = by_type(section["questions"])
     assert stats[0]["fixed_score"] == 15 and stats[0]["agent_score"] == 75
-
-
-# 新版初始专项少了题：用户没动过的多余旧题删掉，用户改过的保留；专项里有用户自己加的题时整个专项不动。
-def test_late_seed_revision_removes_items(setup):
-    from sqlalchemy import insert, select, update
-    from app.evaluation.dataset import LATE_SEED_KEY, seed_late_suites, seed_suites
-    from app.mysql.store import settings as settings_table
-    from app.mysql.tables import eval_suite_items, eval_suites
-    _, store = setup
-    seed = next(suite for suite in seed_suites() if suite["name"] == "Agent 区分题")
-
-    def reset(extra):
-        with store.engine.begin() as connection:
-            suite_id = connection.execute(select(eval_suites.c.id).where(eval_suites.c.name == "Agent 区分题")).scalar_one()
-            for index, (item_id, created_by, updated) in enumerate(extra):
-                connection.execute(insert(eval_suite_items).values(id=item_id, suite_id=suite_id, position=len(seed["items"]) + index,
-                    data={"question": item_id, "evidence": ["旧"]}, created_by=created_by, created="2020-01-01", updated=updated))
-            value = connection.execute(select(settings_table.c.value).where(settings_table.c.key == LATE_SEED_KEY)).scalar_one()
-            connection.execute(update(settings_table).where(settings_table.c.key == LATE_SEED_KEY).values(value={"names": value["names"]}))
-        return suite_id
-
-    def ids(suite_id):
-        with store.engine.connect() as connection:
-            return connection.execute(select(eval_suite_items.c.id).where(eval_suite_items.c.suite_id == suite_id)).scalars().all()
-
-    suite_id = reset([("old-1", "system", "2020-01-01"), ("old-2", "system", "2099-01-01")])
-    seed_late_suites(store.engine)
-    remaining = ids(suite_id)
-    assert "old-1" not in remaining and "old-2" in remaining and len(remaining) == len(seed["items"]) + 1
-    # 用户自己加的题：整个专项不动。
-    reset([("mine", "admin", "2020-01-01"), ("old-3", "system", "2020-01-01")])
-    seed_late_suites(store.engine)
-    remaining = ids(suite_id)
-    assert "mine" in remaining and "old-3" in remaining
 
 
 # 交给模型的资料：几段、多少字、约多少 token（中文一个字算 1，其他 4 个字符算 1）。

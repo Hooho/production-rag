@@ -5,14 +5,11 @@ import pytest
 
 from app.evaluation import dataset as dataset_module
 from app.evaluation import results as results_module
-from app.evaluation.corpus import seed_files as corpus_files
-from app.evaluation.dataset import (QUESTION_TYPES, load_dataset, normalize, replace_dataset,
-    seed_items, select_split, validate_dataset)
+from app.evaluation.dataset import load_dataset, normalize, replace_dataset, select_split, validate_dataset
 from app.evaluation.generation import judge_answer, summarize_generation
 from app.evaluation.results import compare_runs, execute_run, previous_run, start_run
 from app.evaluation.retrieval import import_corpus, score_question, summarize_paraphrase_pairs, threshold_sweep
 from app.models import Models
-from app.ingestion.chunking import chunk_document_records
 from app.tools.search import DocumentSearchTool
 from test_app import headers as user_headers, setup  # noqa: F401  复用 API 测试的内存存储夹具
 
@@ -20,51 +17,6 @@ from test_app import headers as user_headers, setup  # noqa: F401  复用 API �
 # 评测接口只允许管理员调用，本文件的请求默认用管理员身份。
 def headers(owner="admin"):
     return user_headers(owner)
-
-
-# 读取仓库里的全部初始语料原文（eval/seed/corpus）。
-def corpus_text():
-    parts = []
-    for path in corpus_files():
-        parts.append(path.read_text(encoding="utf-8"))
-    return "\n".join(parts)
-
-
-# 初始调参评测集（eval/seed/dataset.jsonl）字段完整、证据都能在语料里找到，无法回答题约占两成，并且五种题型都有。
-def test_dataset_is_valid():
-    items = seed_items()
-    assert 30 <= len(items) <= 50
-    assert validate_dataset(items, corpus_text()) == []
-    unanswerable = 0
-    types = set()
-    for item in items:
-        types.add(item["type"])
-        if not item["answerable"]:
-            unanswerable += 1
-    assert types == set(QUESTION_TYPES)
-    assert 0.15 <= unanswerable / len(items) <= 0.25
-    approved = [item for item in items if item.get("reviewed") is True]
-    assert any(item.get("split") == "holdout" for item in items)
-    # 待审核题仍保留在题库中供人工检查，但不能计入任一实际评测范围。
-    assert len(select_split(items, "dev")) + len(select_split(items, "holdout")) == len(approved)
-
-
-# 按当前分块参数切分语料后，每条证据都完整落在某一个分片里。
-# 如果证据正好跨在两个分片的边界上，任何检索都无法"命中"它，这类题需要改短证据或调整分块。
-def test_every_evidence_fits_in_one_chunk():
-    chunks = []
-    for path in corpus_files():
-        for record in chunk_document_records(path.read_text(encoding="utf-8")):
-            chunks.append(normalize(record["embedding_text"]))
-    for item in seed_items():
-        for evidence in item["evidence"]:
-            target = normalize(evidence)
-            found = False
-            for chunk in chunks:
-                if target in chunk:
-                    found = True
-                    break
-            assert found, f"{item['id']} 的证据跨分片或不存在：{evidence}"
 
 
 # 规范化统一全角半角并去掉空白，OCR 或换行造成的差异不影响命中判断。

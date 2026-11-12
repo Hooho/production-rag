@@ -497,8 +497,7 @@ eval_set_runs = Table(
 )
 
 # 调参评测集：开发集 / 留出集的题目，在隔离的评测语料上衡量检索和回答质量，用来调参数。
-# 以前放在 eval/dataset.jsonl 里随代码提交；现在存数据库，在页面上增删改、审核都不用改文件，
-# 首次启动时从 eval/seed/dataset.jsonl 导入（见 app/evaluation/dataset.py 的 seed_eval_data）。
+# 以前放在 eval/dataset.jsonl 里随代码提交；现在只存数据库，只能在评测页里增删改、审核，仓库里没有初始题目。
 # 题目字段（问题、题型、证据、标准答案、追问历史、同义改写题对……）整体放在 data 里，id 是 q01、u01 这样的编号。
 eval_items = Table(
     "eval_items",

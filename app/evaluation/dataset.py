@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-import json
 import os
 import re
 import unicodedata
@@ -8,23 +7,16 @@ from pathlib import Path
 from langchain_core.prompts import ChatPromptTemplate
 from sqlalchemy import func, select
 
-from ..mysql.store import (
-    eval_items,
-    eval_suite_items,
-    eval_suites,
-    settings as settings_table,
-)
+from ..mysql.store import eval_items
 from ..runtime_config import bound_engine
 from ..textnorm import fold_radicals
 
 
-# 评测语料和结果放在仓库的 eval 目录；调参评测集和专项评测集的题目存数据库（eval_items、eval_suites），
-# 首次启动时从 eval/seed 导入。
+# 评测语料和结果放在仓库的 eval 目录；调参评测集和专项评测集的题目只存数据库（eval_items、eval_suites），
+# 只能在评测页（接口）里写入，仓库里没有初始题目。
 EVAL_DIR = Path(os.getenv("EVAL_DIR", "eval"))
 # 调参评测集的题目类型固定为五种，前端按这个顺序分组展示。针对某个方向的检查（例如分片截断）放在专项评测集里。
 QUESTION_TYPES = ["事实", "同义改写", "关键词", "多轮追问", "无法回答"]
-# 导入过初始题目后在 settings 表记一笔，之后把题目删光也不会再导入一次。
-SEED_KEY = "eval_seeded"
 # 同义改写保存为两个独立题目，但用同一个题对编号把它们关联起来。
 REWRITE_ROLES = {"original", "paraphrase"}
 # 评测集拆成开发集和留出集：平时调参只看 dev，holdout 只在确定参数后做最终验证，
@@ -63,225 +55,6 @@ def missing_variants(text, corpus):
 
 def now_text():
     return datetime.now(timezone.utc).isoformat()
-
-
-# 读取 JSONL 文件，每行一道题；空行跳过。只用于 eval/seed 里的初始题目。
-def read_jsonl(path):
-    items = []
-    with Path(path).open(encoding="utf-8") as file:
-        for line in file:
-            if line.strip():
-                items.append(json.loads(line))
-    return items
-
-
-# 初始题目：调参评测集 eval/seed/dataset.jsonl，专项评测集 eval/seed/suites.json。
-def seed_items():
-    path = EVAL_DIR / "seed" / "dataset.jsonl"
-    return read_jsonl(path) if path.exists() else []
-
-
-def seed_suites():
-    path = EVAL_DIR / "seed" / "suites.json"
-    return (
-        json.loads(path.read_text(encoding="utf-8"))["suites"] if path.exists() else []
-    )
-
-
-# 首次启动时把初始题目导入数据库：只在从没导入过、而且表是空的时候做，已有的题目不会被覆盖。
-def seed_eval_data(engine):
-    with engine.begin() as connection:
-        if connection.execute(
-            select(settings_table.c.key).where(settings_table.c.key == SEED_KEY)
-        ).first():
-            return False
-        now = now_text()
-        if not connection.execute(
-            select(func.count()).select_from(eval_items)
-        ).scalar():
-            for position, item in enumerate(seed_items()):
-                connection.execute(
-                    eval_items.insert().values(
-                        id=item["id"],
-                        position=position,
-                        data=item,
-                        created=now,
-                        updated=now,
-                    )
-                )
-        if not connection.execute(
-            select(func.count()).select_from(eval_suites)
-        ).scalar():
-            from uuid import uuid4
-
-            for suite in seed_suites():
-                suite_id = str(uuid4())
-                connection.execute(
-                    eval_suites.insert().values(
-                        id=suite_id,
-                        name=suite["name"],
-                        description=suite.get("description"),
-                        method=suite["method"],
-                        search_mode=suite.get("search_mode", "hybrid"),
-                        created_by="system",
-                        created=now,
-                        updated=now,
-                    )
-                )
-                for position, data in enumerate(suite["items"]):
-                    connection.execute(
-                        eval_suite_items.insert().values(
-                            id=str(uuid4()),
-                            suite_id=suite_id,
-                            position=position,
-                            data=data,
-                            created_by="system",
-                            created=now,
-                            updated=now,
-                        )
-                    )
-        connection.execute(
-            settings_table.insert().values(key=SEED_KEY, value={"at": now}, updated=now)
-        )
-    return True
-
-
-# 后来新增的初始专项（suites.json 里标了 "late": true）：已经初始化过的库不会再走 seed_eval_data，
-# 所以每次启动检查一遍，没加过的补加一次；加过的记在 settings 里（key = eval_seeded_late_suites），
-# 之后用户删掉也不会再加回来。库里已有同名专项时只记录、不重复加。返回这次补加的专项名称。
-LATE_SEED_KEY = "eval_seeded_late_suites"
-
-
-def seed_late_suites(engine):
-    late = [suite for suite in seed_suites() if suite.get("late")]
-    if not late:
-        return []
-    from uuid import uuid4
-
-    added = []
-    with engine.begin() as connection:
-        row = connection.execute(
-            select(settings_table.c.value).where(settings_table.c.key == LATE_SEED_KEY)
-        ).first()
-        done = list(((row[0] if row else None) or {}).get("names") or [])
-        revisions = dict(((row[0] if row else None) or {}).get("revisions") or {})
-        now = now_text()
-        changed = False
-        for suite in late:
-            if suite["name"] in done:
-                continue
-            exists = connection.execute(
-                select(eval_suites.c.id).where(eval_suites.c.name == suite["name"])
-            ).first()
-            if not exists:
-                suite_id = str(uuid4())
-                connection.execute(
-                    eval_suites.insert().values(
-                        id=suite_id,
-                        name=suite["name"],
-                        description=suite.get("description"),
-                        method=suite["method"],
-                        search_mode=suite.get("search_mode", "hybrid"),
-                        created_by="system",
-                        created=now,
-                        updated=now,
-                    )
-                )
-                for position, data in enumerate(suite["items"]):
-                    connection.execute(
-                        eval_suite_items.insert().values(
-                            id=str(uuid4()),
-                            suite_id=suite_id,
-                            position=position,
-                            data=data,
-                            created_by="system",
-                            created=now,
-                            updated=now,
-                        )
-                    )
-                added.append(suite["name"])
-            done.append(suite["name"])
-            changed = True
-        # 初始专项的题改过（suites.json 里 revision 加 1）：按位置把库里的题换成新版，新版少了的删掉、多了的补上，
-        # 每个版本只换一次。用户改过的题（updated 和 created 不同）保留不动；专项里有用户自己加的题时整个专项不动，
-        # 免得按位置对错题。专项说明也一并更新（用户改过专项就不动）。
-        for suite in late:
-            revision = suite.get("revision") or 1
-            if revisions.get(suite["name"], 1) >= revision:
-                continue
-            revisions[suite["name"]] = revision
-            changed = True
-            exists = connection.execute(
-                select(
-                    eval_suites.c.id, eval_suites.c.created, eval_suites.c.updated
-                ).where(eval_suites.c.name == suite["name"])
-            ).first()
-            if not exists:
-                continue
-            rows = connection.execute(
-                select(
-                    eval_suite_items.c.id,
-                    eval_suite_items.c.data,
-                    eval_suite_items.c.created_by,
-                    eval_suite_items.c.created,
-                    eval_suite_items.c.updated,
-                )
-                .where(eval_suite_items.c.suite_id == exists.id)
-                .order_by(eval_suite_items.c.position)
-            ).all()
-            if any(item.created_by != "system" for item in rows):
-                continue
-            if exists.updated == exists.created:
-                connection.execute(
-                    eval_suites.update()
-                    .where(eval_suites.c.id == exists.id)
-                    .values(description=suite.get("description"))
-                )
-            items = suite["items"]
-            for index in range(max(len(rows), len(items))):
-                item = rows[index] if index < len(rows) else None
-                data = items[index] if index < len(items) else None
-                if item is None:
-                    connection.execute(
-                        eval_suite_items.insert().values(
-                            id=str(uuid4()),
-                            suite_id=exists.id,
-                            position=index,
-                            data=data,
-                            created_by="system",
-                            created=now,
-                            updated=now,
-                        )
-                    )
-                elif item.updated != item.created:
-                    continue
-                elif data is None:
-                    connection.execute(
-                        eval_suite_items.delete().where(
-                            eval_suite_items.c.id == item.id
-                        )
-                    )
-                elif item.data != data:
-                    connection.execute(
-                        eval_suite_items.update()
-                        .where(eval_suite_items.c.id == item.id)
-                        .values(data=data)
-                    )
-        if changed:
-            value = {"names": done, "revisions": revisions, "at": now}
-            if row:
-                connection.execute(
-                    settings_table.update()
-                    .where(settings_table.c.key == LATE_SEED_KEY)
-                    .values(value=value, updated=now)
-                )
-            else:
-                connection.execute(
-                    settings_table.insert().values(
-                        key=LATE_SEED_KEY, value=value, updated=now
-                    )
-                )
-    return added
 
 
 # 读取调参评测集的全部题目，按加入顺序排列。engine 不传时用系统参数绑定的同一个库。

@@ -84,8 +84,6 @@ from ..evaluation.dataset import (
     update_prelude,
     next_item_id,
     next_pair_id,
-    seed_eval_data,
-    seed_late_suites,
     select_split,
     validate_dataset,
 )
@@ -718,10 +716,6 @@ def create_app(store=None, models=None, jwt_secret=None):
         # 测试传入的存储不经过 Storage.__init__，这里再绑定一次系统参数的数据库。
         runtime_config.bind(app.state.store.engine)
         seed_users(app.state.store.engine)
-        # 评测题目存数据库：第一次启动时从 eval/seed 导入初始的调参题和专项。
-        seed_eval_data(app.state.store.engine)
-        # 已经初始化过的库：补加后来新增的初始专项（例如「Agent 区分题」），每个只加一次。
-        seed_late_suites(app.state.store.engine)
         # 评测结果也存数据库：第一次启动时把 eval/results 下的旧结果文件导入。
         import_result_files(app.state.store.engine)
         # 设置页保存过模型配置时优先使用它，必须在创建 Agent 之前应用，回答 Agent 才会绑定到这个模型。

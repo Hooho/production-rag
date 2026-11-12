@@ -108,9 +108,10 @@ def test_memory_eval_dialogue(setup):
     assert outcome["route"] == "knowledge" and outcome["summarized"] is False
     with store.engine.connect() as connection:
         assert connection.execute(select(func.count()).select_from(runs)).scalar() == 0
-    suites = client.get("/eval/suites", headers=admin()).json()["items"]
-    dialogue_suite = next(suite for suite in suites if suite["method"] == "dialogue")
-    assert dialogue_suite["item_count"] >= 3
+    dialogue_suite = client.post("/eval/suites", headers=admin(), json={"name": "多轮对话", "method": "dialogue"}).json()
+    added = client.post(f"/eval/suites/{dialogue_suite['id']}/items", headers=admin(), json={
+        "question": "那运费呢", "turns": ["退货期限是多久"], "reference_answer": "运费由买家承担"})
+    assert added.status_code == 201, added.text
     response = client.post("/eval/runs", headers=admin(), json={"kind": "special", "suite_ids": [dialogue_suite["id"]]})
     assert response.status_code == 422 and "真实大模型" in response.json()["detail"]
 
