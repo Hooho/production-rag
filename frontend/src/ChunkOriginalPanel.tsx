@@ -1,20 +1,23 @@
 import { useEffect, useState } from "react";
 import { getChunkOriginal, type ChunkOriginal } from "./api";
 import { DetailDialog } from "./DetailDialog";
-import { HighlightedText } from "./HighlightedText";
+import { HighlightedText, type HighlightGroup } from "./HighlightedText";
 
 // 分片原文：检索诊断的排名表里点「更多」时看这一片的正文。
 // 弹窗里再打开的内容就是伴随浮窗（DetailDialog 会自己贴到「更多」左边），不再叠一层抽屉。
 // 来源列已经取过的原文直接传进来，不用再读一次；没取到才自己读。
 // 标题固定：标题一变，浮窗会重新定位，闪一下。
+// groups：要高亮的内容（例如图谱关系的原文引用和起点、终点的名字）；不传就不高亮。
 export function ChunkOriginalPanel({
   chunkId,
   chunk,
   onClose,
+  groups,
 }: {
   chunkId: string;
   chunk?: ChunkOriginal;
   onClose: () => void;
+  groups?: HighlightGroup[];
 }) {
   const [state, setState] = useState<{
     id: string;
@@ -54,7 +57,11 @@ export function ChunkOriginalPanel({
               <small className="ag-muted"> · {data.heading}</small>
             )}
           </p>
-          <HighlightedText text={data.content} className="ag-delivery-text" />
+          <HighlightedText
+            text={data.content}
+            className="ag-delivery-text"
+            groups={groups}
+          />
         </>
       ) : (
         <p role="status" className="ag-muted">

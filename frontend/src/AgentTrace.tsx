@@ -25,7 +25,11 @@ import { huePicker } from "./hues";
 import { Tag } from "./Tag";
 import { DetailDialog } from "./DetailDialog";
 import { GraphRetrievalTrace } from "./GraphRetrievalTrace";
-import type { GraphRetrievalTrace as GraphRetrievalTraceData } from "./api";
+import type {
+  ContextRelation,
+  GraphRetrievalTrace as GraphRetrievalTraceData,
+} from "./api";
+import { ContextRelationList } from "./ContextRelations";
 import "./AgentTrace.css";
 
 const TOOL_LABELS: Record<string, string> = {
@@ -252,7 +256,7 @@ function EvidenceId({
   cited?: boolean;
 }) {
   const kind = id[0] === "O" ? "o" : id[0] === "D" ? "d" : "s";
-  // 编号的颜色跟着产出它的工具：S 是 search_knowledge，O 是 lookup_order，D 是 query_data。
+  // 编号的颜色跟着产出它的工具：S、G（图谱关系）是 search_knowledge，O 是 lookup_order，D 是 query_data。
   const hue = toolHue(
     kind === "o"
       ? "lookup_order"
@@ -272,9 +276,31 @@ function EvidenceId({
   );
 }
 
+// search_knowledge 这次放进上下文的图谱关系，编号换成整次问答的 G 编号（relation_ids 和关系一一对应）。
+function toolRelations(result: AgentToolResult): ContextRelation[] {
+  const trace = result.trace ?? {};
+  const retrieval = trace.retrieval as
+    | { relations?: ContextRelation[] }
+    | undefined;
+  const ids = Array.isArray(trace.relation_ids)
+    ? (trace.relation_ids as string[])
+    : [];
+  return (retrieval?.relations ?? []).map((relation, index) => ({
+    ...relation,
+    id: ids[index] ?? relation.id,
+  }));
+}
+
 function evidenceIds(result: AgentToolResult) {
   const trace = result.trace ?? {};
-  if (Array.isArray(trace.evidence_ids)) return trace.evidence_ids as string[];
+  // 图谱关系的 G 编号接在资料编号后面。
+  if (Array.isArray(trace.evidence_ids))
+    return [
+      ...(trace.evidence_ids as string[]),
+      ...(Array.isArray(trace.relation_ids)
+        ? (trace.relation_ids as string[])
+        : []),
+    ];
   if (typeof trace.evidence_id === "string") return [trace.evidence_id];
   return [];
 }
@@ -1417,6 +1443,19 @@ function ProgramItem({ result }: { result: AgentToolResult }) {
           <JsonView value={trace.plan} />
         </>
       )}
+      {/* 这次放进上下文的图谱关系：编号换成整次问答的 G 编号。 */}
+      {result.name === "search_knowledge" &&
+        toolRelations(result).length > 0 && (
+          <>
+            <div className="agent-block-label">
+              放进上下文的图谱关系
+              <span>
+                {toolRelations(result).length} 条，接在资料后面交给模型
+              </span>
+            </div>
+            <ContextRelationList relations={toolRelations(result)} />
+          </>
+        )}
       {/* 工具的最终结果放在最后：这次返回了哪几条资料、编号是什么（资料池是整次问答所有工具查到的资料的总清单）。 */}
       {ids.length > 0 && (
         <div className="agent-evidence-result">

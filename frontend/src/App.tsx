@@ -1,6 +1,7 @@
 import Table from "./Table";
 import { DetailDialog } from "./DetailDialog";
 import { ChunkOriginalPanel } from "./ChunkOriginalPanel";
+import { ContextRelationList, ContextRelationTable } from "./ContextRelations";
 import { ConfirmPopover } from "./ConfirmPopover";
 import { InfoPopover } from "./Popover";
 import {
@@ -96,6 +97,7 @@ import {
   sendChatStream,
   uploadDocument,
   type ChatResult,
+  type ContextRelation,
   type ChunkOriginal,
   type DocumentChunk,
   type ChunkSource,
@@ -1279,7 +1281,11 @@ function Chat({
                         <details className="sources-panel">
                           <summary>
                             <span>来源</span>
-                            <strong>{message.sources.length} 条检索结果</strong>
+                            <strong>
+                              {message.sources.length} 条检索结果
+                              {(message.relations?.length ?? 0) > 0 &&
+                                ` + ${message.relations!.length} 条图谱关系`}
+                            </strong>
                             <span className="panel-chevron">⌄</span>
                           </summary>
                           <div className="sources">
@@ -1311,6 +1317,14 @@ function Chat({
                               </details>
                             ))}
                           </div>
+                          {(message.relations?.length ?? 0) > 0 && (
+                            <div className="sources">
+                              <ContextRelationList
+                                relations={message.relations!}
+                                cited={citedIds(message.answer)}
+                              />
+                            </div>
+                          )}
                         </details>
                       )}
                       <div className="trace">链路编号：{message.trace_id}</div>
@@ -1883,6 +1897,14 @@ function totalElapsed(steps: TraceStep[]) {
   return total;
 }
 
+// 回答里引用的资料编号（去重，按出现顺序）。
+function citedIds(answer: string | undefined, agentMode = true) {
+  const text = (answer ?? "").replace(/<think>[\s\S]*?<\/think>/g, "");
+  return [
+    ...new Set(text.match(agentMode ? /\[[SODG]\d+\]/g : /\[[SG]\d+\]/g) ?? []),
+  ].map((item) => item.slice(1, -1));
+}
+
 // "完成本次处理"的汇总：以前只写"LangGraph 已完成执行，结果将写入 MySQL"，没有有效信息。
 // 现在用前面各步已有的数据汇总成四块：耗时分布、模型调用、回答与引用、结果保存（写到哪、写了什么）。
 // 全部由前端计算，旧记录同样适用。
@@ -1922,11 +1944,12 @@ function RunSummary({
     | undefined;
   const text = (answer ?? "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
   const agentMode = steps.some((step) => step.id === "agent");
-  // Agent 模式的资料有知识库 S、订单 O、业务数据 D 三种编号。
-  const cited = [
-    ...new Set(text.match(agentMode ? /\[[SOD]\d+\]/g : /\[S\d+\]/g) ?? []),
-  ].map((item) => item.slice(1, -1));
-  const sourceCount = sources?.length ?? 0;
+  // Agent 模式的资料有知识库 S、订单 O、业务数据 D、图谱关系 G 四种编号；固定流程有 S 和 G。
+  const cited = citedIds(text, agentMode);
+  const relationCount = Number(
+    (find("context").relation_count as number | undefined) ?? 0,
+  );
+  const sourceCount = (sources?.length ?? 0) + relationCount;
   const route = String(
     find("router").route ?? (find("input_guard").blocked ? "blocked" : ""),
   );
@@ -3213,6 +3236,10 @@ function formatResult(
     "process_method",
     "recent_characters",
     "source_layout",
+    "relation_count",
+    "relation_characters",
+    "relations",
+    "relation_reason",
   ]);
   // 读取 Memory：以前 MySQL 历史、滚动摘要、Checkpoint 存储、Checkpoint 消息数各占一行，看不出哪些是完整记录、
   // 哪些是发给模型的记忆。现在分成"审计历史"（MySQL，完整记录，不发给模型）和"模型记忆"（Checkpoint，发给模型）两块。
@@ -3316,7 +3343,16 @@ function formatResult(
     result.answer_context &&
     typeof result.answer_context === "object"
   )
-    answerRows.push(["answer_sources", result.answer_context]);
+    // 回答里引用了哪些编号：图谱关系里被引用的标「已引用」。
+    answerRows.push([
+      "answer_sources",
+      {
+        ...(result.answer_context as AnswerContext),
+        cited:
+          (result.citation_check as { cited?: string[] } | undefined)?.cited ??
+          [],
+      },
+    ]);
   if (
     answered &&
     Array.isArray(result.ai_memory_sent) &&
@@ -4174,6 +4210,18 @@ function ContextParts({ result }: { result: Record<string, unknown> }) {
         : "没有来源，回答阶段直接拒答",
     ],
   ];
+  // 图谱关系拼在检索来源后面；旧记录没有 relation_count 时不显示这一项。
+  const relationCount = Number(result.relation_count ?? 0);
+  const relations = Array.isArray(result.relations)
+    ? (result.relations as ContextRelation[])
+    : [];
+  if (Object.hasOwn(result, "relation_count"))
+    parts.push([
+      "图谱关系",
+      relationCount > 0
+        ? `${relationCount} 条，共 ${Number(result.relation_characters ?? 0)} 字`
+        : `未使用（${String(result.relation_reason ?? "没有放图谱关系")}）`,
+    ]);
   // 检索来源可以展开看每段由哪几片拼成；旧记录没有 source_layout 时只显示条数和字数。
   const layout = Array.isArray(result.source_layout)
     ? (result.source_layout as AnswerSource[])
@@ -4193,6 +4241,11 @@ function ContextParts({ result }: { result: Record<string, unknown> }) {
                 label="查看每段由哪几片组成"
               >
                 <SourceLayoutList sources={layout} />
+              </ContextDetail>
+            )}
+            {title === "图谱关系" && relations.length > 0 && (
+              <ContextDetail title="放进上下文的图谱关系" label="查看每条关系">
+                <ContextRelationList relations={relations} />
               </ContextDetail>
             )}
           </div>
@@ -4329,6 +4382,10 @@ type AnswerSource = {
 type AnswerContext = {
   note?: string;
   sources?: AnswerSource[];
+  // 图谱关系（G 编号），拼在检索来源后面；旧记录没有。
+  relations?: ContextRelation[];
+  // 回答里引用的编号（引用检查的结果）。
+  cited?: string[];
   profile?: Array<{ category?: string; content?: string }>;
 };
 
@@ -4405,10 +4462,12 @@ function SourceLayoutList({ sources }: { sources: AnswerSource[] }) {
 // 每段来源写明命中的子块和拼成父块的分片，每片只列上下文说明（全文在回答的来源里），命中的那片高亮。
 function AnswerSources({ context }: { context: AnswerContext }) {
   const sources = context.sources ?? [];
+  const relations = context.relations ?? [];
   const profile = context.profile ?? [];
   const note = context.note ?? "";
   const total = sources.reduce((sum, source) => sum + (source.chars ?? 0), 0);
   const parts = [`${sources.length} 段资料（共 ${total} 字）`];
+  if (relations.length > 0) parts.push(`${relations.length} 条图谱关系`);
   if (note) parts.push("缺失提示");
   if (profile.length > 0) parts.push("用户画像");
   const expanded = sources.filter(
@@ -4425,6 +4484,11 @@ function AnswerSources({ context }: { context: AnswerContext }) {
     `检索资料（${sources.length} 段）`,
     <SourceLayoutList sources={sources} />,
   ]);
+  if (relations.length > 0)
+    sections.push([
+      `图谱关系（${relations.length} 条）`,
+      <ContextRelationList relations={relations} cited={context.cited ?? []} />,
+    ]);
   if (profile.length > 0)
     sections.push([
       `用户画像（长期记忆 ${profile.length} 条）`,
@@ -4736,6 +4800,12 @@ function RetrievalDiagnostics({
   const [chunkOpen, setChunkOpen] = useState<string | null>(null);
   // 交给重排的候选池单独看：页面上只留一个入口，内容在弹窗里。
   const [poolOpen, setPoolOpen] = useState(false);
+  // 图检索留下的关系和去向（放进上下文 / 额度不够没放）：入口在混合检索里，内容在弹窗里。
+  const [relationsOpen, setRelationsOpen] = useState(false);
+  const contextRelations = data.context_relations;
+  const placedRelations = (contextRelations?.items ?? []).filter(
+    (item) => item.status === "context",
+  ).length;
   // 「被哪几路找到」里的分片数字：点开看这一组具体是哪些分片、各路排第几。
   const [comboOpen, setComboOpen] = useState<string | null>(null);
   // 漏斗里「交给重排」「相关性 ≥ 阈值」「最终返回」三行的数字：点开看这一行具体留下了哪些分片。
@@ -4906,7 +4976,7 @@ function RetrievalDiagnostics({
           .join("，") || "没有分片被排除",
       hint:
         config.source_selection_mode === "tokens"
-          ? `图保底上限 ${config.source_graph_budget_reserved ?? 0} token，实际保底 ${config.source_graph_budget_used ?? 0} token（${config.source_graph_budget_count ?? 0} 片）；其余公共竞争，原始命中合计估算 ${config.source_child_tokens ?? 0} token，剩余预算再补父子扩展；分片不截断。预算仅包含原文，不含对话与提示词。`
+          ? `图保底上限 ${config.source_graph_budget_reserved ?? 0} token，实际保底 ${config.source_graph_budget_used ?? 0} token（关系 ${config.source_graph_relation_count ?? 0} 条、分片 ${config.source_graph_budget_count ?? 0} 片）；其余公共竞争，原始命中合计估算 ${config.source_child_tokens ?? 0} token，剩余预算再补父子扩展；分片不截断。预算包含原文和图谱关系，不含对话与提示词。`
           : `最多返回 ${config.return_limit} 条来源；并入父块的分片不单独成源，也不占名额`,
     },
   ];
@@ -5518,6 +5588,22 @@ function RetrievalDiagnostics({
             <small>{poolBreakdown}；点开看每片是哪几路找到的、各路排第几</small>
           </div>
         )}
+        {contextRelations && contextRelations.items.length > 0 && (
+          <div className="diag-fold-head">
+            <button
+              type="button"
+              className="link-button"
+              onClick={() => setRelationsOpen(true)}
+            >
+              图检索留下的关系 {contextRelations.items.length} 条
+            </button>
+            <small>
+              {contextRelations.reason
+                ? `用来找分片；没有放进上下文：${contextRelations.reason}`
+                : `重排后留下，用来找分片；按预算放入上下文 ${placedRelations} 条，额度不够没放 ${contextRelations.items.length - placedRelations} 条。点开看每条关系`}
+            </small>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -5594,11 +5680,13 @@ function RetrievalDiagnostics({
       <div className="diag-section-title">检索漏斗</div>
       {config.source_selection_mode === "tokens" && (
         <p className="diag-contrib-hint">
-          图原文保底 {Math.round((config.source_graph_budget_ratio ?? 0) * 100)}
+          图保底 {Math.round((config.source_graph_budget_ratio ?? 0) * 100)}
           %： 上限 {config.source_graph_budget_reserved ??
             0} token，实际使用 {config.source_graph_budget_used ?? 0} token（
-          {config.source_graph_budget_count ?? 0} 个分片）。
-          只保底仅图检索找到的分片；未用完的份额归还公共预算。
+          图谱关系 {config.source_graph_relation_count ?? 0} 条、共{" "}
+          {config.source_graph_relation_tokens ?? 0} token；只有图找到的分片{" "}
+          {config.source_graph_budget_count ?? 0} 片）。
+          先放关系，剩下的给只有图检索找到的分片；未用完的份额归还公共预算。
           {!config.reranked && "本次重排未成功，未启用图保底。"}
         </p>
       )}
@@ -5679,6 +5767,18 @@ function RetrievalDiagnostics({
     <>
       {rankDialog}
       {poolDialog}
+      {relationsOpen && contextRelations && (
+        <DetailDialog
+          open
+          title={`图检索留下的 ${contextRelations.items.length} 条关系`}
+          onClose={() => setRelationsOpen(false)}
+        >
+          <ContextRelationTable
+            items={contextRelations.items}
+            reason={contextRelations.reason}
+          />
+        </DetailDialog>
+      )}
       {comboDialog}
       {candidatesOpen && (
         <CandidateDetailDialog

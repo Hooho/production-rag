@@ -90,6 +90,10 @@ export type RetrievalDiagnosticsData = {
     source_graph_budget_reserved?: number;
     source_graph_budget_used?: number;
     source_graph_budget_count?: number;
+    // 图保底里放进上下文的图谱关系：条数、token、额度不够没放的条数；旧记录没有。
+    source_graph_relation_count?: number;
+    source_graph_relation_tokens?: number;
+    source_graph_relation_skipped?: number;
     source_selection_mode?: "count" | "tokens";
     source_token_budget?: number | null;
     source_tokens_used?: number | null;
@@ -110,6 +114,8 @@ export type RetrievalDiagnosticsData = {
   scope?: RetrievalScope;
   // 图检索每一步的明细；没打开图检索、旧记录没有。
   graph?: GraphRetrievalTrace;
+  // 图检索留下的关系和去向（放进上下文 / 额度不够没放）；reason 是一条都没放时的原因。没打开图检索、旧记录没有。
+  context_relations?: { reason: string | null; items: ContextRelation[] };
   // 每一步、每一路的耗时（毫秒）；旧记录没有。
   timings?: {
     scope_ms?: number;
@@ -267,10 +273,34 @@ export type RetrievalScope = {
   // 图检索范围：可检索文档里有生效图谱的版本；没打开图检索时没有。
   graph_versions?: GraphScopeVersion[];
 };
+// 放进回答上下文的图谱关系（G 编号），后端 app/tools/search.py 的 select_relations。
+// 检索诊断里的 context_relations.items 也是这个结构，多了 status（放入 / 额度不够 / 没放）和 context_id。
+export type ContextRelation = {
+  id?: string | null;
+  context_id?: string | null;
+  status?: "context" | "beyond_budget" | "off";
+  relation_id: string;
+  text: string;
+  source: string;
+  target: string;
+  category: string;
+  description?: string | null;
+  evidence?: string | null;
+  chunk_id?: string | null;
+  document_id?: string | null;
+  title?: string | null;
+  version?: number | null;
+  rerank_score?: number | null;
+  rerank_rank?: number | null;
+  tokens?: number | null;
+  injection?: unknown[];
+};
 export type ChatResult = {
   answer: string;
   route: string;
   sources: Source[];
+  // 放进上下文的图谱关系，回答里的 [G1] 据此点开；旧记录没有。
+  relations?: ContextRelation[];
   steps: TraceStep[];
   trace_id: string;
   request_id: string;

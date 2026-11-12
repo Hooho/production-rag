@@ -10176,3 +10176,11 @@ label {
 .table-pagination > span {
   margin-right: auto;
 }
+
+/* 检索诊断「图检索留下的关系」弹窗：按去向筛选 */
+.context-relation-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 10px;
+}
