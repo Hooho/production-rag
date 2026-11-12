@@ -6327,7 +6327,42 @@ function CandidateRow({
           className={`diag-status status-${item.merged ? "merged" : item.status}`}
           title={status.hint}
         >
-          <b>{status.icon}</b>
+          <b aria-hidden="true">
+            <svg
+              viewBox="0 0 16 16"
+              width="10"
+              height="10"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              {status.icon === "✓" ? (
+                <path d="m3 8 3 3 7-7" />
+              ) : status.icon === "⇢" ? (
+                <path d="M3 8h10m-4-4 4 4-4 4" />
+              ) : status.icon === "✕" ? (
+                <path d="m4 4 8 8m0-8-8 8" />
+              ) : status.icon === "…" ? (
+                <g fill="currentColor" stroke="none">
+                  <circle cx="3" cy="8" r="1.3" />
+                  <circle cx="8" cy="8" r="1.3" />
+                  <circle cx="13" cy="8" r="1.3" />
+                </g>
+              ) : status.icon === "·" ? (
+                <circle
+                  cx="8"
+                  cy="8"
+                  r="1.5"
+                  fill="currentColor"
+                  stroke="none"
+                />
+              ) : (
+                <path d="M3 8h10" />
+              )}
+            </svg>
+          </b>
           {status.label}
         </span>
       </td>

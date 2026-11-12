@@ -3777,6 +3777,8 @@ label {
 }
 
 .diag-status b {
+  flex: 0 0 14px;
+  line-height: 1;
   display: inline-grid;
   place-items: center;
   width: 14px;
