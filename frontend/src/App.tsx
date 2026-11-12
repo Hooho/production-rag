@@ -2,6 +2,7 @@ import Table from "./Table";
 import { DetailDialog } from "./DetailDialog";
 import { ChunkOriginalPanel } from "./ChunkOriginalPanel";
 import { ConfirmPopover } from "./ConfirmPopover";
+import { InfoPopover } from "./Popover";
 import {
   checkOverview,
   GraphCheckDialogBody,
@@ -4925,39 +4926,47 @@ function RetrievalDiagnostics({
         )}
       </p>
       {scope.documents.length > 0 && (
-        <details className="mem-fold">
-          <summary>查看文档列表</summary>
-          <ul className="scope-list">
-            {scope.documents.map((item) => {
-              const graphVersion = scope.graph_versions?.find(
-                (version) => version.document_id === item.document_id,
-              );
-              return (
-                <li key={item.document_id}>
-                  {item.title}
-                  <em>v{item.version}</em>
-                  <span>
-                    {item.source === "own"
-                      ? "自己上传"
-                      : item.source === "public"
-                        ? `公开 · ${item.owner}`
-                        : `共享 · ${item.owner}${item.groups.length > 0 ? ` · ${item.groups.join("、")}` : ""}`}
-                  </span>
-                  {scope.graph_versions && (
-                    <span className="scope-graph">
-                      {graphVersion
-                        ? `图谱 v${graphVersion.number} 生效`
-                        : "没有建图"}
-                    </span>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-          {scope.total > scope.documents.length && (
-            <small>只列出前 {scope.documents.length} 份</small>
+        <InfoPopover
+          title={`可检索文档（${scope.documents.length} 份）`}
+          content={() => (
+            <>
+              <ul className="scope-list">
+                {scope.documents.map((item) => {
+                  const graphVersion = scope.graph_versions?.find(
+                    (version) => version.document_id === item.document_id,
+                  );
+                  return (
+                    <li key={item.document_id}>
+                      {item.title}
+                      <em>v{item.version}</em>
+                      <span>
+                        {item.source === "own"
+                          ? "自己上传"
+                          : item.source === "public"
+                            ? `公开 · ${item.owner}`
+                            : `共享 · ${item.owner}${item.groups.length > 0 ? ` · ${item.groups.join("、")}` : ""}`}
+                      </span>
+                      {scope.graph_versions && (
+                        <span className="scope-graph">
+                          {graphVersion
+                            ? `图谱 v${graphVersion.number} 生效`
+                            : "没有建图"}
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+              {scope.total > scope.documents.length && (
+                <small>只列出前 {scope.documents.length} 份</small>
+              )}
+            </>
           )}
-        </details>
+        >
+          <button type="button" className="link-button button-sm">
+            查看文档列表
+          </button>
+        </InfoPopover>
       )}
       <small className="diag-part-note">
         范围由服务端按登录身份从 <StackTag kind="store">MySQL</StackTag>
