@@ -52,6 +52,8 @@ import {
 } from "./format";
 import {
   Fragment,
+  createContext,
+  useContext,
   useEffect,
   useRef,
   useState,
@@ -1278,54 +1280,38 @@ function Chat({
                         />
                       )}
                       {message.sources.length > 0 && (
-                        <details className="sources-panel">
-                          <summary>
-                            <span>来源</span>
-                            <strong>
-                              {message.sources.length} 条检索结果
-                              {(message.relations?.length ?? 0) > 0 &&
-                                ` + ${message.relations!.length} 条图谱关系`}
-                            </strong>
-                            <span className="panel-chevron">⌄</span>
-                          </summary>
-                          <div className="sources">
-                            {/* 每条来源默认只显示一行正文，点击展开查看全文；以前长文本超出面板被截断，又没法看到完整内容。 */}
+                        <ContextDetail
+                          title="回答来源"
+                          label={`来源 · ${message.sources.length} 条检索结果`}
+                        >
+                          <div className="answer-source-list">
                             {message.sources.map((source) => (
-                              <details className="source" key={source.id}>
-                                <summary>
-                                  <span>{source.id}</span>
-                                  <div>
-                                    <strong>
-                                      {source.title}
-                                      <small className="source-location">
-                                        {sourceLocation(
-                                          source.version,
-                                          source.page_start,
-                                          source.heading,
-                                        )}
-                                      </small>
-                                    </strong>
-                                    <p>{source.text}</p>
-                                  </div>
-                                  <span
-                                    className="source-toggle"
-                                    aria-hidden="true"
-                                  >
-                                    ⌄
-                                  </span>
-                                </summary>
-                              </details>
+                              <article
+                                className="answer-source"
+                                key={source.id}
+                              >
+                                <strong>
+                                  {source.id} · {source.title}
+                                </strong>
+                                <small className="source-location">
+                                  {sourceLocation(
+                                    source.version,
+                                    source.page_start,
+                                    source.heading,
+                                  )}
+                                </small>
+                                <ContextDetail
+                                  title={`${source.id} · ${source.title}`}
+                                  label="查看原文"
+                                >
+                                  <p className="ag-delivery-text">
+                                    {source.text}
+                                  </p>
+                                </ContextDetail>
+                              </article>
                             ))}
                           </div>
-                          {(message.relations?.length ?? 0) > 0 && (
-                            <div className="sources">
-                              <ContextRelationList
-                                relations={message.relations!}
-                                cited={citedIds(message.answer)}
-                              />
-                            </div>
-                          )}
-                        </details>
+                        </ContextDetail>
                       )}
                       <div className="trace">链路编号：{message.trace_id}</div>
                     </div>
@@ -3613,12 +3599,12 @@ function IntentContext({ context }: { context: unknown }) {
         </ol>
       )}
       {value.rolling_summary && (
-        <details>
-          <summary>
-            滚动摘要（{value.rolling_summary.length} 字，较早对话压缩成的摘要）
-          </summary>
-          <p>{value.rolling_summary}</p>
-        </details>
+        <ContextDetail
+          title="滚动摘要"
+          label={`查看滚动摘要（${value.rolling_summary.length} 字）`}
+        >
+          <p className="ag-delivery-text">{value.rolling_summary}</p>
+        </ContextDetail>
       )}
     </div>
   );
@@ -4086,10 +4072,12 @@ function ModelMemory({ result }: { result: Record<string, unknown> }) {
           <i className="is-summary" />
           滚动摘要<b>{summaryCount} 条</b>
           {summary ? (
-            <details className="mem-fold">
-              <summary>{summary.length} 字，展开</summary>
-              <p>{summary}</p>
-            </details>
+            <ContextDetail
+              title="滚动摘要"
+              label={`查看摘要（${summary.length} 字）`}
+            >
+              <p className="ag-delivery-text">{summary}</p>
+            </ContextDetail>
           ) : (
             <small>对话还没超过上限，没有摘要</small>
           )}
@@ -4161,6 +4149,8 @@ function LongMemoryUsed({ items }: { items: unknown[] }) {
   );
 }
 
+const ContextDetailDepth = createContext(0);
+
 function ContextDetail({
   title,
   label = "查看详情",
@@ -4171,14 +4161,36 @@ function ContextDetail({
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const depth = useContext(ContextDetailDepth);
+  const body = (
+    <ContextDetailDepth.Provider value={depth + 1}>
+      {children}
+    </ContextDetailDepth.Provider>
+  );
   return (
     <div className="ai-memory-collapse">
-      <button className="link-button button-sm" onClick={() => setOpen(true)}>
-        {label}
-      </button>
-      <DetailDialog open={open} title={title} onClose={() => setOpen(false)}>
-        {children}
-      </DetailDialog>
+      {depth >= 2 ? (
+        <InfoPopover title={title} content={() => body}>
+          <button type="button" className="link-button button-sm">
+            {label}
+          </button>
+        </InfoPopover>
+      ) : (
+        <>
+          <button
+            type="button"
+            className="link-button button-sm"
+            onClick={() => setOpen(true)}
+          >
+            {label}
+          </button>
+          {open && (
+            <DetailDialog open title={title} onClose={() => setOpen(false)}>
+              {body}
+            </DetailDialog>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -4324,10 +4336,12 @@ function AnswerHistory({ result }: { result: Record<string, unknown> }) {
   if (summary)
     sections.push([
       "更早对话的摘要",
-      <details className="ai-memory-summary">
-        <summary>展开摘要（{summary.length} 字）</summary>
-        <p>{summary}</p>
-      </details>,
+      <ContextDetail
+        title="滚动摘要"
+        label={`查看摘要（${summary.length} 字）`}
+      >
+        <p className="ag-delivery-text">{summary}</p>
+      </ContextDetail>,
     ]);
   if (turns.length > 0)
     sections.push([
@@ -4553,10 +4567,12 @@ function AIMemorySent({ items }: { items: unknown[] }) {
           >
             <strong>{String(call.target ?? "模型调用")}</strong>
             {summary ? (
-              <details className="ai-memory-summary">
-                <summary>查看滚动摘要（{summary.length} 字）</summary>
-                <p>{summary}</p>
-              </details>
+              <ContextDetail
+                title="滚动摘要"
+                label={`查看滚动摘要（${summary.length} 字）`}
+              >
+                <p className="ag-delivery-text">{summary}</p>
+              </ContextDetail>
             ) : null}
             {questions.length > 0 ? (
               <ol>
@@ -6643,10 +6659,13 @@ function MemoryHistory({ items }: { items: unknown[] }) {
                 <span>问题：</span>
                 {question || "无"}
               </p>
-              <details className="memory-answer">
-                <summary>展开答案（{answer.length} 字）</summary>
-                <p>{answer || "无"}</p>
-              </details>
+              <ContextDetail
+                title="历史答案"
+                label={`查看答案（${answer.length} 字）`}
+              >
+                <p className="ag-muted">问题：{question || "无"}</p>
+                <MarkdownAnswer content={answer || "无"} />
+              </ContextDetail>
             </div>
           </article>
         );
