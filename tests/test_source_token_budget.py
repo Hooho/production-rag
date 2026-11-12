@@ -180,14 +180,18 @@ def test_graph_budget_protects_evidence_and_zero_disables_it(runtime, monkeypatc
     ] + ["g1", "g2"]
     assert protected["stats"]["source_tokens_used"] == 8000
     assert protected["stats"]["source_graph_budget_used"] == 2000
-    # 同一分片既被普通召回又被图召回，只计一次。
+    # 同一分片既被普通召回又被图召回：不占图保底，按重排分数参加公共竞争，只出现一次。
     graph_rows[:] = [dict(normal[0])]
     reused = run()
-    assert reused["stats"]["source_graph_budget_used"] == 1000
+    assert reused["stats"]["source_graph_budget_used"] == 0
+    assert reused["stats"]["source_graph_budget_count"] == 0
+    assert reused["sources"][0]["chunk_id"] == "p0"
     assert reused["stats"]["source_tokens_used"] == 7000
     assert len({row["chunk_id"] for row in reused["sources"]}) == len(reused["sources"])
     # 图内容低于相关度阈值时不因保底而入选，预算全部回归公共竞争。
-    scores[normal[0]["text"]] = 0.01
+    graph_rows[:] = [dict(id="low0", title="low0", text="低" * 1000, score=0.6)]
+    scores["低" * 1000] = 0.01
     rejected = run()
     assert rejected["stats"]["source_graph_budget_count"] == 0
-    assert all(row["chunk_id"] != "p0" for row in rejected["sources"])
+    assert all(row["chunk_id"] != "low0" for row in rejected["sources"])
+    assert rejected["stats"]["source_tokens_used"] == 7000

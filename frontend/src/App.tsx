@@ -5576,7 +5576,7 @@ function RetrievalDiagnostics({
           %： 上限 {config.source_graph_budget_reserved ??
             0} token，实际使用 {config.source_graph_budget_used ?? 0} token（
           {config.source_graph_budget_count ?? 0} 个分片）。
-          未用完的份额归还公共预算，图分片也可继续参与公共竞争。
+          只保底仅图检索找到的分片；未用完的份额归还公共预算。
           {!config.reranked && "本次重排未成功，未启用图保底。"}
         </p>
       )}

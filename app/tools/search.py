@@ -308,9 +308,11 @@ class DocumentSearchTool:
         graph_guaranteed = set()
         graph_budget_used = 0
         # 只保底真正通过相关性过滤的图候选；没有可靠重排分数时仍按公共排名选取。
+        # 只保底「仅图检索找到」的分片：向量 / 关键词也找到的分片本来就在公共竞争里，
+        # 让它占保底等于把保底用在本来就能入选的内容上，挤掉图独有的证据。
         if graph_budget and rerank_count and not fallback_used:
             for item in ranked:
-                if "graph" not in item["retrieval_methods"]:
+                if set(item["retrieval_methods"]) != {"graph"}:
                     continue
                 clean_text, _ = sanitize_source(item["text"])
                 size = text_tokens(clean_text)
