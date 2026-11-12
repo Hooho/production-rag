@@ -25,33 +25,56 @@
 
 /* 弹窗里带表格的：内容区撑满剩下的高度，表格框自己上下左右滚，表头吸在框顶。
    顶部的筛选和底部的翻页留在框外一屏显示完，弹窗本身不用滚。 */
-.ag-delivery-dialog[open]:has(> .diag > .table-frame > .diag-table-wrap) {
+.ag-delivery-dialog:is([open], :popover-open):has(
+    > .diag > .table-frame > .diag-table-wrap
+  ) {
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
-.ag-delivery-dialog[open] > .diag:has(> .table-frame > .diag-table-wrap) {
+.ag-delivery-dialog:is([open], :popover-open)
+  > .diag:has(> .table-frame > .diag-table-wrap) {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
-.ag-delivery-dialog[open] > .diag > .table-frame:has(> .diag-table-wrap) {
+.ag-delivery-dialog:is([open], :popover-open)
+  > .diag
+  > .table-frame:has(> .diag-table-wrap) {
   flex: 1 1 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
-.ag-delivery-dialog[open] > .diag > .table-frame > .diag-table-wrap {
+.ag-delivery-dialog:is([open], :popover-open)
+  > .diag
+  > .table-frame
+  > .diag-table-wrap {
   min-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: auto;
 }
 
 /* 只有表格框跟着高度压缩，筛选条、说明和翻页保持原样。 */
-.ag-delivery-dialog[open] > .diag > :not(.table-frame:has(> .diag-table-wrap)) {
+.ag-delivery-dialog:is([open], :popover-open)
+  > .diag
+  > :not(.table-frame:has(> .diag-table-wrap)) {
   flex: none;
+}
+
+.ag-delivery-dialog:is([open], :popover-open):has(
+    > .diag > .table-frame > .diag-table-wrap
+  )
+  > .ag-delivery-dialog-head {
+  flex: none;
+  min-width: 0;
 }
 
 /* 所有带表格的伴随浮窗使用统一可用高度，表格填充剩余区域。 */
