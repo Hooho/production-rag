@@ -4125,6 +4125,28 @@ function LongMemoryUsed({ items }: { items: unknown[] }) {
   );
 }
 
+function ContextDetail({
+  title,
+  label = "查看详情",
+  children,
+}: {
+  title: string;
+  label?: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="ai-memory-collapse">
+      <button className="link-button button-sm" onClick={() => setOpen(true)}>
+        {label}
+      </button>
+      <DetailDialog open={open} title={title} onClose={() => setOpen(false)}>
+        {children}
+      </DetailDialog>
+    </div>
+  );
+}
+
 // 组装模型上下文的三块内容，按发给模型的顺序排列：滚动摘要 → 最近问答原文 → 检索来源。
 function ContextParts({ result }: { result: Record<string, unknown> }) {
   const summary = Number(result.summary_characters ?? 0);
@@ -4166,10 +4188,12 @@ function ContextParts({ result }: { result: Record<string, unknown> }) {
           <div>
             <strong>{title}</strong>：{text}
             {title === "检索来源" && layout.length > 0 && (
-              <details className="ai-memory-collapse context-source-layout">
-                <summary>展开查看每段由哪几片组成</summary>
+              <ContextDetail
+                title="检索来源分片组成"
+                label="查看每段由哪几片组成"
+              >
                 <SourceLayoutList sources={layout} />
-              </details>
+              </ContextDetail>
             )}
           </div>
         </li>
@@ -4263,8 +4287,7 @@ function AnswerHistory({ result }: { result: Record<string, unknown> }) {
       <strong>{parts.join(" + ")}</strong>
       <small className="result-help">{note}</small>
       {sections.length > 0 && (
-        <details className="ai-memory-collapse">
-          <summary>展开查看</summary>
+        <ContextDetail title="回答模型收到的对话历史">
           <ol className="intent-trace answer-history-list">
             {sections.map(([title, body], index) => (
               <li key={title}>
@@ -4278,7 +4301,7 @@ function AnswerHistory({ result }: { result: Record<string, unknown> }) {
               </li>
             ))}
           </ol>
-        </details>
+        </ContextDetail>
       )}
     </div>
   );
@@ -4417,8 +4440,7 @@ function AnswerSources({ context }: { context: AnswerContext }) {
     <div className="answer-history">
       <strong>{parts.join(" + ")}</strong>
       <small className="result-help">{help}</small>
-      <details className="ai-memory-collapse">
-        <summary>展开查看</summary>
+      <ContextDetail title="回答模型收到的资料">
         <ol className="intent-trace answer-history-list">
           {sections.map(([title, body], index) => (
             <li key={title}>
@@ -4432,7 +4454,7 @@ function AnswerSources({ context }: { context: AnswerContext }) {
             </li>
           ))}
         </ol>
-      </details>
+      </ContextDetail>
     </div>
   );
 }
