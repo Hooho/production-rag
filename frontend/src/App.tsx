@@ -5163,79 +5163,81 @@ function RetrievalDiagnostics({
             <strong>{listLabel(activeList)}</strong>
             <small>按这一路召回的名次排列</small>
           </p>
-          <div className="diag-table-wrap rank-table-wrap">
-            {activeHits.length === 0 ? (
-              <p className="diag-empty">没有找到分片</p>
-            ) : (
-              <Table className="diag-table diag-table-compact">
-                <thead>
-                  <tr>
-                    <th>名次</th>
-                    <th>来源</th>
-                    <th>分片</th>
-                    <th>{RAW_SCORE_LABELS[activeList.method] ?? "原始分"}</th>
-                    <th title={`1 / (${config.rrf_k} + 名次)`}>RRF 贡献</th>
+          <Table
+            className="diag-table diag-table-compact"
+            containerProps={{ className: "diag-table-wrap rank-table-wrap" }}
+            maxHeight={340}
+            stickyHeader
+            empty={activeHits.length === 0}
+            emptyContent="没有找到分片"
+            columnCount={5}
+          >
+            <thead>
+              <tr>
+                <th>名次</th>
+                <th>来源</th>
+                <th>分片</th>
+                <th>{RAW_SCORE_LABELS[activeList.method] ?? "原始分"}</th>
+                <th title={`1 / (${config.rrf_k} + 名次)`}>RRF 贡献</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRankHits.map((hit) => {
+                const body = chunkOriginals[hit.chunk_id]?.content;
+                return (
+                  <tr key={hit.rank}>
+                    <td className="num">{hit.rank}</td>
+                    {/* 来源是这一片出自哪份文档；分片列是这一片的原文。 */}
+                    <td className="rank-source">
+                      <span className="rank-source-title" title={hit.title}>
+                        {hit.title}
+                      </span>
+                    </td>
+                    <td className="rank-chunk">
+                      <span className="rank-chunk-body">
+                        {body ? (
+                          <span
+                            className="diag-preview"
+                            title={body.slice(0, 160)}
+                          >
+                            {body}
+                          </span>
+                        ) : (
+                          <SkeletonBlock className="rank-preview-skeleton" />
+                        )}
+                        <button
+                          type="button"
+                          className="link-button button-sm"
+                          onClick={() => setChunkOpen(hit.chunk_id)}
+                        >
+                          更多
+                        </button>
+                      </span>
+                      {hit.relation_ids?.length ? (
+                        <small className="diag-sub">
+                          通过关系：
+                          {hit.relation_ids
+                            .map((id) => graphRelations.get(id) ?? id)
+                            .join("；")}
+                        </small>
+                      ) : null}
+                    </td>
+                    <td className="num">{formatNumber(hit.raw_score)}</td>
+                    <td className="num">
+                      <RrfTerm
+                        method={activeList.method}
+                        rank={hit.rank}
+                        k={config.rrf_k}
+                      />
+                      <small className="diag-sub">
+                        {formatNumber(hit.rrf, 5)}
+                      </small>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {visibleRankHits.map((hit) => {
-                    const body = chunkOriginals[hit.chunk_id]?.content;
-                    return (
-                      <tr key={hit.rank}>
-                        <td className="num">{hit.rank}</td>
-                        {/* 来源是这一片出自哪份文档；分片列是这一片的原文。 */}
-                        <td className="rank-source">
-                          <span className="rank-source-title" title={hit.title}>
-                            {hit.title}
-                          </span>
-                        </td>
-                        <td className="rank-chunk">
-                          <span className="rank-chunk-body">
-                            {body ? (
-                              <span
-                                className="diag-preview"
-                                title={body.slice(0, 160)}
-                              >
-                                {body}
-                              </span>
-                            ) : (
-                              <SkeletonBlock className="rank-preview-skeleton" />
-                            )}
-                            <button
-                              type="button"
-                              className="link-button button-sm"
-                              onClick={() => setChunkOpen(hit.chunk_id)}
-                            >
-                              更多
-                            </button>
-                          </span>
-                          {hit.relation_ids?.length ? (
-                            <small className="diag-sub">
-                              通过关系：
-                              {hit.relation_ids
-                                .map((id) => graphRelations.get(id) ?? id)
-                                .join("；")}
-                            </small>
-                          ) : null}
-                        </td>
-                        <td className="num">{formatNumber(hit.raw_score)}</td>
-                        <td className="num">
-                          <RrfTerm
-                            method={activeList.method}
-                            rank={hit.rank}
-                            k={config.rrf_k}
-                          />
-                          <small className="diag-sub">
-                            {formatNumber(hit.rrf, 5)}
-                          </small>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </Table>
-            )}
-          </div>
+                );
+              })}
+            </tbody>
+          </Table>
           <div className="diag-pagination" aria-label="排名表分页">
             <span aria-live="polite">
               {activeHits.length === 0
