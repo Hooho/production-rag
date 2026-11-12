@@ -113,28 +113,35 @@ export default function Table({
       observer.disconnect();
       element.removeEventListener("scroll", update);
     };
-  }, [children]);
-  const body =
-    loading || empty ? (
-      <tbody>
-        <tr>
-          <td colSpan={columnCount}>
-            {loading ? (
+  }, [children, loading, empty, skeletonRows, columnCount]);
+  const body = loading ? (
+    <tbody>
+      {Array.from({ length: skeletonRows }, (_, row) => (
+        <tr key={row} aria-hidden="true">
+          {Array.from({ length: columnCount }, (_, column) => (
+            <td key={column}>
               <LoadingSkeleton>
-                {Array.from({ length: skeletonRows }, (_, index) => (
-                  <SkeletonBlock
-                    key={index}
-                    style={{ display: "block", height: 24, margin: "8px 0" }}
-                  />
-                ))}
+                <SkeletonBlock
+                  style={{
+                    display: "block",
+                    height: 16,
+                    width: `${[76, 92, 64][(row + column) % 3]}%`,
+                    margin: "4px 0",
+                  }}
+                />
               </LoadingSkeleton>
-            ) : (
-              emptyContent
-            )}
-          </td>
+            </td>
+          ))}
         </tr>
-      </tbody>
-    ) : null;
+      ))}
+    </tbody>
+  ) : empty ? (
+    <tbody>
+      <tr>
+        <td colSpan={columnCount}>{emptyContent}</td>
+      </tr>
+    </tbody>
+  ) : null;
   return (
     <>
       <div
