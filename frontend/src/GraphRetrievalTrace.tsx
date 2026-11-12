@@ -752,7 +752,13 @@ function TraceDetail({
     ? "完整问题在可见关系库中检索；向量和关键词排名融合后参与统一重排。"
     : `关系相似度 = 这一行的概括关键词和这条关系的文字（${relationVectorText}）的相似度`;
   return (
-    <DetailDialog open title={title} className="grt-dialog" onClose={onClose}>
+    <DetailDialog
+      open
+      title={title}
+      className="grt-dialog"
+      size="table"
+      onClose={onClose}
+    >
       {/* 抽屉可能挂在别的弹窗里，不在 .diag 下面：自己带上 .diag，表格颜色变量才对。 */}
       <div className="diag grt">
         {detail.kind === "names" && (

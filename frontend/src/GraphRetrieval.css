@@ -221,9 +221,6 @@
 }
 
 /* 明细抽屉：分类方式 → 分类值 → 是否带上去掉的；下面表格分页。 */
-.ag-delivery-dialog.grt-dialog {
-  width: min(960px, calc(100vw - 32px));
-}
 
 .grt-filters {
   display: grid;

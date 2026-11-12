@@ -5154,7 +5154,7 @@ function RetrievalDiagnostics({
       open
       title={`原始排名表（${lists.length} 张）`}
       onClose={() => setRankOpen(false)}
-      className="ag-dialog-rank"
+      size="table"
     >
       <div className="diag">
         <RetrievalMethodFilter
@@ -6042,12 +6042,7 @@ function CandidateChunksDialog({
     );
   };
   return (
-    <DetailDialog
-      open
-      title={title}
-      onClose={onClose}
-      className="ag-dialog-pool"
-    >
+    <DetailDialog open title={title} onClose={onClose} size="table">
       <div className="diag">
         <p className="diag-part-lead">
           <strong>{lead}</strong>
@@ -6200,7 +6195,7 @@ function CandidateDetailDialog({
     setPage(1);
   }, [candidates.length, selectedMethods, resetKey]);
   return (
-    <DetailDialog open={open} title={title} onClose={onClose}>
+    <DetailDialog open={open} title={title} onClose={onClose} size="table">
       {/* 弹窗不在 .diag 下面：自己带上，表格颜色变量才对。 */}
       <div className="diag">
         <RetrievalMethodFilter

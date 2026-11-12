@@ -5,7 +5,23 @@ import "./DetailDialog.css";
 const dialogTriggers = new WeakMap<HTMLDialogElement, HTMLElement>();
 
 // 从弹窗内打开详情时，以点击入口为锚点，在其左侧显示固定宽度的浮窗。
-export function DetailDialog({ open, title, onClose, children, className = "", movable = false }: { open: boolean; title: string; onClose: () => void; children: ReactNode; className?: string; movable?: boolean }) {
+export function DetailDialog({
+  open,
+  title,
+  onClose,
+  children,
+  className = "",
+  movable = false,
+  size = "default",
+}: {
+  open: boolean;
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+  className?: string;
+  movable?: boolean;
+  size?: "default" | "table";
+}) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [host, setHost] = useState<HTMLDialogElement | null>(null);
   const instance = useRef(Symbol("companion"));
@@ -17,7 +33,9 @@ export function DetailDialog({ open, title, onClose, children, className = "", m
       closeHandler.current();
     } else dialog.current?.close();
   }
-  const [connector, setConnector] = useState<{ x: number; y: number } | null>(null);
+  const [connector, setConnector] = useState<{ x: number; y: number } | null>(
+    null,
+  );
   useEffect(() => {
     const element = dialog.current;
     if (!element || !open) {
@@ -25,8 +43,16 @@ export function DetailDialog({ open, title, onClose, children, className = "", m
       if (element?.open) element.close();
       return;
     }
-    const parent = host ?? Array.from(document.querySelectorAll<HTMLDialogElement>("dialog[open]")).filter((item) => item !== element).at(-1);
-    const trigger = parent ? dialogTriggers.get(parent) : movable && document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const parent =
+      host ??
+      Array.from(document.querySelectorAll<HTMLDialogElement>("dialog[open]"))
+        .filter((item) => item !== element)
+        .at(-1);
+    const trigger = parent
+      ? dialogTriggers.get(parent)
+      : movable && document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     const companion = parent && trigger ? parent : null;
     if (companion && host !== companion) {
       setHost(companion);
@@ -38,12 +64,17 @@ export function DetailDialog({ open, title, onClose, children, className = "", m
     }
     if (companion) {
       element.showPopover();
-      document.dispatchEvent(new CustomEvent("detail-companion-open", { detail: instance.current }));
+      document.dispatchEvent(
+        new CustomEvent("detail-companion-open", { detail: instance.current }),
+      );
     } else if (!element.open) element.showModal();
     function dismissOther(event: Event) {
-      if ((event as CustomEvent).detail !== instance.current) closeHandler.current();
+      if ((event as CustomEvent).detail !== instance.current)
+        closeHandler.current();
     }
-    function dismiss() { closeHandler.current(); }
+    function dismiss() {
+      closeHandler.current();
+    }
     function outsidePointer(event: PointerEvent) {
       if (!event.composedPath().includes(element!)) closeHandler.current();
     }
@@ -61,24 +92,49 @@ export function DetailDialog({ open, title, onClose, children, className = "", m
       companion.addEventListener("close", dismiss);
     }
     let position: { left: number; top: number } | null = null;
-    let drag: { pointerId: number; x: number; y: number; left: number; top: number } | null = null;
-    const header = element.querySelector<HTMLElement>(".ag-delivery-dialog-head");
+    let drag: {
+      pointerId: number;
+      x: number;
+      y: number;
+      left: number;
+      top: number;
+    } | null = null;
+    const header = element.querySelector<HTMLElement>(
+      ".ag-delivery-dialog-head",
+    );
     function startDrag(event: PointerEvent) {
-      if ((!companion && !movable) || !header || !element || event.button !== 0 || (event.target instanceof Element && event.target.closest("button"))) return;
+      if (
+        (!companion && !movable) ||
+        !header ||
+        !element ||
+        event.button !== 0 ||
+        (event.target instanceof Element && event.target.closest("button"))
+      )
+        return;
       const panel = element.getBoundingClientRect();
-      drag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, left: panel.left, top: panel.top };
+      drag = {
+        pointerId: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        left: panel.left,
+        top: panel.top,
+      };
       header.setPointerCapture(event.pointerId);
       event.preventDefault();
     }
     function moveDrag(event: PointerEvent) {
       if (!drag || event.pointerId !== drag.pointerId) return;
-      position = { left: drag.left + event.clientX - drag.x, top: drag.top + event.clientY - drag.y };
+      position = {
+        left: drag.left + event.clientX - drag.x,
+        top: drag.top + event.clientY - drag.y,
+      };
       updateConnector();
     }
     function stopDrag(event: PointerEvent) {
       if (drag?.pointerId !== event.pointerId) return;
       drag = null;
-      if (header?.hasPointerCapture(event.pointerId)) header.releasePointerCapture(event.pointerId);
+      if (header?.hasPointerCapture(event.pointerId))
+        header.releasePointerCapture(event.pointerId);
     }
     header?.addEventListener("pointerdown", startDrag);
     header?.addEventListener("pointermove", moveDrag);
@@ -89,18 +145,40 @@ export function DetailDialog({ open, title, onClose, children, className = "", m
       if ((!companion && !movable) || !trigger || !element) return;
       const anchor = trigger.getBoundingClientRect();
       const container = companion?.getBoundingClientRect();
-      element.style.setProperty("--companion-max-height", `${Math.min((container?.height ?? window.innerHeight) * 0.8, window.innerHeight - 32)}px`);
+      element.style.setProperty(
+        "--companion-max-height",
+        `${Math.min((container?.height ?? window.innerHeight) * 0.8, window.innerHeight - 32)}px`,
+      );
       const { width, height } = element.getBoundingClientRect();
-      const left = Math.max(16, Math.min(position?.left ?? anchor.left - width - 16, window.innerWidth - width - 16));
+      const left = Math.max(
+        16,
+        Math.min(
+          position?.left ?? anchor.left - width - 16,
+          window.innerWidth - width - 16,
+        ),
+      );
       element.style.left = `${left}px`;
       const center = anchor.top + anchor.height / 2;
-      const top = Math.max(16, Math.min(position?.top ?? center - height / 2, window.innerHeight - height - 16));
+      const top = Math.max(
+        16,
+        Math.min(
+          position?.top ?? center - height / 2,
+          window.innerHeight - height - 16,
+        ),
+      );
       element.style.top = `${top}px`;
       if (position) position = { left, top };
       const panel = element.getBoundingClientRect();
       const y = Math.max(panel.top + 20, Math.min(center, panel.bottom - 20));
-      setConnector(!position && container && anchor.bottom > container.top && anchor.top < container.bottom && panel.right < anchor.left
-        ? { x: panel.right - 1, y: y - 10 } : null);
+      setConnector(
+        !position &&
+          container &&
+          anchor.bottom > container.top &&
+          anchor.top < container.bottom &&
+          panel.right < anchor.left
+          ? { x: panel.right - 1, y: y - 10 }
+          : null,
+      );
     }
     updateConnector();
     const observer = new ResizeObserver(updateConnector);
@@ -132,18 +210,56 @@ export function DetailDialog({ open, title, onClose, children, className = "", m
       setConnector(null);
     };
   }, [open, host, title, movable]);
-  const content = <dialog popover={host ? "manual" : undefined} ref={dialog} onClickCapture={(event) => {
-    const target = event.target instanceof Element ? event.target.closest<HTMLElement>("button, a, summary") : null;
-    if (target && target.closest("dialog") === event.currentTarget) dialogTriggers.set(event.currentTarget, target);
-  }} className={`ag-delivery-dialog ${movable ? "ag-dialog-movable" : ""} ${className}`} aria-label={title} onClose={(event) => { event.stopPropagation(); onClose(); }}
-    onClick={(event) => { if (!host && event.target === event.currentTarget) close(); }}>
-    {connector && <svg className="ag-dialog-connector" style={{ left: connector.x, top: connector.y }} viewBox="0 0 12 20" aria-hidden="true">
-      <path d="M0 0 L11 10 L0 20" fill="white" stroke="#d9e5dc" strokeWidth="1.5" />
-    </svg>}
-    <div className="ag-delivery-dialog-head"><strong>{title}</strong>
-      <button type="button" className="secondary-button" autoFocus onClick={close}>关闭</button></div>
-    {children}
-  </dialog>;
+  const content = (
+    <dialog
+      popover={host ? "manual" : undefined}
+      ref={dialog}
+      onClickCapture={(event) => {
+        const target =
+          event.target instanceof Element
+            ? event.target.closest<HTMLElement>("button, a, summary")
+            : null;
+        if (target && target.closest("dialog") === event.currentTarget)
+          dialogTriggers.set(event.currentTarget, target);
+      }}
+      className={`ag-delivery-dialog ${movable ? "ag-dialog-movable" : ""} ${className} ${size === "table" ? "ag-dialog-table" : ""}`}
+      aria-label={title}
+      onClose={(event) => {
+        event.stopPropagation();
+        onClose();
+      }}
+      onClick={(event) => {
+        if (!host && event.target === event.currentTarget) close();
+      }}
+    >
+      {connector && (
+        <svg
+          className="ag-dialog-connector"
+          style={{ left: connector.x, top: connector.y }}
+          viewBox="0 0 12 20"
+          aria-hidden="true"
+        >
+          <path
+            d="M0 0 L11 10 L0 20"
+            fill="white"
+            stroke="#d9e5dc"
+            strokeWidth="1.5"
+          />
+        </svg>
+      )}
+      <div className="ag-delivery-dialog-head">
+        <strong>{title}</strong>
+        <button
+          type="button"
+          className="secondary-button"
+          autoFocus
+          onClick={close}
+        >
+          关闭
+        </button>
+      </div>
+      {children}
+    </dialog>
+  );
   return host ? createPortal(content, host) : content;
 }
-
