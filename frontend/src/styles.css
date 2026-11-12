@@ -10131,3 +10131,49 @@ label {
   background: linear-gradient(to left, rgb(25 55 85 / 22%), transparent);
   opacity: var(--table-shadow-right, 0);
 }
+
+.table-scroll[data-shadow="false"]::before,
+.table-scroll[data-shadow="false"]::after {
+  display: none;
+}
+.shared-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.shared-table th,
+.shared-table td {
+  padding: 8px 12px;
+  text-align: left;
+}
+.shared-table th {
+  background: var(--diag-head, #f0f5fa);
+  font-weight: 600;
+}
+.shared-table-bordered th,
+.shared-table-bordered td {
+  border: 1px solid var(--diag-line, #dce5ef);
+}
+.shared-table-compact th,
+.shared-table-compact td {
+  padding: 5px 8px;
+  font-size: 12px;
+}
+.shared-table-hover tbody tr:hover {
+  background-color: rgb(50 120 220 / 4%);
+}
+.shared-table-sticky > thead > tr > th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.table-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 12px;
+}
+.table-pagination > span {
+  margin-right: auto;
+}

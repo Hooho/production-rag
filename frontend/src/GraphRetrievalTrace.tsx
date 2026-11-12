@@ -1,4 +1,4 @@
-import Table from "./Table";
+import Table, { TablePagination } from "./Table";
 import {
   useEffect,
   useMemo,
@@ -501,28 +501,13 @@ function Pager({
   total: number;
   onPage: (page: number) => void;
 }) {
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  if (total <= PAGE_SIZE) return <p className="grt-pager">共 {total} 条</p>;
   return (
-    <div className="grt-pager">
-      共 {total} 条 · 第 {page} / {pages} 页
-      <button
-        type="button"
-        className="secondary-button button-sm"
-        disabled={page <= 1}
-        onClick={() => onPage(page - 1)}
-      >
-        ‹
-      </button>
-      <button
-        type="button"
-        className="secondary-button button-sm"
-        disabled={page >= pages}
-        onClick={() => onPage(page + 1)}
-      >
-        ›
-      </button>
-    </div>
+    <TablePagination
+      page={page}
+      pageSize={PAGE_SIZE}
+      total={total}
+      onPageChange={onPage}
+    />
   );
 }
 

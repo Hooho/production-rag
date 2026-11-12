@@ -193,9 +193,6 @@ function DataTable({ type, onToast }: { type: DataType; onToast: ShowToast }) {
     }
   }
 
-  const totalPages = data
-    ? Math.max(1, Math.ceil(data.total / data.page_size))
-    : 1;
   return (
     <section className="data-section">
       <p className="data-hint">{type.description}</p>
@@ -238,140 +235,115 @@ function DataTable({ type, onToast }: { type: DataType; onToast: ShowToast }) {
           )}
         </div>
       </div>
-      <div className="data-table-wrap">
-        {loading ? (
-          <DataTableSkeleton columns={columns.length + 3} />
-        ) : (
-          <Table className="data-table">
-            <thead>
-              <tr>
-                <th>
-                  <button type="button" onClick={() => toggleSort("id")}>
-                    编号
-                    {sort === "id" ? (direction === "asc" ? " ↑" : " ↓") : ""}
+      <Table
+        className="data-table"
+        size="compact"
+        loading={loading}
+        columnCount={columns.length + 3}
+        empty={!!data && data.items.length === 0}
+        pagination={{
+          page,
+          pageSize: data?.page_size ?? 20,
+          total: data?.total ?? 0,
+          onPageChange: setPage,
+        }}
+      >
+        <thead>
+          <tr>
+            <th>
+              <button type="button" onClick={() => toggleSort("id")}>
+                编号
+                {sort === "id" ? (direction === "asc" ? " ↑" : " ↓") : ""}
+              </button>
+            </th>
+            {columns.map((field) => (
+              <th key={field.name}>
+                {field.type === "text" ? (
+                  field.label
+                ) : (
+                  <button type="button" onClick={() => toggleSort(field.name)}>
+                    {field.label}
+                    {sort === field.name
+                      ? direction === "asc"
+                        ? " ↑"
+                        : " ↓"
+                      : ""}
                   </button>
-                </th>
-                {columns.map((field) => (
-                  <th key={field.name}>
-                    {field.type === "text" ? (
-                      field.label
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => toggleSort(field.name)}
-                      >
-                        {field.label}
-                        {sort === field.name
-                          ? direction === "asc"
-                            ? " ↑"
-                            : " ↓"
-                          : ""}
-                      </button>
-                    )}
-                  </th>
-                ))}
-                <th>来源</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data && data.items.length === 0 && (
-                <tr>
-                  <td className="data-empty-row" colSpan={columns.length + 3}>
-                    暂无数据
-                  </td>
-                </tr>
-              )}
-              {data?.items.map((row) => (
-                <tr key={row.id}>
-                  <td className="data-id">{row.id}</td>
-                  {columns.map((field) => (
-                    <td
-                      key={field.name}
-                      title={
-                        row[field.name] === null ? "" : String(row[field.name])
-                      }
-                    >
-                      {displayValue(row, field)}
-                    </td>
-                  ))}
-                  <td>
-                    {row.source === "ai" ? (
-                      <Tag size="sm" tone="info" title={`批次 ${row.batch_id}`}>
-                        AI
-                      </Tag>
-                    ) : (
-                      <Tag size="sm" outline plain>
-                        手动
-                      </Tag>
-                    )}
-                  </td>
-                  <td className="data-actions">
-                    {can("update") && (
-                      <button
-                        type="button"
-                        className="secondary-button button-sm"
-                        onClick={() => setEditing(row)}
-                      >
-                        编辑
-                      </button>
-                    )}
-                    {can("delete") && (
-                      <ConfirmPopover
-                        danger
-                        message={`删除${type.label} ${row.id}？删除后列表和问答里都不再出现（数据库保留记录，可由管理员恢复）。`}
-                        confirmText="删除"
-                        onConfirm={() => remove(row)}
-                      >
-                        <button type="button" className="delete-button">
-                          删除
-                        </button>
-                      </ConfirmPopover>
-                    )}
-                    {can("delete") && row.source === "ai" && row.batch_id && (
-                      <ConfirmPopover
-                        danger
-                        message="删除这一批 AI 生成的全部数据？"
-                        confirmText="删除本批"
-                        onConfirm={() => removeBatch(row.batch_id as string)}
-                      >
-                        <button
-                          type="button"
-                          className="delete-button"
-                          title="删除同一次 AI 生成写入的全部数据"
-                        >
-                          删除本批
-                        </button>
-                      </ConfirmPopover>
-                    )}
-                  </td>
-                </tr>
+                )}
+              </th>
+            ))}
+            <th>来源</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data?.items.map((row) => (
+            <tr key={row.id}>
+              <td className="data-id">{row.id}</td>
+              {columns.map((field) => (
+                <td
+                  key={field.name}
+                  title={
+                    row[field.name] === null ? "" : String(row[field.name])
+                  }
+                >
+                  {displayValue(row, field)}
+                </td>
               ))}
-            </tbody>
-          </Table>
-        )}
-      </div>
-      <div className="data-pager">
-        <span>
-          共 {data?.total ?? 0} 条 · 第 {page} / {totalPages} 页
-        </span>
-        <button
-          type="button"
-          className="secondary-button button-sm"
-          disabled={page <= 1}
-          onClick={() => setPage(page - 1)}
-        >
-          上一页
-        </button>
-        <button
-          type="button"
-          className="secondary-button button-sm"
-          disabled={page >= totalPages}
-          onClick={() => setPage(page + 1)}
-        >
-          下一页
-        </button>
-      </div>
+              <td>
+                {row.source === "ai" ? (
+                  <Tag size="sm" tone="info" title={`批次 ${row.batch_id}`}>
+                    AI
+                  </Tag>
+                ) : (
+                  <Tag size="sm" outline plain>
+                    手动
+                  </Tag>
+                )}
+              </td>
+              <td className="data-actions">
+                {can("update") && (
+                  <button
+                    type="button"
+                    className="secondary-button button-sm"
+                    onClick={() => setEditing(row)}
+                  >
+                    编辑
+                  </button>
+                )}
+                {can("delete") && (
+                  <ConfirmPopover
+                    danger
+                    message={`删除${type.label} ${row.id}？删除后列表和问答里都不再出现（数据库保留记录，可由管理员恢复）。`}
+                    confirmText="删除"
+                    onConfirm={() => remove(row)}
+                  >
+                    <button type="button" className="delete-button">
+                      删除
+                    </button>
+                  </ConfirmPopover>
+                )}
+                {can("delete") && row.source === "ai" && row.batch_id && (
+                  <ConfirmPopover
+                    danger
+                    message="删除这一批 AI 生成的全部数据？"
+                    confirmText="删除本批"
+                    onConfirm={() => removeBatch(row.batch_id as string)}
+                  >
+                    <button
+                      type="button"
+                      className="delete-button"
+                      title="删除同一次 AI 生成写入的全部数据"
+                    >
+                      删除本批
+                    </button>
+                  </ConfirmPopover>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </Table>
       {editing && (
         <RecordForm
           type={type}
