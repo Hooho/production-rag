@@ -38,7 +38,7 @@ CONTEXT_COUNT_MAX = 3
 
 
 class EvidencePool:
-    """一次问答里所有工具返回的资料，统一编号：S 知识库、O 订单、D 业务数据。
+    """一次问答里所有工具返回的资料，统一编号：S 知识库、O 订单、D 业务数据、G 图谱关系。
 
     Agent 会多次调用工具，固定流程里每次检索都从 S1 开始编号，这里改成整次问答连续编号，
     回答里的 [S3] 才能唯一对应到一条资料。同一个分片被不同检索词再次命中时沿用原来的编号，不重复给模型。
@@ -46,7 +46,7 @@ class EvidencePool:
 
     def __init__(self):
         self.items = {}
-        self.counters = {"S": 0, "O": 0, "D": 0}
+        self.counters = {"S": 0, "O": 0, "D": 0, "G": 0}
         self.chunks = {}
 
     def add(self, prefix, item, chunk_id=None):
@@ -151,6 +151,28 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
             )
             continue
         blocks.append(format_source(evidence_id, source))
+    # 图谱关系（token 预算模式、打开图检索时才有）：同一条关系再次出现时沿用原来的 G 编号，不重复给模型。
+    relation_blocks = []
+    relation_ids = []
+    for relation in retrieval.get("relations") or []:
+        item = {key: value for key, value in relation.items() if key != "id"}
+        relation_id, is_new = ctx.evidence.add(
+            "G",
+            {"type": "relation", **item},
+            chunk_id=f"relation:{relation['relation_id']}",
+        )
+        relation_ids.append(relation_id)
+        if is_new:
+            relation_blocks.append(f"[{relation_id}] {relation['text']}")
+        else:
+            relation_blocks.append(
+                f"[{relation_id}] 和前面返回的 {relation_id} 是同一条关系，见上文。"
+            )
+    if relation_blocks:
+        blocks.append(
+            "图谱关系（由模型从原文抽取，可能有误；和知识库资料冲突时以知识库资料为准）：\n"
+            + "\n".join(relation_blocks)
+        )
     # 这次返回的资料前面全都给过：明确告诉模型这次检索没有新资料。原来只逐条写“同一段资料”，模型要自己比对编号，
     # 评测里常见换几种说法反复拿回同一批资料（无新增检索）。这里只给信息、不强制停，查不查由模型决定。
     if len(repeated) == len(evidence_ids):
@@ -174,6 +196,7 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
         given=len(sources),
         hidden=hidden,
         evidence_ids=evidence_ids,
+        relation_ids=relation_ids,
         retrieval=retrieval,
         no_new=len(repeated) == len(evidence_ids),
     )

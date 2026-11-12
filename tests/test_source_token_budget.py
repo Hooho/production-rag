@@ -346,3 +346,49 @@ def test_relation_citations_and_prompt_block():
     # 资料里伪造的结束标签要失效。
     assert "</relation>\n</relation>" not in block
     assert relation_block([]) == ""
+
+
+def test_agent_search_knowledge_numbers_relations_once(monkeypatch):
+    from app.agentic.citations import check_citations
+    from app.agentic.loop import to_sources
+    from app.agentic.tools import AgentContext, search_knowledge
+
+    relation_row = {
+        "id": "G1",
+        "relation_id": "r1",
+        "text": "段永平 → 网易（投资）：买入",
+        "title": "投资的本质",
+        "chunk_id": "c1",
+    }
+
+    class Search:
+        def execute(self, *args, **kwargs):
+            return {
+                "sources": [
+                    {"id": "S1", "chunk_id": "c9", "title": "t", "text": "资料"}
+                ],
+                "relations": [dict(relation_row)],
+                "stats": {},
+            }
+
+    monkeypatch.setattr(
+        "app.agentic.tools.runtime_snapshot",
+        lambda: {
+            "agent_return_limit": 5,
+            "agent_rerank_min_score": 0.1,
+            "agent_parent_context": False,
+            "agent_excellent_score": 1,
+        },
+    )
+    ctx = AgentContext(store=None, models=None, owner="alice", search_tool=Search())
+    first = search_knowledge(ctx, "段永平投资了什么")
+    assert "[G1] 段永平 → 网易（投资）：买入" in first["content"]
+    assert first["trace"]["relation_ids"] == ["G1"]
+    second = search_knowledge(ctx, "段永平还投资了什么")
+    assert second["trace"]["relation_ids"] == ["G1"]
+    assert "同一条关系" in second["content"]
+    sources = to_sources(ctx.evidence)
+    assert [row["id"] for row in sources] == ["S1", "G1"]
+    assert sources[1]["type"] == "relation"
+    assert sources[1]["title"] == "图谱关系 · 投资的本质"
+    assert check_citations("网易 [G1]", list(ctx.evidence.items))["passed"]
