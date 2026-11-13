@@ -46,7 +46,8 @@
 .ag-delivery-dialog:is([open], :popover-open)
   > .diag
   > .table-frame:has(> .diag-table-wrap) {
-  flex: 1 1 0;
+  /* 内容不满一屏时表格框贴着内容高度，不留一大片空白；超过一屏再压缩，框里自己滚。 */
+  flex: 0 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
