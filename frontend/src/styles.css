@@ -10184,3 +10184,19 @@ label {
   gap: 8px;
   margin: 4px 0 10px;
 }
+
+.answer-source-filters {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.answer-source-filters > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.answer-source-filters button[aria-pressed="true"] {
+  color: #1677ff;
+  border-color: #1677ff;
+  background: #eaf3ff;
+}

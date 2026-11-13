@@ -1288,45 +1288,11 @@ function Chat({
                               : ""
                           }`}
                         >
-                          <div className="answer-source-list">
-                            {message.sources.map((source) => (
-                              <article
-                                className="answer-source"
-                                key={source.id}
-                              >
-                                <strong>
-                                  {source.id} · {source.title}
-                                </strong>
-                                <small className="source-location">
-                                  {sourceLocation(
-                                    source.version,
-                                    source.page_start,
-                                    source.heading,
-                                  )}
-                                </small>
-                                <ContextDetail
-                                  title={`${source.id} · ${source.title}`}
-                                  label="查看原文"
-                                >
-                                  <p className="ag-delivery-text">
-                                    {source.text}
-                                  </p>
-                                </ContextDetail>
-                              </article>
-                            ))}
-                          </div>
-                          {/* 放进上下文的图谱关系（G 编号）：回答里引用了的标「已引用」，「原文」看出处分片。 */}
-                          {(message.relations?.length ?? 0) > 0 && (
-                            <>
-                              <strong>
-                                图谱关系（{message.relations!.length} 条）
-                              </strong>
-                              <ContextRelationList
-                                relations={message.relations!}
-                                cited={citedIds(message.answer)}
-                              />
-                            </>
-                          )}
+                          <AnswerSourceFilters
+                            sources={message.sources}
+                            relations={message.relations ?? []}
+                            answer={message.answer}
+                          />
                         </ContextDetail>
                       )}
                       <div className="trace">链路编号：{message.trace_id}</div>
@@ -9286,5 +9252,102 @@ function UploadGraphField({
         />
       )}
     </div>
+  );
+}
+
+function AnswerSourceFilters({
+  sources,
+  relations,
+  answer,
+}: {
+  sources: Source[];
+  relations: ContextRelation[];
+  answer: string;
+}) {
+  const [kind, setKind] = useState("all");
+  const [citation, setCitation] = useState("all");
+  const cited = citedIds(answer);
+  const matches = (id: string | null | undefined) =>
+    citation === "all" ||
+    (citation === "cited"
+      ? cited.includes(id ?? "")
+      : !cited.includes(id ?? ""));
+  const visibleSources =
+    kind === "graph" ? [] : sources.filter((source) => matches(source.id));
+  const visibleRelations =
+    kind === "source"
+      ? []
+      : relations.filter((relation) => matches(relation.id));
+  return (
+    <>
+      <div className="answer-source-filters">
+        <div role="group" aria-label="来源类型">
+          {[
+            ["all", "全部"],
+            ["source", "检索分片"],
+            ["graph", "图谱关系"],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className="secondary-button button-sm"
+              aria-pressed={kind === value}
+              onClick={() => setKind(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div role="group" aria-label="引用状态">
+          {[
+            ["all", "全部状态"],
+            ["cited", "已引用"],
+            ["uncited", "未引用"],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className="secondary-button button-sm"
+              aria-pressed={citation === value}
+              onClick={() => setCitation(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {visibleSources.length === 0 && visibleRelations.length === 0 && (
+        <p>没有符合筛选条件的来源</p>
+      )}
+      <div className="answer-source-list">
+        {visibleSources.map((source) => (
+          <article className="answer-source" key={source.id}>
+            <strong>
+              {source.id} · {source.title}
+            </strong>
+            <small className="source-location">
+              {sourceLocation(
+                source.version,
+                source.page_start,
+                source.heading,
+              )}
+            </small>
+            <ContextDetail
+              title={`${source.id} · ${source.title}`}
+              label="查看原文"
+            >
+              <p className="ag-delivery-text">{source.text}</p>
+            </ContextDetail>
+          </article>
+        ))}
+      </div>
+      {/* 放进上下文的图谱关系（G 编号）：回答里引用了的标「已引用」，「原文」看出处分片。 */}
+      {visibleRelations.length > 0 && (
+        <>
+          <strong>图谱关系（{visibleRelations.length} 条）</strong>
+          <ContextRelationList relations={visibleRelations} cited={cited} />
+        </>
+      )}
+    </>
   );
 }
