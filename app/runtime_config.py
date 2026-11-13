@@ -134,21 +134,21 @@ SPECS = [
         "eval": "fixed",
     },
     {
-        "key": "source_graph_budget_ratio",
-        "group": "retrieval",
-        "type": "float",
-        "default": 0.25,
-        "min": 0,
-        "max": 1,
-        "eval": "fixed",
-    },
-    {
         "key": "source_token_budget",
         "group": "retrieval",
         "type": "int",
         "default": 8000,
         "min": 100,
         "max": 128000,
+        "eval": "fixed",
+    },
+    {
+        "key": "source_graph_budget_ratio",
+        "group": "retrieval",
+        "type": "float",
+        "default": 0.25,
+        "min": 0,
+        "max": 1,
         "eval": "fixed",
     },
     {
@@ -580,6 +580,82 @@ SPECS = [
 ]
 BY_KEY = {spec["key"]: spec for spec in SPECS}
 
+
+# 生效条件：参数只在这些条件都满足时起作用，不满足时设置页把整项置灰并写明原因（原因由页面按参数名和取值生成）。
+# 每条是 {"key": 依赖的参数, "equals": 要求的取值}；开关类参数写 True 表示「打开时才生效」。
+# 以前写在前端（SystemSettings.tsx 的 dependsOn），只能依赖一个开关；现在统一放这里，也能依赖选项的取值、同时依赖多项。
+def _on(key):
+    return {"key": key, "equals": True}
+
+
+def _is(key, value):
+    return {"key": key, "equals": value}
+
+
+REQUIRES = {
+    "rerank_min_score": [_on("rerank_enabled")],
+    "rerank_fallback_min_score": [_on("rerank_enabled")],
+    # 优秀阈值只在按条数选来源时放行（按 token 预算时不受条数限制，也就用不上它）。
+    "rerank_excellent_score": [
+        _on("rerank_enabled"),
+        _is("source_selection_mode", "count"),
+    ],
+    "return_limit": [_is("source_selection_mode", "count")],
+    "source_token_budget": [_is("source_selection_mode", "tokens")],
+    # 图保底（图谱关系 + 只被图找到的分片）只在按 token 预算时分配，图检索打开才有东西可保。
+    "source_graph_budget_ratio": [
+        _is("source_selection_mode", "tokens"),
+        _on("graph_retrieval"),
+    ],
+    "parent_max_chars": [_on("parent_context")],
+    "parent_radius": [_on("parent_context")],
+    **{
+        key: [_on("graph_retrieval")]
+        for key in (
+            "graph_name_min_score",
+            "graph_name_top_k",
+            "graph_entity_top_k",
+            "graph_entity_min_score",
+            "graph_entity_relation_limit",
+            "graph_relation_min_score",
+            "graph_relation_top_k",
+            "graph_entity_relation_quota",
+            "graph_global_relation_quota",
+            "graph_relation_rerank_candidates",
+            "graph_relation_return_limit",
+            "graph_relation_rerank_min_score",
+            "graph_chunk_rerank_candidates",
+        )
+    },
+    "agent_rerank_min_score": [_on("rerank_enabled")],
+    "agent_excellent_score": [_on("rerank_enabled")],
+    "long_memory_max_items": [_on("long_memory_enabled")],
+    "injection_vector_threshold": [_on("injection_vector_enabled")],
+    "injection_vector_action": [_on("injection_vector_enabled")],
+    "injection_model_threshold": [_on("injection_model_enabled")],
+    "injection_model_action": [_on("injection_model_enabled")],
+    "chunk_context_max_tokens": [_on("contextual_retrieval")],
+}
+
+# 卡片：几项放在设置页的同一张卡片里（按这里的顺序），卡片出现在组里第一项原来的位置。
+CARDS = {
+    "source_selection": {
+        "title": "交给回答模型的资料",
+        "keys": ["source_selection_mode", "source_token_budget", "return_limit"],
+    },
+}
+CARD_OF = {key: name for name, card in CARDS.items() for key in card["keys"]}
+
+
+# 当前取值下这一项是否生效：返回不满足的条件列表（空表示生效）。values 是 {参数: 取值}。
+def unmet(key, values):
+    return [
+        rule
+        for rule in REQUIRES.get(key, [])
+        if values.get(rule["key"]) != rule["equals"]
+    ]
+
+
 _engine = None
 _cache = {"at": 0.0, "saved": None}
 _lock = threading.Lock()
@@ -761,6 +837,10 @@ def view(engine=None):
         for key in ("min", "max", "choices"):
             if key in spec:
                 item[key] = spec[key]
+        if spec["key"] in REQUIRES:
+            item["requires"] = REQUIRES[spec["key"]]
+        if spec["key"] in CARD_OF:
+            item["card"] = CARD_OF[spec["key"]]
         items.append(item)
     history = []
     target = engine or _engine
@@ -776,6 +856,7 @@ def view(engine=None):
         "items": items,
         "groups": GROUPS,
         "pages": PAGES,
+        "cards": CARDS,
         "history": history[:10],
         "cache_seconds": CACHE_SECONDS,
     }
