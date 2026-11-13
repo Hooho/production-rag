@@ -1892,6 +1892,7 @@ function GraphRetrievalMap({
         });
       };
       const edges: ElementDefinition[] = [];
+      const groupedEdges = new Map<string, ElementDefinition>();
       for (const item of [...kept, ...dropped]) {
         const relation = item.relation;
         const faded = !item.entity && !item.theme;
@@ -1915,7 +1916,23 @@ function GraphRetrievalMap({
               ? "entity"
               : "relation";
         const text = relation.description || relation.category;
-        edges.push({
+        const key = JSON.stringify([
+          relation.source_entity_id,
+          relation.target_entity_id,
+          relation.category,
+        ]);
+        const existing = groupedEdges.get(key);
+        if (existing) {
+          existing.data.count = Number(existing.data.count) + 1;
+          existing.data.label = `${relation.category || "关系"} ×${existing.data.count}`;
+          existing.data.title += `\n${text}`;
+          if (!faded) {
+            existing.data.dashed = 0;
+            existing.data.color = ROUTE_COLORS[route];
+          }
+          continue;
+        }
+        const edge: ElementDefinition = {
           group: "edges",
           data: {
             id: relation.relation_id,
@@ -1924,14 +1941,17 @@ function GraphRetrievalMap({
             color: ROUTE_COLORS[route],
             width: route === "both" ? 4 : faded ? 1.5 : 2.5,
             dashed: faded ? 1 : 0,
-            // 关系只写类别，和知识图谱一样；完整描述在提示框和点开后的弹窗里。
-            label: relation.category || "关系",
+            // 合并相同方向和类别，线上显示关系与数量。
+            count: 1,
+            label: `${relation.category || "关系"} ×1`,
             category: relation.category || "关系",
             title: faded
               ? `${relation.category}：${text}（${item.reason ?? "去掉"}）`
               : `${relation.category}：${text}`,
           },
-        });
+        };
+        groupedEdges.set(key, edge);
+        edges.push(edge);
       }
       // 列表只列 ② 找到的实体（关键词匹配上的），图里其他实体不占位置。
       // 每个实体连了几条边标在后面，点之前先看得到规模。
@@ -2013,7 +2033,7 @@ function GraphRetrievalMap({
             "target-arrow-shape": "triangle",
             width: "data(width)",
             "curve-style": "bezier",
-            // 默认不画标签，和知识图谱一样：几十条边都标着长句，图会糊成一片。
+            label: "data(label)",
             color: "#475569",
             "font-size": 9,
             "text-background-color": "#ffffff",
@@ -2278,22 +2298,31 @@ function GraphRetrievalMap({
           title={`关系 · ${openRelation.source} → ${openRelation.target}`}
           onClose={() => setOpenRelation(null)}
         >
-          <div className="grt grt-map-detail">
-            <RelationText relation={openRelation} />
-            <span>
-              {graph.pipeline
-                ? `关系优先级 ${score(openRelation.score)} · 重排分数 ${score(openRelation.rerank_score)}`
-                : `相似度 ${score(openRelation.score)}`}{" "}
-              · <Origin relation={openRelation} />
-            </span>
-            {!openRelation.kept && openRelation.reason && (
-              <p className="grt-dropped">没被留下：{openRelation.reason}</p>
-            )}
-            <OriginalButton
-              relation={openRelation}
-              chunk={chunks.get(openRelation.chunk_id)}
-            />
-          </div>
+          {[...relations.values()]
+            .filter(
+              (member) =>
+                member.source_entity_id === openRelation.source_entity_id &&
+                member.target_entity_id === openRelation.target_entity_id &&
+                member.category === openRelation.category,
+            )
+            .map((member) => (
+              <div className="grt grt-map-detail" key={member.relation_id}>
+                <RelationText relation={member} />
+                <span>
+                  {graph.pipeline
+                    ? `关系优先级 ${score(member.score)} · 重排分数 ${score(member.rerank_score)}`
+                    : `相似度 ${score(member.score)}`}{" "}
+                  · <Origin relation={member} />
+                </span>
+                {!member.kept && member.reason && (
+                  <p className="grt-dropped">没被留下：{member.reason}</p>
+                )}
+                <OriginalButton
+                  relation={member}
+                  chunk={chunks.get(member.chunk_id)}
+                />
+              </div>
+            ))}
         </DetailDialog>
       )}
     </div>
