@@ -5155,12 +5155,13 @@ function RetrievalDiagnostics({
   // 图检索那一路的关系：候选明细悬停时说明这一片是通过哪几条关系找到的。
   const graphRelations = new Map<string, string>();
   for (const row of [
+    ...(graph?.relation_candidates ?? []),
     ...(graph?.entity_relations ?? []),
     ...(graph?.relation_matches ?? []),
   ])
     graphRelations.set(
       row.relation_id,
-      `${row.source} → ${row.target}（${row.description || row.category}）`,
+      `${row.source} → ${row.category} → ${row.target}\n${row.description ?? ""}${row.evidence ? `\n「${row.evidence}」` : ""}`,
     );
   const scope = data.scope;
 
@@ -5567,6 +5568,7 @@ function RetrievalDiagnostics({
       leadNote="按 RRF 得分排；每行写清楚这片是哪几路找到的、在各路的排名表里第几"
       candidates={rerankPool}
       queries={queries}
+      relations={graphRelations}
       scoreKind="rrf"
       splitQuota
       rrfK={config.rrf_k}
@@ -5612,6 +5614,7 @@ function RetrievalDiagnostics({
           : (a.rrf_rank ?? 0) - (b.rrf_rank ?? 0),
       )}
       queries={queries}
+      relations={graphRelations}
       scoreKind="rrf"
       rrfK={config.rrf_k}
       fusion={config.fusion}
@@ -6040,6 +6043,7 @@ function RetrievalDiagnostics({
           }，${returned} 条成了来源；按重排概率排，点「原文」看分片正文`}
           candidates={passedChunks}
           queries={queries}
+          relations={graphRelations}
           scoreKind="rerank"
           rrfK={config.rrf_k}
           fusion={config.fusion}
@@ -6056,6 +6060,7 @@ function RetrievalDiagnostics({
           leadNote="按重排概率排；并入父块的分片不单独成源，点「原文」看分片正文"
           candidates={returnedChunks}
           queries={queries}
+          relations={graphRelations}
           scoreKind="rerank"
           rrfK={config.rrf_k}
           fusion={config.fusion}
@@ -6223,6 +6228,7 @@ function CandidateChunksDialog({
   leadNote,
   candidates,
   queries,
+  relations,
   scoreKind = "rrf",
   splitQuota = false,
   rrfK = 60,
@@ -6235,6 +6241,7 @@ function CandidateChunksDialog({
   leadNote?: ReactNode;
   candidates: RetrievalCandidate[];
   queries: string[];
+  relations?: Map<string, string>;
   scoreKind?: "rrf" | "rerank";
   splitQuota?: boolean;
   // RRF 的常数和融合方式：算式要按这次实际用的参数写出来。
@@ -6352,6 +6359,23 @@ function CandidateChunksDialog({
             </span>
           )}
         </td>
+        {relations && (
+          <td>
+            {(item.graph_relation_ids ?? []).length > 0 ? (
+              <ul>
+                {item.graph_relation_ids!.map((id) => (
+                  <li key={id} style={{ whiteSpace: "pre-wrap" }}>
+                    {relations.get(id) ?? "此条历史记录未保存关系详情"}
+                  </li>
+                ))}
+              </ul>
+            ) : item.retrieval_methods.includes("graph") ? (
+              "此条历史记录未保存关系关联"
+            ) : (
+              "—"
+            )}
+          </td>
+        )}
         <td className="num">
           {scoreKind === "rerank" ? (
             <>
@@ -6427,6 +6451,7 @@ function CandidateChunksDialog({
             <tr>
               <th>序号</th>
               <th title="这一片自己的正文">分片</th>
+              {relations && <th>来自哪些关系</th>}
               <th
                 title={
                   scoreKind === "rerank"
@@ -6445,14 +6470,14 @@ function CandidateChunksDialog({
           <tbody>
             {filteredCandidates.length === 0 && (
               <tr>
-                <td colSpan={5}>没有符合筛选条件的分片</td>
+                <td colSpan={relations ? 6 : 5}>没有符合筛选条件的分片</td>
               </tr>
             )}
             {visible.map((entry, index) =>
               entry.kind === "group" ? (
                 // 名额补进来的单独一段，别和 RRF 名前面几个混在一起。
                 <tr className="diag-pool-group" key={`group-${index}`}>
-                  <td colSpan={5}>
+                  <td colSpan={relations ? 6 : 5}>
                     {graphOrdered
                       ? `只被图找到的 ${entry.count} 个：不比 RRF 名次，按图检索的名次进重排`
                       : `图检索名额补进来的 ${entry.count} 个：RRF 名次不够，靠名额进池`}
