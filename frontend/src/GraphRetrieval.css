@@ -92,10 +92,12 @@
   color: var(--tag-text);
 }
 
-/* 关系类型在第一行中间，两边各留一点距离。 */
+/* 关系类型在第一行中间，两边各留一点距离。
+   用两级类名压过外层的「.xxx small { display: block }」（如 .intent-trace small），
+   否则放进这些列表里时关系类型会单独占一整行。 */
 .grt-rel-line .grt-category {
-  margin-left: 0;
-  margin-right: 0;
+  display: inline-block;
+  margin: 0;
 }
 
 /* 关系的描述：第二行，跟着第一行往下。 */
