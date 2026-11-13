@@ -6694,6 +6694,18 @@ label {
   white-space: nowrap;
 }
 
+/* 列表值的标题行：内容和「展开全部／收起」放同一行。 */
+.clamp-list > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.clamp-list > summary > .clamp-toggle {
+  flex: none;
+  margin-top: 0;
+}
+
 .clamp > summary > .clamp-toggle {
   display: block;
   margin-top: 2px;
