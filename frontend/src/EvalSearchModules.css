@@ -133,3 +133,22 @@
 .ag-retrieval-content > .eval-search-module {
   margin: 0;
 }
+
+/* 计分项、状态和说明共用行内排版，按可用宽度自然折行。 */
+.eval-search-results .ag-merge-evidence > li {
+  display: block;
+  line-height: 2;
+}
+.eval-search-results .ag-merge-evidence .ag-evidence-match {
+  display: contents;
+}
+.eval-search-results .ag-evidence-name {
+  display: inline-block;
+  margin-right: 8px;
+}
+.eval-search-results .ag-merge-evidence .tag {
+  margin-right: 8px;
+}
+.eval-search-results .ag-evidence-match > small {
+  display: inline;
+}
