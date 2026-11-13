@@ -321,6 +321,7 @@ function Row({
   label,
   hint,
   systemText,
+  fillable = false,
   custom,
   onFollow,
   children,
@@ -328,6 +329,7 @@ function Row({
   label: string;
   hint?: string;
   systemText: string;
+  fillable?: boolean;
   custom: boolean;
   onFollow: () => void;
   children: ReactNode;
@@ -340,17 +342,19 @@ function Row({
       </div>
       <div className="evp-control">
         <div className="evp-input">{children}</div>
-        <div className="evp-system-value">
-          <small>系统：{systemText}</small>
-          <button
-            type="button"
-            className="link-button button-sm"
-            onClick={onFollow}
-          >
-            填入
-          </button>
-          {custom && <small className="evp-modified">已修改</small>}
-        </div>
+        {fillable && (
+          <div className="evp-system-value">
+            <small>系统：{systemText}</small>
+            <button
+              type="button"
+              className="link-button button-sm"
+              onClick={onFollow}
+            >
+              填入
+            </button>
+          </div>
+        )}
+        {custom && <small className="evp-modified">已修改</small>}
       </div>
     </div>
   );
@@ -368,6 +372,7 @@ function SettingRow({
   const custom = value !== undefined;
   return (
     <Row
+      fillable={item.type === "int" || item.type === "float"}
       label={settingLabel(item.key)}
       systemText={formatValue(item.value)}
       custom={custom}
@@ -511,6 +516,7 @@ function ModelRow({
   return (
     <Row
       label={label}
+      fillable
       hint={hint}
       systemText={`${current.provider} · ${current.model}`}
       custom={value !== undefined}
