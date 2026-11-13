@@ -20,10 +20,13 @@ export function HighlightedText({
   text,
   groups = [],
   className = "graph-chunk-text",
+  autoScroll = true,
 }: {
   text: string;
   groups?: HighlightGroup[];
   className?: string;
+  // 分段展示时（ChunkOriginalText）只让第一处高亮的那一段滚动，避免每段都抢着滚。
+  autoScroll?: boolean;
 }) {
   const root = useRef<HTMLDivElement>(null);
   // 每个字符被哪几种高亮覆盖（位掩码），相同的连续字符合成一段。
@@ -48,10 +51,11 @@ export function HighlightedText({
     else parts.push({ text: text[index], mask: masks[index] });
   }
   useEffect(() => {
+    if (!autoScroll) return;
     root.current
       ?.querySelector("mark")
       ?.scrollIntoView({ block: "center", behavior: "auto" });
-  }, [text]);
+  }, [text, autoScroll]);
   return (
     <div ref={root}>
       {missing.length > 0 && (
