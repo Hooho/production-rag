@@ -111,11 +111,18 @@ export default function UnifiedEvalLauncher({
       toast("error", "请填写配置名称并至少选择一种检索方式");
       return;
     }
-    setConfigs((items) => {
-      const next = [...items];
-      next[editing] = { ...draft, label: draft.label.trim() };
-      return next;
-    });
+    const next = [...configs];
+    next[editing] = { ...draft, label: draft.label.trim() };
+    setConfigs(next);
+    // 保存完就把表单重置：接着填下一组，不再停在刚存好的这一份上。
+    // 最多 4 组，存满后就留在最后一份上。
+    if (next.length < 4) {
+      setEditing(next.length);
+      setDraft(empty(next.length));
+    } else {
+      setEditing(editing);
+      setDraft(next[editing]);
+    }
   }
   async function launch() {
     if (!data || !configs.length || dirty) {
@@ -348,7 +355,13 @@ export default function UnifiedEvalLauncher({
             />
           </div>
           <footer>
-            <span>{dirty ? "当前修改未保存" : "配置已保存"}</span>
+            <span>
+              {dirty
+                ? "当前修改未保存"
+                : editing >= configs.length
+                  ? "新配置还没保存"
+                  : "配置已保存"}
+            </span>
             <button type="button" className="secondary-button" onClick={save}>
               保存一份配置
             </button>
