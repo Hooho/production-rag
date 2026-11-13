@@ -17,7 +17,7 @@ import type {
 import { DetailDialog } from "./DetailDialog";
 import { GraphEntityDialog } from "./GraphEntityDialog";
 import { typeColor } from "./GraphView";
-import { HighlightedText } from "./HighlightedText";
+import { ChunkOriginalText } from "./ChunkOriginalText";
 import { InfoPopover } from "./Popover";
 import { labelHue } from "./hues";
 import "./GraphRetrieval.css";
@@ -47,6 +47,8 @@ type ChunkInfo = Pick<
   "chunk_id" | "title" | "text" | "heading" | "version"
 >;
 
+// 分片原文是三段拼起来的：上下文说明、标题路径、正文。
+// 拆开各给一个底色，一眼能看出哪段是什么（结构与后端 app/storage.py 的 chunk_body 一致）。
 // 原文：整片原文，高亮这条关系的原文引用和起点、终点的名字。
 function OriginalButton({
   relation,
@@ -58,25 +60,30 @@ function OriginalButton({
   return (
     <InfoPopover
       title={chunk?.title ?? relation.title ?? "原文"}
-      content={() =>
-        chunk?.text ? (
-          <HighlightedText
+      content={() => {
+        if (!chunk?.text) {
+          return (
+            <div className="grt-original-missing">
+              <p>此记录未保存完整分片，以下为抽取时记录的原文引用：</p>
+              <blockquote>{relation.evidence || "（没有原文引用）"}</blockquote>
+            </div>
+          );
+        }
+        return (
+          <ChunkOriginalText
             text={chunk.text}
             groups={[
               {
                 kind: "evidence",
-                texts: (relation.evidence ?? "").split("||"),
+                texts: (relation.evidence ?? "")
+                  .split("||")
+                  .filter((item) => item.trim()),
               },
               { kind: "entity", texts: [relation.source, relation.target] },
             ]}
           />
-        ) : (
-          <div className="grt-original-missing">
-            <p>此记录未保存完整分片，以下为抽取时记录的原文引用：</p>
-            <blockquote>{relation.evidence || "（没有原文引用）"}</blockquote>
-          </div>
-        )
-      }
+        );
+      }}
     >
       <button type="button" className="link-button button-sm">
         原文
@@ -1683,7 +1690,7 @@ function ChunkTable({
                             (item): item is GraphRetrievalRelation => !!item,
                           );
                         return (
-                          <HighlightedText
+                          <ChunkOriginalText
                             text={row.text ?? ""}
                             groups={[
                               {
