@@ -243,18 +243,6 @@ SPECS = [
         "max": 500,
         "advanced": True,
     },
-    # 图检索名额：保证交给重排的候选里至少有几个图检索带回的分片。图只有 2 张排名表，向量、关键词每个检索词各 1 张，
-    # 同一分片被多张表找到时 RRF 分数是只被图找到的 3 倍左右，只有图找到的分片几乎进不了 RRF 前 N（2026-11-08 查：最好第 32 名）。
-    # LightRAG、RAGFlow 也不让图和分片比名次，而是单独交给模型；这里交给重排判断。0 表示不留名额。
-    {
-        "key": "graph_rerank_quota",
-        "group": "retrieval",
-        "type": "int",
-        "default": 4,
-        "min": 0,
-        "max": 20,
-        "advanced": True,
-    },
     {
         "key": "graph_relation_min_score",
         "group": "retrieval",
@@ -318,13 +306,17 @@ SPECS = [
         "max": 1,
         "advanced": True,
     },
+    # 只被图找到的分片进重排的上限：这些分片不和其他分片比 RRF 名次（图只有一张排名表，向量、关键词每个检索词各一张，
+    # 只被图找到的分片 RRF 分数天生低，2026-11-08 查：最好第 32 名），按图检索的名次单独取前 N 个交给重排。
+    # 被其他路也找到的分片仍按 RRF 名次进 rerank_candidates 那一份。0 表示只被图找到的分片不进重排。
+    # 以前的「图检索名额」（graph_rerank_quota）和「开图检索时候选池至少 50」都去掉了（2026-11-13）。
     {
         "key": "graph_chunk_rerank_candidates",
         "group": "retrieval",
         "type": "int",
-        "default": 50,
-        "min": 5,
-        "max": 200,
+        "default": 15,
+        "min": 0,
+        "max": 100,
         "advanced": True,
     },
     # 分片大小和重叠只在切分文档时用，改了只影响之后导入的文档；已导入的分片不变。

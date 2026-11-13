@@ -106,10 +106,14 @@ class DocumentSearchTool:
                 ("graph",) if config.get("graph_retrieval") else ()
             )
         methods = tuple(methods)
+        # pool_size 只管按 RRF 名次进重排的那一份；只被图找到的分片另有上限（graph_chunk_rerank_candidates）。
         if pool_size is None:
             pool_size = config["rerank_candidates"]
-            if "graph" in methods:
-                pool_size = max(pool_size, config["graph_chunk_rerank_candidates"])
+        graph_pool_size = (
+            int(config.get("graph_chunk_rerank_candidates") or 0)
+            if "graph" in methods
+            else 0
+        )
         candidates = {}
         lists = []
         dense_hits = 0
@@ -215,34 +219,35 @@ class DocumentSearchTool:
         for rrf_rank, item in enumerate(ranked, start=1):
             item["rrf_rank"] = rrf_rank
             item["status"] = "not_in_pool"
-        # RRF 只负责挑出进入重排的候选池；池子比最终返回数大，给重排留出纠正召回排序的空间。
-        pool = ranked[:pool_size]
-        # 图检索名额：候选池里图检索带回的分片不够 graph_rerank_quota 个时，按图排名表里的名次补进来（池子相应变大），
-        # 交给重排判断。不然只有图找到的分片要和被多张表找到的分片比 RRF 分数，几乎进不了池子。
-        graph_quota = (
-            int(config.get("graph_rerank_quota") or 0) if "graph" in methods else 0
-        )
-        if graph_quota:
 
-            def graph_rank(item):
-                return min(
-                    contribution["rank"]
-                    for contribution in item["contributions"]
-                    if contribution["method"] == "graph"
-                )
+        # 交给重排的候选分两份：
+        #   1. RRF 候选：向量、关键词找到的分片（图也找到的照样有图的 RRF 分），按 RRF 名次取前 pool_size 个；
+        #   2. 图独有候选：只被图找到的分片不和其他分片比 RRF 名次，按图检索的名次取前 graph_pool_size 个。
+        # 图只有一张排名表，向量、关键词每个检索词各一张，只被图找到的分片 RRF 分数天生低，比名次几乎进不了候选池。
+        # LightRAG 也是把图带回的分片直接和向量分片一起交给重排，不先按名次筛。
+        def graph_only(item):
+            return set(item["retrieval_methods"]) == {"graph"}
 
-            present = sum(1 for item in pool if "graph" in item["retrieval_methods"])
-            extra = sorted(
-                (
-                    item
-                    for item in ranked[pool_size:]
-                    if "graph" in item["retrieval_methods"]
-                ),
-                key=lambda item: (graph_rank(item), item["rrf_rank"]),
+        def graph_rank(item):
+            return min(
+                contribution["rank"]
+                for contribution in item["contributions"]
+                if contribution["method"] == "graph"
             )
-            for item in extra[: max(0, graph_quota - present)]:
-                item["graph_quota"] = True
+
+        pool = [item for item in ranked if not graph_only(item)][:pool_size]
+        for item in pool:
+            item["pool_via"] = "rrf"
+        graph_candidates = sorted(
+            (item for item in ranked if graph_only(item)),
+            key=lambda item: (graph_rank(item), item["rrf_rank"]),
+        )
+        for graph_only_rank, item in enumerate(graph_candidates, start=1):
+            item["graph_only_rank"] = graph_only_rank
+            if graph_only_rank <= graph_pool_size:
+                item["pool_via"] = "graph"
                 pool.append(item)
+        graph_pool_count = min(len(graph_candidates), graph_pool_size)
         rerank_documents = []
         for item in pool:
             item["status"] = "in_pool"
@@ -512,6 +517,8 @@ class DocumentSearchTool:
             "returned": len(sources),
             "parent_context": "on" if use_parent else "off",
             "source_characters": parent_characters,
+            "graph_pool_size": graph_pool_size,
+            "graph_pool_count": graph_pool_count,
             "source_graph_budget_ratio": config.get("source_graph_budget_ratio", 0.25),
             "source_graph_budget_reserved": graph_budget,
             "source_graph_budget_used": graph_budget_used,
@@ -996,17 +1003,18 @@ class DocumentSearchTool:
                     else None,
                     "rerank_rank": item.get("rerank_rank"),
                     "graph_relation_ids": item.get("graph_relation_ids") or [],
-                    # 不是靠 RRF 名次、而是靠图检索名额进入重排的
-                    "graph_quota": bool(item.get("graph_quota")),
+                    # 怎么进的重排：rrf = 按 RRF 名次；graph = 只被图找到，按图的名次（graph_only_rank）进的。
+                    "pool_via": item.get("pool_via"),
+                    "graph_only_rank": item.get("graph_only_rank"),
                 }
             )
         # 候选池、融合方式和召回方式写进诊断配置，评测对比不同参数时能看出每次实际用的是哪一组。
         config = {
             "rrf_k": settings["rrf_k"],
             "rerank_candidates": pool_size,
-            "graph_rerank_quota": settings.get("graph_rerank_quota", 0)
-            if "graph" in methods
-            else 0,
+            # 只被图找到的分片进重排的上限和实际进了几个；没走图检索时为 0。
+            "graph_pool_size": stats.get("graph_pool_size", 0),
+            "graph_pool_count": stats.get("graph_pool_count", 0),
             "fusion": fusion,
             "methods": list(methods),
             "return_limit": settings["return_limit"],

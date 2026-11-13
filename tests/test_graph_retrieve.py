@@ -462,54 +462,58 @@ def test_entity_relations_dedupe_other_end(graph):
     )
 
 
-# 图检索名额：RRF 名次不够进候选池时，按图排名表的名次补进来交给重排，诊断里标出来；名额为 0 时不补。
-def test_graph_rerank_quota(graph, runtime):
+# 交给重排的候选分两份：其他路也找到的按 RRF 名次取前 pool_size 个；只被图找到的按图的名次取前
+# graph_chunk_rerank_candidates 个，不和其他分片比 RRF 名次。上限为 0 时只被图找到的分片不进重排。
+def test_graph_only_chunks_enter_rerank_by_graph_rank(graph, runtime):
     from app.tools.search import DocumentSearchTool
 
     client, store, models, document_id = graph
     tool = DocumentSearchTool()
     keywords = {"entities": ["段永平"], "themes": ["投资"]}
-    runtime(
-        graph_retrieval=True,
-        graph_name_min_score=0.3,
-        graph_relation_min_score=0.3,
-        graph_entity_min_score=0.3,
-        graph_rerank_quota=0,
-    )
-    off = tool.execute(
-        store,
-        models,
-        "alice",
-        ["段永平投资"],
-        "段永平投资了什么",
-        pool_size=1,
-        graph_keywords=keywords,
-    )
-    assert not any(item["graph_quota"] for item in off["diagnostics"]["candidates"])
-    assert off["diagnostics"]["config"]["graph_rerank_quota"] == 0
-    runtime(
-        graph_retrieval=True,
-        graph_name_min_score=0.3,
-        graph_relation_min_score=0.3,
-        graph_entity_min_score=0.3,
-        graph_rerank_quota=5,
-    )
-    on = tool.execute(
-        store,
-        models,
-        "alice",
-        ["段永平投资"],
-        "段永平投资了什么",
-        pool_size=1,
-        graph_keywords=keywords,
-    )
+
+    def run(limit):
+        runtime(
+            graph_retrieval=True,
+            graph_name_min_score=0.3,
+            graph_relation_min_score=0.3,
+            graph_entity_min_score=0.3,
+            graph_chunk_rerank_candidates=limit,
+        )
+        return tool.execute(
+            store,
+            models,
+            "alice",
+            ["段永平投资"],
+            "段永平投资了什么",
+            pool_size=1,
+            graph_keywords=keywords,
+            # 测试语料很小，向量、关键词几乎能找到所有分片；只用图检索，所有分片都是只被图找到的。
+            methods=("graph",),
+        )
+
+    def graph_only(item):
+        return item["retrieval_methods"] == ["graph"]
+
+    off = run(0)
+    candidates = off["diagnostics"]["candidates"]
+    # 上限为 0：只被图找到的分片一个都不进重排（候选池为空时没有重排，和重排失败一样按 RRF 顺序兜底）。
+    assert not any(item["pool_via"] for item in candidates)
+    assert off["diagnostics"]["config"]["graph_pool_size"] == 0
+    assert off["diagnostics"]["config"]["graph_pool_count"] == 0
+    on = run(5)
     candidates = on["diagnostics"]["candidates"]
-    graph_items = [item for item in candidates if "graph" in item["retrieval_methods"]]
-    # 图带回的分片全部进了重排（不再是 not_in_pool），靠名额进来的标 graph_quota。
-    assert graph_items and all(item["status"] != "not_in_pool" for item in graph_items)
-    assert any(item["graph_quota"] for item in graph_items)
-    assert all(item["rrf_rank"] > 1 for item in candidates if item["graph_quota"])
-    assert on["diagnostics"]["config"]["graph_rerank_quota"] == 5
+    only = [item for item in candidates if graph_only(item)]
+    assert only
+    entered = [item for item in only if item["status"] != "not_in_pool"]
+    # 按图的名次取前 5 个，标 pool_via = graph；不占 RRF 那一份。
+    assert sorted(item["graph_only_rank"] for item in entered) == list(
+        range(1, min(5, len(only)) + 1)
+    )
+    assert all(item["pool_via"] == "graph" for item in entered)
+    assert not any(item["pool_via"] == "rrf" for item in candidates)
+    config = on["diagnostics"]["config"]
+    assert config["graph_pool_size"] == 5
+    assert config["graph_pool_count"] == len(entered)
 
 
 def test_relation_rerank_happens_before_chunk_selection(graph, monkeypatch):
@@ -596,7 +600,7 @@ def test_global_relations_work_without_extracted_entities(graph):
     assert result["keywords"]["themes"] == []
 
 
-def test_graph_chunk_pool_expands_without_changing_return_limit(graph, runtime):
+def test_graph_chunk_pool_is_separate_from_rrf_pool(graph, runtime):
     from app.tools.search import DocumentSearchTool
 
     client, store, models, document_id = graph
@@ -614,7 +618,9 @@ def test_graph_chunk_pool_expands_without_changing_return_limit(graph, runtime):
         "段永平投资了什么",
         graph_keywords={"entities": ["段永平"]},
     )
-    assert result["diagnostics"]["config"]["rerank_candidates"] == 60
+    # 开了图检索也不再抬高 RRF 那一份候选；只被图找到的分片另有上限。
+    assert result["diagnostics"]["config"]["rerank_candidates"] == 12
+    assert result["diagnostics"]["config"]["graph_pool_size"] == 60
     assert result["diagnostics"]["config"]["return_limit"] == 6
 
 

@@ -392,3 +392,21 @@ def test_agent_search_knowledge_numbers_relations_once(monkeypatch):
     assert sources[1]["type"] == "relation"
     assert sources[1]["title"] == "图谱关系 · 投资的本质"
     assert check_citations("网易 [G1]", list(ctx.evidence.items))["passed"]
+
+
+def test_graph_only_chunks_do_not_take_rrf_slots(runtime, monkeypatch):
+    # RRF 那一份只取向量、关键词找到的分片；只被图找到的另按图的名次进重排，各自有上限。
+    result = run_with_relations(
+        runtime,
+        monkeypatch,
+        [],
+        graph_chunk_rerank_candidates=1,
+    )
+    rows = {row["chunk_id"]: row for row in result["diagnostics"]["candidates"]}
+    assert rows["g1"]["pool_via"] == "graph"
+    assert rows["g1"]["graph_only_rank"] == 1
+    # 这里 pool_size=20，7 个向量分片全部按 RRF 进重排，图分片不占其中名额。
+    assert sum(1 for row in rows.values() if row["pool_via"] == "rrf") == 7
+    config = result["diagnostics"]["config"]
+    assert config["rerank_candidates"] == 20
+    assert (config["graph_pool_size"], config["graph_pool_count"]) == (1, 1)

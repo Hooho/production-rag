@@ -229,11 +229,14 @@ def score_question(item, retrieval, chunk_texts, pool_size):
     evidence = item.get("evidence") or []
     return_limit = config["return_limit"]
     hits = evidence_hits(candidates, evidence, chunk_texts)
-    # 阶段一：召回。RRF 前 pool_size 名就是交给重排的候选池，证据没进池子，后面再强的重排也救不回来。
+    # 阶段一：召回。交给重排的候选池，证据没进池子，后面再强的重排也救不回来。
+    # 候选池分两份：按 RRF 名次进的（pool_via = rrf）和只被图找到、按图的名次进的（pool_via = graph），
+    # 按实际进池的那批算，排序仍按 RRF 名次。旧记录没有 pool_via，退回按 RRF 前 pool_size 名算。
     by_rrf = sorted(candidates, key=lambda row: row["rrf_rank"])
-    pool_ids = []
-    for row in by_rrf[:pool_size]:
-        pool_ids.append(row["chunk_id"])
+    if any(row.get("pool_via") for row in candidates):
+        pool_ids = [row["chunk_id"] for row in by_rrf if row.get("pool_via")]
+    else:
+        pool_ids = [row["chunk_id"] for row in by_rrf[:pool_size]]
     # 阶段二：重排后前 return_limit 名，不考虑阈值；没启用重排时就是 RRF 顺序。
     pool_rows = []
     for row in candidates:
