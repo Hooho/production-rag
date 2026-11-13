@@ -2,7 +2,7 @@
   --module-accent: #526681;
   --module-border: #dce3eb;
   --module-bg: #f7f9fc;
-  margin: 14px 0;
+  margin: 0;
   padding: 14px 16px;
   border: 1px solid var(--module-border);
   border-left: 3px solid var(--module-accent);
@@ -128,4 +128,8 @@
   .eval-search-pools {
     grid-template-columns: 1fr;
   }
+}
+
+.ag-retrieval-content > .eval-search-module {
+  margin: 0;
 }
