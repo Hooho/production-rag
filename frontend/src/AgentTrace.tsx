@@ -1485,7 +1485,11 @@ function RetrievalFunnel({
   const num = (value: unknown) => (typeof value === "number" ? value : 0);
   const dense = num(stats.dense_hits),
     keyword = num(stats.keyword_hits),
+    graph = num(stats.graph_hits),
     fused = num(stats.fused_candidates);
+  // 只被图找到、按图检索名次进重排的个数和上限；旧记录没有。
+  const graphPool = num(stats.graph_pool_count),
+    graphPoolSize = num(stats.graph_pool_size);
   const reranked = num(stats.reranked),
     filtered = num(stats.filtered),
     returned = num(stats.returned);
@@ -1498,20 +1502,30 @@ function RetrievalFunnel({
   const passed = hasRerank ? reranked - filtered : fused;
   const stages = [
     {
-      label: "向量 + 关键词召回",
-      value: dense + keyword,
-      ...{ text: `向量 ${dense} · 关键词 ${keyword}`, removed: false },
+      label: graph > 0 ? "向量 + 关键词 + 图检索召回" : "向量 + 关键词召回",
+      value: dense + keyword + graph,
+      ...{
+        text: `向量 ${dense} · 关键词 ${keyword}${graph > 0 ? ` · 图检索 ${graph}` : ""}`,
+        removed: false,
+      },
     },
     {
       label: "RRF 融合去重",
       value: fused,
-      ...removed(dense + keyword - fused, "重复", "没有重复"),
+      ...removed(dense + keyword + graph - fused, "重复", "没有重复"),
     },
     hasRerank
       ? {
-          label: "交给重排",
+          label:
+            graphPool > 0
+              ? `交给重排（含只被图找到的 ${graphPool}）`
+              : "交给重排",
           value: reranked,
-          ...removed(fused - reranked, "超出候选上限", "全部交给重排"),
+          ...removed(
+            fused - reranked,
+            graphPoolSize > 0 ? "超出候选上限（RRF / 图名次）" : "超出候选上限",
+            "全部交给重排",
+          ),
         }
       : {
           label: stats.rerank_error ? "重排失败" : "未重排",

@@ -1804,8 +1804,12 @@ function stageCandidates(
   returnLimit: number,
 ) {
   const candidates = [...(question.diagnostics?.candidates ?? [])];
+  // 交给重排的候选：新记录按 pool_via（RRF 名次进的 + 只被图找到、按图名次进的），旧记录按 RRF 前 poolSize 名。
+  const marked = candidates.some((candidate) => candidate.pool_via);
   const pool = candidates
-    .filter((candidate) => candidate.rrf_rank <= poolSize)
+    .filter((candidate) =>
+      marked ? Boolean(candidate.pool_via) : candidate.rrf_rank <= poolSize,
+    )
     .sort((left, right) => left.rrf_rank - right.rrf_rank);
   if (stage === "pool") return pool;
   if (stage === "top")
@@ -1908,8 +1912,11 @@ function QuestionChunkComparison({
                         </div>
                         <p>{candidate.preview}</p>
                         <small>
-                          RRF {candidate.rrf_rank} · 重排{" "}
-                          {candidate.rerank_rank ?? "—"}
+                          RRF {candidate.rrf_rank}
+                          {candidate.pool_via === "graph"
+                            ? ` · 图名次 ${candidate.graph_only_rank}`
+                            : ""}{" "}
+                          · 重排 {candidate.rerank_rank ?? "—"}
                           {stage.key === "final"
                             ? ` · ${candidate.source_id ?? "未编号"}`
                             : ""}
@@ -2433,7 +2440,11 @@ function QuestionList({
                                   </span>
                                 </button>
                                 <div className="ev-leak-chunk-meta">
-                                  <span>RRF 第 {candidate.rrf_rank} 名</span>
+                                  <span>
+                                    RRF 第 {candidate.rrf_rank} 名
+                                    {candidate.pool_via === "graph" &&
+                                      `（只被图找到，按图名次第 ${candidate.graph_only_rank} 进重排）`}
+                                  </span>
                                   <span>
                                     重排第 {candidate.rerank_rank ?? "—"} 名
                                   </span>

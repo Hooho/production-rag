@@ -85,7 +85,7 @@ const META: Record<string, Meta> = {
     unit: "条",
     step: 1,
     impact: "judgement",
-    what: "向量和关键词融合后，取前多少条交给重排模型打分。",
+    what: "向量和关键词融合后，按 RRF 名次取前多少条交给重排模型打分。只被图检索找到的分片不占这里的名额，另有上限。",
     why: "候选池应大于最终返回数，让重排有机会纠正初始排名。",
     effect:
       "调大不容易漏资料，但重排耗时大致按条数增加；调小更快，排名靠后的资料可能轮不到打分。",
@@ -238,17 +238,6 @@ const META: Record<string, Meta> = {
     effect: "调大能增加召回，查询开销也增加。",
     when: "之后的问答。",
   },
-  graph_rerank_quota: {
-    label: "图检索 · 进入重排的名额",
-    step: 1,
-    impact: "judgement",
-    dependsOn: "graph_retrieval",
-    what: "交给重排的候选里，至少有几个是图检索带回的分片；RRF 前几名里不够时，按图排名表的名次补进来，候选池相应变大。",
-    why: "图只有 2 张排名表，向量、关键词每个检索词各 1 张；被多张表找到的分片 RRF 分数高得多，只有图找到的分片几乎进不了候选池，图就白查了。LightRAG、RAGFlow 也不让图和分片比名次。",
-    effect:
-      "调大更多图找到的分片交给重排判断，重排多花一点时间；0 表示不留名额，完全按 RRF 名次。",
-    when: "之后的问答。",
-  },
   graph_relation_min_score: {
     label: "图检索 · 关系相似度阈值",
     step: 0.05,
@@ -320,13 +309,14 @@ const META: Record<string, Meta> = {
     when: "之后的问答。",
   },
   graph_chunk_rerank_candidates: {
-    label: "图检索 · 分片重排候选池",
+    label: "图检索 · 只有图找到的分片进重排上限",
     step: 1,
     impact: "judgement",
     dependsOn: "graph_retrieval",
-    what: "启用图检索时分片候选池至少为此值，不改变最终返回条数。",
-    why: "控制关系检索和重排的候选范围。",
-    effect: "修改后应用于后续检索。",
+    what: "只被图检索找到的分片不和其他分片比 RRF 名次，按图检索的名次取前多少个交给重排；不占「候选池大小」的名额。",
+    why: "图只有一张排名表，向量、关键词每个检索词各一张，只被图找到的分片 RRF 分数天生低，比名次几乎进不了候选池。",
+    effect:
+      "调大更多只被图找到的分片交给重排判断，重排多花一点时间；0 表示这些分片不进重排。",
     when: "之后的问答。",
   },
   chunk_size: {

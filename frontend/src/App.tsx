@@ -2615,7 +2615,8 @@ type TraceRow = {
 };
 const PART_PURPOSES: Record<DiagnosticsPart, string> = {
   scope: "按登录身份查出可检索的文档和图谱，作为查询条件交给每一路检索",
-  recall: "向量、关键词、图检索各自召回，再用 RRF 按名次融合",
+  recall:
+    "向量、关键词、图检索各自召回，用 RRF 按名次融合；只被图找到的分片按图的名次单独进重排",
   rerank: "重排候选，按相关性阈值和返回上限决定交给回答模型的资料",
 };
 
@@ -4760,7 +4761,7 @@ const STATUS_INFO: Record<
   not_in_pool: {
     icon: "–",
     label: "未进重排",
-    hint: "RRF 名次不在候选池内，没有交给重排模型",
+    hint: "RRF 名次不在候选池内（只被图找到的：超过按图名次进重排的上限），没有交给重排模型",
   },
 };
 
@@ -4888,9 +4889,8 @@ function RetrievalDiagnostics({
       if (item.status === "not_in_pool") graphOnlyOutOfPool += 1;
     }
   }
-  // 交给重排的候选池：进池的分片就是 status 不是 not_in_pool 的那些（app/tools/search.py 里
-  // RRF 排名前 pool_size 个，再按图检索名额补几个）。池子分两批：RRF 名前 pool_size 个，
-  // 和 RRF 名次不够、靠图检索名额补进来的（后端标了 graph_quota）。
+  // 交给重排的候选池分两份（app/tools/search.py）：其他路也找到的按 RRF 名次取前 rerank_candidates 个（pool_via = rrf），
+  // 只被图找到的按图检索的名次取前 graph_pool_size 个（pool_via = graph）。旧记录是 RRF 前几个 + 图检索名额（graph_quota）。
   const rerankPool = poolCandidates(data);
   // 最终返回的分片：漏斗最后一步留下的那几片，按重排名次排。
   const returnedChunks = returnedCandidates(data);
@@ -4919,7 +4919,12 @@ function RetrievalDiagnostics({
     .filter((method) => hitsByMethod[method] !== undefined)
     .map((method) => `${METHOD_LABELS[method]} ${hitsByMethod[method]}`)
     .join(" · ");
+  // 只被图找到、按图的名次进重排的；旧记录是靠图检索名额补进来的。
+  const graphPoolCount = candidates.filter(
+    (item) => item.pool_via === "graph",
+  ).length;
   const quotaCount = candidates.filter((item) => item.graph_quota).length;
+  const graphPoolMode = config.graph_pool_size !== undefined;
   const funnel = [
     {
       label: "三路返回（含重复）",
@@ -4935,8 +4940,11 @@ function RetrievalDiagnostics({
     },
     config.reranked
       ? {
-          label:
-            quotaCount > 0
+          label: graphPoolMode
+            ? graphPoolCount > 0
+              ? `交给重排（RRF 前 ${config.rerank_candidates} + 只有图找到的 ${graphPoolCount}）`
+              : `交给重排（RRF 前 ${config.rerank_candidates}）`
+            : quotaCount > 0
               ? `交给重排（RRF 前 ${config.rerank_candidates} + 图检索名额 ${quotaCount}）`
               : `交给重排（RRF 前 ${config.rerank_candidates}）`,
           // 这一行的数字能点开：看交给重排的是哪些分片。
@@ -4949,13 +4957,16 @@ function RetrievalDiagnostics({
               "全部交给重排",
             ) +
             (graphOnlyOutOfPool > 0
-              ? `（其中只有图找到的 ${graphOnlyOutOfPool} 个）`
+              ? graphPoolMode
+                ? `（其中只有图找到、超过上限 ${config.graph_pool_size} 的 ${graphOnlyOutOfPool} 个）`
+                : `（其中只有图找到的 ${graphOnlyOutOfPool} 个）`
               : ""),
-          hint:
-            `RRF 前 ${config.rerank_candidates} 名交给交叉编码器重新打分排序` +
-            (quotaCount > 0
-              ? `；另按图排名表的名次补进 ${quotaCount} 个图检索带回的分片（图检索名额 ${config.graph_rerank_quota}）`
-              : ""),
+          hint: graphPoolMode
+            ? `其他路也找到的分片按 RRF 名次取前 ${config.rerank_candidates} 个；只被图找到的不比 RRF 名次，按图检索的名次取前 ${config.graph_pool_size} 个（这次 ${graphPoolCount} 个）。一起交给交叉编码器重新打分排序`
+            : `RRF 前 ${config.rerank_candidates} 名交给交叉编码器重新打分排序` +
+              (quotaCount > 0
+                ? `；另按图排名表的名次补进 ${quotaCount} 个图检索带回的分片（图检索名额 ${config.graph_rerank_quota}）`
+                : ""),
         }
       : {
           label: config.rerank_error ? "重排失败" : "未启用重排",
@@ -5651,7 +5662,10 @@ function RetrievalDiagnostics({
             <strong>重排</strong>：
             {config.reranked ? (
               <>
-                RRF 前 {config.rerank_candidates} 个分片交给{" "}
+                RRF 前 {config.rerank_candidates} 个分片
+                {graphPoolCount > 0 &&
+                  ` + 只被图找到的 ${graphPoolCount} 个（按图检索名次取，上限 ${config.graph_pool_size}）`}
+                交给{" "}
                 <StackTag kind="model" variant="rerank">
                   {config.rerank_model}
                 </StackTag>
@@ -5969,13 +5983,20 @@ function returnedCandidates(data: RetrievalDiagnosticsData) {
   );
 }
 
-// 候选池两批各多少：RRF 名前面的，和 RRF 名次不够、靠图检索名额补进来的。
+// 候选池两批各多少：按 RRF 名次进的，和只被图找到、按图的名次进的（旧记录：靠图检索名额补进来的）。
 function poolBreakdownText(pool: RetrievalCandidate[]) {
+  const graph = pool.filter((item) => item.pool_via === "graph").length;
   const quota = pool.filter((item) => item.graph_quota).length;
-  const rrf = pool.length - quota;
+  const rrf = pool.length - graph - quota;
+  if (graph) return `RRF 前 ${rrf} 个 + 只有图找到的 ${graph} 个`;
   return quota
     ? `RRF 前 ${rrf} 个 + 图检索名额 ${quota} 个`
     : `RRF 前 ${rrf} 个`;
+}
+
+// 不是按 RRF 名次进重排的：只被图找到、按图名次进的，或旧记录里靠图检索名额补进来的。
+function enteredByGraph(item: RetrievalCandidate) {
+  return item.pool_via === "graph" || Boolean(item.graph_quota);
 }
 
 // 文本检索的检索词（按出现顺序）：多个检索词时用 Q1、Q2 标注每条召回贡献来自哪个。
@@ -6060,12 +6081,11 @@ function CandidateChunksDialog({
   const filteredCandidates = candidates.filter((item) =>
     item.retrieval_methods.some((method) => selectedMethods.includes(method)),
   );
-  const quota = splitQuota
-    ? filteredCandidates.filter((item) => item.graph_quota)
-    : [];
+  const quota = splitQuota ? filteredCandidates.filter(enteredByGraph) : [];
   const rest = splitQuota
-    ? filteredCandidates.filter((item) => !item.graph_quota)
+    ? filteredCandidates.filter((item) => !enteredByGraph(item))
     : filteredCandidates;
+  const graphOrdered = quota.some((item) => item.pool_via === "graph");
   // 每一行是一篇分片，或「图检索名额补进来的」那一段的分隔行；翻页按行翻。
   type Entry =
     | { kind: "chunk"; item: RetrievalCandidate }
@@ -6149,6 +6169,14 @@ function CandidateChunksDialog({
               title="RRF 名次不够进入重排，靠图检索名额补进来的"
             >
               图检索名额
+            </span>
+          )}
+          {item.pool_via === "graph" && (
+            <span
+              className="diag-graph-only"
+              title="只被图找到，不比 RRF 名次，按图检索的名次进重排"
+            >
+              按图名次 {item.graph_only_rank}
             </span>
           )}
         </td>
@@ -6253,8 +6281,9 @@ function CandidateChunksDialog({
                 // 名额补进来的单独一段，别和 RRF 名前面几个混在一起。
                 <tr className="diag-pool-group" key={`group-${index}`}>
                   <td colSpan={5}>
-                    图检索名额补进来的 {entry.count} 个：RRF
-                    名次不够，靠名额进池
+                    {graphOrdered
+                      ? `只被图找到的 ${entry.count} 个：不比 RRF 名次，按图检索的名次进重排`
+                      : `图检索名额补进来的 ${entry.count} 个：RRF 名次不够，靠名额进池`}
                   </td>
                 </tr>
               ) : (
@@ -6586,6 +6615,14 @@ function CandidateRow({
             title="RRF 名次不够进入重排，靠图检索名额补进来的"
           >
             图检索名额
+          </span>
+        )}
+        {item.pool_via === "graph" && (
+          <span
+            className="diag-graph-only"
+            title="只被图找到，不比 RRF 名次，按图检索的名次进重排"
+          >
+            按图名次 {item.graph_only_rank}
           </span>
         )}
       </td>

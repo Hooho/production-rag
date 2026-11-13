@@ -74,8 +74,11 @@ export type RetrievalCandidate = {
   rerank_probability: number | null;
   rerank_rank: number | null;
   graph_relation_ids?: string[];
-  // 靠图检索名额（不是 RRF 名次）进入重排的；旧记录没有。
+  // 旧记录：靠图检索名额（不是 RRF 名次）进入重排的。
   graph_quota?: boolean;
+  // 怎么进的重排：rrf = 按 RRF 名次；graph = 只被图找到，按图检索的名次（graph_only_rank）进的。旧记录没有。
+  pool_via?: "rrf" | "graph" | null;
+  graph_only_rank?: number | null;
 };
 export type RetrievalDiagnosticsData = {
   config: {
@@ -84,8 +87,11 @@ export type RetrievalDiagnosticsData = {
     // 融合方式：sum = 各路贡献全累加；best = 同一路只取名次最好的那次。旧记录没有。
     fusion?: string;
     rerank_candidates: number;
-    // 图检索名额：交给重排的候选里至少几个图带回的分片；旧记录没有。
+    // 旧记录：图检索名额。
     graph_rerank_quota?: number;
+    // 只被图找到的分片进重排的上限和实际进了几个；旧记录没有。
+    graph_pool_size?: number;
+    graph_pool_count?: number;
     source_graph_budget_ratio?: number;
     source_graph_budget_reserved?: number;
     source_graph_budget_used?: number;

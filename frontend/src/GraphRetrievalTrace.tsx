@@ -1358,7 +1358,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
           {graph.pipeline ? "⑥ 取分片" : "⑤ 取分片"}
           <small>
             {graph.pipeline
-              ? "保留关系的出处分片，同一片去重并保留关系 ID；按关系重排后的优先级排列。"
+              ? "保留关系的出处分片，同一片去重并保留关系 ID；按关系重排后的优先级排列。其他路也找到的分片参加 RRF 融合；只被图找到的按这个顺序单独进重排（有上限）。"
               : "关系的出处分片，同一片去重，名次按这一片对应的关系里相似度最高的那条"}
           </small>
         </h5>
