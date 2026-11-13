@@ -1,4 +1,5 @@
 import Table from "./Table";
+import "./EvalSearchModules.css";
 import { GraphRetrievalTrace } from "./GraphRetrievalTrace";
 import {
   Fragment,
@@ -2599,53 +2600,71 @@ function FixedSearchResults({
         </div>
       )}
       {graphSelected && (
-        <section className="ag-route" aria-label="图检索">
-          <strong>图检索</strong>
+        <section
+          className="eval-search-module eval-search-graph"
+          aria-label="图检索"
+        >
+          <header className="eval-search-module-head">
+            <strong>图检索</strong>
+            <span>
+              {graph
+                ? { ok: "已完成", skipped: "已跳过", failed: "失败" }[
+                    graph.status
+                  ]
+                : "未记录"}
+            </span>
+          </header>
           {graph ? (
             <>
-              <p>
-                图独有召回{" "}
-                {
-                  candidates.filter(
-                    (c) =>
-                      c.retrieval_methods.length === 1 &&
-                      c.retrieval_methods[0] === "graph",
-                  ).length
-                }{" "}
-                段
-              </p>
-              <ul className="ag-evidence-trace">
-                {evidenceChunkLists(question).map((ids, index) => {
-                  const found = candidates.filter(
-                    (c) =>
-                      ids.includes(c.chunk_id) &&
-                      c.contributions.some((x) => x.method === "graph"),
-                  );
-                  const ranks = found.flatMap((c) =>
-                    c.contributions
-                      .filter((x) => x.method === "graph")
-                      .map((x) => x.rank),
-                  );
-                  return (
-                    <li
-                      key={index}
-                      className={found.length ? "is-hit" : "is-miss"}
-                    >
-                      <b>{found.length ? "✓" : "—"}</b>计分项 {index + 1}
-                      <small>
-                        {found.length
-                          ? `图检索第 ${Math.min(...ranks)} 名`
-                          : "图检索未召回"}
-                      </small>
-                      {found.some((c) => c.retrieval_methods.length === 1) && (
-                        <Tag size="sm" outline plain>
-                          图独有
-                        </Tag>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
+              {graph.status === "ok" && (
+                <>
+                  <p className="eval-search-summary">
+                    图独有召回{" "}
+                    {
+                      candidates.filter(
+                        (c) =>
+                          c.retrieval_methods.length === 1 &&
+                          c.retrieval_methods[0] === "graph",
+                      ).length
+                    }{" "}
+                    段
+                  </p>
+                  <ul className="ag-evidence-trace">
+                    {evidenceChunkLists(question).map((ids, index) => {
+                      const found = candidates.filter(
+                        (c) =>
+                          ids.includes(c.chunk_id) &&
+                          c.contributions.some((x) => x.method === "graph"),
+                      );
+                      const ranks = found.flatMap((c) =>
+                        c.contributions
+                          .filter((x) => x.method === "graph")
+                          .map((x) => x.rank),
+                      );
+                      return (
+                        <li
+                          key={index}
+                          className={found.length ? "is-hit" : "is-miss"}
+                        >
+                          <b>{found.length ? "✓" : "—"}</b>计分项 {index + 1}
+                          <small>
+                            {found.length
+                              ? `图检索第 ${Math.min(...ranks)} 名`
+                              : "图检索未召回"}
+                          </small>
+                          {found.some(
+                            (c) => c.retrieval_methods.length === 1,
+                          ) && (
+                            <Tag size="sm" outline plain>
+                              图独有
+                            </Tag>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </>
+              )}
               <GraphRetrievalTrace graph={graph} />
             </>
           ) : (
@@ -2653,118 +2672,181 @@ function FixedSearchResults({
           )}
         </section>
       )}
-      <div className="ag-merge-label">
-        {graphSelected ? (
-          <>
-            普通候选按融合排名取前{" "}
-            {dc?.rerank_candidates ?? config.pool_size ?? "未记录"} 段（实际{" "}
-            {diagnostics
-              ? candidates.filter((c) => c.pool_via === "rrf").length
-              : "未记录"}{" "}
-            段） ＋ 图独有按图排名额外取前 {dc?.graph_pool_size ?? "未记录"}{" "}
-            段（实际 {dc?.graph_pool_count ?? "未记录"} 段）
-          </>
-        ) : (
-          <>合并 → 前 {config.pool_size ?? "—"} 段入池</>
-        )}
-        →{" "}
-        {dc?.reranked === false
-          ? "未重排、未做相关性过滤"
-          : `统一重排 → 过阈值 ${dc?.min_score ?? config.min_score ?? "未记录"}`}
-        →{" "}
-        {dc?.source_selection_mode === "tokens"
-          ? `按 ${dc.source_token_budget ?? "未记录"} token 预算选择来源`
-          : `最多 ${dc?.return_limit ?? config.return_limit ?? "—"} 段交给模型`}
-      </div>
+      <section
+        className="eval-search-module eval-search-pool"
+        aria-label="候选入池与重排"
+      >
+        <header className="eval-search-module-head">
+          <strong>候选入池与重排</strong>
+          <span>合并后统一处理</span>
+        </header>
+        <div className="eval-search-pools">
+          <div>
+            <span>融合排名入池</span>
+            <strong>
+              {diagnostics && candidates.some((c) => c.pool_via)
+                ? candidates.filter((c) => c.pool_via === "rrf").length
+                : "未记录"}
+              <small> 段</small>
+            </strong>
+            <small>
+              上限 {dc?.rerank_candidates ?? config.pool_size ?? "未记录"} 段
+            </small>
+          </div>
+          {graphSelected && (
+            <div>
+              <span>图独有额外入池</span>
+              <strong>
+                {dc?.graph_pool_count ?? "未记录"}
+                <small> 段</small>
+              </strong>
+              <small>
+                按图排名 · 上限 {dc?.graph_pool_size ?? "未记录"} 段
+              </small>
+            </div>
+          )}
+        </div>
+        <div className="eval-search-flow">
+          <span>{dc?.reranked === false ? "未重排" : "统一重排"}</span>
+          <i>→</i>
+          <span>
+            {dc?.reranked === false
+              ? "未做相关性过滤"
+              : `相关性阈值 ${dc?.min_score ?? config.min_score ?? "未记录"}`}
+          </span>
+          <i>→</i>
+          <span>
+            {dc?.source_selection_mode === "tokens"
+              ? `来源预算 ${dc.source_token_budget ?? "未记录"} token`
+              : `最多返回 ${dc?.return_limit ?? config.return_limit ?? "未记录"} 段`}
+          </span>
+        </div>
+      </section>
       {graphSelected && dc && (
-        <p className="ag-muted">
+        <section
+          className="eval-search-module eval-search-budget"
+          aria-label="图保底预算"
+        >
+          <header className="eval-search-module-head">
+            <strong>图保底预算</strong>
+            <span>
+              {dc.source_selection_mode === "tokens"
+                ? `${Math.round((dc.source_graph_budget_ratio ?? 0) * 100)}% 预留额度`
+                : "未启用"}
+            </span>
+          </header>
           {dc.source_selection_mode === "tokens" ? (
             <>
-              图保底 {Math.round((dc.source_graph_budget_ratio ?? 0) * 100)}
-              %：额度 {dc.source_graph_budget_reserved ??
-                0} token，实际使用 {dc.source_graph_budget_used ?? 0} token
-              （关系 {dc.source_graph_relation_count ?? 0} 条 /{" "}
-              {dc.source_graph_relation_tokens ?? 0} token，图独有分片{" "}
-              {dc.source_graph_budget_count ?? 0} 段）。
-              先放关系，剩余额度放通过相关性过滤的图独有分片，未用完额度归还公共预算。
-              {diagnostics?.context_relations?.reason}
+              <div className="eval-search-budget-stats">
+                <span>
+                  实际使用 <b>{dc.source_graph_budget_used ?? 0}</b> /{" "}
+                  {dc.source_graph_budget_reserved ?? 0} token
+                </span>
+                <span>
+                  关系 <b>{dc.source_graph_relation_count ?? 0}</b> 条 ·{" "}
+                  {dc.source_graph_relation_tokens ?? 0} token
+                </span>
+                <span>
+                  图独有分片 <b>{dc.source_graph_budget_count ?? 0}</b> 段
+                </span>
+              </div>
+              <p className="eval-search-note">
+                先放关系，再放通过相关性过滤的图独有分片；剩余额度归还公共预算。
+              </p>
+              {diagnostics?.context_relations?.reason && (
+                <p className="eval-search-note">
+                  {diagnostics.context_relations.reason}
+                </p>
+              )}
             </>
           ) : (
-            "本次未记录 token 预算图保底，或按条数选择来源。"
+            <p className="eval-search-note">
+              本次未记录 token 预算图保底，或按条数选择来源。
+            </p>
           )}
-        </p>
+        </section>
       )}
       {mergedEvidence && mergedEvidence.length > 0 && (
-        <ul
-          className="ag-evidence-trace ag-merge-evidence"
-          aria-label="合并过滤后的计分项命中情况"
-        >
-          {mergedEvidence.map((row, index) => (
-            <li key={index}>
-              <span
-                className={`ag-evidence-name ${row.tone === "danger" || row.tone === "neutral" ? "is-missed" : ""}`}
-              >
-                计分项 {index + 1}
-              </span>
-              {!retrySearch &&
-                (() => {
-                  const ids = evidenceChunkLists(question)[index] ?? [];
-                  const found = candidates.filter((c) =>
-                    ids.includes(c.chunk_id),
-                  );
-                  return (
-                    <>
-                      {found.some((c) => c.pool_via === "rrf") && (
-                        <Tag size="sm" outline plain>
-                          融合排名入池
-                        </Tag>
-                      )}
-                      {found.some((c) => c.pool_via === "graph") && (
-                        <Tag size="sm" outline plain>
-                          图独有额外入池
-                        </Tag>
-                      )}
-                      {found.some((c) => c.graph_budget_guaranteed) && (
-                        <Tag size="sm" outline plain>
-                          图保底入选
-                        </Tag>
-                      )}
-                    </>
-                  );
-                })()}
-              {(row.matches ?? [row]).map((match) => (
-                <span className="ag-evidence-match" key={match.label}>
-                  <Tag
-                    tone={match.tone}
-                    hue={match.hue}
-                    size="sm"
-                    outline={match.dashed}
-                    className={match.dashed ? "is-dashed" : undefined}
-                  >
-                    {match.label}
-                  </Tag>
-                  {match.detail && <small>{match.detail}</small>}
-                  {match.tone === "danger" &&
-                    (() => {
-                      const fixed = retrySearch
-                        ? question.retry?.evidence?.[index]
-                        : question.evidence[index];
-                      const ids = evidenceChunkLists(question)[index] ?? [];
-                      const candidates = !retrySearch
-                        ? question.diagnostics?.candidates.filter((candidate) =>
-                            ids.includes(candidate.chunk_id),
-                          )
-                        : undefined;
-                      const text = filteredRankingText(
-                        candidates?.length ? candidates : fixed ? [fixed] : [],
-                      );
-                      return text ? <small>{text}</small> : null;
-                    })()}
+        <section className="eval-search-module eval-search-results">
+          <header className="eval-search-module-head">
+            <strong>最终计分项去向</strong>
+            <span>{mergedEvidence.length} 个计分项</span>
+          </header>
+          <ul
+            className="ag-evidence-trace ag-merge-evidence"
+            aria-label="合并过滤后的计分项命中情况"
+          >
+            {mergedEvidence.map((row, index) => (
+              <li key={index}>
+                <span
+                  className={`ag-evidence-name ${row.tone === "danger" || row.tone === "neutral" ? "is-missed" : ""}`}
+                >
+                  计分项 {index + 1}
                 </span>
-              ))}
-            </li>
-          ))}
-        </ul>
+                {!retrySearch &&
+                  (() => {
+                    const ids = evidenceChunkLists(question)[index] ?? [];
+                    const found = candidates.filter((c) =>
+                      ids.includes(c.chunk_id),
+                    );
+                    return (
+                      <>
+                        {found.some((c) => c.pool_via === "rrf") && (
+                          <Tag size="sm" outline plain>
+                            融合排名入池
+                          </Tag>
+                        )}
+                        {found.some((c) => c.pool_via === "graph") && (
+                          <Tag size="sm" outline plain>
+                            图独有额外入池
+                          </Tag>
+                        )}
+                        {found.some((c) => c.graph_budget_guaranteed) && (
+                          <Tag size="sm" outline plain>
+                            图保底入选
+                          </Tag>
+                        )}
+                      </>
+                    );
+                  })()}
+                {(row.matches ?? [row]).map((match) => (
+                  <span className="ag-evidence-match" key={match.label}>
+                    <Tag
+                      tone={match.tone}
+                      hue={match.hue}
+                      size="sm"
+                      outline={match.dashed}
+                      className={match.dashed ? "is-dashed" : undefined}
+                    >
+                      {match.label}
+                    </Tag>
+                    {match.detail && <small>{match.detail}</small>}
+                    {match.tone === "danger" &&
+                      (() => {
+                        const fixed = retrySearch
+                          ? question.retry?.evidence?.[index]
+                          : question.evidence[index];
+                        const ids = evidenceChunkLists(question)[index] ?? [];
+                        const candidates = !retrySearch
+                          ? question.diagnostics?.candidates.filter(
+                              (candidate) => ids.includes(candidate.chunk_id),
+                            )
+                          : undefined;
+                        const text = filteredRankingText(
+                          candidates?.length
+                            ? candidates
+                            : fixed
+                              ? [fixed]
+                              : [],
+                        );
+                        return text ? <small>{text}</small> : null;
+                      })()}
+                  </span>
+                ))}
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
       {sourcesAvailable && (
         <ChunkTabs question={question} items={items} empty="过滤后没有分块。" />

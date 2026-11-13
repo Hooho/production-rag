@@ -1,0 +1,131 @@
+.eval-search-module {
+  --module-accent: #526681;
+  --module-border: #dce3eb;
+  --module-bg: #f7f9fc;
+  margin: 14px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--module-border);
+  border-left: 3px solid var(--module-accent);
+  border-radius: 8px;
+  background: var(--module-bg);
+  color: #33465c;
+  font-size: 13px;
+  line-height: 1.65;
+}
+.eval-search-graph {
+  --module-accent: #188878;
+  --module-border: #cde6df;
+  --module-bg: #f3faf7;
+}
+.eval-search-pool {
+  --module-accent: #477fc3;
+  --module-border: #d4e2f4;
+  --module-bg: #f5f9ff;
+}
+.eval-search-budget {
+  --module-accent: #b3832c;
+  --module-border: #ebdfc5;
+  --module-bg: #fffbf2;
+}
+.eval-search-module-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-bottom: 10px;
+}
+.eval-search-module-head strong {
+  color: var(--module-accent);
+  font-size: 14px;
+}
+.eval-search-module-head > span {
+  color: #687b90;
+  font-size: 12px;
+}
+.eval-search-summary {
+  margin: 4px 0 10px;
+  color: #4d7067;
+}
+.eval-search-module .ag-evidence-trace {
+  margin: 8px 0 0;
+}
+.eval-search-module .ag-evidence-trace > li {
+  padding: 5px 0;
+  gap: 8px;
+  border-bottom: 1px solid var(--module-border);
+  flex-wrap: wrap;
+}
+.eval-search-module .ag-evidence-trace > li:last-child {
+  border-bottom: 0;
+}
+.eval-search-pools {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+}
+.eval-search-pools > div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 2px 12px;
+  background: #ffffffb3;
+  border: 1px solid var(--module-border);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.eval-search-pools > div > strong {
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  color: #355f91;
+}
+.eval-search-pools small {
+  font-size: 12px;
+  font-weight: 400;
+  color: #70839a;
+}
+.eval-search-pools > div > small {
+  grid-column: 1 / -1;
+}
+.eval-search-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 12px;
+  color: #526f90;
+  font-size: 12px;
+}
+.eval-search-flow i {
+  font-style: normal;
+  color: #9aafc7;
+}
+.eval-search-budget-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  font-variant-numeric: tabular-nums;
+}
+.eval-search-budget-stats b {
+  color: #936b22;
+}
+.eval-search-note {
+  margin: 8px 0 0;
+  color: #7e735d;
+  font-size: 12px;
+}
+.eval-search-graph .grt-empty {
+  margin: 4px 0;
+  font-size: 13px;
+}
+.eval-search-results .ag-evidence-name {
+  min-width: 64px;
+}
+@media (max-width: 600px) {
+  .eval-search-module {
+    padding: 12px;
+  }
+  .eval-search-pools {
+    grid-template-columns: 1fr;
+  }
+}
