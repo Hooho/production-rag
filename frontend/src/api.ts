@@ -219,6 +219,7 @@ export type GraphRetrievalTrace = {
     model?: string | null;
     duration_ms?: number;
   } | null;
+  name_score_query?: string;
   name_matches: {
     keyword: string;
     name: string;
@@ -230,6 +231,9 @@ export type GraphRetrievalTrace = {
     title: string | null;
     version_number: number | null;
     score: number;
+    baseline?: boolean;
+    gap?: number | null;
+    keyword_score?: number | null;
     // exact 字面相同 / contains 互相包含 / vector 名字向量（旧记录没有这一项，当作 vector）
     match?: "exact" | "contains" | "vector";
     // 算名字向量用的那段文字：名字（类型）：描述1；描述2

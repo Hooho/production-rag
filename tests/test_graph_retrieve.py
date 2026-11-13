@@ -48,7 +48,6 @@ def test_retrieve_with_given_keywords(graph):
         "段永平投资了什么",
         scope,
         {
-            "graph_name_min_score": 0.3,
             "graph_relation_min_score": 0.3,
             "graph_entity_min_score": 0.3,
         },
@@ -62,7 +61,7 @@ def test_retrieve_with_given_keywords(graph):
     # 问题始终记在诊断里：关系相似度是「问题 × 关系」，页面要显示是哪个问题。
     assert result["keywords"]["question"] == "段永平投资了什么"
     assert [item["document_id"] for item in result["scope"]] == [document_id]
-    assert [entity["name"] for entity in result["entities"]] == ["段永平"]
+    assert "段永平" in [entity["name"] for entity in result["entities"]]
     kept_names = {match["name"] for match in result["name_matches"] if match["kept"]}
     assert "段永平" in kept_names
     # 名字向量用的文字：名字（类型）：描述，诊断里能看到向量到底算的是什么。
@@ -94,22 +93,37 @@ def test_retrieve_with_given_keywords(graph):
     assert result["tables"]["unified"][0]["rank"] == 1
 
 
-# 低于阈值的名字留在诊断里，标明原因，不参与找实体。
-def test_name_threshold(graph):
+# 找实体按基准过滤：没有字面命中时以向量第一名为基准，比它低超过差距的名字留在诊断里、标明原因，不参与找实体。
+def test_entity_score_gap(graph):
     client, store, models, document_id = graph
-    result = graph_retrieve.retrieve(
-        store,
-        models,
-        "段",
-        store.readable_scope("alice"),
-        {"graph_name_min_score": 0.6},
-        entities=["段"],
+
+    def run(gap):
+        return graph_retrieve.retrieve(
+            store,
+            models,
+            "段",
+            store.readable_scope("alice"),
+            {"graph_entity_score_gap": gap},
+            entities=["段"],
+        )
+
+    strict = run(0)
+    matches = strict["name_matches"]
+    baseline = [match for match in matches if match["baseline"]]
+    assert len(baseline) == 1 and baseline[0]["match"] == "vector"
+    assert baseline[0]["kept"] and baseline[0]["gap"] == 0
+    assert strict["name_baselines"][0]["name"] == baseline[0]["name"]
+    dropped = [match for match in matches if not match["kept"]]
+    assert dropped
+    assert all(
+        match["reason"] == f"比基准低 {match['gap']:.2f}，超过阈值 0.00"
+        for match in dropped
     )
-    assert result["entities"] == [] and result["entity_relations"] == []
-    assert result["name_matches"] and not any(
-        match["kept"] for match in result["name_matches"]
+    loose = run(1)
+    assert all(
+        match["kept"] or "超过每个关键词" in match["reason"]
+        for match in loose["name_matches"]
     )
-    assert {match["reason"] for match in result["name_matches"]} == {"相似度低于 0.6"}
 
 
 # 每个实体最多留几条关系，多的标「超过每个实体 N 条」。
@@ -121,7 +135,6 @@ def test_entity_relation_limit(graph):
         "段永平",
         store.readable_scope("alice"),
         {
-            "graph_name_min_score": 0.3,
             "graph_entity_relation_limit": 1,
             "graph_entity_min_score": 0,
         },
@@ -142,7 +155,7 @@ def test_entity_relation_threshold(graph):
         models,
         "段永平",
         store.readable_scope("alice"),
-        {"graph_name_min_score": 0.3, "graph_entity_min_score": 0.4},
+        {"graph_entity_min_score": 0.4},
         entities=["段永平"],
     )
     # 向量分数线只作用于向量路径，关键词可以救回低向量分的关系。
@@ -172,13 +185,13 @@ def test_scope_and_deleted_relations(graph):
         models,
         "段永平",
         store.readable_scope("alice"),
-        {"graph_name_min_score": 0.3},
+        {},
         entities=["段永平"],
     )
     assert {item["target"] for item in result["entity_relations"]} == {"苹果公司"}
 
 
-# 字面匹配：名字或模型给的标准名和关键词相同就直接命中，不看向量阈值；「阿段」的标准名是段永平，也算相同。
+# 字面匹配：名字或模型给的标准名和关键词相同就命中；「阿段」的标准名是段永平，也算相同。
 def test_literal_exact_match(graph):
     client, store, models, document_id = graph
     result = graph_retrieve.retrieve(
@@ -186,7 +199,7 @@ def test_literal_exact_match(graph):
         models,
         "段永平",
         store.readable_scope("alice"),
-        {"graph_name_min_score": 0.99},
+        {"graph_entity_score_gap": 1},
         entities=["段永平"],
     )
     literal = {
@@ -195,11 +208,14 @@ def test_literal_exact_match(graph):
         if match["match"] != "vector"
     }
     assert set(literal) == {"段永平", "阿段"}
+    # 字面命中也算向量分数，不再固定 1.0；基准是字面命中里分数最高的那个。
     assert all(
-        item["match"] == "exact" and item["kept"] and item["score"] == 1.0
+        item["match"] == "exact" and item["kept"] and isinstance(item["score"], float)
         for item in literal.values()
     )
-    assert [entity["name"] for entity in result["entities"]] == ["段永平"]
+    best = max(literal.values(), key=lambda item: item["score"])
+    assert best["baseline"] and result["name_baselines"][0]["match"] == "exact"
+    assert "段永平" in [entity["name"] for entity in result["entities"]]
     # 字面命中过的名字不再从向量里重复列出。
     names = [(match["name"], match["entity_id"]) for match in result["name_matches"]]
     assert len(names) == len(set(names))
@@ -213,7 +229,7 @@ def test_literal_contains(graph):
         models,
         "段永平先生",
         store.readable_scope("alice"),
-        {"graph_name_min_score": 0.99},
+        {"graph_entity_score_gap": 1},
         entities=["段永平先生"],
     )
     assert {
@@ -221,7 +237,7 @@ def test_literal_contains(graph):
         for match in result["name_matches"]
         if match["match"] == "contains"
     } == {"段永平", "阿段"}
-    assert [entity["name"] for entity in result["entities"]] == ["段永平"]
+    assert "段永平" in [entity["name"] for entity in result["entities"]]
     with store.engine.connect() as connection:
         version_ids = [
             row["version_id"]
@@ -242,10 +258,10 @@ def test_entity_top_k(graph):
         models,
         "段永平",
         store.readable_scope("alice"),
-        {"graph_name_min_score": 0, "graph_entity_top_k": 1},
+        {"graph_entity_score_gap": 1, "graph_entity_top_k": 1},
         entities=["段永平"],
     )
-    assert [entity["name"] for entity in result["entities"]] == ["段永平"]
+    assert "段永平" in [entity["name"] for entity in result["entities"]]
     dropped = [match for match in result["name_matches"] if not match["kept"]]
     assert dropped and {match["reason"] for match in dropped} == {
         "超过每个关键词 1 个实体"
@@ -338,7 +354,6 @@ def test_search_tool_with_graph(graph, runtime):
     ] == ["dense", "keyword"]
     runtime(
         graph_retrieval=True,
-        graph_name_min_score=0.3,
         graph_relation_min_score=0.3,
         graph_entity_min_score=0.3,
     )
@@ -399,7 +414,6 @@ def test_agent_search_knowledge_graph(graph, runtime):
     before = agent_tools.tool_definitions(ctx)
     runtime(
         graph_retrieval=True,
-        graph_name_min_score=0.3,
         graph_relation_min_score=0.3,
         graph_entity_min_score=0.3,
     )
@@ -444,7 +458,7 @@ def test_entity_relations_dedupe_other_end(graph):
         models,
         "段永平",
         store.readable_scope("alice"),
-        {"graph_name_min_score": 0.3, "graph_entity_min_score": 0},
+        {"graph_entity_min_score": 0},
         entities=["段永平"],
     )
     to_bbk = [
@@ -474,7 +488,6 @@ def test_graph_only_chunks_enter_rerank_by_graph_rank(graph, runtime):
     def run(limit):
         runtime(
             graph_retrieval=True,
-            graph_name_min_score=0.3,
             graph_relation_min_score=0.3,
             graph_entity_min_score=0.3,
             graph_chunk_rerank_candidates=limit,
@@ -718,3 +731,29 @@ def test_unified_graph_chunks_have_one_rrf_contribution(graph, runtime):
         ]
         assert len(contributions) <= 1
     assert len(lists[0]["hits"]) == diagnostics["graph"]["counts"]["chunks"]
+
+
+def test_entity_disambiguation_uses_full_question(graph):
+    import math
+
+    _, store, models, _ = graph
+    question = "段永平投资苹果公司"
+    result = graph_retrieve.retrieve(
+        store,
+        models,
+        question,
+        store.readable_scope("alice"),
+        {"graph_entity_score_gap": 1},
+        entities=["段永平"],
+    )
+    assert result["name_score_query"] == question
+    query = char_embed([question])[0]
+    matches = result["name_matches"]
+    assert matches
+    for match in matches:
+        text = char_embed([match["vector_text"]])[0]
+        expected = sum(a * b for a, b in zip(query, text)) / math.sqrt(
+            sum(a * a for a in query) * sum(b * b for b in text)
+        )
+        assert match["score"] == pytest.approx(expected, abs=0.0001)
+    assert any(abs(m["score"] - m["keyword_score"]) > 0.01 for m in matches)

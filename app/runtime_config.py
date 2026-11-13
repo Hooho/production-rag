@@ -195,13 +195,15 @@ SPECS = [
     # 图检索：打开后向量、关键词、图检索三路一起用（固定流程和 Agent 都是）。默认关，关闭时问答和以前完全一样。
     # 阈值、条数先按 LightRAG 的量级定，还没有评测依据（docs：claude/graph-retrieval-phase2-plan.md）。
     {"key": "graph_retrieval", "group": "retrieval", "type": "bool", "default": False},
+    # 找实体：每个关键词以字面命中里分数最高的名字为基准（没有字面命中就用向量第一名），
+    # 比基准低超过这个差距的候选去掉。分数挤在 0.6～0.7，固定阈值（原来的 graph_name_min_score 0.5）不起作用（2026-11-13）。
     {
-        "key": "graph_name_min_score",
+        "key": "graph_entity_score_gap",
         "group": "retrieval",
         "type": "float",
-        "default": 0.5,
+        "default": 0.03,
         "min": 0,
-        "max": 1,
+        "max": 0.3,
         "advanced": True,
     },
     {
@@ -612,7 +614,7 @@ REQUIRES = {
     **{
         key: [_on("graph_retrieval")]
         for key in (
-            "graph_name_min_score",
+            "graph_entity_score_gap",
             "graph_name_top_k",
             "graph_entity_top_k",
             "graph_entity_min_score",

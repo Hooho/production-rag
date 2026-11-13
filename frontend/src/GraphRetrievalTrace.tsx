@@ -955,9 +955,20 @@ function NamesDetail({
                     : match.match === "contains"
                       ? "字面包含 · "
                       : ""}
-                  向量相似度{" "}
+                  {graph.name_score_query ? "完整问题相似度 " : "向量相似度 "}
                   {match.score == null ? "未记录" : score(match.score)}
                 </small>
+                {graph.name_score_query && (
+                  <small>
+                    {match.baseline
+                      ? "基准"
+                      : match.gap == null
+                        ? "无分数，未参与消歧"
+                        : match.gap < 0
+                          ? `比基准高 ${Math.abs(match.gap).toFixed(2)}`
+                          : `比基准低 ${match.gap.toFixed(2)}`}
+                  </small>
+                )}
               </td>
               <td>
                 {match.entity_name ?? "—"}
@@ -1164,17 +1175,31 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
         <h5>
           ② 找实体
           <small>
-            具体关键词 → 字面匹配（名字相同或被关键词包含）+ 名字向量（相似度 ≥{" "}
-            {settings.graph_name_min_score ?? 0.5}
-            ，前 {settings.graph_name_top_k ?? 10} 个）→
-            按归属合并成实体，每个关键词最多 {settings.graph_entity_top_k ?? 6}{" "}
-            个（字面命中的排最前）
+            {graph.name_score_query
+              ? `关键词召回候选（字面匹配＋向量前 ${settings.graph_name_top_k ?? 10} 个）→ 完整问题消歧过滤 → 按归属合并，每个关键词最多 ${settings.graph_entity_top_k ?? 6} 个实体`
+              : "关键词字面匹配＋名字向量召回，按历史记录的规则筛选实体"}
           </small>
           <DetailButton
             count={graph.name_matches.length}
             onClick={() => setDetail({ kind: "names" })}
           />
         </h5>
+        {graph.name_score_query && (
+          <p className="grt-note">
+            <button
+              type="button"
+              className="secondary-button button-sm"
+              onClick={() => setDetail({ kind: "names" })}
+            >
+              完整问题消歧过滤 · 查看分数与差距
+            </button>{" "}
+            消歧过滤：用完整问题「{graph.name_score_query}
+            」与候选的名字、类型、描述计算相似度；
+            每个关键词以字面命中最高分为基准，无字面命中则取向量候选最高分，
+            比基准低超过 {settings.graph_entity_score_gap ?? 0.03}{" "}
+            的去掉，再限制实体数量。
+          </p>
+        )}
         {graph.name_matches.length === 0 ? (
           <p className="grt-empty">没有匹配到名字</p>
         ) : (
@@ -1366,6 +1391,10 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
               关系重排未完成，已回退到融合排名：{graph.relation_rerank_error}
             </p>
           )}
+          <p className="grt-summary">
+            留下的关系不进 RRF
+            融合，也不进分片重排：一边用来取出处分片（⑥），一边按预算直接放进回答上下文。
+          </p>
         </section>
       )}
       <section className="grt-step">

@@ -203,8 +203,9 @@ class GraphVectorStore:
                 )
 
     # version_ids 由业务层按权限和生效版本算好；空范围绝不能退化成全库检索。
-    def search_names(self, vector, version_ids, limit):
-        return self._search(self.names, NAME_FIELDS, vector, version_ids, limit)
+    # ids 不为空时只在这些名字里算相似度（给字面命中的名字取分数）。
+    def search_names(self, vector, version_ids, limit, ids=None):
+        return self._search(self.names, NAME_FIELDS, vector, version_ids, limit, ids)
 
     # ids 不为空时只在这些关系里算相似度（给找到的实体的关系按和问题的相似度排序）。
     def search_relations(self, vector, version_ids, limit, ids=None):

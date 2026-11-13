@@ -21,7 +21,7 @@ from ..mysql.tables import (
 from .extract import model_options
 from .resolve import normalize
 from .schemas import ONLINE_SPACE
-from .vectors import ensure_keyword_versions, name_vector_texts, vector_store
+from .vectors import ensure_keyword_versions, name_key, name_vector_texts, vector_store
 from .relation_retrieval import hybrid_ranking, select_candidates, rerank_candidates
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 PROMPT_ID = "graph_keywords"
 # 默认参数；系统设置里可以改（runtime_config 的 graph_* 项）。
 DEFAULTS = {
-    "graph_name_min_score": 0.5,
+    "graph_entity_score_gap": 0.03,
     "graph_name_top_k": 10,
     "graph_entity_top_k": 6,
     "graph_entity_min_score": 0.5,
@@ -403,6 +403,7 @@ def empty(status, reason, scope=None, **extra):
         "scope": scope or [],
         "keywords": None,
         "name_matches": [],
+        "name_baselines": [],
         "entities": [],
         "entity_relations": [],
         "relation_matches": [],
@@ -450,10 +451,15 @@ def retrieve(
     timings["embed_ms"] = round((time.monotonic() - step) * 1000)
 
     # ② 找实体：字面匹配 + 名字向量，同一个名字字面命中了就不再用向量那条；每个关键词只留前几个实体。
+    # 分数都是关键词向量和名字向量（名字（类型）：描述）的余弦相似度，字面命中的名字也算一次。
+    # 每个关键词定一个基准：字面命中里分数最高的那个，没有字面命中就用向量第一名；
+    # 比基准低超过 graph_entity_score_gap 的候选（字面的、向量的都算）去掉。
+    # 以前向量这一路用固定阈值 0.5，但这个向量模型的分数挤在 0.6～0.7，阈值不起作用；字面命中固定 1.0、无条件留下。
     step = time.monotonic()
-    name_min = setting(settings, "graph_name_min_score")
+    gap_limit = float(setting(settings, "graph_entity_score_gap"))
     entity_top = int(setting(settings, "graph_entity_top_k"))
     name_matches = []
+    name_baselines = []
     with store.engine.connect() as connection:
         literal_hits = {
             keyword: literal_names(connection, keyword, version_ids)
@@ -462,15 +468,30 @@ def retrieve(
     for keyword, vector in zip(words["entities"], entity_vectors):
         matches = []
         seen = set()
-        for hit in literal_hits[keyword]:
+        literal = literal_hits[keyword]
+        keys = [
+            name_key(hit["version_id"], hit["entity_id"], hit["name"])
+            for hit in literal
+        ]
+        scores = (
+            {
+                hit["id"]: hit["score"]
+                for hit in target.search_names(vector, version_ids, len(keys), ids=keys)
+            }
+            if keys
+            else {}
+        )
+        for hit, key in zip(literal, keys):
             seen.add((hit["version_id"], hit["entity_id"], hit["name"]))
-            matches.append({**hit, "kept": True, "reason": None})
+            # 没建名字向量的（还没补算）没有分数：照样留下，不参与基准比较。
+            matches.append(
+                {**hit, "score": scores.get(key), "kept": True, "reason": None}
+            )
         for hit in target.search_names(
             vector, version_ids, int(setting(settings, "graph_name_top_k"))
         ):
             if (hit["version_id"], hit["entity_id"], hit["name"]) in seen:
                 continue
-            kept = hit["score"] >= name_min
             matches.append(
                 {
                     "name": hit["name"],
@@ -479,8 +500,63 @@ def retrieve(
                     "document_id": hit["document_id"],
                     "score": hit["score"],
                     "match": "vector",
-                    "kept": kept,
-                    "reason": None if kept else f"相似度低于 {name_min}",
+                    "kept": True,
+                    "reason": None,
+                }
+            )
+        # 关键词只召回；用完整问题在同一候选集合中重新算分，避免二次全库召回。
+        candidate_keys = [
+            name_key(m["version_id"], m["entity_id"], m["name"]) for m in matches
+        ]
+        question_scores = (
+            {
+                hit["id"]: hit["score"]
+                for hit in target.search_names(
+                    question_vector,
+                    version_ids,
+                    len(candidate_keys),
+                    ids=candidate_keys,
+                )
+            }
+            if candidate_keys
+            else {}
+        )
+        for match, key in zip(matches, candidate_keys):
+            match["keyword_score"] = match["score"]
+            match["score"] = question_scores.get(key)
+        scored_literal = [
+            match
+            for match in matches
+            if match["match"] != "vector" and match["score"] is not None
+        ]
+        pool = scored_literal or [
+            match
+            for match in matches
+            if match["match"] == "vector" and match["score"] is not None
+        ]
+        baseline = max(pool, key=lambda match: match["score"]) if pool else None
+        for match in matches:
+            match["baseline"] = match is baseline
+            match["gap"] = None
+            if baseline is None or match["score"] is None:
+                continue
+            # 差距按两位小数比，和页面上显示的数字一致（显示 0.03 的不会被判成超过 0.03）。
+            gap = round(baseline["score"] - match["score"], 2)
+            match["gap"] = gap
+            if gap > gap_limit:
+                match.update(
+                    kept=False,
+                    reason=f"比基准低 {gap:.2f}，超过阈值 {gap_limit:.2f}",
+                )
+        if baseline is not None:
+            name_baselines.append(
+                {
+                    "keyword": keyword,
+                    "name": baseline["name"],
+                    "entity_id": baseline["entity_id"],
+                    "match": baseline["match"],
+                    "score": round(baseline["score"], 4),
+                    "gap_limit": gap_limit,
                 }
             )
         # 实体排序：有字面命中（完全相同在前）的排最前，其余按留下的名字里最高的相似度。
@@ -494,7 +570,7 @@ def retrieve(
                 else 1
                 if match["match"] == "contains"
                 else 2,
-                -match["score"],
+                -(match["score"] or 0),
             )
             if match["entity_id"] not in rank or order < rank[match["entity_id"]]:
                 rank[match["entity_id"]] = order
@@ -515,7 +591,9 @@ def retrieve(
                     "version_number": (versions.get(match["version_id"]) or {}).get(
                         "number"
                     ),
-                    "score": round(match["score"], 4),
+                    "score": None
+                    if match["score"] is None
+                    else round(match["score"], 4),
                 }
             )
     entity_ids = []
@@ -773,6 +851,9 @@ def retrieve(
         "scope": graph_scope,
         "keywords": words,
         "name_matches": name_matches,
+        # 每个关键词的基准（字面命中里分数最高的，没有字面命中就是向量第一名）。
+        "name_baselines": name_baselines,
+        "name_score_query": question,
         "entities": found,
         "entity_relations": entity_relations,
         "relation_matches": relation_matches,
