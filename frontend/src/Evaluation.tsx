@@ -799,7 +799,8 @@ function Evaluation({
       await refreshRuns();
       onToast("success", "评测记录已删除。");
     } catch (reason) {
-      onToast("error", (reason as Error).message);
+      onToast("error", errorText(reason));
+      throw reason;
     }
   }
 
@@ -3500,13 +3501,50 @@ function RunHistory({
                     </Tag>
                   </td>
                   <td>
-                    <button
-                      type="button"
-                      className="secondary-button button-sm"
-                      onClick={() => onOpenBatch(item.batch!.id)}
-                    >
-                      查看报告
-                    </button>
+                    <div className="ev-history-actions">
+                      <button
+                        type="button"
+                        className="secondary-button button-sm"
+                        disabled={deletingId !== null}
+                        onClick={() => onOpenBatch(item.batch!.id)}
+                      >
+                        查看
+                      </button>
+                      <ConfirmPopover
+                        danger
+                        message={`删除这份评测报告及其中 ${members.length} 组配置记录？删除后不可恢复。`}
+                        confirmText="删除报告"
+                        onConfirm={async () => {
+                          if (active) return;
+                          setDeletingId(item.batch!.id);
+                          try {
+                            for (const member of members)
+                              await onDelete(member.id);
+                            setPicked((previous) =>
+                              previous.filter(
+                                (id) =>
+                                  !members.some((member) => member.id === id),
+                              ),
+                            );
+                          } finally {
+                            setDeletingId(null);
+                          }
+                        }}
+                      >
+                        <button
+                          type="button"
+                          className={`delete-button button-sm${deletingId === item.batch.id ? " is-loading" : ""}`}
+                          disabled={Boolean(active) || deletingId !== null}
+                          title={
+                            active
+                              ? "评测正在运行或排队，不能删除"
+                              : "删除整份评测报告"
+                          }
+                        >
+                          删除
+                        </button>
+                      </ConfirmPopover>
+                    </div>
                   </td>
                 </tr>
               );
