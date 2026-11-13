@@ -261,6 +261,13 @@ export default function EvalParamsPanel({
             <button
               type="button"
               className="link-button button-sm"
+              onClick={() => onChange({})}
+            >
+              全部恢复系统
+            </button>
+            <button
+              type="button"
+              className="link-button button-sm"
               onClick={() => setOpenGroup(null)}
             >
               关闭
@@ -309,14 +316,13 @@ export default function EvalParamsPanel({
   );
 }
 
-// 一行：名称 · 跟随系统（灰字显示当前系统值）/ 自定义，选自定义后出现输入框。
+// 参数直接编辑，系统值可一键填入并恢复跟随。
 function Row({
   label,
   hint,
   systemText,
   custom,
   onFollow,
-  onCustom,
   children,
 }: {
   label: string;
@@ -324,7 +330,6 @@ function Row({
   systemText: string;
   custom: boolean;
   onFollow: () => void;
-  onCustom: () => void;
   children: ReactNode;
 }) {
   return (
@@ -334,28 +339,18 @@ function Row({
         {hint && <small>{hint}</small>}
       </div>
       <div className="evp-control">
-        <div className="evp-switch" role="radiogroup" aria-label={label}>
+        <div className="evp-input">{children}</div>
+        <div className="evp-system-value">
+          <small>系统：{systemText}</small>
           <button
             type="button"
-            role="radio"
-            aria-checked={!custom}
-            className={!custom ? "is-selected" : ""}
+            className="link-button button-sm"
             onClick={onFollow}
           >
-            跟随系统
-            <em>{systemText}</em>
+            填入
           </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={custom}
-            className={custom ? "is-selected" : ""}
-            onClick={onCustom}
-          >
-            自定义
-          </button>
+          {custom && <small className="evp-modified">已修改</small>}
         </div>
-        {custom && <div className="evp-input">{children}</div>}
       </div>
     </div>
   );
@@ -377,12 +372,11 @@ function SettingRow({
       systemText={formatValue(item.value)}
       custom={custom}
       onFollow={() => onChange(undefined)}
-      onCustom={() => onChange(item.value)}
     >
       <SettingInput
         item={item}
         value={value ?? item.value}
-        onChange={onChange}
+        onChange={(next) => onChange(next === item.value ? undefined : next)}
       />
     </Row>
   );
@@ -397,31 +391,39 @@ function SettingInput({
   value: RuntimeSettingValue;
   onChange: (next: RuntimeSettingValue) => void;
 }) {
-  if (item.type === "bool") {
+  if (item.type === "bool" || item.type === "choice") {
+    const choices: RuntimeSettingValue[] =
+      item.type === "bool" ? [true, false] : (item.choices ?? []);
     return (
-      <select
-        className="input-sm"
-        value={value ? "on" : "off"}
-        onChange={(event) => onChange(event.target.value === "on")}
+      <div
+        className="evp-radio-options"
+        role="radiogroup"
+        aria-label={settingLabel(item.key)}
       >
-        <option value="on">开</option>
-        <option value="off">关</option>
-      </select>
-    );
-  }
-  if (item.type === "choice") {
-    return (
-      <select
-        className="input-sm"
-        value={String(value)}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {(item.choices ?? []).map((choice) => (
-          <option key={choice} value={choice}>
-            {choice}
-          </option>
+        {choices.map((choice) => (
+          <label key={String(choice)}>
+            <input
+              type="radio"
+              checked={value === choice}
+              onChange={() => onChange(choice)}
+            />
+            <span>
+              {typeof choice === "boolean"
+                ? choice
+                  ? "开"
+                  : "关"
+                : choice === "tokens"
+                  ? "按 token 预算"
+                  : choice === "count"
+                    ? "按段数"
+                    : String(choice)}
+            </span>
+            {choice === item.value && (
+              <small className="evp-system-mark">系统</small>
+            )}
+          </label>
         ))}
-      </select>
+      </div>
     );
   }
   return (
@@ -463,16 +465,22 @@ function PromptRow({
       systemText={item.active_label}
       custom={value !== undefined}
       onFollow={() => onChange(undefined)}
-      onCustom={() => onChange(item.active_version)}
     >
       <select
         className="input-sm"
         value={String(value ?? item.active_version)}
-        onChange={(event) => onChange(Number(event.target.value))}
+        onChange={(event) =>
+          onChange(
+            Number(event.target.value) === item.active_version
+              ? undefined
+              : Number(event.target.value),
+          )
+        }
       >
         {item.versions.map((version) => (
           <option key={version.version} value={version.version}>
             {version.label}
+            {version.version === item.active_version ? "（系统）" : ""}
             {version.note ? ` · ${version.note}` : ""}
           </option>
         ))}
@@ -507,31 +515,41 @@ function ModelRow({
       systemText={`${current.provider} · ${current.model}`}
       custom={value !== undefined}
       onFollow={() => onChange(undefined)}
-      onCustom={() => onChange(pick(current.provider))}
     >
       <select
         className="input-sm"
         value={value?.provider ?? current.provider}
-        onChange={(event) => onChange(pick(event.target.value))}
+        onChange={(event) =>
+          onChange(
+            event.target.value === current.provider
+              ? undefined
+              : pick(event.target.value),
+          )
+        }
       >
         {profiles.map((item) => (
           <option key={item.provider} value={item.provider}>
             {item.provider}
-            {item.is_active ? "（当前）" : ""}
+            {item.provider === current.provider ? "（系统）" : ""}
           </option>
         ))}
       </select>
       <input
         className="input-sm"
         type="text"
-        value={value?.model ?? ""}
+        value={value?.model ?? current.model}
         placeholder="模型名"
         aria-label={`${label}名称`}
         onChange={(event) =>
-          onChange({
-            provider: value?.provider ?? current.provider,
-            model: event.target.value,
-          })
+          onChange(
+            event.target.value === current.model &&
+              (value?.provider ?? current.provider) === current.provider
+              ? undefined
+              : {
+                  provider: value?.provider ?? current.provider,
+                  model: event.target.value,
+                },
+          )
         }
       />
     </Row>

@@ -187,3 +187,36 @@
   align-items: stretch;
   gap: 6px;
 }
+
+.evp-radio-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+.evp-radio-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.evp-system-mark {
+  color: #718398;
+  background: #edf2f7;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+.evp-system-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #718398;
+}
+.evp-modified {
+  color: #3774bc;
+}
+.evp-control {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
