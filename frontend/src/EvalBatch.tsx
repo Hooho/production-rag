@@ -157,8 +157,15 @@ export default function BatchReport({
         {report.arms.map((arm) => {
           const status = runStatus(arm.status);
           const lines = paramsSummary(arm.params);
+          const failed =
+            arm.status === "failed" ||
+            arm.status === "interrupted" ||
+            Boolean(arm.error);
           return (
-            <article key={arm.id} className="evb-arm">
+            <article
+              key={arm.id}
+              className={`evb-arm${failed ? " is-error" : ""}`}
+            >
               <div className="evb-arm-title">
                 <strong>
                   {arm.label}

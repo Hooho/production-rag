@@ -18,36 +18,59 @@
   font-size: 18px;
 }
 
-.evb-head span,
-.evb-arm p {
+.evb-head span {
   color: var(--ev-muted);
   font-size: 12px;
 }
 
-.evb-error {
-  color: var(--ev-bad);
-  font-size: 12px;
+/* 某一组跑失败：整张卡标红，错误原因单独一块贴在卡里。 */
+.evb-arm.is-error {
+  border-color: var(--ev-bad);
+  background: color-mix(in srgb, var(--ev-bad) 6%, var(--t-ffffff, #fff));
 }
 
+.evb-arm.is-error .evb-arm-title strong {
+  color: var(--ev-bad);
+}
+
+.evb-arm .evb-error {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ev-bad) 12%, transparent);
+  color: var(--ev-bad);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+/* 每组配置的状态卡：卡片本身放大一点，文字和内边距跟着放大。 */
 .evb-arms {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
 }
 
 .evb-arm {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
+  gap: 8px;
   border: 1px solid var(--ev-line);
+  border-radius: 8px;
   background: var(--t-f7fbff);
-  padding: 10px 12px;
+  padding: 14px 16px;
 }
 
 .evb-arm p {
   margin: 0;
+  color: var(--ev-muted);
+  font-size: 13px;
   line-height: 1.6;
+}
+
+.evb-arm-title strong {
+  font-size: 16px;
 }
 
 /* 「运行配置快照」弹窗里的参数：名称和值并排一行，字号压到 12px。 */
