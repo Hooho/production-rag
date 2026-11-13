@@ -232,6 +232,13 @@ button {
   align-self: flex-end;
 }
 
+/* 消息区顶部「更早的 N 条消息」：一次只读最近 10 条，往上翻到顶自动读，读不动时也可以点。 */
+.messages-older {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
 .chat-loading-composer {
   min-height: 116px;
   display: flex;
@@ -6672,9 +6679,19 @@ label {
   overflow: hidden;
 }
 
-.clamp-body > *,
-.clamp-list strong {
+.clamp-body > * {
   white-space: pre-wrap;
+}
+
+/* 列表值横着排：一行放得下就一行，放不下自动换行。 */
+.clamp-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+}
+
+.clamp-item {
+  white-space: nowrap;
 }
 
 .clamp > summary > .clamp-toggle {
@@ -6700,7 +6717,7 @@ label {
 }
 
 .clamp-list[open] > strong {
-  display: block;
+  display: flex;
 }
 
 /* 版本历史整行是按钮，里面不能再放可点击的折叠；错误信息只显示一行，悬停查看全文。 */

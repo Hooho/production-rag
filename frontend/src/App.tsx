@@ -11,7 +11,7 @@ import {
   pendingCount,
   summarizeCheck,
 } from "./GraphReviewPanel";
-import { useToast, type ShowToast, type ToastKind } from "./Toast";
+import { errorText, useToast, type ShowToast, type ToastKind } from "./Toast";
 import type { CheckReport, CheckStepName, GraphReviewReport } from "./api";
 import DataManagement from "./DataManagement";
 import Evaluation, { type EvaluationSection } from "./Evaluation";
@@ -55,6 +55,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
@@ -93,9 +94,10 @@ import {
   getDocument,
   getChunkOriginals,
   getSessionHistory,
+  listChatSessions,
+  type ChatSessionSummary,
   listDocumentChunks,
   listDocuments,
-  listHistory,
   sendChatStream,
   uploadDocument,
   type ChatResult,
@@ -337,7 +339,15 @@ function App() {
   const [user, setUser] = useState<AuthUser | null>(() => storedUser());
   const [sessionId, setSessionId] = useState("");
   const [savedMessages, setSavedMessages] = useState<ChatResult[]>([]);
-  const [historyRuns, setHistoryRuns] = useState<HistoryRun[]>([]);
+  // 当前会话里还没读到的更早消息条数：一次只读最近 10 条，往上翻再分页取。
+  const [hiddenCount, setHiddenCount] = useState(0);
+  // 左侧历史对话列表，每个会话一行（GET /sessions）。
+  const [chatSessions, setChatSessions] = useState<ChatSessionSummary[]>([]);
+  // 点了历史对话、新会话的第一页还没回来：消息区显示骨架。openToken 防止连点两个会话时旧的结果覆盖新的。
+  const [conversationLoading, setConversationLoading] = useState(false);
+  const openToken = useRef(0);
+  // 已经计入列表条数的问答：同一个结果可能从原连接和续看两处到达，只算一次。
+  const recordedRuns = useRef(new Set<string>());
   const [route, setRoute] = useState<Route>(() => readRoute());
   const [sessionLoading, setSessionLoading] = useState(true);
   const [error, setError] = useState("");
@@ -406,9 +416,10 @@ function App() {
     let cancelled = false;
     async function connect() {
       let currentSession = localStorage.getItem(sessionStorage) ?? "";
+      let page: Awaited<ReturnType<typeof getSessionHistory>> | null = null;
       if (currentSession) {
         try {
-          await getSessionHistory(currentSession);
+          page = await getSessionHistory(currentSession);
         } catch {
           currentSession = "";
         }
@@ -418,19 +429,13 @@ function App() {
         currentSession = created.session_id;
         localStorage.setItem(sessionStorage, currentSession);
       }
-      const history = await listHistory();
+      const listed = await listChatSessions();
       if (cancelled) return;
+      recordedRuns.current = new Set();
       setSessionId(currentSession);
-      setHistoryRuns(history.messages);
-      setSavedMessages(
-        history.messages
-          .filter((item) => item.session_id === currentSession)
-          .map((item) => ({
-            ...item.response,
-            request_id: item.response.request_id || item.id,
-            feedback: item.feedback,
-          })),
-      );
+      setChatSessions(listed.sessions);
+      setSavedMessages(page ? page.messages.map(historyMessage) : []);
+      setHiddenCount(page ? page.total - page.messages.length : 0);
     }
     connect()
       .catch((reason: Error) => {
@@ -457,7 +462,8 @@ function App() {
     localStorage.removeItem(sessionStorage);
     setSessionId("");
     setSavedMessages([]);
-    setHistoryRuns([]);
+    setHiddenCount(0);
+    setChatSessions([]);
     setUser(null);
   }
 
@@ -474,9 +480,12 @@ function App() {
     setError("");
     try {
       const created = await createSession();
+      openToken.current += 1;
+      setConversationLoading(false);
       localStorage.setItem(sessionStorage, created.session_id);
       setSessionId(created.session_id);
       setSavedMessages([]);
+      setHiddenCount(0);
     } catch (reason) {
       setError((reason as Error).message);
     } finally {
@@ -484,22 +493,38 @@ function App() {
     }
   }
 
-  function openHistory(session: string) {
-    const sessionMessages = historyRuns
-      .filter((item) => item.session_id === session)
-      .map((item) => ({
-        ...item.response,
-        request_id: item.response.request_id || item.id,
-        feedback: item.feedback,
-      }));
-    localStorage.setItem(sessionStorage, session);
-    setSessionId(session);
-    setSavedMessages(sessionMessages);
+  // 点历史对话：向后端读这个会话最近 10 条，更早的在消息区往上翻时再分页取。
+  async function openHistory(session: string) {
+    if (session === sessionId && !conversationLoading) return;
+    const token = ++openToken.current;
+    setConversationLoading(true);
+    try {
+      const page = await getSessionHistory(session);
+      if (token !== openToken.current) return;
+      localStorage.setItem(sessionStorage, session);
+      setSessionId(session);
+      setSavedMessages(page.messages.map(historyMessage));
+      setHiddenCount(page.total - page.messages.length);
+    } catch (reason) {
+      if (token === openToken.current) showToast("error", errorText(reason));
+    } finally {
+      if (token === openToken.current) setConversationLoading(false);
+    }
+  }
+
+  // 消息区往上翻读到的更早消息：放回上层，切到别的页面再回来时不用重新读。
+  function recordOlder(session: string, older: ChatResult[], hidden: number) {
+    if (session !== sessionId) return;
+    setSavedMessages((items) => {
+      const known = new Set(items.map((item) => item.request_id));
+      return [...older.filter((item) => !known.has(item.request_id)), ...items];
+    });
+    setHiddenCount(hidden);
   }
 
   // 会话删除后从历史列表里去掉；删的是当前会话时换成一个新会话，不再停留在已经不存在的会话上。
   function removeHistory(session: string) {
-    setHistoryRuns((items) =>
+    setChatSessions((items) =>
       items.filter((item) => item.session_id !== session),
     );
     if (session === sessionId) void startNewChat();
@@ -515,7 +540,25 @@ function App() {
   // 问答完成后同步到上层：历史记录，以及当前会话的消息。知识问答页切走时会卸载，切回来按 savedMessages 重新显示；
   // 以前只更新了历史记录，切到别的页面再回来就看不到刚问的问题（要刷新页面重新加载才有）。
   function recordHistory(run: HistoryRun) {
-    setHistoryRuns((items) => [...items, run]);
+    if (!recordedRuns.current.has(run.id)) {
+      recordedRuns.current.add(run.id);
+      setChatSessions((items) => {
+        const existing = items.find(
+          (item) => item.session_id === run.session_id,
+        );
+        const updated: ChatSessionSummary = {
+          session_id: run.session_id,
+          title: existing?.title || run.question,
+          count: (existing?.count ?? 0) + 1,
+          updated: run.created,
+          route: run.response.route,
+        };
+        return [
+          updated,
+          ...items.filter((item) => item.session_id !== run.session_id),
+        ];
+      });
+    }
     if (run.session_id === sessionId) {
       setSavedMessages((items) =>
         items.some((item) => item.request_id === run.id)
@@ -534,11 +577,6 @@ function App() {
 
   // 反馈保存后同步到历史记录和当前会话的消息，切换会话或页面再切回来时仍显示已提交的反馈。
   function recordFeedback(value: FeedbackRecord) {
-    setHistoryRuns((items) =>
-      items.map((item) =>
-        item.id === value.request_id ? { ...item, feedback: value } : item,
-      ),
-    );
     setSavedMessages((items) =>
       items.map((item) =>
         item.request_id === value.request_id
@@ -768,9 +806,12 @@ function App() {
               <Chat
                 sessionId={sessionId}
                 initialMessages={savedMessages}
-                historyRuns={historyRuns}
+                hiddenCount={hiddenCount}
+                loading={conversationLoading}
+                sessions={chatSessions}
                 onNewChat={() => void startNewChat()}
-                onOpenHistory={openHistory}
+                onOpenHistory={(session) => void openHistory(session)}
+                onOlderLoaded={recordOlder}
                 onSessionDeleted={removeHistory}
                 onMessageSaved={recordHistory}
                 onFeedbackSaved={recordFeedback}
@@ -869,6 +910,32 @@ function Login({ onLogin }: { onLogin: (user: AuthUser) => void }) {
   );
 }
 
+// 历史问答记录转成消息区用的格式。
+function historyMessage(item: HistoryRun): ChatResult {
+  return {
+    ...item.response,
+    request_id: item.response.request_id || item.id,
+    feedback: item.feedback,
+  };
+}
+
+function ChatMessageSkeletonCards() {
+  return (
+    <>
+      <div className="chat-loading-card">
+        <SkeletonBlock className="skeleton-line-short" />
+        <SkeletonBlock className="skeleton-line-long" />
+        <SkeletonBlock className="skeleton-line" />
+      </div>
+      <div className="chat-loading-card is-right">
+        <SkeletonBlock className="skeleton-line" />
+        <SkeletonBlock className="skeleton-line-long" />
+        <SkeletonBlock className="skeleton-line-short" />
+      </div>
+    </>
+  );
+}
+
 // 会话和历史记录并行恢复时先展示聊天结构；原来会误显示空对话，加载完成后又突然替换成历史内容。
 function ChatLoading() {
   return (
@@ -887,16 +954,7 @@ function ChatLoading() {
       </aside>
       <div className="chat-column">
         <div className="messages chat-loading-messages">
-          <div className="chat-loading-card">
-            <SkeletonBlock className="skeleton-line-short" />
-            <SkeletonBlock className="skeleton-line-long" />
-            <SkeletonBlock className="skeleton-line" />
-          </div>
-          <div className="chat-loading-card is-right">
-            <SkeletonBlock className="skeleton-line" />
-            <SkeletonBlock className="skeleton-line-long" />
-            <SkeletonBlock className="skeleton-line-short" />
-          </div>
+          <ChatMessageSkeletonCards />
         </div>
         <div className="composer chat-loading-composer">
           <SkeletonBlock className="skeleton-line-long" />
@@ -910,25 +968,35 @@ function ChatLoading() {
 function Chat({
   sessionId,
   initialMessages,
-  historyRuns,
+  hiddenCount,
+  loading,
+  sessions,
   onNewChat,
   onOpenHistory,
+  onOlderLoaded,
   onSessionDeleted,
   onMessageSaved,
   onFeedbackSaved,
 }: {
   sessionId: string;
   initialMessages: ChatResult[];
-  historyRuns: HistoryRun[];
+  hiddenCount: number;
+  loading: boolean;
+  sessions: ChatSessionSummary[];
   onNewChat: () => void;
   onOpenHistory: (sessionId: string) => void;
+  onOlderLoaded: (
+    sessionId: string,
+    older: ChatResult[],
+    hidden: number,
+  ) => void;
   onSessionDeleted: (sessionId: string) => void;
   onMessageSaved: (run: HistoryRun) => void;
   onFeedbackSaved: (value: FeedbackRecord) => void;
 }) {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<ChatResult[]>(initialMessages);
-  const [localHistory, setLocalHistory] = useState<HistoryRun[]>(historyRuns);
+  const toast = useToast();
   // 正在回答的问题放在 liveChat 里（按会话保存，不随组件卸载丢失）：切到别的页面再回来，进度还在。
   // streamAnswer 是回答生成过程中已收到的文字；complete 后以服务端最终回答为准（引用校验失败时最终回答会被替换）。
   const live = useLiveChat(sessionId);
@@ -970,7 +1038,57 @@ function Chat({
     if (!element) return;
     followRef.current =
       element.scrollHeight - element.scrollTop - element.clientHeight < 80;
+    // 翻到接近顶部时读更早的 10 条。
+    if (element.scrollTop < 120) void loadOlder();
   };
+
+  // 往上翻页：取当前最早一条之前的 10 条，插到前面，并保持用户正在看的位置不跳。
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const loadingOlderRef = useRef(false);
+  const currentSessionRef = useRef(sessionId);
+  currentSessionRef.current = sessionId;
+  // 插入前记下滚动高度和位置，渲染后按新增的高度把 scrollTop 往下补，内容就停在原处。
+  const prependRef = useRef<{ height: number; top: number } | null>(null);
+  // 刚往前插入：下面按消息条数变化的处理（重新折叠、滚到底）这次跳过。
+  const prependedRef = useRef(false);
+  async function loadOlder() {
+    if (loadingOlderRef.current || loading || hiddenCount <= 0) return;
+    const first = latestMessages.current[0]?.request_id;
+    if (!first) return;
+    const session = sessionId;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      const page = await getSessionHistory(session, first);
+      if (currentSessionRef.current !== session) return;
+      const known = new Set(
+        latestMessages.current.map((item) => item.request_id),
+      );
+      const older = page.messages
+        .map(historyMessage)
+        .filter((item) => !known.has(item.request_id));
+      const hidden = page.has_more
+        ? Math.max(0, page.total - latestMessages.current.length - older.length)
+        : 0;
+      const element = messagesRef.current;
+      prependRef.current = element
+        ? { height: element.scrollHeight, top: element.scrollTop }
+        : null;
+      prependedRef.current = older.length > 0;
+      // 新读到的更早消息默认折叠，已经展开/折叠过的保持不变。
+      setCollapsedMessages((items) => ({
+        ...Object.fromEntries(older.map((item) => [item.request_id, true])),
+        ...items,
+      }));
+      setMessages((items) => [...older, ...items]);
+      onOlderLoaded(session, older, hidden);
+    } catch (reason) {
+      toast("error", errorText(reason));
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }
 
   // 上层的 initialMessages 有两种变化：切换会话（换成另一组消息，要回到底部），和本页刚问完、反馈后同步上去的
   // （内容和这里已经一样）。后一种不能再强制滚到底：以前回答一完成就同步上去，又触发这里，用户往上翻着也被拉回底部。
@@ -995,18 +1113,37 @@ function Chat({
     requestAnimationFrame(() => scrollToBottom(true));
   }, [initialMessages]);
 
+  useLayoutEffect(() => {
+    const element = messagesRef.current;
+    const before = prependRef.current;
+    if (!element || !before) return;
+    prependRef.current = null;
+    element.scrollTop = before.top + (element.scrollHeight - before.height);
+  }, [messages]);
+
   useEffect(() => {
+    if (prependedRef.current) {
+      prependedRef.current = false;
+      return;
+    }
     setCollapsedMessages(collapsedStateForLast(messages));
     requestAnimationFrame(() => scrollToBottom());
   }, [messages.length]);
 
+  // 消息都折叠着时 10 条可能不满一屏，出不了滚动条，没法往上翻：这时直接接着读，直到满屏或读完。
+  useEffect(() => {
+    if (loading || loadingOlder || hiddenCount <= 0) return;
+    const frame = requestAnimationFrame(() => {
+      const element = messagesRef.current;
+      if (element && element.scrollHeight <= element.clientHeight + 120)
+        void loadOlder();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [messages, hiddenCount, loading, loadingOlder]);
+
   useEffect(() => {
     if (busy || pendingQuestion) scrollToBottom();
   }, [busy, pendingQuestion, streamSteps, streamAnswer]);
-
-  useEffect(() => {
-    setLocalHistory(historyRuns);
-  }, [historyRuns]);
 
   // 历史对话右键菜单里确认删除后调用：删除成功后通知上层更新列表；正在回答的会话后端会返回 409。
   async function removeSession(session: string) {
@@ -1081,11 +1218,6 @@ function Chat({
       response: result,
       created: new Date().toISOString(),
     };
-    setLocalHistory((items) =>
-      items.some((item) => item.id === savedRun.id)
-        ? items
-        : [...items, savedRun],
-    );
     onMessageSaved(savedRun);
   }
 
@@ -1208,7 +1340,7 @@ function Chat({
   return (
     <section className="chat-layout">
       <HistoryRail
-        runs={localHistory}
+        sessions={sessions}
         activeSessionId={sessionId}
         onSelect={selectHistory}
         onNewChat={onNewChat}
@@ -1217,135 +1349,162 @@ function Chat({
       />
       <div className="chat-column">
         <div className="messages" ref={messagesRef} onScroll={handleScroll}>
-          {messages.length === 0 && !busy && !pendingQuestion && (
-            <div className="empty-state">
-              <div className="empty-orbit">✦</div>
-              <h2>从一个问题开始</h2>
-              <p>试试“退货政策是什么？”或“查询订单 A1001”。</p>
-            </div>
-          )}
-          {messages.map((message, index) => {
-            const requestId = message.request_id || `message-${index}`;
-            const questionText =
-              (message.steps.find((step) => step.id === "request")?.result
-                ?.question as string) ?? "本轮问题";
-            const collapsed = collapsedMessages[requestId] ?? false;
-            return (
-              <article
-                className={`message-card ${collapsed ? "is-collapsed" : ""}`}
-                key={requestId}
-              >
-                <div className="message-index">
-                  {String(index + 1).padStart(2, "0")}
-                </div>
-                <div className="message-content">
+          {loading ? (
+            <LoadingSkeleton
+              className="chat-loading-messages"
+              label="正在加载聊天记录"
+            >
+              <ChatMessageSkeletonCards />
+            </LoadingSkeleton>
+          ) : (
+            <>
+              {hiddenCount > 0 && messages.length > 0 && (
+                <div className="messages-older">
                   <button
-                    className="message-toggle"
-                    onClick={() => toggleMessage(requestId)}
-                    aria-expanded={!collapsed}
+                    className={`link-button button-sm ${loadingOlder ? "is-loading" : ""}`}
+                    disabled={loadingOlder}
+                    onClick={() => void loadOlder()}
                   >
-                    <span className="question-line">
-                      {questionText}
-                      {message.mode === "agent" && (
-                        <Tag size="sm" className="is-after" hue={true}>
-                          Agent
-                        </Tag>
-                      )}
-                    </span>
-                    <span className="collapse-icon">
-                      {collapsed ? "＋" : "−"}
-                    </span>
+                    更早的 {hiddenCount} 条消息
                   </button>
-                  {!collapsed && (
-                    <div className="message-body">
-                      <TraceTimeline
-                        steps={message.steps}
-                        answer={message.answer}
-                        sources={message.sources}
-                        traceId={message.trace_id}
-                        requestId={message.request_id}
-                        rounds={
-                          roundsByRequest[message.request_id] ??
-                          finishedRoundsFor(message.request_id)
-                        }
-                      />
-                      <div className="answer">
-                        <MarkdownAnswer content={message.answer} />
-                      </div>
-                      {message.request_id && (
-                        <AnswerFeedback
-                          requestId={message.request_id}
-                          initial={message.feedback}
-                          onSaved={saveFeedback}
-                        />
-                      )}
-                      {message.sources.length > 0 && (
-                        <ContextDetail
-                          title="回答来源"
-                          label={`来源 · ${message.sources.length} 条检索结果${
-                            (message.relations?.length ?? 0) > 0
-                              ? ` + ${message.relations!.length} 条图谱关系`
-                              : ""
-                          }`}
-                        >
-                          <AnswerSourceFilters
-                            sources={message.sources}
-                            relations={message.relations ?? []}
+                </div>
+              )}
+              {messages.length === 0 && !busy && !pendingQuestion && (
+                <div className="empty-state">
+                  <div className="empty-orbit">✦</div>
+                  <h2>从一个问题开始</h2>
+                  <p>试试“退货政策是什么？”或“查询订单 A1001”。</p>
+                </div>
+              )}
+              {messages.map((message, index) => {
+                const requestId = message.request_id || `message-${index}`;
+                const questionText =
+                  (message.steps.find((step) => step.id === "request")?.result
+                    ?.question as string) ?? "本轮问题";
+                const collapsed = collapsedMessages[requestId] ?? false;
+                return (
+                  <article
+                    className={`message-card ${collapsed ? "is-collapsed" : ""}`}
+                    key={requestId}
+                  >
+                    <div className="message-index">
+                      {String(hiddenCount + index + 1).padStart(2, "0")}
+                    </div>
+                    <div className="message-content">
+                      <button
+                        className="message-toggle"
+                        onClick={() => toggleMessage(requestId)}
+                        aria-expanded={!collapsed}
+                      >
+                        <span className="question-line">
+                          {questionText}
+                          {message.mode === "agent" && (
+                            <Tag size="sm" className="is-after" hue={true}>
+                              Agent
+                            </Tag>
+                          )}
+                        </span>
+                        <span className="collapse-icon">
+                          {collapsed ? "＋" : "−"}
+                        </span>
+                      </button>
+                      {!collapsed && (
+                        <div className="message-body">
+                          <TraceTimeline
+                            steps={message.steps}
                             answer={message.answer}
+                            sources={message.sources}
+                            traceId={message.trace_id}
+                            requestId={message.request_id}
+                            rounds={
+                              roundsByRequest[message.request_id] ??
+                              finishedRoundsFor(message.request_id)
+                            }
                           />
-                        </ContextDetail>
-                      )}
-                      <div className="trace">链路编号：{message.trace_id}</div>
-                    </div>
-                  )}
-                </div>
-              </article>
-            );
-          })}
-          {pendingQuestion && (
-            <article className="message-card pending-message">
-              <div className="message-index">
-                {String(messages.length + 1).padStart(2, "0")}
-              </div>
-              <div className="message-content">
-                <div className="pending-question">
-                  <span className="question-line">{pendingQuestion}</span>
-                  {busy && (
-                    <span className="pending-indicator">
-                      <span className="pulse-dot" />
-                      处理中
-                    </span>
-                  )}
-                </div>
-                <div className="message-body">
-                  <TraceTimeline steps={streamSteps} live={busy} />
-                  <AgentLiveRounds rounds={streamRounds} busy={busy} />
-                  {streamAnswer ? (
-                    <div className="answer">
-                      <MarkdownAnswer content={streamAnswer} streaming={busy} />
-                    </div>
-                  ) : busy ? (
-                    <ChatAnswerSkeleton />
-                  ) : null}
-                  {pendingError && (
-                    <div className="pending-error">
-                      <span>
-                        本次处理未完成，已保留收到的阶段记录：{pendingError}
-                      </span>
-                      {!busy && (
-                        <button
-                          type="button"
-                          className="pending-retry"
-                          onClick={() => void submit(pendingQuestion)}
-                        >
-                          重试
-                        </button>
+                          <div className="answer">
+                            <MarkdownAnswer content={message.answer} />
+                          </div>
+                          {message.request_id && (
+                            <AnswerFeedback
+                              requestId={message.request_id}
+                              initial={message.feedback}
+                              onSaved={saveFeedback}
+                            />
+                          )}
+                          {message.sources.length > 0 && (
+                            <ContextDetail
+                              title="回答来源"
+                              label={`来源 · ${message.sources.length} 条检索结果${
+                                (message.relations?.length ?? 0) > 0
+                                  ? ` + ${message.relations!.length} 条图谱关系`
+                                  : ""
+                              }`}
+                            >
+                              <AnswerSourceFilters
+                                sources={message.sources}
+                                relations={message.relations ?? []}
+                                answer={message.answer}
+                              />
+                            </ContextDetail>
+                          )}
+                          <div className="trace">
+                            链路编号：{message.trace_id}
+                          </div>
+                        </div>
                       )}
                     </div>
-                  )}
-                </div>
-              </div>
-            </article>
+                  </article>
+                );
+              })}
+              {pendingQuestion && (
+                <article className="message-card pending-message">
+                  <div className="message-index">
+                    {String(hiddenCount + messages.length + 1).padStart(2, "0")}
+                  </div>
+                  <div className="message-content">
+                    <div className="pending-question">
+                      <span className="question-line">{pendingQuestion}</span>
+                      {busy && (
+                        <span className="pending-indicator">
+                          <span className="pulse-dot" />
+                          处理中
+                        </span>
+                      )}
+                    </div>
+                    <div className="message-body">
+                      <TraceTimeline steps={streamSteps} live={busy} />
+                      <AgentLiveRounds rounds={streamRounds} busy={busy} />
+                      {streamAnswer ? (
+                        <div className="answer">
+                          <MarkdownAnswer
+                            content={streamAnswer}
+                            streaming={busy}
+                          />
+                        </div>
+                      ) : busy ? (
+                        <ChatAnswerSkeleton />
+                      ) : null}
+                      {pendingError && (
+                        <div className="pending-error">
+                          <span>
+                            本次处理未完成，已保留收到的阶段记录：{pendingError}
+                          </span>
+                          {!busy && (
+                            <button
+                              type="button"
+                              className="pending-retry"
+                              onClick={() => void submit(pendingQuestion)}
+                            >
+                              重试
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </article>
+              )}
+            </>
           )}
         </div>
         <div className="composer">
@@ -1655,14 +1814,14 @@ function collapsedStateForLast(messages: ChatResult[]) {
 
 // 持续展示当前用户的历史会话，并允许恢复某个会话继续追问。
 function HistoryRail({
-  runs,
+  sessions,
   activeSessionId,
   onSelect,
   onNewChat,
   onDelete,
   busy,
 }: {
-  runs: HistoryRun[];
+  sessions: ChatSessionSummary[];
   activeSessionId: string;
   onSelect: (sessionId: string) => void;
   onNewChat: () => void;
@@ -1712,21 +1871,6 @@ function HistoryRail({
     });
   }
 
-  const groups: Array<{ sessionId: string; runs: HistoryRun[] }> = [];
-  const grouped = new Map<string, HistoryRun[]>();
-  for (const run of [...runs].reverse()) {
-    const existing = grouped.get(run.session_id);
-    if (existing) {
-      existing.push(run);
-    } else {
-      grouped.set(run.session_id, [run]);
-      groups.push({
-        sessionId: run.session_id,
-        runs: grouped.get(run.session_id) ?? [],
-      });
-    }
-  }
-
   return (
     <aside className="chat-history-rail" aria-label="历史对话">
       <div className="history-rail-heading">
@@ -1734,7 +1878,7 @@ function HistoryRail({
           <strong>历史对话</strong>
         </div>
         <div className="history-rail-actions">
-          <span className="history-count">{groups.length}</span>
+          <span className="history-count">{sessions.length}</span>
           <button
             className="history-new-chat"
             onClick={onNewChat}
@@ -1745,31 +1889,28 @@ function HistoryRail({
         </div>
       </div>
       <div className="history-rail-list">
-        {groups.length === 0 ? (
+        {sessions.length === 0 ? (
           <div className="history-empty">还没有历史对话</div>
         ) : (
-          groups.map((group) => {
-            const latest = group.runs[0];
-            const title =
-              group.runs[group.runs.length - 1]?.question ?? "未命名对话";
+          sessions.map((item) => {
             return (
               <div
-                className={`history-session ${group.sessionId === activeSessionId ? "active" : ""}`}
-                key={group.sessionId}
-                onContextMenu={(event) => openMenu(event, group.sessionId)}
+                className={`history-session ${item.session_id === activeSessionId ? "active" : ""}`}
+                key={item.session_id}
+                onContextMenu={(event) => openMenu(event, item.session_id)}
               >
                 <div className="history-session-heading">
-                  <span>{formatHistoryDate(latest.created)}</span>
-                  <small>{group.runs.length} 条消息</small>
+                  <span>{formatHistoryDate(item.updated)}</span>
+                  <small>{item.count} 条消息</small>
                 </div>
                 <button
                   className="history-item history-conversation"
-                  onClick={() => onSelect(group.sessionId)}
+                  onClick={() => onSelect(item.session_id)}
                 >
-                  <strong>{title}</strong>
+                  <strong>{item.title || "未命名对话"}</strong>
                   <small>
-                    {formatRoute(latest.response.route)} · 最后更新{" "}
-                    {formatHistoryDate(latest.created, true)}
+                    {item.route ? `${formatRoute(item.route)} · ` : ""}最后更新{" "}
+                    {formatHistoryDate(item.updated, true)}
                   </small>
                 </button>
               </div>
@@ -3012,20 +3153,30 @@ function ResultFieldValue({
     return (
       <strong title={durationTitle(value)}>{formatDuration(value)}</strong>
     );
-  // 列表超过 3 项时先显示前 3 项，其余折叠。
+  // 列表超过 3 项时先显示前 3 项，其余折叠；一项一行改成横着排。
   if (Array.isArray(value) && value.length > CLAMP_ITEMS) {
     const items: string[] = [];
     for (const item of value) items.push(formatResultValue(item));
+    const chips = (list: string[]) =>
+      list.map((item, index) => (
+        <span className="clamp-item" key={index}>
+          {item}
+        </span>
+      ));
     return (
       <details className="clamp clamp-list">
         <summary>
-          <strong>{items.slice(0, CLAMP_ITEMS).join("\n")}</strong>
+          <strong className="clamp-items">
+            {chips(items.slice(0, CLAMP_ITEMS))}
+          </strong>
           <span className="clamp-toggle">
             <span className="clamp-more">展开全部 {items.length} 项</span>
             <span className="clamp-less">收起</span>
           </span>
         </summary>
-        <strong>{items.slice(CLAMP_ITEMS).join("\n")}</strong>
+        <strong className="clamp-items">
+          {chips(items.slice(CLAMP_ITEMS))}
+        </strong>
       </details>
     );
   }
@@ -4799,7 +4950,7 @@ function RetrievalDiagnostics({
   const [chunkOpen, setChunkOpen] = useState<string | null>(null);
   // 交给重排的候选池单独看：页面上只留一个入口，内容在弹窗里。
   const [poolOpen, setPoolOpen] = useState(false);
-  // 图检索留下的关系和去向（放进上下文 / 额度不够没放）：入口在混合检索里，内容在弹窗里。
+  // 图检索留下的关系和去向（放进上下文 / 额度不够没放）：入口在混合检索最后单独一块（关系不进融合），内容在弹窗里。
   const [relationsOpen, setRelationsOpen] = useState(false);
   const contextRelations = data.context_relations;
   const placedRelations = (contextRelations?.items ?? []).filter(
@@ -5443,6 +5594,8 @@ function RetrievalDiagnostics({
 
   // 「被哪几路找到」里点分片数量：这一组具体是哪些分片，每片在各路的排名表里第几。
   const comboGroup = comboOpen ? (combos.get(comboOpen) ?? []) : [];
+  const comboByGraphRank =
+    comboOpen === "graph" && graphPoolMode && graphOnly > 0;
   const comboDialog = comboOpen && comboGroup.length > 0 && (
     <CandidateChunksDialog
       // 换一组就重新翻到第一页。
@@ -5450,9 +5603,17 @@ function RetrievalDiagnostics({
       open
       title={`${comboName(comboOpen)}：${comboGroup.length} 个分片`}
       lead={`这 ${comboGroup.length} 个分片被${comboLabel(comboOpen)}找到`}
-      leadNote="按 RRF 得分排；每行写清楚这片是在哪张排名表里第几名，点「原文」看分片正文"
-      candidates={[...comboGroup].sort(
-        (a, b) => (a.rrf_rank ?? 0) - (b.rrf_rank ?? 0),
+      leadNote={
+        comboByGraphRank
+          ? "按图检索的名次排（不比 RRF 名次），前 " +
+            config.graph_pool_size +
+            " 个进入重排；点「原文」看分片正文"
+          : "按 RRF 得分排；每行写清楚这片是在哪张排名表里第几名，点「原文」看分片正文"
+      }
+      candidates={[...comboGroup].sort((a, b) =>
+        comboByGraphRank
+          ? (a.graph_only_rank ?? 0) - (b.graph_only_rank ?? 0)
+          : (a.rrf_rank ?? 0) - (b.rrf_rank ?? 0),
       )}
       queries={queries}
       scoreKind="rrf"
@@ -5471,6 +5632,11 @@ function RetrievalDiagnostics({
     "keyword",
     "graph",
   ];
+  // 新记录里只被图找到的分片不参加 RRF 排名，单独一条线显示，融合的组合表里不再列「只有图检索」。
+  const splitGraphOnly = graphPoolMode && graphOnly > 0;
+  const fusionCombos = comboOrder.filter(
+    (key) => combos.has(key) && !(splitGraphOnly && key === "graph"),
+  );
   const recallSection = (
     <div className="diag-part">
       <p className="diag-part-lead">
@@ -5533,19 +5699,26 @@ function RetrievalDiagnostics({
           </section>
         )}
       </div>
+      {/* 召回之后分三条线（app/tools/search.py）：
+          ① RRF 融合：向量、关键词找到的分片按名次合并，图也找到的加上图的名次分，前 rerank_candidates 个进重排；
+          ② 只被图找到的分片：不比 RRF 名次，按图检索的名次取前 graph_pool_size 个直接进重排；
+          ③ 图谱关系：不进融合，也不进分片重排，按预算直接放进回答上下文。
+          旧记录（图检索名额 graph_quota）里图独有分片也比 RRF 名次，仍按一张表显示。 */}
       <div className="diag-fusion">
         <p className="diag-part-lead">
           <strong>
             融合：<StackTag kind="algo">RRF</StackTag>（k={config.rrf_k}
             ）按名次合并，
-            {candidates.length} 个分片，前 {config.rerank_candidates} 个进入重排
+            {splitGraphOnly
+              ? `${candidates.length - graphOnly} 个分片（向量、关键词找到的；图也找到的加上图的名次分），前 ${config.rerank_candidates} 个进入重排`
+              : `${candidates.length} 个分片，前 ${config.rerank_candidates} 个进入重排`}
           </strong>
           <small>
             得分 = Σ 1 / ({config.rrf_k} +
             名次)，只看名次不看原始分数；被多路找到的分片更靠前
           </small>
         </p>
-        {combos.size > 0 && (
+        {fusionCombos.length > 0 && (
           <Table className="diag-table diag-table-compact diag-combo">
             <thead>
               <tr>
@@ -5555,49 +5728,85 @@ function RetrievalDiagnostics({
               </tr>
             </thead>
             <tbody>
-              {comboOrder
-                .filter((key) => combos.has(key))
-                .map((key, index) => {
-                  const group = combos.get(key) ?? [];
-                  return (
-                    <tr
-                      key={key}
-                      className={key === "graph" ? "is-graph-only" : ""}
-                    >
-                      <td className="num">{index + 1}</td>
-                      <td>{comboName(key)}</td>
-                      <td className="num">
-                        <button
-                          type="button"
-                          className="link-button"
-                          title={`点开看这 ${group.length} 个分片`}
-                          onClick={() => setComboOpen(key)}
-                        >
-                          {group.length}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+              {fusionCombos.map((key, index) => {
+                const group = combos.get(key) ?? [];
+                return (
+                  <tr
+                    key={key}
+                    className={key === "graph" ? "is-graph-only" : ""}
+                  >
+                    <td className="num">{index + 1}</td>
+                    <td>{comboName(key)}</td>
+                    <td className="num">
+                      <button
+                        type="button"
+                        className="link-button"
+                        title={`点开看这 ${group.length} 个分片`}
+                        onClick={() => setComboOpen(key)}
+                      >
+                        {group.length}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </Table>
         )}
         {rankingTables}
-        {/* 交给重排的候选池单独看：每片是哪几路找到的、在各路排第几，一张表看完。
-            没做重排就没有这一批，入口不显示。 */}
-        {config.reranked && rerankPool.length > 0 && (
+      </div>
+      {splitGraphOnly && (
+        <div className="diag-fusion">
+          <p className="diag-part-lead">
+            <strong>
+              只被图找到的：{graphOnly} 个分片不比 RRF 名次，按图检索的名次取前{" "}
+              {config.graph_pool_size} 个直接进入重排
+            </strong>
+            <small>
+              图只有一张排名表，向量、关键词每个检索词各一张，只被图找到的分片
+              RRF 分天生低，所以单独走这条线
+            </small>
+          </p>
           <div className="diag-fold-head">
             <button
               type="button"
               className="link-button"
-              onClick={() => setPoolOpen(true)}
+              onClick={() => setComboOpen("graph")}
             >
-              交给重排的 {rerankPool.length} 个
+              只被图找到的 {graphOnly} 个
             </button>
-            <small>{poolBreakdown}；点开看每片是哪几路找到的、各路排第几</small>
+            <small>
+              进入重排 {graphPoolCount} 个
+              {graphOnlyOutOfPool > 0
+                ? `，超过上限没进 ${graphOnlyOutOfPool} 个`
+                : ""}
+              ；点开看按图名次的顺序
+            </small>
           </div>
-        )}
-        {contextRelations && contextRelations.items.length > 0 && (
+        </div>
+      )}
+      {/* 两条线在这里汇合：交给重排的候选池。没做重排就没有这一批，入口不显示。 */}
+      {config.reranked && rerankPool.length > 0 && (
+        <div className="diag-fold-head">
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => setPoolOpen(true)}
+          >
+            交给重排的 {rerankPool.length} 个
+          </button>
+          <small>{poolBreakdown}；点开看每片是哪几路找到的、各路排第几</small>
+        </div>
+      )}
+      {contextRelations && contextRelations.items.length > 0 && (
+        <div className="diag-fusion">
+          <p className="diag-part-lead">
+            <strong>图谱关系：不进融合，也不进分片重排</strong>
+            <small>
+              在图检索 ⑤
+              里做过关系重排，用来找出处分片，再按预算直接放进回答上下文
+            </small>
+          </p>
           <div className="diag-fold-head">
             <button
               type="button"
@@ -5609,11 +5818,11 @@ function RetrievalDiagnostics({
             <small>
               {contextRelations.reason
                 ? `用来找分片；没有放进上下文：${contextRelations.reason}`
-                : `重排后留下，用来找分片；按预算放入上下文 ${placedRelations} 条，额度不够没放 ${contextRelations.items.length - placedRelations} 条。点开看每条关系`}
+                : `按预算放入上下文 ${placedRelations} 条，额度不够没放 ${contextRelations.items.length - placedRelations} 条。点开看每条关系`}
             </small>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 
