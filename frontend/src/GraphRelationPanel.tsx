@@ -5,7 +5,7 @@ import {
   type GraphRelationDetail,
 } from "./api";
 import { DetailDialog } from "./DetailDialog";
-import { HighlightedText } from "./HighlightedText";
+import { ChunkOriginalText } from "./ChunkOriginalText";
 import { Tag } from "./Tag";
 
 export function GraphRelationPanel({
@@ -109,8 +109,7 @@ export function GraphRelationPanel({
           title={`原文 · ${original.document_title ?? "文档"} · 第 ${original.position + 1} 片`}
           onClose={() => setOriginal(null)}
         >
-          <HighlightedText
-            className="graph-original-content"
+          <ChunkOriginalText
             text={original.chunk_content}
             groups={[
               {

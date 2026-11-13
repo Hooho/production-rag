@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { getChunkOriginal, type ChunkOriginal } from "./api";
 import { DetailDialog } from "./DetailDialog";
-import { HighlightedText, type HighlightGroup } from "./HighlightedText";
+import { ChunkOriginalText } from "./ChunkOriginalText";
+import type { HighlightGroup } from "./HighlightedText";
 
 // 分片原文：检索诊断的排名表里点「更多」时看这一片的正文。
 // 弹窗里再打开的内容就是伴随浮窗（DetailDialog 会自己贴到「更多」左边），不再叠一层抽屉。
@@ -57,11 +58,7 @@ export function ChunkOriginalPanel({
               <small className="ag-muted"> · {data.heading}</small>
             )}
           </p>
-          <HighlightedText
-            text={data.content}
-            className="ag-delivery-text"
-            groups={groups}
-          />
+          <ChunkOriginalText text={data.content} groups={groups} />
         </>
       ) : (
         <p role="status" className="ag-muted">

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { getEvalChunkOriginal, type EvalChunkOriginal } from "./api";
+import { ChunkOriginalText } from "./ChunkOriginalText";
 import { DetailDialog } from "./DetailDialog";
 import { evidenceRanges } from "./evidenceRanges";
 import { SourceTag, Tag } from "./Tag";
@@ -102,15 +103,11 @@ export function ChunkOriginalDialog({
             </p>
           )}
           {current?.data?.map((chunk) => (
-            <OriginalText
-              key={chunk.chunk_id}
-              text={chunk.content}
-              evidence={[]}
-            />
+            <ChunkOriginalText key={chunk.chunk_id} text={chunk.content} />
           ))}
           {!chunkId &&
             value.sources.map((source) => (
-              <OriginalText key={source.key} text={source.text} evidence={[]} />
+              <ChunkOriginalText key={source.key} text={source.text} />
             ))}
         </div>
       </DetailDialog>
@@ -187,9 +184,15 @@ export function ChunkOriginalDialog({
                   ?.relevance?.toFixed(2)}
               </p>
             )}
-            <OriginalText
+            <ChunkOriginalText
               text={chunk.content}
-              evidence={value.evidence.map((quote) => quote.text)}
+              evidenceHint={false}
+              groups={[
+                {
+                  kind: "evidence",
+                  texts: value.evidence.map((quote) => quote.text),
+                },
+              ]}
             />
           </section>
         );
@@ -204,45 +207,18 @@ export function ChunkOriginalDialog({
             {item.snapshotNote && (
               <p className="ag-muted">{item.snapshotNote}</p>
             )}
-            <OriginalText
+            <ChunkOriginalText
               text={item.text}
-              evidence={value.evidence.map((quote) => quote.text)}
+              evidenceHint={false}
+              groups={[
+                {
+                  kind: "evidence",
+                  texts: value.evidence.map((quote) => quote.text),
+                },
+              ]}
             />
           </section>
         ))}
     </DetailDialog>
-  );
-}
-
-function OriginalText({
-  text,
-  evidence,
-}: {
-  text: string;
-  evidence: string[];
-}) {
-  const ranges = evidenceRanges(text, evidence);
-  ranges.sort((a, b) => a[0] - b[0]);
-  const merged: [number, number][] = [];
-  for (const range of ranges) {
-    const last = merged[merged.length - 1];
-    if (last && range[0] <= last[1]) last[1] = Math.max(last[1], range[1]);
-    else merged.push([...range]);
-  }
-  let end = 0;
-  return (
-    <div className="ag-delivery-text">
-      {merged.map(([start, to]) => {
-        const prefix = text.slice(end, start);
-        end = to;
-        return (
-          <span key={start}>
-            {prefix}
-            <mark>{text.slice(start, to)}</mark>
-          </span>
-        );
-      })}
-      {text.slice(end)}
-    </div>
   );
 }

@@ -1,6 +1,7 @@
 import Table from "./Table";
 import { DetailDialog } from "./DetailDialog";
 import { ChunkOriginalPanel } from "./ChunkOriginalPanel";
+import { ChunkOriginalText } from "./ChunkOriginalText";
 import { ContextRelationList, ContextRelationTable } from "./ContextRelations";
 import { ConfirmPopover } from "./ConfirmPopover";
 import { InfoPopover } from "./Popover";
@@ -9566,7 +9567,7 @@ function AnswerSourceFilters({
               title={`${source.id} · ${source.title}`}
               label="查看原文"
             >
-              <p className="ag-delivery-text">{source.text}</p>
+              <ChunkOriginalText text={source.text} />
             </ContextDetail>
           </article>
         ))}
