@@ -30,6 +30,7 @@ export function filteredRankingText(candidates: RankedCandidate[]): string {
   for (const [method, label] of [
     ["dense", "向量"],
     ["keyword", "关键词"],
+    ["graph", "图检索"],
   ]) {
     const values = (candidate.contributions ?? [])
       .filter(
@@ -61,7 +62,10 @@ export function evidenceFilterReason(
     case "filtered_low_score":
       return `进了重排，重排分 ${candidate.rerank_probability?.toFixed(2) ?? "未记录"}，低于阈值 ${config?.min_score ?? "未记录"}`;
     case "not_in_pool":
-      return `合并后排第 ${candidate.rrf_rank} 名，没进候选池（前 ${config?.rerank_candidates ?? "未记录"} 段）`;
+      return candidate.retrieval_methods?.length === 1 &&
+        candidate.retrieval_methods[0] === "graph"
+        ? `图独有第 ${candidate.graph_only_rank ?? "未记录"} 名，超出图额外候选上限 ${config?.graph_pool_size ?? "未记录"} 段`
+        : `合并后排第 ${candidate.rrf_rank} 名，没进候选池（前 ${config?.rerank_candidates ?? "未记录"} 段）`;
     case "beyond_budget":
       return `超出剩余原文 token 预算（估算上限 ${config?.source_token_budget ?? "未记录"}），未单独入选`;
     case "beyond_limit":

@@ -1,4 +1,5 @@
 import Table from "./Table";
+import { GraphRetrievalTrace } from "./GraphRetrievalTrace";
 import {
   Fragment,
   useEffect,
@@ -2400,13 +2401,17 @@ function mergeOutcome(
     case "not_in_pool":
       return {
         ok: false,
-        text: `合并后排第 ${fixed.rrf_rank ?? "—"} 名，没进候选池（前 ${config.pool_size ?? "—"} 段）`,
+        text: config.methods?.includes("graph")
+          ? "未进入候选池：普通候选按融合排名筛选，图独有候选按图排名额外筛选"
+          : `合并后排第 ${fixed.rrf_rank ?? "—"} 名，没进候选池（前 ${config.pool_size ?? "—"} 段）`,
       };
     case "filtered_low_score":
       return {
         ok: false,
         text: `进了重排，${score ? `${score}，` : "重排分"}低于阈值 ${typeof config.min_score === "number" ? config.min_score.toFixed(2) : "—"}，被过滤`,
       };
+    case "beyond_budget":
+      return { ok: false, text: "超出剩余来源 token 预算，未单独入选" };
     case "beyond_limit":
       return {
         ok: false,
@@ -2475,6 +2480,15 @@ function FixedSearchResults({
   sourcesAvailable?: boolean;
   retrySearch?: boolean;
 }) {
+  const diagnostics = retrySearch ? undefined : question.diagnostics;
+  const dc = diagnostics?.config;
+  const graph = diagnostics?.graph;
+  const candidates = diagnostics?.candidates ?? [];
+  const graphSelected = Boolean(
+    graph ||
+      dc?.methods?.includes("graph") ||
+      config.methods?.includes("graph"),
+  );
   const total = question.answerable ? evidenceChunkLists(question).length : 0;
   const routes =
     queryRoutes == null
@@ -2584,13 +2598,102 @@ function FixedSearchResults({
           ))}
         </div>
       )}
+      {graphSelected && (
+        <section className="ag-route" aria-label="图检索">
+          <strong>图检索</strong>
+          {graph ? (
+            <>
+              <p>
+                图独有召回{" "}
+                {
+                  candidates.filter(
+                    (c) =>
+                      c.retrieval_methods.length === 1 &&
+                      c.retrieval_methods[0] === "graph",
+                  ).length
+                }{" "}
+                段
+              </p>
+              <ul className="ag-evidence-trace">
+                {evidenceChunkLists(question).map((ids, index) => {
+                  const found = candidates.filter(
+                    (c) =>
+                      ids.includes(c.chunk_id) &&
+                      c.contributions.some((x) => x.method === "graph"),
+                  );
+                  const ranks = found.flatMap((c) =>
+                    c.contributions
+                      .filter((x) => x.method === "graph")
+                      .map((x) => x.rank),
+                  );
+                  return (
+                    <li
+                      key={index}
+                      className={found.length ? "is-hit" : "is-miss"}
+                    >
+                      <b>{found.length ? "✓" : "—"}</b>计分项 {index + 1}
+                      <small>
+                        {found.length
+                          ? `图检索第 ${Math.min(...ranks)} 名`
+                          : "图检索未召回"}
+                      </small>
+                      {found.some((c) => c.retrieval_methods.length === 1) && (
+                        <Tag size="sm" outline plain>
+                          图独有
+                        </Tag>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+              <GraphRetrievalTrace graph={graph} />
+            </>
+          ) : (
+            <p className="ag-muted">这次检索未保存图检索诊断，无法还原过程。</p>
+          )}
+        </section>
+      )}
       <div className="ag-merge-label">
-        合并 → 前 {config.pool_size ?? "—"} 段进重排 → 过阈值{" "}
-        {typeof config.min_score === "number"
-          ? config.min_score.toFixed(2)
-          : "—"}{" "}
-        → 最多 {config.return_limit ?? "—"} 段交给模型
+        {graphSelected ? (
+          <>
+            普通候选按融合排名取前{" "}
+            {dc?.rerank_candidates ?? config.pool_size ?? "未记录"} 段（实际{" "}
+            {diagnostics
+              ? candidates.filter((c) => c.pool_via === "rrf").length
+              : "未记录"}{" "}
+            段） ＋ 图独有按图排名额外取前 {dc?.graph_pool_size ?? "未记录"}{" "}
+            段（实际 {dc?.graph_pool_count ?? "未记录"} 段）
+          </>
+        ) : (
+          <>合并 → 前 {config.pool_size ?? "—"} 段入池</>
+        )}
+        →{" "}
+        {dc?.reranked === false
+          ? "未重排、未做相关性过滤"
+          : `统一重排 → 过阈值 ${dc?.min_score ?? config.min_score ?? "未记录"}`}
+        →{" "}
+        {dc?.source_selection_mode === "tokens"
+          ? `按 ${dc.source_token_budget ?? "未记录"} token 预算选择来源`
+          : `最多 ${dc?.return_limit ?? config.return_limit ?? "—"} 段交给模型`}
       </div>
+      {graphSelected && dc && (
+        <p className="ag-muted">
+          {dc.source_selection_mode === "tokens" ? (
+            <>
+              图保底 {Math.round((dc.source_graph_budget_ratio ?? 0) * 100)}
+              %：额度 {dc.source_graph_budget_reserved ??
+                0} token，实际使用 {dc.source_graph_budget_used ?? 0} token
+              （关系 {dc.source_graph_relation_count ?? 0} 条 /{" "}
+              {dc.source_graph_relation_tokens ?? 0} token，图独有分片{" "}
+              {dc.source_graph_budget_count ?? 0} 段）。
+              先放关系，剩余额度放通过相关性过滤的图独有分片，未用完额度归还公共预算。
+              {diagnostics?.context_relations?.reason}
+            </>
+          ) : (
+            "本次未记录 token 预算图保底，或按条数选择来源。"
+          )}
+        </p>
+      )}
       {mergedEvidence && mergedEvidence.length > 0 && (
         <ul
           className="ag-evidence-trace ag-merge-evidence"
@@ -2603,6 +2706,32 @@ function FixedSearchResults({
               >
                 计分项 {index + 1}
               </span>
+              {!retrySearch &&
+                (() => {
+                  const ids = evidenceChunkLists(question)[index] ?? [];
+                  const found = candidates.filter((c) =>
+                    ids.includes(c.chunk_id),
+                  );
+                  return (
+                    <>
+                      {found.some((c) => c.pool_via === "rrf") && (
+                        <Tag size="sm" outline plain>
+                          融合排名入池
+                        </Tag>
+                      )}
+                      {found.some((c) => c.pool_via === "graph") && (
+                        <Tag size="sm" outline plain>
+                          图独有额外入池
+                        </Tag>
+                      )}
+                      {found.some((c) => c.graph_budget_guaranteed) && (
+                        <Tag size="sm" outline plain>
+                          图保底入选
+                        </Tag>
+                      )}
+                    </>
+                  );
+                })()}
               {(row.matches ?? [row]).map((match) => (
                 <span className="ag-evidence-match" key={match.label}>
                   <Tag
