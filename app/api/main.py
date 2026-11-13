@@ -28,7 +28,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import case, delete, select
+from sqlalchemy import and_, case, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 
 from ..agent.service import Agent
@@ -1197,6 +1197,83 @@ def create_app(store=None, models=None, jwt_secret=None):
             raise HTTPException(422, str(error))
         return load_user(app.state.store.engine, username)
 
+    # 知识问答左侧的历史对话列表：按最后一次提问时间倒序，每个会话给标题（第一个问题）、消息条数、最后一条的路由。
+    # 以前前端从 /history 的最近 50 条问答里自己分组，老会话会整个从列表里消失。
+    @app.get("/sessions")
+    def list_sessions(limit: int = Query(100, ge=1, le=200), owner=Depends(identity)):
+        with app.state.store.engine.connect() as connection:
+            groups = (
+                connection.execute(
+                    select(
+                        runs.c.session_id,
+                        func.count().label("count"),
+                        func.max(runs.c.created).label("updated"),
+                    )
+                    .where(runs.c.owner == owner)
+                    .group_by(runs.c.session_id)
+                    .order_by(func.max(runs.c.created).desc())
+                    .limit(limit)
+                )
+                .mappings()
+                .all()
+            )
+            ids = [row["session_id"] for row in groups]
+            # 只取小列，不带 response JSON；标题取每个会话最早的问题，路由取最新一条。
+            rows = (
+                connection.execute(
+                    select(
+                        runs.c.id,
+                        runs.c.session_id,
+                        runs.c.question,
+                        runs.c.created,
+                        runs.c.route,
+                    ).where(runs.c.owner == owner, runs.c.session_id.in_(ids))
+                )
+                .mappings()
+                .all()
+                if ids
+                else []
+            )
+            first, last = {}, {}
+            for row in rows:
+                key = row["session_id"]
+                if key not in first or (row["created"], row["id"]) < (
+                    first[key]["created"],
+                    first[key]["id"],
+                ):
+                    first[key] = row
+                if key not in last or (row["created"], row["id"]) > (
+                    last[key]["created"],
+                    last[key]["id"],
+                ):
+                    last[key] = row
+            # 早期记录没有 route 列，回到 response 里读。
+            missing = [row["id"] for row in last.values() if row["route"] is None]
+            fallback = {}
+            if missing:
+                for row in connection.execute(
+                    select(runs.c.id, runs.c.response).where(runs.c.id.in_(missing))
+                ).mappings():
+                    fallback[row["id"]] = (row["response"] or {}).get("route")
+        sessions = []
+        for group in groups:
+            key = group["session_id"]
+            latest = last.get(key)
+            sessions.append(
+                {
+                    "session_id": key,
+                    "title": first[key]["question"] if key in first else "",
+                    "count": group["count"],
+                    "updated": group["updated"],
+                    "route": (
+                        latest["route"] or fallback.get(latest["id"])
+                        if latest
+                        else None
+                    ),
+                }
+            )
+        return {"sessions": sessions}
+
     # 创建服务器生成的会话 ID。
     @app.post("/sessions", status_code=201)
     def create_session(owner=Depends(identity)):
@@ -1205,12 +1282,54 @@ def create_app(store=None, models=None, jwt_secret=None):
             connection.execute(sessions.insert().values(id=session_id, owner=owner))
         return {"session_id": session_id}
 
-    # 返回当前用户会话的最近六轮问答。
+    # 分页读取一个会话的问答记录：默认最近 10 条，before 传当前已显示的最早一条的 id，取它之前的 10 条。
+    # 返回按时间正序；has_more 表示更早的还有没有，total 是这个会话一共多少条（前端用来给消息编号）。
     @app.get("/sessions/{session_id}")
-    def get_history(session_id: UUID, owner=Depends(identity)):
+    def get_history(
+        session_id: UUID,
+        limit: int = Query(10, ge=1, le=50),
+        before: str | None = Query(None, max_length=36),
+        owner=Depends(identity),
+    ):
         value = str(session_id)
-        check_session(app.state.store, value, owner)
-        return {"messages": app.state.memory.history(app.state.store, value, owner)}
+        store = app.state.store
+        check_session(store, value, owner)
+        scope = and_(runs.c.session_id == value, runs.c.owner == owner)
+        with store.engine.connect() as connection:
+            query = select(runs).where(scope)
+            if before:
+                anchor = connection.execute(
+                    select(runs.c.created).where(scope, runs.c.id == before)
+                ).scalar_one_or_none()
+                if anchor is None:
+                    raise HTTPException(404, "找不到这条问答记录")
+                query = query.where(
+                    or_(
+                        runs.c.created < anchor,
+                        and_(runs.c.created == anchor, runs.c.id < before),
+                    )
+                )
+            rows = (
+                connection.execute(
+                    query.order_by(runs.c.created.desc(), runs.c.id.desc()).limit(
+                        limit + 1
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            total = connection.execute(
+                select(func.count()).select_from(runs).where(scope)
+            ).scalar_one()
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        ratings = read_feedback(owner, [row["id"] for row in rows])
+        messages = []
+        for row in reversed(rows):
+            item = dict(row)
+            item["feedback"] = ratings.get(row["id"])
+            messages.append(item)
+        return {"messages": messages, "has_more": has_more, "total": total}
 
     # 删除自己的一个会话：问答记录（runs）、失败记录、反馈、Agent 执行记录、会话记忆外箱，以及 PostgreSQL 里的
     # Checkpointer 线程（会话记忆）全部删掉，不做软删除——对话内容是个人数据，用户删了就不该再留着。

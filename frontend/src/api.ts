@@ -855,8 +855,25 @@ export function createSession(): Promise<{ session_id: string }> {
 }
 
 // 读取指定会话，确认浏览器保存的会话仍属于当前用户。
-export function getSessionHistory(sessionId: string) {
-  return request<{ messages: HistoryRun[] }>(`/sessions/${sessionId}`, {});
+// 分页读取一个会话的问答记录：不传 before 取最近 10 条；往上翻时传已显示的最早一条的 id，取它之前的 10 条。
+export function getSessionHistory(sessionId: string, before?: string) {
+  const query = before ? `?before=${encodeURIComponent(before)}` : "";
+  return request<{ messages: HistoryRun[]; has_more: boolean; total: number }>(
+    `/sessions/${sessionId}${query}`,
+    {},
+  );
+}
+
+// 历史对话列表：每个会话一行，按最后提问时间倒序。
+export type ChatSessionSummary = {
+  session_id: string;
+  title: string;
+  count: number;
+  updated: string;
+  route?: string | null;
+};
+export function listChatSessions() {
+  return request<{ sessions: ChatSessionSummary[] }>("/sessions");
 }
 
 // 删除自己的一个会话：问答记录、反馈、会话记忆一起删掉；正在回答的会话返回 409。

@@ -297,6 +297,58 @@ def test_saved_history_is_available_after_session_reload(setup):
     assert client.get("/history", headers=headers("bob")).json()["messages"] == []
 
 
+def test_session_messages_are_paged_and_sessions_are_listed(setup):
+    client, store = setup
+    first = session(client)
+    second = session(client)
+    # 直接写 runs：12 条在第一个会话，1 条在第二个会话；第二个会话最后提问，排在列表最前。
+    with store.engine.begin() as connection:
+        for index in range(12):
+            connection.execute(
+                runs.insert().values(
+                    id=f"run-{index:02d}",
+                    session_id=first,
+                    owner="alice",
+                    question=f"问题 {index}",
+                    response={"route": "knowledge", "answer": str(index)},
+                    created=f"2026-01-01T00:00:{index:02d}+00:00",
+                )
+            )
+        connection.execute(
+            runs.insert().values(
+                id="run-other",
+                session_id=second,
+                owner="alice",
+                question="另一个会话",
+                response={"route": "order", "answer": "x"},
+                created="2026-01-02T00:00:00+00:00",
+            )
+        )
+    page = client.get(f"/sessions/{first}", headers=headers()).json()
+    assert [item["id"] for item in page["messages"]] == [
+        f"run-{index:02d}" for index in range(2, 12)
+    ]
+    assert page["has_more"] is True and page["total"] == 12
+    older = client.get(
+        f"/sessions/{first}", params={"before": "run-02"}, headers=headers()
+    ).json()
+    assert [item["id"] for item in older["messages"]] == ["run-00", "run-01"]
+    assert older["has_more"] is False
+    assert (
+        client.get(
+            f"/sessions/{first}", params={"before": "run-other"}, headers=headers()
+        ).status_code
+        == 404
+    )
+    listed = client.get("/sessions", headers=headers()).json()["sessions"]
+    assert [item["session_id"] for item in listed] == [second, first]
+    assert listed[1]["title"] == "问题 0"
+    assert listed[1]["count"] == 12
+    assert listed[1]["route"] == "knowledge"
+    assert listed[0]["route"] == "order"
+    assert client.get("/sessions", headers=headers("bob")).json()["sessions"] == []
+
+
 def test_chat_returns_explainable_execution_trace(setup):
     client, _ = setup
     response = client.post(
