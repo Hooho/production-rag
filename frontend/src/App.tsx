@@ -5818,6 +5818,7 @@ function RetrievalDiagnostics({
           open
           title={`图检索留下的 ${contextRelations.items.length} 条关系`}
           onClose={() => setRelationsOpen(false)}
+          size="table"
         >
           <ContextRelationTable
             items={contextRelations.items}
