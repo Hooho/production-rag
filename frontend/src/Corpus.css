@@ -110,3 +110,122 @@
   color: #718398;
   margin-top: 3px;
 }
+
+/* 评测语料采用固定列紧凑表格。 */
+.cp-root {
+  color: #303846;
+  font-size: 13px;
+}
+.cp-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.cp-toolbar h2 {
+  margin: 0;
+  color: #263447;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 24px;
+}
+.cp-toolbar p {
+  margin: 4px 0 0;
+  color: #758091;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 20px;
+}
+.cp-table-panel {
+  background: #fff;
+  border: 1px solid #e0e6ed;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.cp-table-caption {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  color: #303846;
+  font-size: 13px;
+  font-weight: 500;
+  border-bottom: 1px solid #e8edf2;
+}
+.cp-table-caption span {
+  color: #88919e;
+  font-size: 12px;
+  font-weight: 400;
+}
+.cp-root .cp-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.cp-root .cp-table th,
+.cp-root .cp-table td {
+  padding: 8px 12px;
+  text-align: left;
+  vertical-align: middle;
+  border: 0;
+  border-bottom: 1px solid #edf0f4;
+  color: #414b59;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 22px;
+  background: #fff;
+}
+.cp-root .cp-table th {
+  background: #fafbfd;
+  color: #707b89;
+  font-size: 12px;
+  font-weight: 500;
+}
+.cp-root .cp-table th:first-child {
+  width: 48%;
+}
+.cp-root .cp-table th:nth-child(2) {
+  width: 12%;
+}
+.cp-root .cp-table th:nth-child(3) {
+  width: 8%;
+}
+.cp-root .cp-table th:nth-child(4) {
+  width: 9%;
+}
+.cp-root .cp-table th:nth-child(5) {
+  width: 14%;
+}
+.cp-root .cp-table th:last-child {
+  width: 9%;
+}
+.cp-root .cp-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.cp-root .cp-table tbody tr:hover td {
+  background: #fafcff;
+}
+.cp-document-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: #303846;
+  font-weight: 400;
+}
+.cp-root .cp-remove {
+  color: #cb5158;
+}
+.cp-number {
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 700px) {
+  .cp-table-panel {
+    overflow-x: auto;
+  }
+  .cp-root .cp-table {
+    min-width: 650px;
+  }
+}

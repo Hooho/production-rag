@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import Table from "./Table";
 import {
   listEvalDocumentCandidates,
   saveEvalDocumentReferences,
@@ -54,8 +55,11 @@ export default function Corpus({ onToast }: { onToast: ShowToast }) {
   }
   return (
     <div className="cp-root">
-      <div className="cp-head">
-        <p>从知识库选择常用评测文档，发起评测时再勾选本次使用的语料。</p>
+      <div className="cp-toolbar">
+        <div>
+          <h2>评测语料</h2>
+          <p>选择常用知识库文档，发起评测时勾选使用。</p>
+        </div>
         <button
           type="button"
           className="primary-button"
@@ -71,62 +75,82 @@ export default function Corpus({ onToast }: { onToast: ShowToast }) {
       ) : !items.length ? (
         <p>尚未选择评测文档。</p>
       ) : (
-        <ul className="rg-sets">
-          {items.map((item) => (
-            <li className="cp-item" key={item.id}>
-              <div className="cp-head">
-                <div className="cp-main">
-                  <strong>{item.title}</strong>
-                  <span className="rg-set-meta">
-                    {item.owner} · 文档版本 {item.version ?? "—"} ·{" "}
-                    {item.chunks ?? 0} 个分片
-                  </span>
-                </div>
-                <Tag
-                  size="sm"
-                  tone={
-                    item.missing
-                      ? "danger"
-                      : item.graph_ready
-                        ? "success"
-                        : "warning"
-                  }
-                >
-                  {item.missing
-                    ? "文档不可用"
-                    : item.graph_ready
-                      ? "图谱可用"
-                      : "未建图"}
-                </Tag>
-                <ConfirmPopover
-                  danger
-                  message="从评测语料中移除此文档？知识库原文档和图谱保留，可重新加入。"
-                  confirmText="移除引用"
-                  onConfirm={async () => {
-                    setWorking(item.id);
-                    try {
-                      await deleteEvalCorpus(item.id);
-                      await refresh();
-                      onToast("success", "已移除文档引用");
-                    } catch (reason) {
-                      onToast("error", errorText(reason));
-                    } finally {
-                      setWorking(null);
-                    }
-                  }}
-                >
-                  <button
-                    type="button"
-                    className={`delete-button button-sm${working === item.id ? " is-loading" : ""}`}
-                    disabled={working !== null}
-                  >
-                    移除
-                  </button>
-                </ConfirmPopover>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <div className="cp-table-panel">
+          <div className="cp-table-caption">
+            文档列表 <span>{items.length} 份文档</span>
+          </div>
+          <Table className="cp-table" size="compact">
+            <thead>
+              <tr>
+                <th>文档名称</th>
+                <th>所有者</th>
+                <th>版本</th>
+                <th>分片</th>
+                <th>图谱状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.id}>
+                  <td>
+                    <span className="cp-document-title" title={item.title}>
+                      {item.title}
+                    </span>
+                  </td>
+                  <td>{item.owner || "—"}</td>
+                  <td>{item.version ? `v${item.version}` : "—"}</td>
+                  <td className="cp-number">{item.chunks ?? "—"}</td>
+                  <td>
+                    <Tag
+                      size="sm"
+                      tone={
+                        item.missing
+                          ? "danger"
+                          : item.graph_ready
+                            ? "success"
+                            : "warning"
+                      }
+                    >
+                      {item.missing
+                        ? "文档不可用"
+                        : item.graph_ready
+                          ? "图谱可用"
+                          : "未建图"}
+                    </Tag>
+                  </td>
+                  <td>
+                    <ConfirmPopover
+                      danger
+                      message="从评测语料中移除此文档？知识库原文档和图谱保留，可重新加入。"
+                      confirmText="移除引用"
+                      onConfirm={async () => {
+                        setWorking(item.id);
+                        try {
+                          await deleteEvalCorpus(item.id);
+                          await refresh();
+                          onToast("success", "已移除文档引用");
+                        } catch (reason) {
+                          onToast("error", errorText(reason));
+                        } finally {
+                          setWorking(null);
+                        }
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className={`link-button button-sm cp-remove${working === item.id ? " is-loading" : ""}`}
+                        disabled={working !== null}
+                      >
+                        移除
+                      </button>
+                    </ConfirmPopover>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </div>
       )}
       <DetailDialog
         open={open}
