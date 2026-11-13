@@ -1906,6 +1906,9 @@ function HistoryRail({
                 </div>
                 <button
                   className="history-item history-conversation"
+                  aria-current={
+                    item.session_id === activeSessionId ? "true" : undefined
+                  }
                   onClick={() => onSelect(item.session_id)}
                 >
                   <strong>{item.title || "未命名对话"}</strong>

@@ -2038,6 +2038,23 @@ input::placeholder {
   color: var(--t-2563eb);
 }
 
+/* 当前所在的对话：左边一道主色竖条 + 底色加深 + 标题用主色，一眼看出在哪个会话里。 */
+.history-session.active .history-item {
+  border-left: 3px solid var(--t-2563eb);
+  padding-left: 9px;
+  background: var(--t-dcecf9);
+}
+
+.history-session.active .history-item strong {
+  color: var(--t-1d4ed8);
+}
+
+/* 悬停在激活项上时，左边的竖条保持主色，别被普通项的悬停样式盖掉。 */
+.history-session.active .history-item:hover {
+  border-left-color: var(--t-2563eb);
+  background: var(--t-dcecf9);
+}
+
 /* 历史对话的右键菜单：position: fixed 跟着鼠标位置，不受侧栏 overflow 裁切。 */
 .history-context-menu {
   position: fixed;
