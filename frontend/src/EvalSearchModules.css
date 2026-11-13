@@ -130,7 +130,11 @@
   }
 }
 
-.ag-retrieval-content > .eval-search-module {
+.ag-retrieval-dialog .ag-retrieval-content {
+  gap: 8px;
+  align-content: start;
+}
+.ag-retrieval-dialog .ag-retrieval-content > .eval-search-module {
   margin: 0;
 }
 

@@ -2600,7 +2600,7 @@ function FixedSearchResults({
         </div>
       )}
       {graphSelected && (
-        <section
+        <div
           className="eval-search-module eval-search-graph"
           aria-label="图检索"
         >
@@ -2670,9 +2670,9 @@ function FixedSearchResults({
           ) : (
             <p className="ag-muted">这次检索未保存图检索诊断，无法还原过程。</p>
           )}
-        </section>
+        </div>
       )}
-      <section
+      <div
         className="eval-search-module eval-search-pool"
         aria-label="候选入池与重排"
       >
@@ -2721,9 +2721,9 @@ function FixedSearchResults({
               : `最多返回 ${dc?.return_limit ?? config.return_limit ?? "未记录"} 段`}
           </span>
         </div>
-      </section>
+      </div>
       {graphSelected && dc && (
-        <section
+        <div
           className="eval-search-module eval-search-budget"
           aria-label="图保底预算"
         >
@@ -2764,10 +2764,10 @@ function FixedSearchResults({
               本次未记录 token 预算图保底，或按条数选择来源。
             </p>
           )}
-        </section>
+        </div>
       )}
       {mergedEvidence && mergedEvidence.length > 0 && (
-        <section className="eval-search-module eval-search-results">
+        <div className="eval-search-module eval-search-results">
           <header className="eval-search-module-head">
             <strong>最终计分项去向</strong>
             <span>{mergedEvidence.length} 个计分项</span>
@@ -2846,7 +2846,7 @@ function FixedSearchResults({
               </li>
             ))}
           </ul>
-        </section>
+        </div>
       )}
       {sourcesAvailable && (
         <ChunkTabs question={question} items={items} empty="过滤后没有分块。" />
