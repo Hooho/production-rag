@@ -27,7 +27,6 @@ type Meta = {
   effect?: string;
   when?: string;
   impact: Impact;
-  dependsOn?: string;
 };
 
 const GROUP_INTROS: Record<string, string> = {
@@ -56,7 +55,6 @@ const META: Record<string, Meta> = {
     effect:
       "调高更容易拒答、编造更少；调低更敢答，可能拿不相关的资料凑答案。巡检里「差一点就找到」的分数线跟着变。",
     when: "之后的问答；已有的问答记录和诊断结论不变，下次巡检按新值判断。",
-    dependsOn: "rerank_enabled",
   },
   rerank_fallback_min_score: {
     label: "兜底分数线",
@@ -67,7 +65,6 @@ const META: Record<string, Meta> = {
     effect:
       "调低更少出现“没找到”，但模型更常看到不相关的资料；调高相反。不能高于相关度阈值。",
     when: "之后的问答。知识巡检不把兜底返回的资料算作“现在能答”。",
-    dependsOn: "rerank_enabled",
   },
   rerank_excellent_score: {
     label: "优秀阈值",
@@ -78,7 +75,6 @@ const META: Record<string, Meta> = {
     effect:
       "调低（比如 0.9），列举、汇总类问题能拿到更多高度相关的资料，但交给充分性判断和回答模型的内容更长、更费 token；单点问题过线的资料本来就少，基本不受影响。不能低于相关度阈值。建议先在评测里单独指定这个值对比，再改这里。",
     when: "之后的问答。",
-    dependsOn: "rerank_enabled",
   },
   rerank_candidates: {
     label: "候选池大小",
@@ -94,9 +90,10 @@ const META: Record<string, Meta> = {
   source_selection_mode: {
     label: "原文选取方式",
     impact: "judgement",
-    what: "按条数沿用原规则；按 token 预算先选原始命中，再用剩余容量补父子上下文。",
-    why: "避免条数限制截掉相关证据，或父块先占满容量。",
-    effect: "预算模式不应用返回条数和优秀阈值放行规则。",
+    what: "按条数：过了阈值的资料取前几段（交给模型的段数），父子扩展不受总量控制。按 token 预算：按总量取，先放图保底（图谱关系，再放只有图找到的分片），其余按重排分数竞争，最后用剩余容量补父子扩展；图谱关系只在这种方式下放进上下文。",
+    why: "默认按条数，和以前的行为一致。",
+    effect:
+      "按 token 预算时「交给模型的段数」和优秀阈值不起作用；按条数时 token 预算和图检索保底比例不起作用。",
     when: "之后的检索。",
   },
   source_graph_budget_ratio: {
@@ -114,7 +111,7 @@ const META: Record<string, Meta> = {
     unit: "token",
     step: 500,
     impact: "judgement",
-    what: "预算模式下原文总量上限。中文按字、其他文字按约四字符一个 token 估算，先原始命中后父子扩展。",
+    what: "交给回答模型的原文和图谱关系的总量上限。中文按字、其他文字按约四字符一个 token 估算；先图保底，再其他资料竞争，最后父子扩展。",
     why: "没有回答模型专用 tokenizer，估算值不代表实际模型用量。",
     effect: "不包含系统提示词、对话历史和回答空间，请根据模型上下文预留余量。",
     when: "按 token 预算选取时。",
@@ -124,7 +121,7 @@ const META: Record<string, Meta> = {
     unit: "段",
     step: 1,
     impact: "judgement",
-    what: "达到阈值的资料最多交给回答模型几段，不能超过候选池大小。",
+    what: "达到阈值的资料最多交给回答模型几段，不能超过候选池大小（按 RRF 名次进重排的那一份）。",
     why: "6 是常见取值（一般 3–8）。离线评测里 1 到 12 段的召回都是 1.0，37 题里只有 10 题达标资料超过 6 段，实际主要靠阈值截断。",
     effect:
       "调大，跨多段的问题更容易答全，但输入更长、更慢、更贵；开着父子分块时每段最长 2400 字。调小相反。",
@@ -143,7 +140,6 @@ const META: Record<string, Meta> = {
     unit: "字",
     step: 100,
     impact: "now",
-    dependsOn: "parent_context",
     what: "扩展后的一段最长多少字。",
     why: "约等于三个 800 字分片。",
     effect: "调大上下文更完整，输入更长；调小更接近关掉父子分块。",
@@ -153,7 +149,6 @@ const META: Record<string, Meta> = {
     unit: "片",
     step: 1,
     impact: "now",
-    dependsOn: "parent_context",
     what: "从命中的分片往前、往后最多拼几片，只在同一小节内。",
     why: "实际长度先受上一项限制，3 片配合 2400 字刚好。",
     effect: "单独调大作用不大，要和长度上限一起调。",
@@ -190,7 +185,6 @@ const META: Record<string, Meta> = {
     label: "图检索 · 名字相似度阈值",
     step: 0.05,
     impact: "judgement",
-    dependsOn: "graph_retrieval",
     what: "具体关键词（如「段永平」）和图谱里的名字（名字 + 类型 + 描述）的向量相似度，达到这个值才算找到这个名字。字面命中的名字不看这个阈值。",
     why: "参考 LightRAG 的量级先定 0.5，还没有评测依据。",
     effect: "调高找到的实体更少更准，调低更容易把不相干的名字也算进来。",
@@ -200,7 +194,6 @@ const META: Record<string, Meta> = {
     label: "图检索 · 每个关键词找几个名字",
     step: 1,
     impact: "judgement",
-    dependsOn: "graph_retrieval",
     what: "每个具体关键词在名字向量里取最相似的前几个，再按上面的阈值筛。",
     why: "同一个实体常有好几个名字（段永平、阿段、段总），取 10 个能覆盖。",
     effect: "调大能把更多别名、没合并的同名实体找回来，也更容易混进不相干的。",
@@ -210,7 +203,6 @@ const META: Record<string, Meta> = {
     label: "图检索 · 每个关键词最多几个实体",
     step: 1,
     impact: "judgement",
-    dependsOn: "graph_retrieval",
     what: "每个具体关键词找到的名字按实体合并后，最多留几个实体：名字和关键词相同或被关键词包含（字面命中）的排最前，其余按相似度。",
     why: "名字向量带着描述，描述里都提到同一个人时（一本讲段永平的书），不相干的实体也会很像；参考 RAGFlow 只留前 6 个。",
     effect:
@@ -221,7 +213,6 @@ const META: Record<string, Meta> = {
     label: "图检索 · 实体关系相似度阈值",
     step: 0.05,
     impact: "judgement",
-    dependsOn: "graph_retrieval",
     what: "实体一跳关系的向量检索分数线；低于分数线的关系仍可通过关键词检索进入候选。",
     why: "实体这条路原来只看条数不看相似度：关系少的实体（常见于名字向量误匹配进来的）关系全部留下，热门实体的低分关系反被条数上限砍掉，两个方向正好相反。默认 0.5，和关系相似度阈值一致。",
     effect:
@@ -232,7 +223,6 @@ const META: Record<string, Meta> = {
     label: "图检索 · 每实体每路关系候选数",
     step: 1,
     impact: "judgement",
-    dependsOn: "graph_retrieval",
     what: "在每个实体的一跳关系内，向量和关键词检索各取多少条，再融合排名。",
     why: "仅控制粗筛规模，最终关系由统一重排决定。",
     effect: "调大能增加召回，查询开销也增加。",
@@ -242,7 +232,6 @@ const META: Record<string, Meta> = {
     label: "图检索 · 关系相似度阈值",
     step: 0.05,
     impact: "judgement",
-    dependsOn: "graph_retrieval",
     what: "完整问题和关系（起点 → 终点 + 描述）的向量相似度，达到这个值进入向量候选；关键词匹配可以补充召回。",
     why: "参考 LightRAG 的量级先定 0.5，还没有评测依据。",
     effect: "调高留下的关系更少更准，调低更全但噪声更多。",
@@ -252,7 +241,6 @@ const META: Record<string, Meta> = {
     label: "图检索 · 全局每路关系候选数",
     step: 1,
     impact: "judgement",
-    dependsOn: "graph_retrieval",
     what: "完整问题在可见关系库中，向量和关键词检索各取多少条。",
     why: "不依赖实体匹配，补充一跳路径遗漏的关系。",
     effect: "调大扩大候选范围。",
@@ -262,7 +250,6 @@ const META: Record<string, Meta> = {
     label: "图检索 · 每实体保底候选数",
     step: 1,
     impact: "judgement",
-    dependsOn: "graph_retrieval",
     what: "每个实体排名靠前的关系优先进入重排候选池；重复关系只占一席。总预算不足时按轮次分配。",
     why: "控制关系检索和重排的候选范围。",
     effect: "修改后应用于后续检索。",
@@ -272,7 +259,6 @@ const META: Record<string, Meta> = {
     label: "图检索 · 全局保底候选数",
     step: 1,
     impact: "judgement",
-    dependsOn: "graph_retrieval",
     what: "全局关系路径优先进入关系重排的候选数，0 表示不保底。",
     why: "控制关系检索和重排的候选范围。",
     effect: "修改后应用于后续检索。",
@@ -282,7 +268,6 @@ const META: Record<string, Meta> = {
     label: "图检索 · 关系重排候选数",
     step: 1,
     impact: "judgement",
-    dependsOn: "graph_retrieval",
     what: "各路径保底合并后，按融合排名补齐到这个总上限。",
     why: "控制关系检索和重排的候选范围。",
     effect: "修改后应用于后续检索。",
@@ -292,7 +277,6 @@ const META: Record<string, Meta> = {
     label: "图检索 · 重排后关系保留数",
     step: 1,
     impact: "judgement",
-    dependsOn: "graph_retrieval",
     what: "关系统一重排后最多留多少条：留下的关系用来找原文；token 预算模式下还按重排顺序放进图保底额度，交给回答模型。",
     why: "控制关系检索和重排的候选范围。",
     effect: "修改后应用于后续检索。",
@@ -302,7 +286,6 @@ const META: Record<string, Meta> = {
     label: "图检索 · 关系重排分数线",
     step: 0.05,
     impact: "judgement",
-    dependsOn: "graph_retrieval",
     what: "仅用于关系重排分数，不能与向量分数比较；失败回退时不应用。低于分数线的关系既不用来找原文，也不放进回答上下文。",
     why: "控制关系检索和重排的候选范围。",
     effect: "修改后应用于后续检索。",
@@ -312,7 +295,6 @@ const META: Record<string, Meta> = {
     label: "图检索 · 只有图找到的分片进重排上限",
     step: 1,
     impact: "judgement",
-    dependsOn: "graph_retrieval",
     what: "只被图检索找到的分片不和其他分片比 RRF 名次，按图检索的名次取前多少个交给重排；不占「候选池大小」的名额。",
     why: "图只有一张排名表，向量、关键词每个检索词各一张，只被图找到的分片 RRF 分数天生低，比名次几乎进不了候选池。",
     effect:
@@ -381,7 +363,6 @@ const META: Record<string, Meta> = {
     label: "Agent 相关度阈值",
     step: 0.05,
     impact: "judgement",
-    dependsOn: "rerank_enabled",
     what: "Agent 模式每次检索时，重排得分低于它的资料不返回给模型；全部低于时同样按兜底分数线返回一条。固定流程用上面的「相关度阈值」，两边分开设。",
     why: "默认和固定流程一样是 0.85，行为和以前相同。Agent 会自己读资料、判断是否切题，不够还会换说法再查，阈值可以比固定流程低一些，让它看到更多候选。",
     effect:
@@ -392,7 +373,6 @@ const META: Record<string, Meta> = {
     label: "Agent 优秀阈值",
     step: 0.05,
     impact: "judgement",
-    dependsOn: "rerank_enabled",
     what: "Agent 每次检索时，重排得分不低于它的资料全部返回给模型，不受「Agent 每次最多返回几条」和模型自己要的条数（top_k）限制；比要的多时工具会告诉模型为什么。固定流程用上面的「优秀阈值」，两边分开设。设成 1 表示不启用。",
     why: "评测里 Agent 只要了 10 条，过线的有 12 条，没给的腾讯重排分 0.99；工具提示了没给全，但它预算不够，没有再查。",
     effect:
@@ -461,7 +441,6 @@ const META: Record<string, Meta> = {
     unit: "条",
     step: 5,
     impact: "now",
-    dependsOn: "long_memory_enabled",
     what: "每个用户的长期记忆条数上限，满了以后不再新增，已有的仍可以被修改或删除。",
     why: "偏好和身份一般十几条就够了；条数越多，每次发给模型的用户画像越长。",
     effect:
@@ -486,7 +465,6 @@ const META: Record<string, Meta> = {
     label: "相似度阈值",
     step: 0.01,
     impact: "now",
-    dependsOn: "injection_vector_enabled",
     what: "问题和最相似样本的相似度达到它，就算疑似攻击。",
     why: "经验值：同一个意思换个说法通常在 0.85 以上，话题相近的正常问题一般在 0.6–0.8。不同向量模型的分数范围不一样，换模型后要在「安全样本」页做一次误拦检查。",
     effect:
@@ -495,7 +473,6 @@ const META: Record<string, Meta> = {
   injection_vector_action: {
     label: "超过阈值时",
     impact: "now",
-    dependsOn: "injection_vector_enabled",
     what: "只记录：照常回答，在处理过程和运行概览里记下来；拦截：和规则命中一样直接拒绝。",
     why: "阈值合不合适要看真实问题。先只记录一段时间，看会误拦哪些正常问题，再改成拦截。",
     effect: "改成拦截后，超过阈值的问题不再检索和回答。",
@@ -512,7 +489,6 @@ const META: Record<string, Meta> = {
     label: "攻击概率阈值",
     step: 0.01,
     impact: "now",
-    dependsOn: "injection_model_enabled",
     what: "模型给出的攻击概率达到它，就按下面的设置处理。",
     why: "偏严：只拦模型很有把握的，宁可漏掉少数也不误拦正常问题。中文问题的分数分布要用真实数据看，可以先在「系统管理 › 安全样本」的试一试里测几句。",
     effect:
@@ -521,7 +497,6 @@ const META: Record<string, Meta> = {
   injection_model_action: {
     label: "模型判断为攻击时",
     impact: "now",
-    dependsOn: "injection_model_enabled",
     what: "拦截：和规则命中一样直接拒绝；只记录：照常回答，在处理过程和运行概览里记下来。",
     why: "模型判断为攻击的问题都会进「安全样本」的待确认，确认后加入样本库，下次同类问题在第二层就能拦下。",
     effect: "改成只记录后，模型判断为攻击的问题也会正常检索和回答。",
@@ -615,7 +590,6 @@ const META: Record<string, Meta> = {
     unit: "Token",
     step: 128,
     impact: "new_docs",
-    dependsOn: "contextual_retrieval",
     what: "给每个分片写说明时，大模型最多输出多少。",
     why: "说明本身只有一两句，给 1024 是为了给推理模型的思考过程留额度；原来额度太小，半截思考过程被当成说明写进了分片。",
     effect:
@@ -637,6 +611,15 @@ const THEME_LABELS: Record<string, string> = {
   log: "只记录",
   block: "拦截",
 };
+// 选项的显示文字：设置页下拉框和「为什么不生效」的原因共用。
+function choiceLabel(value: unknown) {
+  const text = String(value);
+  return (
+    THEME_LABELS[text] ??
+    (TIMEZONE_LABELS[text] ? `${TIMEZONE_LABELS[text]}（${text}）` : text)
+  );
+}
+
 const TIMEZONE_LABELS: Record<string, string> = {
   "Asia/Shanghai": "北京时间",
   "Asia/Hong_Kong": "香港",
@@ -709,6 +692,66 @@ export default function SystemSettings({
       if (key in draft) return draft[key] === null ? null : draft[key];
     }
     return byKey[key]?.value;
+  }
+
+  // 这一项现在为什么不生效：按生效条件（后端 REQUIRES）和当前取值（含没保存的修改）逐条判断，改了依赖的项立刻更新。
+  function inactiveReasons(item: RuntimeSettingItem) {
+    return (item.requires ?? [])
+      .filter((rule) => {
+        const actual = current(rule.key);
+        return (actual ?? byKey[rule.key]?.default) !== rule.equals;
+      })
+      .map((rule) => {
+        const label = META[rule.key]?.label ?? rule.key;
+        if (typeof rule.equals === "boolean")
+          return rule.equals
+            ? `「${label}」关闭，这一项不生效`
+            : `「${label}」打开，这一项不生效`;
+        const actual = current(rule.key) ?? byKey[rule.key]?.default;
+        return `「${label}」是「${choiceLabel(actual)}」，这一项不生效；只在「${choiceLabel(rule.equals)}」时生效`;
+      });
+  }
+
+  // 一行设置；卡片里和组里共用。
+  function row(
+    group: string,
+    item: RuntimeSettingItem,
+    draft: Record<string, unknown>,
+  ) {
+    return (
+      <SettingRow
+        key={item.key}
+        item={item}
+        value={current(item.key)}
+        dirty={item.key in draft}
+        reasons={inactiveReasons(item)}
+        onChange={(value) => change(group, item.key, value)}
+      />
+    );
+  }
+
+  // 组里的设置按顺序显示；属于卡片的几项合成一张卡片，放在其中第一项原来的位置。
+  function rows(
+    group: string,
+    list: RuntimeSettingItem[],
+    draft: Record<string, unknown>,
+  ) {
+    const shown = new Set<string>();
+    return list.flatMap((item) => {
+      if (!item.card) return [row(group, item, draft)];
+      if (shown.has(item.card)) return [];
+      shown.add(item.card);
+      const card = data?.cards?.[item.card];
+      const members = (card?.keys ?? [item.key])
+        .map((key) => list.find((entry) => entry.key === key))
+        .filter((entry): entry is RuntimeSettingItem => Boolean(entry));
+      return [
+        <div className="sys-card" key={`card-${item.card}`}>
+          <h3>{card?.title ?? item.card}</h3>
+          {members.map((entry) => row(group, entry, draft))}
+        </div>,
+      ];
+    });
   }
 
   function change(
@@ -804,21 +847,11 @@ export default function SystemSettings({
                 </div>
               </div>
               <div className="sys-items">
-                {items
-                  .filter((item) => !item.advanced)
-                  .map((item) => (
-                    <SettingRow
-                      key={item.key}
-                      item={item}
-                      value={current(item.key)}
-                      dirty={item.key in draft}
-                      disabled={Boolean(
-                        META[item.key]?.dependsOn &&
-                          current(META[item.key].dependsOn!) === false,
-                      )}
-                      onChange={(value) => change(group, item.key, value)}
-                    />
-                  ))}
+                {rows(
+                  group,
+                  items.filter((item) => !item.advanced),
+                  draft,
+                )}
               </div>
               {items.some((item) => item.advanced) && (
                 <details
@@ -829,21 +862,11 @@ export default function SystemSettings({
                 >
                   <summary>高级</summary>
                   <div className="sys-items">
-                    {items
-                      .filter((item) => item.advanced)
-                      .map((item) => (
-                        <SettingRow
-                          key={item.key}
-                          item={item}
-                          value={current(item.key)}
-                          dirty={item.key in draft}
-                          disabled={Boolean(
-                            META[item.key]?.dependsOn &&
-                              current(META[item.key].dependsOn!) === false,
-                          )}
-                          onChange={(value) => change(group, item.key, value)}
-                        />
-                      ))}
+                    {rows(
+                      group,
+                      items.filter((item) => item.advanced),
+                      draft,
+                    )}
                   </div>
                 </details>
               )}
@@ -914,19 +937,21 @@ export default function SystemSettings({
   );
 }
 
+// 一项设置。reasons 是这一项现在不生效的原因（生效条件不满足）：有原因时整项置灰、不能修改，并逐条写出原因。
 function SettingRow({
   item,
   value,
   dirty,
-  disabled,
+  reasons,
   onChange,
 }: {
   item: RuntimeSettingItem;
   value: RuntimeSettingValue | null | undefined;
   dirty: boolean;
-  disabled: boolean;
+  reasons: string[];
   onChange: (value: RuntimeSettingValue | null) => void;
 }) {
+  const disabled = reasons.length > 0;
   const meta = META[item.key] ?? {
     label: item.key,
     what: "",
@@ -1020,9 +1045,11 @@ function SettingRow({
           </dl>
         )}
         {disabled && (
-          <p className="sys-disabled-note">
-            {META[meta.dependsOn!]?.label}关闭时这一项不起作用。
-          </p>
+          <ul className="sys-disabled-note">
+            {reasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
         )}
       </div>
       <div className="sys-item-control">
@@ -1057,10 +1084,7 @@ function SettingRow({
               )
               .map((choice) => (
                 <option key={choice} value={choice}>
-                  {THEME_LABELS[choice] ??
-                    (TIMEZONE_LABELS[choice]
-                      ? `${TIMEZONE_LABELS[choice]}（${choice}）`
-                      : choice)}
+                  {choiceLabel(choice)}
                 </option>
               ))}
           </select>

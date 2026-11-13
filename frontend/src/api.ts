@@ -2938,6 +2938,10 @@ export type RuntimeSettingItem = {
   min?: number;
   max?: number;
   choices?: string[];
+  // 生效条件（app/runtime_config.py 的 REQUIRES）：都满足才起作用，否则设置页整项置灰并写原因。
+  requires?: { key: string; equals: RuntimeSettingValue }[];
+  // 放在哪张卡片里（RuntimeSettingsView.cards 的键）。
+  card?: string;
 };
 export type RuntimeSettingChange = {
   key: string;
@@ -2948,6 +2952,8 @@ export type RuntimeSettingsView = {
   items: RuntimeSettingItem[];
   groups: Record<string, string>;
   pages?: Record<string, "rag" | "system">;
+  // 卡片：几项合在一起显示，keys 是卡片里的顺序。
+  cards?: Record<string, { title: string; keys: string[] }>;
   history: { at: string; by: string; changes: RuntimeSettingChange[] }[];
   cache_seconds: number;
   changed?: RuntimeSettingChange[];
