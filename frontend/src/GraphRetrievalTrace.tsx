@@ -1,3 +1,4 @@
+import { Tag } from "./Tag";
 import Table, { TablePagination } from "./Table";
 import {
   useEffect,
@@ -938,11 +939,18 @@ function NamesDetail({
                 ) : null}
               </td>
               <td className="num">
-                {match.match === "exact"
-                  ? "字面相同"
-                  : match.match === "contains"
-                    ? "字面包含"
-                    : `向量 ${score(match.score)}`}
+                <Tag size="sm" hue={match.match === "vector" ? 220 : 30}>
+                  {match.match === "vector" ? "向量匹配" : "字面匹配"}
+                </Tag>
+                <small>
+                  {match.match === "exact"
+                    ? "字面相同 · "
+                    : match.match === "contains"
+                      ? "字面包含 · "
+                      : ""}
+                  向量相似度{" "}
+                  {match.score == null ? "未记录" : score(match.score)}
+                </small>
               </td>
               <td>
                 {match.entity_name ?? "—"}
