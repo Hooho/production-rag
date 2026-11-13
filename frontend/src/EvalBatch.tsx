@@ -161,11 +161,14 @@ export default function BatchReport({
             arm.status === "failed" ||
             arm.status === "interrupted" ||
             Boolean(arm.error);
+          // 跑完的组标绿，失败的组标红，运行中/排队保持中性。
+          const cardState = failed
+            ? " is-error"
+            : arm.status === "completed"
+              ? " is-success"
+              : "";
           return (
-            <article
-              key={arm.id}
-              className={`evb-arm${failed ? " is-error" : ""}`}
-            >
+            <article key={arm.id} className={`evb-arm${cardState}`}>
               <div className="evb-arm-title">
                 <strong>
                   {arm.label}

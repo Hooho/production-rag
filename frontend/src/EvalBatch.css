@@ -33,6 +33,16 @@
   color: var(--ev-bad);
 }
 
+/* 跑完的组：整张卡标绿。 */
+.evb-arm.is-success {
+  border-color: var(--ev-good);
+  background: color-mix(in srgb, var(--ev-good) 6%, var(--t-ffffff, #fff));
+}
+
+.evb-arm.is-success .evb-arm-title strong {
+  color: var(--ev-good);
+}
+
 .evb-arm .evb-error {
   margin: 0;
   padding: 8px 10px;
