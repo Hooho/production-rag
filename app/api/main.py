@@ -3685,6 +3685,14 @@ def create_app(store=None, models=None, jwt_secret=None):
                 methods=body.methods,
                 modes=[body.mode],
                 suite_ids=body.suite_ids,
+                # 题集名字跟着记录存下来：历史记录的「范围」显示它，题集以后改名或删掉也还是当时的名字。
+                suite_names=list(
+                    dict.fromkeys(
+                        item["source_suite_name"]
+                        for item in launch["questions"] or []
+                        if item.get("source_suite_name")
+                    )
+                ),
             )
             run["question_snapshot"] = launch["questions"]
             with eval_params.applied(app.state.models, launch["prepared"]) as (

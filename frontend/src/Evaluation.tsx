@@ -37,6 +37,7 @@ import {
   type EvalParamGroup,
   type EvalParamOptions,
   type EvalParams,
+  type EvalConfig,
   type EvalSuiteBrief,
   deleteEvalRun,
   saveEvalRunNote,
@@ -148,8 +149,16 @@ const DETAIL_TAB_LABELS: Record<DetailTab, string> = {
 const SPLIT_LABELS: Record<string, string> = {
   dev: "开发集",
   holdout: "留出集",
-  all: "全部题目",
+  all: "全部已审核题目",
 };
+// 一次评测的题目范围：选了自建题集就写题集名字（这时 split 固定是 all，不能按 split 显示），否则按 split。
+function scopeLabel(config: EvalConfig | undefined) {
+  if (config?.suite_ids?.length)
+    return config.suite_names?.length
+      ? config.suite_names.join("、")
+      : "自建题集";
+  return SPLIT_LABELS[config?.split ?? ""] ?? config?.split ?? "—";
+}
 // 丢失阶段的说明：告诉读者该去优化哪一环。
 const LOST_LABELS: Record<string, { label: string; hint: string }> = {
   recall: {
@@ -214,7 +223,7 @@ function progressBreakdown(run: EvalRunBrief, suites: EvalSuite[]) {
     for (const variant of suite.variants) groups.push(variant);
   }
   const questions = Math.round(total / groups.length);
-  const splitLabel = SPLIT_LABELS[run.config.split ?? ""] ?? run.config.split;
+  const splitLabel = scopeLabel(run.config);
   const groupText = parts.length
     ? `${parts.join("和")}，再加上基线，一共 ${groups.length} 组配置`
     : "只跑基线（当前线上配置），1 组配置";
@@ -1239,7 +1248,7 @@ function RunConfig({ run }: { run: EvalRunBrief }) {
   const items: [string, string][] = [
     [
       "题目",
-      `${SPLIT_LABELS[config.split ?? ""] ?? config.split}${config.dataset_size ? ` · ${config.dataset_size} 题` : ""}`,
+      `${scopeLabel(config)}${config.dataset_size ? ` · ${config.dataset_size} 题` : ""}`,
     ],
     ["模式", modesLabel(run)],
     ...(paramsSummary(run.params).length
@@ -3466,7 +3475,7 @@ function RunHistory({
                   <td>—</td>
                   <td>{formatTime(item.created)}</td>
                   <td>评测报告</td>
-                  <td>{SPLIT_LABELS[item.config.split ?? ""] ?? "题集"}</td>
+                  <td>{scopeLabel(item.config)}</td>
                   <td>{item.config.dataset_size ?? "—"}</td>
                   <td>
                     {members.length} 组配置 · 完成 {done}/{members.length}
@@ -3558,8 +3567,7 @@ function RunHistory({
                       ? (item.config.special?.suites ?? [])
                           .map((suite) => suite.name)
                           .join("、")
-                      : (SPLIT_LABELS[item.config.split ?? ""] ??
-                        item.config.split)}
+                      : scopeLabel(item.config)}
                   </td>
                   <td className="num ev-history-number">
                     {item.kind === "special"
@@ -3988,10 +3996,7 @@ function RunHistory({
                   {comparison.base.kind === "retrieval"
                     ? ` · ${modesLabel(comparison.base)}`
                     : ""}{" "}
-                  ·{" "}
-                  {SPLIT_LABELS[comparison.base.config.split ?? ""] ??
-                    comparison.base.config.split ??
-                    "—"}
+                  · {scopeLabel(comparison.base.config)}
                 </small>
               </div>
               <span className="ev-compare-arrow" aria-hidden="true">
@@ -4005,10 +4010,7 @@ function RunHistory({
                   {comparison.target.kind === "retrieval"
                     ? ` · ${modesLabel(comparison.target)}`
                     : ""}{" "}
-                  ·{" "}
-                  {SPLIT_LABELS[comparison.target.config.split ?? ""] ??
-                    comparison.target.config.split ??
-                    "—"}
+                  · {scopeLabel(comparison.target.config)}
                 </small>
               </div>
             </div>

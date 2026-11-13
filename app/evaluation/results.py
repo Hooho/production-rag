@@ -7,7 +7,7 @@ import threading
 
 from sqlalchemy import select
 
-from ..mysql.store import eval_runs, settings as settings_table
+from ..mysql.store import eval_runs, eval_suites, settings as settings_table
 from ..runtime_config import bound_engine
 from .dataset import EVAL_DIR, QUESTION_TYPES
 from .generation import answer_question, cited_ids, judge_answer, summarize_generation
@@ -341,7 +341,36 @@ def list_runs(engine=None):
                 )
             ).all()
         )
+        fill_suite_names(connection, rows)
     return [{**row, **(notes.get(NOTE_PREFIX + row["id"]) or {})} for row in rows]
+
+
+# 旧记录只存了 suite_ids 没存题集名字：按当前题集补上，已经删掉的题集写「已删除的题集」。
+def fill_suite_names(connection, rows):
+    pending = [
+        row
+        for row in rows
+        if (row.get("config") or {}).get("suite_ids")
+        and not row["config"].get("suite_names")
+    ]
+    if not pending:
+        return
+    ids = {suite_id for row in pending for suite_id in row["config"]["suite_ids"]}
+    names = dict(
+        connection.execute(
+            select(eval_suites.c.id, eval_suites.c.name).where(
+                eval_suites.c.id.in_(ids)
+            )
+        ).all()
+    )
+    for row in pending:
+        row["config"] = {
+            **row["config"],
+            "suite_names": [
+                names.get(suite_id, "已删除的题集")
+                for suite_id in dict.fromkeys(row["config"]["suite_ids"])
+            ],
+        }
 
 
 # 一次评测的概要：编号、时间、提交号、配置、主要指标和进度。

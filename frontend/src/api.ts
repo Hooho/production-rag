@@ -1539,6 +1539,9 @@ export type EvalHistoryMetrics = {
 export type EvalConfig = {
   split: string | null;
   suites: string[];
+  // 自建题集：选了哪些题集（此时 split 固定是 all）和当时的名字；旧记录的名字由后端按当前题集补上。
+  suite_ids?: string[];
+  suite_names?: string[];
   special?: {
     suites: { id: string; name: string }[];
     compare_memory?: boolean;
