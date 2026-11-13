@@ -126,6 +126,10 @@ class DocumentSearchTool:
         scope_started = time.monotonic()
         if selected_scope() is not None:
             scope = selected_scope()
+        if scope is None and owner == "eval" and hasattr(store, "engine"):
+            from ..evaluation.document_refs import scope as evaluation_scope
+
+            scope = evaluation_scope(store.engine)
         if scope is None:
             scope = (
                 store.readable_scope(owner)

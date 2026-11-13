@@ -100,6 +100,26 @@ def eval_dir(setup, tmp_path, monkeypatch):
     replace_dataset(rows, setup[1].engine)
     monkeypatch.setattr(dataset_module, "EVAL_DIR", tmp_path)
     monkeypatch.setattr(results_module, "RESULTS_DIR", tmp_path / "results")
+    # 评测使用知识库文档引用，夹具只在知识库建立一次索引。
+    from app.evaluation.document_refs import save as save_references
+    import copy
+
+    client, store = setup
+    models = copy.copy(client.app.state.models)
+    models.embedding_mode = "demo"
+    models.contextual = False
+    references = []
+    for path in sorted(corpus.glob("*.md")):
+        key = f"fixture-{path.stem}"
+        store.mysql.create_document(
+            key, "admin", path.stem, path.name, "", {}, doc_key=key, version=1
+        )
+        count = store.ingest(
+            "admin", path.stem, path.read_text(encoding="utf-8"), models, key, key
+        )
+        store.activate_version(key, count)
+        references.append(key)
+    save_references(store.engine, references)
     return tmp_path
 
 
@@ -291,15 +311,15 @@ def test_eval_dataset_ai_paraphrase_generation(setup, eval_dir):
     assert items[0]["evidence"] == ["耳机保修期为一年"]
 
 
-# 语料导入走正常的版本流程，内容不变时第二次直接跳过，不重复向量化。
+# 引用入口可重复调用，不复制或重新向量化知识库文档。
 def test_import_corpus_is_idempotent(setup, eval_dir):
     client, store = setup
     first = import_corpus(store, client.app.state.models)
-    assert [item["status"] for item in first] == ["imported", "imported"]
+    assert [item["status"] for item in first] == ["referenced", "referenced"]
     second = import_corpus(store, client.app.state.models)
-    assert [item["status"] for item in second] == ["unchanged", "unchanged"]
-    # 评测用户的数据与真实用户隔离：alice 的文档列表里看不到评测语料。
-    assert client.get("/documents", headers=headers()).json()["documents"] == []
+    assert [item["status"] for item in second] == ["referenced", "referenced"]
+    assert first == second
+    assert all(item["document_id"].startswith("fixture-") for item in first)
 
 
 # 完整跑一次检索评测：三个阶段的指标、按题型分组、漏斗、阈值扫描、消融变体和结果文件都齐全。

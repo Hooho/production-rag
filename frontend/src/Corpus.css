@@ -1,99 +1,112 @@
 /* 评测语料库页签：列表沿用回归集（Regression.css）的样式，这里只补语料特有的部分。 */
 .cp-item {
-   border: 1px solid var(--t-e3edf5);
-   border-radius: 6px;
-   background: #fff;
-   padding: 12px 16px;
+  border: 1px solid var(--t-e3edf5);
+  border-radius: 6px;
+  background: #fff;
+  padding: 12px 16px;
 }
 
 .cp-head {
-   display: flex;
-   align-items: flex-start;
-   justify-content: space-between;
-   gap: 16px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
 }
 
 .cp-main {
-   display: flex;
-   min-width: 0;
-   flex-direction: column;
-   gap: 4px;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .cp-main .rg-set-meta {
-   display: flex;
-   flex-wrap: wrap;
-   gap: 4px 14px;
-   color: var(--t-5e7a95);
-   font-weight: 400;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  color: var(--t-5e7a95);
+  font-weight: 400;
 }
 
 .cp-total {
-   color: var(--t-5e7a95);
+  color: var(--t-5e7a95);
 }
 
 .cp-preview {
-   display: flex;
-   flex-direction: column;
-   align-items: flex-start;
-   gap: 8px;
-   margin-top: 12px;
-   border-top: 1px solid var(--t-e3edf5);
-   padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  border-top: 1px solid var(--t-e3edf5);
+  padding-top: 12px;
 }
 
 .cp-preview pre {
-   width: 100%;
-   margin: 0;
-   white-space: pre-wrap;
-   word-break: break-word;
-   color: var(--t-1d3550);
-   font-family: inherit;
-   font-size: 13px;
-   line-height: 1.7;
+  width: 100%;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--t-1d3550);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.7;
 }
 
 .cp-rejected {
-   border: 1px solid #f3c4c0;
-   border-radius: 6px;
-   background: #fdecec;
-   padding: 10px 14px;
-   color: #b42318;
+  border: 1px solid #f3c4c0;
+  border-radius: 6px;
+  background: #fdecec;
+  padding: 10px 14px;
+  color: #b42318;
 }
 
 .cp-rejected ul {
-   margin: 6px 0 0;
-   padding-left: 18px;
+  margin: 6px 0 0;
+  padding-left: 18px;
 }
 
 /* 发起评测时的语料勾选：一行一份，右边是字数。 */
 .ev-launch .cp-pick-list label em {
-   margin-left: 8px;
-   color: var(--t-7d95ac);
-   font-style: normal;
+  margin-left: 8px;
+  color: var(--t-7d95ac);
+  font-style: normal;
 }
 
 .cp-error {
-   color: #b42318;
-   font-size: 12px;
+  color: #b42318;
+  font-size: 12px;
 }
 
 .cp-chunks {
-   align-items: stretch;
+  align-items: stretch;
 }
 
 .cp-chunks-head {
-   display: flex;
-   flex-wrap: wrap;
-   justify-content: space-between;
-   gap: 8px;
-   color: var(--t-5e7a95);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--t-5e7a95);
 }
 
 .cp-pager {
-   display: flex;
-   align-items: center;
-   justify-content: center;
-   gap: 12px;
-   color: var(--t-5e7a95);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--t-5e7a95);
+}
+
+.cp-reference-option {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid #e4ebf3;
+}
+.cp-reference-option small {
+  display: block;
+  color: #718398;
+  margin-top: 3px;
 }

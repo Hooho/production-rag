@@ -1919,6 +1919,7 @@ export type EvalCorpusStatus =
   | "not_imported"
   | "importing";
 export type EvalCorpusEntry = {
+  graph_ready?: boolean;
   id: string;
   title: string;
   filename: string;
@@ -4806,4 +4807,22 @@ export function saveEvalDatasetPrelude(
       body: JSON.stringify({ prelude }),
     },
   );
+}
+
+export type EvalDocumentReference = EvalCorpusEntry & {
+  document_id?: string;
+  owner?: string;
+  version?: number;
+  graph_ready?: boolean;
+};
+export function listEvalDocumentCandidates() {
+  return request<{ items: EvalDocumentReference[] }>(
+    "/eval/document-candidates",
+  );
+}
+export function saveEvalDocumentReferences(documentIds: string[]) {
+  return request<{ saved: boolean }>("/eval/document-references", {
+    method: "PUT",
+    body: JSON.stringify({ document_ids: documentIds }),
+  });
 }

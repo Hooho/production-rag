@@ -1,24 +1,18 @@
-from ..retrieval_policy import selected_methods, selected_scope
-import hashlib
+from ..retrieval_policy import selected_methods
 import math
 import os
 import time
-from uuid import uuid4
 
-from sqlalchemy import select
 
 from ..models import Models
-from ..mysql.store import chunks, document_chunks, document_heads
 from ..runtime_config import snapshot as runtime_snapshot
-from ..tools.search import DocumentSearchTool, title_limit
-from .corpus import documents_for as corpus_documents
+from ..tools.search import DocumentSearchTool
 from .dataset import QUESTION_TYPES, evidence_variants, normalize, select_split
 from .grouped_evidence import bind_groups, evidence_fields, match_evidence
 from .flow import apply_sufficiency, given_chunk_ids, rewrite_item, item_history
 
 
-# 评测语料导入到专门的评测用户下，和 alice、bob 的真实知识库完全隔离：
-# 评测数据不会混进用户的检索结果，用户上传或删除文档也不会改变评测分数。
+# 评测请求身份；实际检索范围由文档引用和冻结版本提供。
 EVAL_OWNER = "eval"
 # 阈值扫描的取值：0.05 到 0.9，每 0.05 一档。
 SWEEP_THRESHOLDS = []
@@ -52,100 +46,26 @@ VARIANTS = {
 SUITES = {"ablation": "消融实验", "params": "参数对比"}
 
 
-# 把评测语料库里的文档导入评测用户，走和线上导入相同的"去重 → 新版本 → 切换当前版本"流程。
-# 内容没变时 sha256 去重直接跳过，所以每次评测前都可以放心调用：语料改了才会重新切分和向量化。
-# 评测开跑时勾选了几份语料（limit_titles）就只导入这几份，没勾的不用花时间切分和向量化。
+# 保留调用入口，直接返回引用文档，不复制或重新索引。
 def import_corpus(store, models):
-    frozen = selected_scope()
-    if frozen is not None:
-        return [
-            {
-                "document_id": item["document_id"],
-                "title": item.get("title"),
-                "status": "frozen",
-            }
-            for item in frozen.get("documents", [])
-        ]
-    report = []
-    for entry in corpus_documents(title_limit(EVAL_OWNER), store.engine):
-        title = entry["title"]
-        content = entry["content"]
-        filename = entry["filename"]
-        content_sha256 = hashlib.sha256(content.encode()).hexdigest()
-        with store.engine.connect() as connection:
-            head = connection.execute(
-                select(document_heads.c.current_document_id).where(
-                    document_heads.c.owner == EVAL_OWNER,
-                    document_heads.c.title == title,
-                )
-            ).first()
-        replace_id = head[0] if head else None
-        doc_key, version = store.next_version(EVAL_OWNER, replace_id)
-        # 带上 Contextual Retrieval 开关：开关变化后语料要重新导入，评测才能反映开关的效果。
-        duplicate = store.find_duplicate(
-            EVAL_OWNER, content_sha256, doc_key, getattr(models, "contextual", False)
-        )
-        if duplicate:
-            report.append(
-                {
-                    "title": title,
-                    "document_id": duplicate,
-                    "status": "unchanged",
-                    "sha256": content_sha256,
-                }
-            )
-            continue
-        document_id = str(uuid4())
-        store.mysql.create_document(
-            document_id,
-            EVAL_OWNER,
-            title,
-            filename,
-            "",
-            {"sha256": content_sha256},
-            doc_key=doc_key,
-            version=version,
-            version_note="评测语料",
-            content_sha256=content_sha256,
-        )
-        try:
-            count = store.ingest(
-                EVAL_OWNER, title, content, models, document_id, doc_key or document_id
-            )
-            store.activate_version(document_id, count)
-        except Exception:
-            store.mysql.update_document(document_id, "failed", "评测语料导入失败")
-            store.remove_version_data(document_id)
-            raise
-        report.append(
-            {
-                "title": title,
-                "document_id": document_id,
-                "status": "imported",
-                "chunks": count,
-                "sha256": content_sha256,
-            }
-        )
-    return report
+    from .document_refs import scope
+
+    return [
+        {
+            "document_id": item["document_id"],
+            "title": item["title"],
+            "status": "referenced",
+        }
+        for item in scope(store.engine)["documents"]
+    ]
 
 
-# 读取评测用户当前版本的全部分片原文 {分片 id: 文本}。
+# 读取本次评测范围内的全部分片原文 {分片 id: 文本}。
 # 检索诊断里只有 80 字预览，判断"分片是否包含证据原文"需要完整文本，所以一次性从 MySQL 取出。
 def current_chunk_texts(store):
-    joined = document_heads.join(
-        document_chunks,
-        document_chunks.c.document_id == document_heads.c.current_document_id,
-    ).join(chunks, chunks.c.id == document_chunks.c.chunk_id)
-    with store.engine.connect() as connection:
-        rows = connection.execute(
-            select(chunks.c.id, chunks.c.text)
-            .select_from(joined)
-            .where(document_heads.c.owner == EVAL_OWNER)
-        ).all()
-    texts = {}
-    for chunk_id, text in rows:
-        texts[chunk_id] = normalize(text)
-    return texts
+    from .document_refs import rows
+
+    return {row[0]: normalize(row[2]) for row in rows(store.engine)}
 
 
 def scoring_item(store, item):
@@ -153,25 +73,17 @@ def scoring_item(store, item):
         isinstance(value, dict) for value in item.get("evidence", [])
     ):
         return item
-    joined = document_heads.join(
-        document_chunks,
-        document_chunks.c.document_id == document_heads.c.current_document_id,
-    ).join(chunks, chunks.c.id == document_chunks.c.chunk_id)
-    with store.engine.connect() as connection:
-        catalog = (
-            connection.execute(
-                select(
-                    document_heads.c.title,
-                    document_chunks.c.position,
-                    document_chunks.c.chunk_id,
-                    chunks.c.content,
-                )
-                .select_from(joined)
-                .where(document_heads.c.owner == EVAL_OWNER)
-            )
-            .mappings()
-            .all()
-        )
+    from .document_refs import rows
+
+    catalog = [
+        {
+            "title": row[1],
+            "position": row[4],
+            "chunk_id": row[0],
+            "content": row[3] or row[2],
+        }
+        for row in rows(store.engine)
+    ]
     return {
         **item,
         "evidence": bind_groups(item["evidence"], item["evidence_groups"], catalog),

@@ -29,9 +29,7 @@ from ..agentic.query_explanation import query_explanation
 from .. import prompts
 from ..runtime_config import snapshot as runtime_snapshot
 from .dataset import QUESTION_TYPES, select_split
-from sqlalchemy import select
 
-from ..mysql.store import document_chunks, document_heads
 from .retrieval import (
     EVAL_OWNER,
     current_chunk_texts,
@@ -63,17 +61,9 @@ def parse_arguments(raw):
 # 评测语料当前版本里每个分块在文档里的序号（从 0 开始，页面显示成「第 N 片」，和知识库页面一致）。
 # S1、S2 只是某一次检索返回结果的顺序编号，每次检索都从 S1 开始；「第 N 片」才是分块固定的编号。
 def chunk_positions(store):
-    joined = document_heads.join(
-        document_chunks,
-        document_chunks.c.document_id == document_heads.c.current_document_id,
-    )
-    with store.engine.connect() as connection:
-        rows = connection.execute(
-            select(document_chunks.c.chunk_id, document_chunks.c.position)
-            .select_from(joined)
-            .where(document_heads.c.owner == EVAL_OWNER)
-        ).all()
-    return {str(chunk_id): position for chunk_id, position in rows}
+    from .document_refs import rows
+
+    return {str(row[0]): row[4] for row in rows(store.engine)}
 
 
 # 一组分片各自包含哪几条证据（证据序号）。

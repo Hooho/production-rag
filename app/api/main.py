@@ -3605,6 +3605,19 @@ def create_app(store=None, models=None, jwt_secret=None):
             ):
                 raise HTTPException(422, "当前题目范围没有已审核题目，请先审核评测题")
         corpus = pick_corpus(body.corpus_ids)
+        if body.version == 2 and "graph" in body.methods:
+            selected_ids = {entry["id"] for entry in corpus}
+            missing_graph = [
+                entry["title"]
+                for entry in eval_corpus.list_entries(app.state.store.engine)
+                if entry["id"] in selected_ids and not entry.get("graph_ready")
+            ]
+            if missing_graph:
+                raise HTTPException(
+                    422,
+                    f"以下文档没有生效图谱，请先建图或取消图检索：{'、'.join(missing_graph)}",
+                )
+
         # 只对这次评测生效的参数，启动前先校验：参数范围、模型配置、提示词版本不对时直接拒绝，不留下失败的记录。
         try:
             run_params, prepared = eval_params.prepare(
@@ -3640,28 +3653,29 @@ def create_app(store=None, models=None, jwt_secret=None):
         first = launches[0]
         if first["body"].version != 2:
             return
-        with limit_titles(EVAL_OWNER, [item["title"] for item in first["corpus"]]):
-            import_corpus(
-                app.state.store,
-                first["prepared"].get("base_models") or app.state.models,
-            )
-            scope = app.state.store.readable_scope(EVAL_OWNER)
-            titles = {item["title"] for item in first["corpus"]}
-            documents = [
-                item
-                for item in scope.get("documents", [])
-                if item.get("title") in titles
-            ]
-            scope = {
-                "documents": documents,
-                "versions": {
-                    item["document_id"]: item["version"] for item in documents
-                },
-            }
-            versions = [
-                item["version_id"]
-                for item in scope_versions(app.state.store.engine, scope)
-            ]
+        from ..evaluation import document_refs
+
+        chosen = {item["id"] for item in first["corpus"]}
+        documents = [
+            item
+            for item in document_refs.entries(app.state.store.engine)
+            if item["id"] in chosen
+        ]
+        if not documents or any(item["missing"] for item in documents):
+            raise ValueError("所选知识库文档已删除或尚未处理完成，请重新选择")
+        scope = {
+            "documents": documents,
+            "versions": {item["document_id"]: item["version"] for item in documents},
+        }
+        versions = [
+            item["version_id"] for item in scope_versions(app.state.store.engine, scope)
+        ]
+        if any("graph" in launch["body"].methods for launch in launches):
+            missing = [item["title"] for item in documents if not item["graph_ready"]]
+            if missing:
+                raise ValueError(
+                    f"以下文档没有生效图谱，请先建图或取消图检索：{'、'.join(missing)}"
+                )
         for launch in launches:
             launch["prepared"].update(
                 data_scope=copy.deepcopy(scope), graph_versions=list(versions)
@@ -3796,7 +3810,7 @@ def create_app(store=None, models=None, jwt_secret=None):
             entries = [by_id[entry_id] for entry_id in dict.fromkeys(corpus_ids)]
         if not entries:
             raise HTTPException(
-                422, "评测语料库是空的：请先在「评测语料库」页签上传语料"
+                422, "评测语料库是空的：请先在「评测语料库」选择知识库文档"
             )
         missing = [entry["title"] for entry in entries if entry["missing"]]
         if missing:
@@ -3810,48 +3824,36 @@ def create_app(store=None, models=None, jwt_secret=None):
     # 每份带上在评测账号里的导入情况：已导入几个分片、内容改过还没重新导入、还没导入（下次评测开跑时导入）。
     @app.get("/eval/corpus", dependencies=[Depends(require_admin)])
     def eval_corpus_list():
-        engine = app.state.store.engine
-        imported = eval_corpus.imported_versions(engine)
-        items = []
-        for entry in eval_corpus.list_entries(engine):
-            state = imported.get(entry["title"])
-            chunks_count = None
-            if state is None:
-                status = "not_imported"
-            elif state["sha256"] != entry["sha256"]:
-                status = "stale"
-            elif str(state["status"] or "").startswith("ready:"):
-                status = "imported"
-                chunks_count = int(str(state["status"]).split(":", 1)[1] or 0)
-            else:
-                status = "not_imported"
-            if app.state.corpus_importing == entry["id"]:
-                status = "importing"
-            items.append(
-                {
-                    key: entry[key]
-                    for key in (
-                        "id",
-                        "title",
-                        "filename",
-                        "sha256",
-                        "char_count",
-                        "created_by",
-                        "created",
-                        "missing",
-                    )
-                }
-                | {
-                    "status": status,
-                    "chunks": chunks_count,
-                    "import_error": app.state.corpus_import_errors.get(entry["id"]),
-                }
-            )
+        from ..evaluation import document_refs
+
         return {
-            "items": items,
-            "suffixes": sorted(eval_corpus.SUFFIXES),
-            "max_bytes": eval_corpus.MAX_BYTES,
+            "items": document_refs.entries(app.state.store.engine),
+            "suffixes": [],
+            "max_bytes": 0,
         }
+
+    @app.get("/eval/document-candidates", dependencies=[Depends(require_admin)])
+    def eval_document_candidates():
+        from ..evaluation import document_refs
+
+        return {"items": document_refs.candidates(app.state.store.engine)}
+
+    @app.put("/eval/document-references", dependencies=[Depends(require_admin)])
+    def eval_document_references(body: dict):
+        if app.state.eval_running or app.state.eval_batch:
+            raise HTTPException(409, "有评测正在运行，完成后再调整语料列表")
+        from ..evaluation import document_refs
+
+        ids = body.get("document_ids")
+        if not isinstance(ids, list) or not all(isinstance(key, str) for key in ids):
+            raise HTTPException(422, "请选择文档")
+        available = {
+            item["id"] for item in document_refs.candidates(app.state.store.engine)
+        }
+        if any(key not in available for key in ids):
+            raise HTTPException(422, "文档不存在，请刷新后重新选择")
+        document_refs.save(app.state.store.engine, ids)
+        return {"saved": True}
 
     @app.get("/eval/corpus/{entry_id}", dependencies=[Depends(require_admin)])
     def eval_corpus_get(entry_id: str):
@@ -3880,17 +3882,14 @@ def create_app(store=None, models=None, jwt_secret=None):
         entry = eval_corpus.get_entry(engine, entry_id)
         if entry is None:
             raise HTTPException(404, "语料不存在")
-        imported = eval_corpus.imported_versions(engine).get(entry["title"])
-        result = (
-            None
-            if imported is None
-            else app.state.store.list_document_chunks(
-                EVAL_OWNER, imported["document_id"], page, page_size
-            )
+        if entry.get("missing"):
+            raise HTTPException(404, "文档不可用")
+        result = app.state.store.list_document_chunks(
+            entry["owner"], entry["document_id"], page, page_size
         )
         if result is None:
-            raise HTTPException(404, "还没导入：点「导入」，或者跑一次评测时会自动导入")
-        result["stale"] = imported["sha256"] != entry["sha256"]
+            raise HTTPException(404, "文档分片不存在")
+        result["stale"] = False
         return result
 
     # 现在就把这份语料导入评测账号（切分、算向量、生成上下文说明），不用等下次评测。后台跑，和评测共用 eval_lock。
@@ -3900,88 +3899,31 @@ def create_app(store=None, models=None, jwt_secret=None):
         dependencies=[Depends(require_admin)],
     )
     def eval_corpus_import(entry_id: str):
-        entry = eval_corpus.get_entry(app.state.store.engine, entry_id)
-        if entry is None:
-            raise HTTPException(404, "语料不存在")
-        if entry["missing"]:
-            raise HTTPException(422, f"语料《{entry['title']}》的文件不存在")
-        if not app.state.eval_lock.acquire(blocking=False):
-            raise HTTPException(409, "有评测或导入正在进行，请等它完成")
-        app.state.corpus_importing = entry_id
-        app.state.corpus_import_errors.pop(entry_id, None)
+        raise HTTPException(410, "评测语料已改为引用知识库文档，请在评测语料页选择文档")
 
-        def work():
-            try:
-                with limit_titles(EVAL_OWNER, [entry["title"]]):
-                    import_corpus(app.state.store, app.state.models)
-            except Exception as error:
-                logger.exception("eval_corpus_import_failed entry_id=%s", entry_id)
-                app.state.corpus_import_errors[entry_id] = (
-                    f"{type(error).__name__}: {error}"[:300]
-                )
-            finally:
-                app.state.corpus_importing = None
-                app.state.eval_lock.release()
-
-        Thread(target=work, daemon=True).start()
-        return {"id": entry_id, "status": "importing"}
-
-    # 一次可以上传几份；每份单独检查，收下的和没收的（原因）分别返回。
     @app.post("/eval/corpus", status_code=201)
     def eval_corpus_upload(
         files: list[UploadFile] = File(...), admin=Depends(require_admin)
     ):
-        if len(files) > 20:
-            raise HTTPException(422, "一次最多上传 20 个文件")
-        added = []
-        rejected = []
-        for file in files:
-            data = file.file.read(eval_corpus.MAX_BYTES + 1)
-            try:
-                entry = eval_corpus.add_entry(
-                    app.state.store.engine, file.filename, data, admin["username"]
-                )
-            except eval_corpus.CorpusError as error:
-                rejected.append(
-                    {"filename": Path(file.filename or "").name, "reason": str(error)}
-                )
-                continue
-            added.append(
-                {key: entry[key] for key in ("id", "title", "filename", "char_count")}
-            )
-        return {"added": added, "rejected": rejected}
+        raise HTTPException(410, "评测语料已改为引用知识库文档，请在评测语料页选择文档")
 
     @app.put("/eval/corpus/{entry_id}", dependencies=[Depends(require_admin)])
     def eval_corpus_replace(entry_id: str, files: list[UploadFile] = File(...)):
-        if len(files) != 1:
-            raise HTTPException(422, "每次只能更新一份语料")
-        if not app.state.eval_lock.acquire(blocking=False):
-            raise HTTPException(409, "有评测或导入正在进行，请等它完成")
-        try:
-            entry = eval_corpus.replace_entry(
-                app.state.store.engine,
-                entry_id,
-                files[0].file.read(eval_corpus.MAX_BYTES + 1),
-            )
-            if entry is None:
-                raise HTTPException(404, "语料不存在")
-            return {
-                key: entry[key]
-                for key in ("id", "title", "filename", "sha256", "char_count")
-            }
-        except eval_corpus.CorpusError as error:
-            raise HTTPException(422, str(error))
-        finally:
-            app.state.eval_lock.release()
+        raise HTTPException(410, "评测语料已改为引用知识库文档，请在评测语料页选择文档")
 
     # 删除语料：评测正在跑时不能删（它可能正在检索这份）。评测账号里导入过的这份文档一起删掉。
     @app.delete("/eval/corpus/{entry_id}", dependencies=[Depends(require_admin)])
     def eval_corpus_delete(entry_id: str):
         if app.state.eval_running or app.state.corpus_importing:
             raise HTTPException(409, "有评测正在运行，等它跑完再删除语料")
-        entry = eval_corpus.delete_entry(app.state.store, entry_id)
-        if entry is None:
+        from ..evaluation import document_refs
+
+        ids = document_refs.saved(app.state.store.engine)
+        if entry_id not in ids:
             raise HTTPException(404, "语料不存在")
+        document_refs.save(
+            app.state.store.engine, [key for key in ids if key != entry_id]
+        )
         return {"id": entry_id, "deleted": True}
 
     # 专项评测集：管理员自建，每个专项针对一个方向，题目在评测语料上跑，不计入调参分数。

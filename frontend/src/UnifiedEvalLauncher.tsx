@@ -126,6 +126,18 @@ export default function UnifiedEvalLauncher({
       toast("error", "请选择题集和评测语料");
       return;
     }
+    if (configs.some((config) => config.methods.includes("graph"))) {
+      const missing = data.corpus.items.filter(
+        (item) => corpusIds.includes(item.id) && !item.graph_ready,
+      );
+      if (missing.length) {
+        toast(
+          "error",
+          `请先为这些文档建立生效图谱，或取消图检索：${missing.map((item) => item.title).join("、")}`,
+        );
+        return;
+      }
+    }
     setBusy(true);
     try {
       const bodies: (EvalLaunchBody & {
@@ -316,7 +328,10 @@ export default function UnifiedEvalLauncher({
                         )
                       }
                     />
-                    {item.title}
+                    {item.title}{" "}
+                    {draft.methods.includes("graph") && (
+                      <small>{item.graph_ready ? "图谱可用" : "未建图"}</small>
+                    )}
                   </label>
                 ))}
             </div>
