@@ -3157,26 +3157,22 @@ function ResultFieldValue({
   if (Array.isArray(value) && value.length > CLAMP_ITEMS) {
     const items: string[] = [];
     for (const item of value) items.push(formatResultValue(item));
-    const chips = (list: string[]) =>
-      list.map((item, index) => (
-        <span className="clamp-item" key={index}>
-          {item}
-        </span>
-      ));
     return (
       <details className="clamp clamp-list">
         <summary>
+          {/* 全部项都放在标题行里：收起时靠 CSS 只显示前 3 项，展开后全部横着排在一行。 */}
           <strong className="clamp-items">
-            {chips(items.slice(0, CLAMP_ITEMS))}
+            {items.map((item, index) => (
+              <span className="clamp-item" key={index}>
+                {item}
+              </span>
+            ))}
           </strong>
           <span className="clamp-toggle">
             <span className="clamp-more">展开全部 {items.length} 项</span>
             <span className="clamp-less">收起</span>
           </span>
         </summary>
-        <strong className="clamp-items">
-          {chips(items.slice(CLAMP_ITEMS))}
-        </strong>
       </details>
     );
   }

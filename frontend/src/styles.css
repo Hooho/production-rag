@@ -6706,6 +6706,11 @@ label {
   margin-top: 0;
 }
 
+/* 收起时只显示前 3 项；展开后剩下的项也接在同一行上。 */
+.clamp-list:not([open]) .clamp-item:nth-child(n + 4) {
+  display: none;
+}
+
 .clamp > summary > .clamp-toggle {
   display: block;
   margin-top: 2px;
