@@ -84,12 +84,14 @@ export default function EvalParamsPanel({
   onChange,
   groups,
   showJudge,
+  methods,
 }: {
   options: EvalParamOptions | null;
   value: EvalParams;
   onChange: (next: EvalParams) => void;
   groups: EvalParamGroup[];
   showJudge: boolean;
+  methods?: string[];
 }) {
   const [openGroup, setOpenGroup] = useState<EvalParamGroup | null>(null);
   const visible =
@@ -129,7 +131,42 @@ export default function EvalParamsPanel({
 
   // 一组里有哪些参数：模型（只在公共参数组里）、运行参数、提示词版本。
   const groupItems = (group: ParamGroup) => {
-    const settings = options.settings.filter((item) => item.eval === group.key);
+    const effective = (key: string) =>
+      value.settings?.[key] ??
+      options.settings.find((item) => item.key === key)?.value;
+    const mode = effective("source_selection_mode");
+    const settings = options.settings
+      .filter((item) => {
+        if (item.eval !== group.key) return false;
+        if (
+          item.key === "return_limit" ||
+          item.key === "rerank_excellent_score"
+        )
+          return mode !== "tokens";
+        if (item.key === "source_token_budget") return mode === "tokens";
+        if (item.key === "source_graph_budget_ratio")
+          return (
+            mode === "tokens" &&
+            (methods
+              ? methods.includes("graph")
+              : effective("graph_retrieval") === true)
+          );
+        return true;
+      })
+      .sort((a, b) => {
+        const order = [
+          "source_selection_mode",
+          "return_limit",
+          "source_token_budget",
+          "source_graph_budget_ratio",
+        ];
+        const ai = order.indexOf(a.key),
+          bi = order.indexOf(b.key);
+        if (ai < 0 && bi < 0) return 0;
+        if (ai < 0) return 1;
+        if (bi < 0) return -1;
+        return ai - bi;
+      });
     const prompts = options.prompts.filter((item) => item.eval === group.key);
     const models: ("llm" | "judge")[] =
       group.key === "common"

@@ -324,6 +324,7 @@ export default function UnifiedEvalLauncher({
           <div className="unified-eval-row">
             <span>参数配置</span>
             <EvalParamsPanel
+              methods={draft.methods}
               options={data.params}
               value={draft.params}
               onChange={(params) => setDraft({ ...draft, params })}
