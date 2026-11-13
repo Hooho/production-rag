@@ -5991,6 +5991,10 @@ label {
   padding: 0;
   font-size: 12px;
   cursor: pointer;
+  /* 返回入口在自己的栏里靠左：父容器是纵向 flex 时按钮会被拉满宽，
+     按钮内文字默认居中，看起来就跑到中间去了。宽度只按内容算，不动纵向对齐。 */
+  width: fit-content;
+  text-align: left;
 }
 
 /* 题目列表只保留一个明确的添加入口，具体录入方式放进弹窗，避免两个大表单长期占据评测集页面。 */
@@ -8369,7 +8373,8 @@ label {
   border-radius: 6px;
 }
 
-.ev-root .ag-evidence-list {
+/* 计分项卡片列表（.ag-scoring-items）有自己的列数规则，不走这里的两列排布。 */
+.ev-root .ag-evidence-list:not(.ag-scoring-items) {
   gap: 10px;
   grid-template-columns: repeat(
     auto-fit,
