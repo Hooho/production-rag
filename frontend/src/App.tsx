@@ -1282,7 +1282,11 @@ function Chat({
                       {message.sources.length > 0 && (
                         <ContextDetail
                           title="回答来源"
-                          label={`来源 · ${message.sources.length} 条检索结果`}
+                          label={`来源 · ${message.sources.length} 条检索结果${
+                            (message.relations?.length ?? 0) > 0
+                              ? ` + ${message.relations!.length} 条图谱关系`
+                              : ""
+                          }`}
                         >
                           <div className="answer-source-list">
                             {message.sources.map((source) => (
@@ -1311,6 +1315,18 @@ function Chat({
                               </article>
                             ))}
                           </div>
+                          {/* 放进上下文的图谱关系（G 编号）：回答里引用了的标「已引用」，「原文」看出处分片。 */}
+                          {(message.relations?.length ?? 0) > 0 && (
+                            <>
+                              <strong>
+                                图谱关系（{message.relations!.length} 条）
+                              </strong>
+                              <ContextRelationList
+                                relations={message.relations!}
+                                cited={citedIds(message.answer)}
+                              />
+                            </>
+                          )}
                         </ContextDetail>
                       )}
                       <div className="trace">链路编号：{message.trace_id}</div>
