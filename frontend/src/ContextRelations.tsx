@@ -150,7 +150,7 @@ export function ContextRelationTable({
   );
   const placed = items.filter((item) => item.status === "context").length;
   return (
-    <>
+    <div className="diag context-relation-detail">
       <p className="result-help">
         {reason
           ? `没有放图谱关系：${reason}`
@@ -169,7 +169,14 @@ export function ContextRelationTable({
           <option value="other">没放（{items.length - placed}）</option>
         </select>
       </label>
-      <Table size="compact" empty={rows.length === 0} emptyContent="没有关系">
+      <Table
+        containerProps={{ className: "diag-table-wrap" }}
+        stickyHeader
+        columnCount={5}
+        size="compact"
+        empty={rows.length === 0}
+        emptyContent="没有关系"
+      >
         <thead>
           <tr>
             <th>重排</th>
@@ -209,6 +216,6 @@ export function ContextRelationTable({
         </tbody>
       </Table>
       {panel}
-    </>
+    </div>
   );
 }

@@ -220,7 +220,8 @@
 }
 
 /* 回答处理步骤的表格详情使用同一宽度，覆盖抽屉和伴随浮窗的默认值。 */
-.ag-delivery-dialog.ag-dialog-table {
+.ag-delivery-dialog.ag-dialog-table,
+.ag-delivery-dialog:has(> .context-relation-detail) {
   width: min(960px, calc(100vw - 32px));
   max-width: calc(100vw - 32px);
 }
