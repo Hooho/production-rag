@@ -323,7 +323,7 @@ class DocumentSearchTool:
             from ..memory.framework import text_tokens
         graph_budget = (
             int(token_budget * config.get("source_graph_budget_ratio", 0.25))
-            if budget_mode
+            if budget_mode and "graph" in methods
             else 0
         )
         graph_guaranteed = set()

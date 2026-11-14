@@ -50,15 +50,26 @@ export function visibleParams(
 }
 
 // 评测记录上「自定义参数」的一行行说明，例如「Agent 相关度阈值：0.2」。
-export function paramsSummary(params: EvalParams | undefined): string[] {
+export function paramsSummary(
+  params: EvalParams | undefined,
+  methods?: readonly string[],
+): string[] {
   if (!params) return [];
   const lines: string[] = [];
   if (params.llm)
     lines.push(`大模型：${params.llm.model ?? params.llm.provider}`);
   if (params.judge)
     lines.push(`评审模型：${params.judge.model ?? params.judge.provider}`);
-  for (const [key, value] of Object.entries(params.settings ?? {}))
+  for (const [key, value] of Object.entries(params.settings ?? {})) {
+    if (
+      key === "source_graph_budget_ratio" &&
+      ((methods !== undefined && !methods.includes("graph")) ||
+        (params.settings?.source_selection_mode !== undefined &&
+          params.settings.source_selection_mode !== "tokens"))
+    )
+      continue;
     lines.push(`${settingLabel(key)}：${formatValue(value)}`);
+  }
   for (const [id, version] of Object.entries(params.prompts ?? {}))
     lines.push(
       `${PROMPT_LABELS[id] ?? id}提示词：${version ? `v${version}` : "内置"}`,

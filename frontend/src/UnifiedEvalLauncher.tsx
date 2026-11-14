@@ -641,7 +641,7 @@ export default function UnifiedEvalLauncher({
                   .join("＋")}
               </p>
               <small>
-                {paramsSummary(config.params).join("；") ||
+                {paramsSummary(config.params, config.methods).join("；") ||
                   "参数跟随开始时的系统设置"}
               </small>
               <div>

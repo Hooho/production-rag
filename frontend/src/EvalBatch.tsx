@@ -156,7 +156,7 @@ export default function BatchReport({
       <div className="evb-arms">
         {report.arms.map((arm) => {
           const status = runStatus(arm.status);
-          const lines = paramsSummary(arm.params);
+          const lines = paramsSummary(arm.params, arm.methods);
           const failed =
             arm.status === "failed" ||
             arm.status === "interrupted" ||
@@ -301,7 +301,10 @@ export default function BatchReport({
                   <td>{diffLabel(row.key)}</td>
                   {row.values.map((value, index) => (
                     <td key={report.arms[index]?.id ?? index}>
-                      {formatValue(value)}
+                      {row.key === "setting:source_graph_budget_ratio" &&
+                      !report.arms[index]?.methods?.includes("graph")
+                        ? "不适用"
+                        : formatValue(value)}
                     </td>
                   ))}
                 </tr>

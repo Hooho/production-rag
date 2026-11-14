@@ -410,3 +410,11 @@ def test_graph_only_chunks_do_not_take_rrf_slots(runtime, monkeypatch):
     config = result["diagnostics"]["config"]
     assert config["rerank_candidates"] == 20
     assert (config["graph_pool_size"], config["graph_pool_count"]) == (1, 1)
+
+
+def test_graph_budget_is_zero_without_graph_retrieval(runtime):
+    runtime(source_graph_budget_ratio=0.5)
+    result = search(runtime, 1000)
+    assert result["stats"]["source_graph_budget_reserved"] == 0
+    assert result["stats"]["source_graph_budget_used"] == 0
+    assert result["stats"]["source_tokens_used"] == 800
