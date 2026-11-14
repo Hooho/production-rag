@@ -1243,6 +1243,7 @@ export type EvalRewrite = {
 };
 // 补充检索：返回几段、是否被采用、补充检索的资料命中率和来源。
 export type EvalRetry = {
+  diagnostics?: RetrievalDiagnosticsData;
   queries?: string[];
   query_routes?: EvalQueryRoute[];
   evidence?: EvalEvidence[];

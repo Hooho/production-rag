@@ -2348,8 +2348,31 @@ function SearchParams({ values }: { values: string[] }) {
   );
 }
 
-function fixedParams(config: EvalRun["config"] & { search_label?: string }) {
-  const parts = [config.search_label ?? "混合检索"];
+function fixedParams(
+  config: EvalRun["config"] & { search_label?: string },
+  diagnostics?: EvalQuestion["diagnostics"],
+) {
+  const dc = diagnostics?.config;
+  const methods = dc?.methods ?? config.methods;
+  const parts = [
+    methods?.length
+      ? methods
+          .map(
+            (method) =>
+              ({ dense: "向量检索", keyword: "关键词检索", graph: "图检索" })[
+                method
+              ] ?? method,
+          )
+          .join("＋")
+      : (config.search_label ?? "混合检索"),
+  ];
+  if (dc?.source_selection_mode === "tokens") {
+    parts.push(`原文预算 ${dc.source_token_budget ?? "未记录"} token`);
+    if (dc.reranked === false) parts.push("不重排");
+    else if (typeof dc.min_score === "number")
+      parts.push(`阈值 ${dc.min_score.toFixed(2)}`);
+    return parts;
+  }
   if (config.pool_size) parts.push(`候选池 ${config.pool_size}`);
   if (config.return_limit) parts.push(`返回 ${config.return_limit} 段`);
   if (config.reranked === false) parts.push("不重排");
@@ -2460,7 +2483,7 @@ function QuestionDetail({
   );
 }
 
-function FixedSearchResults({
+export function FixedSearchResults({
   question,
   items,
   config,
@@ -2481,15 +2504,17 @@ function FixedSearchResults({
   sourcesAvailable?: boolean;
   retrySearch?: boolean;
 }) {
-  const diagnostics = retrySearch ? undefined : question.diagnostics;
+  const diagnostics = retrySearch
+    ? question.retry?.diagnostics
+    : question.diagnostics;
   const dc = diagnostics?.config;
   const graph = diagnostics?.graph;
   const candidates = diagnostics?.candidates ?? [];
-  const graphSelected = Boolean(
-    graph ||
-      dc?.methods?.includes("graph") ||
-      config.methods?.includes("graph"),
-  );
+  const methods = dc?.methods ?? config.methods;
+  const normalSelected = methods
+    ? methods.some((method) => method === "dense" || method === "keyword")
+    : true;
+  const graphSelected = methods ? methods.includes("graph") : Boolean(graph);
   const total = question.answerable ? evidenceChunkLists(question).length : 0;
   const routes =
     queryRoutes == null
@@ -2506,7 +2531,7 @@ function FixedSearchResults({
         );
   return (
     <>
-      {queryRoutes == null && (
+      {normalSelected && queryRoutes == null && (
         <ul className="ag-query-list">
           {queries.map((query) => (
             <li key={query}>
@@ -2522,14 +2547,14 @@ function FixedSearchResults({
           ))}
         </ul>
       )}
-      {retryQuery && queryRoutes == null && (
+      {normalSelected && retryQuery && queryRoutes == null && (
         <p className="ag-muted">
           这条历史记录未保存补充检索的逐路召回与过滤详情，重新评测后可查看。
         </p>
       )}
       {/* 每一路检索词分别检索（和 Agent 同一轮同时发出的几次检索对应），再合并、重排、过滤成最后的结果。 */}
       {/* 只有 1 路时不再套一层「检索」框（外面已经是检索这一步），直接列这一路。 */}
-      {routes.length > 0 && (
+      {normalSelected && routes.length > 0 && (
         <div
           className={
             routes.length > 1 ? "ag-round is-parallel" : "ag-single-route"
@@ -2575,16 +2600,18 @@ function FixedSearchResults({
                       <li key={evidence} className="is-hit">
                         <b>✓</b>计分项 {evidence + 1}
                         <small>召回到了</small>
-                        {(best?.dense ?? 0) > 0 && (
-                          <Tag size="sm" tone="info" plain>
-                            向量第 {best?.dense} 名
-                          </Tag>
-                        )}
-                        {(best?.keyword ?? 0) > 0 && (
-                          <Tag size="sm" tone="warning" plain>
-                            关键词第 {best?.keyword} 名
-                          </Tag>
-                        )}
+                        {(!methods || methods.includes("dense")) &&
+                          (best?.dense ?? 0) > 0 && (
+                            <Tag size="sm" tone="info" plain>
+                              向量第 {best?.dense} 名
+                            </Tag>
+                          )}
+                        {(!methods || methods.includes("keyword")) &&
+                          (best?.keyword ?? 0) > 0 && (
+                            <Tag size="sm" tone="warning" plain>
+                              关键词第 {best?.keyword} 名
+                            </Tag>
+                          )}
                       </li>
                     ) : (
                       <li key={evidence} className="is-miss">
@@ -2681,21 +2708,23 @@ function FixedSearchResults({
           <span>合并后统一处理</span>
         </header>
         <div className="eval-search-pools">
-          <div>
-            <span>融合排名入池</span>
-            <strong>
-              {diagnostics && candidates.some((c) => c.pool_via)
-                ? candidates.filter((c) => c.pool_via === "rrf").length
-                : "未记录"}
-              <small> 段</small>
-            </strong>
-            <small>
-              上限 {dc?.rerank_candidates ?? config.pool_size ?? "未记录"} 段
-            </small>
-          </div>
+          {normalSelected && (
+            <div>
+              <span>融合排名入池</span>
+              <strong>
+                {diagnostics && candidates.some((c) => c.pool_via)
+                  ? candidates.filter((c) => c.pool_via === "rrf").length
+                  : "未记录"}
+                <small> 段</small>
+              </strong>
+              <small>
+                上限 {dc?.rerank_candidates ?? config.pool_size ?? "未记录"} 段
+              </small>
+            </div>
+          )}
           {graphSelected && (
             <div>
-              <span>图独有额外入池</span>
+              <span>{normalSelected ? "图独有额外入池" : "图候选入池"}</span>
               <strong>
                 {dc?.graph_pool_count ?? "未记录"}
                 <small> 段</small>
@@ -3067,7 +3096,13 @@ function FixedLog({
                     </Tag>
                   )}
                 </div>
-                <SearchParams values={params} />
+                <SearchParams
+                  values={
+                    question.diagnostics
+                      ? fixedParams(config, question.diagnostics)
+                      : params
+                  }
+                />
                 <FixedSearchResults
                   question={question}
                   items={items}
@@ -3097,7 +3132,13 @@ function FixedLog({
                       {usedRetry ? "采用了" : "没变好，沿用第一次的"}
                     </Tag>
                   </div>
-                  <SearchParams values={params} />
+                  <SearchParams
+                    values={
+                      retry.diagnostics
+                        ? fixedParams(config, retry.diagnostics)
+                        : fixedParams(config)
+                    }
+                  />
                   <FixedSearchResults
                     question={question}
                     items={retryItems}

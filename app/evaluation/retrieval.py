@@ -866,6 +866,8 @@ def evaluate_items(
                 retry = check["retry_retrieval"]
                 retry_score = score_question(item, retry, chunk_texts, pool_size)
                 mark_extension(retry_score, retry["sources"], evidence, chunk_texts)
+                if keep_diagnostics:
+                    row["retry"]["diagnostics"] = retry["diagnostics"]
                 row["retry"].update(
                     {
                         "queries": [*queries, check["retry_query"]],
