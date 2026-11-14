@@ -1,4 +1,6 @@
 .unified-eval-launch {
+  display: grid;
+  gap: 12px;
   border: 1px solid var(--border, var(--t-cdddec, #d0dfec));
   padding: 16px;
   background: var(--t-ffffff, #fff);
@@ -21,7 +23,7 @@
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr);
   gap: 24px;
-  margin: 16px 0;
+  margin: 0;
 }
 .unified-eval-row {
   display: grid;
@@ -29,7 +31,7 @@
   gap: 12px;
   align-items: start;
   margin: 0;
-  padding: 9px 0;
+  padding: 0;
   font: inherit;
   letter-spacing: normal;
 }
@@ -103,8 +105,13 @@
   gap: 8px;
   margin-top: 10px;
 }
+.unified-eval-editor {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
 .unified-eval-editor footer {
-  margin-top: 12px;
+  margin-top: 0;
 }
 @media (max-width: 1000px) {
   .unified-eval-columns {
