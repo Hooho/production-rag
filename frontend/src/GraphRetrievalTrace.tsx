@@ -20,6 +20,7 @@ import { typeColor } from "./GraphView";
 import { ChunkOriginalText } from "./ChunkOriginalText";
 import { InfoPopover } from "./Popover";
 import { labelHue } from "./hues";
+import { buildHaystack, normalizeSearch, SearchText } from "./searchText";
 import "./GraphRetrieval.css";
 
 // 检索过程「混合检索」里的图检索模块（docs：claude/graph-retrieval-phase2-plan.md 第一部分第四节）：
@@ -102,14 +103,16 @@ function categoryStyle(category: string) {
 function RelationText({
   relation,
   onEntity,
+  query,
 }: {
   relation: GraphRetrievalRelation;
   onEntity?: (entityId: string, documentId: string) => void;
+  query?: string;
 }) {
   const renamed = (name: string, entity: string | null) =>
     entity && entity !== name ? (
       <small className="grt-entity-of" title={`归到实体「${entity}」`}>
-        （{entity}）
+        （<SearchText text={entity} query={query ?? ""} />）
       </small>
     ) : null;
   const entityName = (text: string, entityId: string, entity: string | null) =>
@@ -120,10 +123,12 @@ function RelationText({
         title={`看实体「${entity ?? text}」的详情`}
         onClick={() => onEntity(entityId, relation.document_id)}
       >
-        {text}
+        <SearchText text={text} query={query ?? ""} />
       </button>
     ) : (
-      <b>{text}</b>
+      <b>
+        <SearchText text={text} query={query ?? ""} />
+      </b>
     );
   return (
     <span className="grt-rel">
@@ -139,7 +144,7 @@ function RelationText({
           className="grt-category is-hue"
           style={categoryStyle(relation.category)}
         >
-          {relation.category}
+          <SearchText text={relation.category} query={query ?? ""} />
         </small>
         <span className="grt-arrow">→</span>
         {entityName(
@@ -150,11 +155,13 @@ function RelationText({
         {renamed(relation.target, relation.target_entity)}
       </span>
       {relation.description && (
-        <small className="grt-rel-desc">{relation.description}</small>
+        <small className="grt-rel-desc">
+          <SearchText text={relation.description} query={query ?? ""} />
+        </small>
       )}
       {relation.evidence && (
         <small className="grt-evidence" title="原文引用">
-          「{relation.evidence}」
+          「<SearchText text={relation.evidence} query={query ?? ""} />」
         </small>
       )}
     </span>
@@ -167,18 +174,20 @@ function Result({
   extra,
   row,
   trace,
+  query,
 }: {
   row?: GraphRetrievalRelation;
   trace?: GraphTrace;
   kept: boolean;
   reason?: string | null;
   extra?: string;
+  query?: string;
 }) {
   const settings = trace?.settings;
   const minimum = settings?.graph_relation_rerank_min_score;
   const limit = settings?.graph_relation_return_limit;
   const capacity = settings?.graph_relation_rerank_candidates;
-  const details: ReactNode[] = [];
+  const details: string[] = [];
   if (row && row.fusion_rank !== undefined) {
     if (
       row.rerank_score != null &&
@@ -222,11 +231,13 @@ function Result({
     const detailLines = (
       <>
         {!kept && reason && reason !== "超过关系重排候选上限" && (
-          <small className="grt-result-detail">{reason}</small>
+          <small className="grt-result-detail">
+            <SearchText text={reason} query={query ?? ""} />
+          </small>
         )}
         {details.map((text, index) => (
           <small className="grt-result-detail" key={index}>
-            {text}
+            <SearchText text={text} query={query ?? ""} />
           </small>
         ))}
       </>
@@ -287,23 +298,45 @@ function Result({
               : "grt-dropped"
         }
       >
-        {kept
-          ? `✓ 留下${extra ? ` · ${extra}` : ""}`
-          : `✕ ${reason === "超过关系重排候选上限" ? "未进入重排候选池" : reason || "去掉"}`}
+        {kept ? (
+          `✓ 留下${extra ? ` · ${extra}` : ""}`
+        ) : (
+          <>
+            ✕{" "}
+            <SearchText
+              text={
+                reason === "超过关系重排候选上限"
+                  ? "未进入重排候选池"
+                  : reason || "去掉"
+              }
+              query={query ?? ""}
+            />
+          </>
+        )}
       </span>
       {details.map((text, index) => (
         <small className="grt-result-detail" key={index}>
-          {text}
+          <SearchText text={text} query={query ?? ""} />
         </small>
       ))}
     </div>
   );
 }
 
-function Origin({ relation }: { relation: GraphRetrievalRelation }) {
+function Origin({
+  relation,
+  query,
+}: {
+  relation: GraphRetrievalRelation;
+  query?: string;
+}) {
   return (
     <span className="grt-origin">
-      {relation.title ?? "—"}
+      {relation.title ? (
+        <SearchText text={relation.title} query={query ?? ""} />
+      ) : (
+        "—"
+      )}
       {relation.version_number ? <em>图 v{relation.version_number}</em> : null}
     </span>
   );
@@ -587,15 +620,95 @@ const RELATION_MATCH_DIMS: Dim<RelationRow>[] = [
   },
 ];
 
-// 明细列表：上面选分类方式和分类值，可以带上去掉的项，下面分页。
+// 搜索只看这一行看得见的文字：把每个单元格的内容拼起来，任何一处命中就显示这一行。
+function nameHaystack(match: NameMatch) {
+  return buildHaystack([
+    match.keyword,
+    match.name,
+    match.entity_name,
+    match.entity_type,
+    match.vector_text,
+    match.title,
+    match.version_number ? `图 v${match.version_number}` : "",
+    MATCH_LABELS[match.match ?? "vector"],
+    match.score,
+    match.gap,
+    match.kept ? "留下" : match.reason || "去掉",
+  ]);
+}
+
+function relationHaystack(row: RelationRow, first: string) {
+  return buildHaystack([
+    first,
+    row.source,
+    row.source_entity,
+    row.source_type,
+    row.target,
+    row.target_entity,
+    row.target_type,
+    row.category,
+    row.description,
+    row.evidence,
+    row.title,
+    row.version_number ? `图 v${row.version_number}` : "",
+    row.kept ? "留下" : row.reason || "去掉",
+    row.score,
+    row.vector_score,
+    row.keyword_score,
+    row.fusion_score,
+    row.rerank_score,
+    row.vector_rank,
+    row.keyword_rank,
+    row.fusion_rank,
+    row.rerank_rank,
+  ]);
+}
+
+function chunkHaystack(
+  row: GraphRetrievalTable,
+  relations: Map<string, GraphRetrievalRelation>,
+) {
+  const linked = row.relation_ids
+    .map((id) => relations.get(id))
+    .filter((item): item is GraphRetrievalRelation => !!item);
+  return buildHaystack([
+    row.title,
+    row.heading,
+    row.text,
+    row.chunk_id,
+    row.relation_ids.join(" "),
+    row.rank,
+    row.score,
+    row.version,
+    row.reason,
+    // 「来自哪些关系」这一列里看得见的名字和关系类型，也算这一行的内容。
+    ...linked.flatMap((item) => [
+      item.source,
+      item.target,
+      item.category,
+      item.description,
+      item.evidence,
+    ]),
+  ]);
+}
+
+// 明细列表：上面选分类方式和分类值，可以带上去掉的项，右上角可以按内容搜索，下面分页。
+// 搜索、分类、「包括去掉的」三个条件取交集；搜索只看这一行可见的文字，不看没显示的字段。
 function useDetailList<
   T extends { kept: boolean; score?: number | null; sort_score?: number },
->(items: T[], dims: Dim<T>[], initialDim?: string, initialValue?: string) {
+>(
+  items: T[],
+  dims: Dim<T>[],
+  initialDim?: string,
+  initialValue?: string,
+  searchOf?: (item: T) => string,
+) {
   const [dimKey, setDimKey] = useState(initialDim ?? dims[0]?.key ?? "");
   const [value, setValue] = useState<string | null>(initialValue ?? null);
   // 默认列出全部（包括去掉的，按分数降序），能看到匹配到的每一项和去掉的原因；可以取消勾选只看留下的。
   const [dropped, setDropped] = useState(true);
   const [page, setPage] = useState(1);
+  const [query, setQueryState] = useState("");
   const dim = dims.find((item) => item.key === dimKey);
   const pool = dropped ? items : items.filter((item) => item.kept);
   const options = useMemo(() => {
@@ -605,10 +718,14 @@ function useDetailList<
         counts.set(dim.value(item), (counts.get(dim.value(item)) ?? 0) + 1);
     return [...counts.entries()];
   }, [pool, dim]);
-  const filtered =
+  const needle = normalizeSearch(query);
+  const byDim =
     dim && value !== null
       ? pool.filter((item) => dim.value(item) === value)
       : pool;
+  const filtered = needle
+    ? byDim.filter((item) => (searchOf?.(item) ?? "").includes(needle))
+    : byDim;
   const ordered = [...filtered].sort(
     (a, b) =>
       (b.sort_score ?? b.score ?? -Infinity) -
@@ -636,6 +753,11 @@ function useDetailList<
       setDropped(next);
       setPage(1);
     },
+    query,
+    setQuery: (next: string) => {
+      setQueryState(next);
+      setPage(1);
+    },
     total: ordered.length,
     poolTotal: pool.length,
     page: current,
@@ -647,30 +769,54 @@ function useDetailList<
 function DetailFilters<T extends { kept: boolean }>({
   list,
   more,
+  placeholder,
 }: {
   list: ReturnType<typeof useDetailList<T>>;
   more?: number;
+  placeholder?: string;
 }) {
   // 关系类型这一维按 hues.ts 的 labelHue 上色，和图谱里的关系类型一个颜色。
   const hueDim = list.dims.find((item) => item.key === list.dimKey)?.hue;
   return (
     <div className="grt-filters">
-      {list.dims.length > 1 && (
-        <div className="grt-chips" role="tablist">
-          {list.dims.map((dim) => (
+      <div className="grt-filter-top">
+        {list.dims.length > 1 && (
+          <div className="grt-chips" role="tablist">
+            {list.dims.map((dim) => (
+              <button
+                key={dim.key}
+                type="button"
+                role="tab"
+                aria-selected={list.dimKey === dim.key}
+                className={`grt-chip is-dim${list.dimKey === dim.key ? " is-active" : ""}`}
+                onClick={() => list.setDim(dim.key)}
+              >
+                {dim.label}
+              </button>
+            ))}
+          </div>
+        )}
+        {/* 搜索框在右上角：按这一行看得见的文字过滤，和分类、「包括去掉的」取交集。 */}
+        <div className="grt-search">
+          <input
+            type="search"
+            className="input-sm"
+            value={list.query}
+            placeholder={placeholder ?? "搜索"}
+            aria-label={placeholder ?? "搜索"}
+            onChange={(event) => list.setQuery(event.target.value)}
+          />
+          {list.query && (
             <button
-              key={dim.key}
               type="button"
-              role="tab"
-              aria-selected={list.dimKey === dim.key}
-              className={`grt-chip is-dim${list.dimKey === dim.key ? " is-active" : ""}`}
-              onClick={() => list.setDim(dim.key)}
+              className="link-button button-sm"
+              onClick={() => list.setQuery("")}
             >
-              {dim.label}
+              清空
             </button>
-          ))}
+          )}
         </div>
-      )}
+      </div>
       {list.dims.length > 0 && (
         <div className="grt-chips">
           <button
@@ -889,10 +1035,15 @@ function NamesDetail({
     NAME_DIMS,
     detail.dim,
     detail.value,
+    nameHaystack,
   );
   return (
     <>
-      <DetailFilters list={list} more={graph.dropped_more?.names} />
+      <DetailFilters
+        list={list}
+        more={graph.dropped_more?.names}
+        placeholder="搜关键词、名字或出处"
+      />
       <Table
         containerProps={{ className: "diag-table-wrap" }}
         className="diag-table grt-table"
@@ -914,7 +1065,9 @@ function NamesDetail({
               key={`${match.keyword}-${match.entity_id}-${match.name}-${index}`}
               className={match.kept ? "" : "is-dropped"}
             >
-              <td>{match.keyword}</td>
+              <td>
+                <SearchText text={match.keyword} query={list.query} />
+              </td>
               <td>
                 {/* 匹配到的名字点开看实体详情，和图谱里点实体一样。 */}
                 {onEntity && match.entity_id ? (
@@ -924,10 +1077,10 @@ function NamesDetail({
                     title={`看实体「${match.entity_name ?? match.name}」的详情`}
                     onClick={() => onEntity(match.entity_id, match.document_id)}
                   >
-                    {match.name}
+                    <SearchText text={match.name} query={list.query} />
                   </button>
                 ) : (
-                  match.name
+                  <SearchText text={match.name} query={list.query} />
                 )}
               </td>
               <td>
@@ -936,13 +1089,27 @@ function NamesDetail({
                   className="grt-vector-text"
                   title={match.vector_text ?? ""}
                 >
-                  {match.vector_text ?? "—"}
+                  {match.vector_text ? (
+                    <SearchText text={match.vector_text} query={list.query} />
+                  ) : (
+                    "—"
+                  )}
                 </span>
               </td>
               <td>
-                {match.title ?? "—"}
+                {match.title ? (
+                  <SearchText text={match.title} query={list.query} />
+                ) : (
+                  "—"
+                )}
                 {match.version_number ? (
-                  <em className="grt-v">图 v{match.version_number}</em>
+                  <em className="grt-v">
+                    图 v
+                    <SearchText
+                      text={String(match.version_number)}
+                      query={list.query}
+                    />
+                  </em>
                 ) : null}
               </td>
               <td className="num">
@@ -956,7 +1123,11 @@ function NamesDetail({
                       ? "字面包含 · "
                       : ""}
                   {graph.name_score_query ? "完整问题相似度 " : "向量相似度 "}
-                  {match.score == null ? "未记录" : score(match.score)}
+                  {match.score == null ? (
+                    "未记录"
+                  ) : (
+                    <SearchText text={score(match.score)} query={list.query} />
+                  )}
                 </small>
                 {graph.name_score_query && (
                   <small>
@@ -971,13 +1142,21 @@ function NamesDetail({
                 )}
               </td>
               <td>
-                {match.entity_name ?? "—"}
+                {match.entity_name ? (
+                  <SearchText text={match.entity_name} query={list.query} />
+                ) : (
+                  "—"
+                )}
                 {match.entity_type ? (
                   <small>（{match.entity_type}）</small>
                 ) : null}
               </td>
               <td>
-                <Result kept={match.kept} reason={match.reason} />
+                <Result
+                  kept={match.kept}
+                  reason={match.reason}
+                  query={list.query}
+                />
               </td>
             </tr>
           ))}
@@ -1023,10 +1202,15 @@ function RelationsDetail({
     dims,
     detail.dim,
     detail.value,
+    (row) => relationHaystack(row, firstValue(row)),
   );
   return (
     <>
-      <DetailFilters list={list} more={more} />
+      <DetailFilters
+        list={list}
+        more={more}
+        placeholder="搜实体、关系描述或原文"
+      />
       <RelationTable
         startIndex={(list.page - 1) * PAGE_SIZE}
         trace={trace}
@@ -1037,6 +1221,7 @@ function RelationsDetail({
         extra={extra}
         scoreHint={scoreHint}
         scoreMode={scoreMode}
+        query={list.query}
         onEntity={onEntity}
       />
       <Pager page={list.page} total={list.total} onPage={list.setPage} />
@@ -1055,11 +1240,13 @@ function ChunksDetail({
     () => rows.map((row) => ({ ...row, kept: row.kept !== false })),
     [rows],
   );
-  const list = useDetailList(items, []);
+  const list = useDetailList(items, [], undefined, undefined, (row) =>
+    chunkHaystack(row, relations),
+  );
   return (
     <>
-      <DetailFilters list={list} />
-      <ChunkTable rows={list.rows} relations={relations} />
+      <DetailFilters list={list} placeholder="搜标题或分片正文" />
+      <ChunkTable rows={list.rows} relations={relations} query={list.query} />
       <Pager page={list.page} total={list.total} onPage={list.setPage} />
     </>
   );
@@ -1546,6 +1733,7 @@ function RelationTable({
   extra,
   scoreHint,
   scoreMode,
+  query,
   onEntity,
 }: {
   trace?: GraphTrace;
@@ -1558,9 +1746,15 @@ function RelationTable({
   // 这一列的分数是哪两个东西算出来的（问题 × 关系 / 关键词 × 关系），说清楚免得看不懂。
   scoreHint?: string;
   scoreMode?: "fusion" | "rerank";
+  query?: string;
   onEntity?: (entityId: string, documentId: string) => void;
 }) {
-  if (rows.length === 0) return <p className="grt-empty">没有找到关系</p>;
+  if (rows.length === 0)
+    return (
+      <p className="grt-empty">
+        {query ? `没有匹配「${query}」的关系` : "没有找到关系"}
+      </p>
+    );
   return (
     <>
       {scoreHint && <p className="grt-hint">{scoreHint}</p>}
@@ -1593,9 +1787,15 @@ function RelationTable({
               className={row.kept ? "" : "is-dropped"}
             >
               <td className="num">{startIndex + index + 1}</td>
-              <td>{firstValue(row)}</td>
               <td>
-                <RelationText relation={row} onEntity={onEntity} />
+                <SearchText text={firstValue(row)} query={query ?? ""} />
+              </td>
+              <td>
+                <RelationText
+                  relation={row}
+                  onEntity={onEntity}
+                  query={query}
+                />
               </td>
               <td className="num">
                 {scoreMode === "fusion" ? (
@@ -1651,7 +1851,7 @@ function RelationTable({
                 )}
               </td>
               <td>
-                <Origin relation={row} />
+                <Origin relation={row} query={query} />
                 <OriginalButton
                   relation={row}
                   chunk={chunks.get(row.chunk_id)}
@@ -1664,6 +1864,7 @@ function RelationTable({
                   extra={extra?.(row)}
                   row={row}
                   trace={trace}
+                  query={query}
                 />
               </td>
             </tr>
@@ -1677,14 +1878,18 @@ function RelationTable({
 function ChunkTable({
   rows,
   relations,
+  query,
 }: {
   rows: GraphRetrievalTable[];
   relations: Map<string, GraphRetrievalRelation>;
+  query?: string;
 }) {
   return (
     <div className="diag-table-wrap">
       {rows.length === 0 ? (
-        <p className="grt-empty">没有分片</p>
+        <p className="grt-empty">
+          {query ? `没有匹配「${query}」的分片` : "没有分片"}
+        </p>
       ) : (
         <Table className="diag-table grt-table">
           <thead>
@@ -1704,11 +1909,21 @@ function ChunkTable({
                 <td className="num">{row.kept === false ? "—" : row.rank}</td>
                 <td>
                   <span className="diag-title">
-                    {row.title ?? row.chunk_id}
+                    {row.title ? (
+                      <SearchText text={row.title} query={query ?? ""} />
+                    ) : (
+                      <SearchText text={row.chunk_id} query={query ?? ""} />
+                    )}
                   </span>
-                  {row.heading ? <small>{row.heading}</small> : null}
+                  {row.heading ? (
+                    <small>
+                      <SearchText text={row.heading} query={query ?? ""} />
+                    </small>
+                  ) : null}
                   {row.kept === false ? (
-                    <span className="grt-dropped">✕ {row.reason}</span>
+                    <span className="grt-dropped">
+                      ✕ <SearchText text={row.reason} query={query ?? ""} />
+                    </span>
                   ) : row.text ? (
                     <InfoPopover
                       title={row.title}
@@ -1754,32 +1969,45 @@ function ChunkTable({
                         <li key={id}>
                           {relation ? (
                             <span className="grt-rel-line">
-                              {relation.source}
+                              <SearchText
+                                text={relation.source}
+                                query={query ?? ""}
+                              />
                               <span className="grt-arrow">→</span>
                               <small
                                 className="grt-category is-hue"
                                 style={categoryStyle(relation.category)}
                               >
-                                {relation.category}
+                                <SearchText
+                                  text={relation.category}
+                                  query={query ?? ""}
+                                />
                               </small>
                               <span className="grt-arrow">→</span>
-                              {relation.target}
+                              <SearchText
+                                text={relation.target}
+                                query={query ?? ""}
+                              />
                               {relation.origins?.length ? (
                                 <small>
                                   来源：
-                                  {relation.origins
-                                    .map((origin) =>
-                                      origin === "global"
-                                        ? "全局关系"
-                                        : origin === relation.source_entity_id
-                                          ? (relation.source_entity ??
-                                            relation.source)
-                                          : origin === relation.target_entity_id
-                                            ? (relation.target_entity ??
-                                              relation.target)
-                                            : "实体一跳",
-                                    )
-                                    .join("、")}
+                                  <SearchText
+                                    text={relation.origins
+                                      .map((origin) =>
+                                        origin === "global"
+                                          ? "全局关系"
+                                          : origin === relation.source_entity_id
+                                            ? (relation.source_entity ??
+                                              relation.source)
+                                            : origin ===
+                                                relation.target_entity_id
+                                              ? (relation.target_entity ??
+                                                relation.target)
+                                              : "实体一跳",
+                                      )
+                                      .join("、")}
+                                    query={query ?? ""}
+                                  />
                                 </small>
                               ) : null}
                             </span>

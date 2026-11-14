@@ -229,6 +229,39 @@
   gap: 8px;
 }
 
+/* 第一行：左边的分类方式，右上角的搜索框。 */
+.grt-filter-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.grt-filter-top > .grt-chips {
+  min-width: 0;
+}
+
+.grt-search {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  /* 没有分类标签时（取分片）搜索框也靠右。 */
+  margin-left: auto;
+}
+
+.grt-search input {
+  width: 200px;
+}
+
+/* 搜索命中的文字：和原文引用同一个黄底，一眼能看出是搜到的。 */
+.grt-hit {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: #fff1a8;
+  color: inherit;
+}
+
 .grt-chips {
   display: flex;
   flex-wrap: wrap;
