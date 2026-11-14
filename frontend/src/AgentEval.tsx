@@ -502,11 +502,44 @@ function evidenceChunkLists(question: EvalQuestion) {
     ? (question.agent?.evidence ?? []).map((item) => item.chunk_ids ?? [])
     : (question.evidence ?? []).map((item, index) => [
         ...new Set(
-          [item.chunk_id, question.retry?.evidence?.[index]?.chunk_id].filter(
-            (id): id is string => Boolean(id),
-          ),
+          [
+            item.chunk_id,
+            ...(item.targets ?? []).map((target) => target.chunk_id),
+            question.retry?.evidence?.[index]?.chunk_id,
+            ...(question.retry?.evidence?.[index]?.targets ?? []).map(
+              (target) => target.chunk_id,
+            ),
+          ].filter((id): id is string => Boolean(id)),
         ),
       ]);
+}
+
+export function graphRelationFilter(
+  question: EvalQuestion,
+  index: number,
+  retry = false,
+): string | null {
+  const evidence = retry
+    ? question.retry?.evidence?.[index]
+    : question.evidence[index];
+  if (evidence?.graph_filter_reason) return evidence.graph_filter_reason;
+  const ids = new Set(
+    (evidence?.targets ?? []).map((target) => target.chunk_id),
+  );
+  if (evidence?.chunk_id) ids.add(evidence.chunk_id);
+  const diagnostics = retry
+    ? question.retry?.diagnostics
+    : question.diagnostics;
+  const relations = (diagnostics?.graph?.relation_candidates ?? []).filter(
+    (relation) => ids.has(relation.chunk_id),
+  );
+  if (!relations.length || relations.some((relation) => relation.kept))
+    return null;
+  return [
+    ...new Set(
+      relations.map((relation) => relation.reason || "关系筛选未保留"),
+    ),
+  ].join("；");
 }
 
 function fixedEvidenceRows(
@@ -587,7 +620,15 @@ function fixedEvidenceRows(
             tone: "danger" as const,
             detail: "补充检索未命中，历史记录未保存过滤原因",
           }
-        : lostRow(fixed, config);
+        : (fixed?.status === "not_recalled" ||
+              fixed?.status === "graph_relation_filtered") &&
+            graphRelationFilter(question, evidence, usedRetry)
+          ? {
+              label: "被过滤",
+              tone: "danger" as const,
+              detail: `图关系已召回，${graphRelationFilter(question, evidence, usedRetry)}`,
+            }
+          : lostRow(fixed, config);
     return retry && !usedRetry
       ? { ...row, detail: `${row.detail}；补充检索没采用` }
       : row;
@@ -2451,6 +2492,11 @@ function mergeOutcome(
       ? `重排分 ${fixed.rerank_probability.toFixed(2)}`
       : "";
   switch (fixed?.status) {
+    case "graph_relation_filtered":
+      return {
+        ok: false,
+        text: `图关系已召回，${fixed?.graph_filter_reason ?? "关系筛选未保留"}`,
+      };
     case "not_recalled":
     case undefined:
       return { ok: false, text: "每一路都没召回" };
@@ -2695,6 +2741,11 @@ export function FixedSearchResults({
                           ids.includes(c.chunk_id) &&
                           c.contributions.some((x) => x.method === "graph"),
                       );
+                      const relationFiltered = graphRelationFilter(
+                        question,
+                        index,
+                        retrySearch,
+                      );
                       const ranks = found.flatMap((c) =>
                         c.contributions
                           .filter((x) => x.method === "graph")
@@ -2703,13 +2754,21 @@ export function FixedSearchResults({
                       return (
                         <li
                           key={index}
-                          className={found.length ? "is-hit" : "is-miss"}
+                          className={
+                            found.length
+                              ? "is-hit"
+                              : relationFiltered
+                                ? "is-filtered"
+                                : "is-miss"
+                          }
                         >
                           <b>{found.length ? "✓" : "—"}</b>计分项 {index + 1}
                           <small>
                             {found.length
                               ? `图检索第 ${Math.min(...ranks)} 名`
-                              : "图检索未召回"}
+                              : relationFiltered
+                                ? `图关系已召回，${relationFiltered}`
+                                : "图检索未召回"}
                           </small>
                           {found.some(
                             (c) => c.retrieval_methods.length === 1,

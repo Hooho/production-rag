@@ -245,6 +245,28 @@ def score_question(item, retrieval, chunk_texts, pool_size):
                 "status": best["status"] if best else "not_recalled",
             }
         )
+    # 关系召回后在关系筛选阶段丢失，也属于已召回后过滤；不改变分片候选池指标。
+    relations = (diagnostics.get("graph") or {}).get("relation_candidates") or []
+    relation_hits = evidence_hits(relations, evidence, chunk_texts)
+    for index, row in enumerate(evidence_rows):
+        if row["status"] != "not_recalled":
+            continue
+        matched = [
+            relation
+            for relation in relations
+            if index in relation_hits.get(relation["chunk_id"], [])
+        ]
+        if matched and all(not relation.get("kept") for relation in matched):
+            reasons = list(
+                dict.fromkeys(
+                    relation.get("reason") or "关系筛选未保留" for relation in matched
+                )
+            )
+            row.update(
+                status="graph_relation_filtered",
+                graph_filter_reason="；".join(reasons),
+                filter_stages=["graph_relation_filtered"],
+            )
     # 交给回答模型的资料（given）：最终来源经过父块扩展，正文里拼进了相邻分片；这些分片里的证据模型也看得到。
     # 上面三个阶段只认命中的那一个分片（用来调召回、重排、阈值），这里把父块里的分片都算上，
     # 和 Agent 比较时用它，两边口径一致（Agent 那边同样算父块里的分片，再加上 read_context 读到的）。

@@ -1180,6 +1180,7 @@ export type EvalEvidenceGroup = {
   targets?: EvalEvidenceTarget[];
 };
 export type EvalEvidence = EvalEvidenceGroup & {
+  graph_filter_reason?: string;
   filter_candidates?: {
     status: string;
     vector_rank?: number | null;

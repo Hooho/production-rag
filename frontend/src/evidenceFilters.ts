@@ -1,6 +1,7 @@
 import type { EvalQuestion, RetrievalCandidate } from "./api";
 
 export const FILTER_LABELS = {
+  graph_relation_filtered: "图关系召回后被过滤",
   not_in_pool: "召回后未进候选池",
   rerank_limit: "重排后超出返回数量",
   threshold: "低于分数阈值",
@@ -42,6 +43,8 @@ function classify(events: Event[]): FilterStage | null {
     return limited.some((item) => item.reranked)
       ? "rerank_limit"
       : "return_limit";
+  if (events.some((item) => item.status === "graph_relation_filtered"))
+    return "graph_relation_filtered";
   return events.some((item) => item.status === "not_in_pool")
     ? "not_in_pool"
     : null;

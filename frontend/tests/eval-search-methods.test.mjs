@@ -9,8 +9,24 @@ test("retrieval display follows actual methods and retains zero recall", async (
     appType: "custom",
   });
   try {
-    const { FixedSearchResults } =
+    const { FixedSearchResults, graphRelationFilter } =
       await server.ssrLoadModule("/src/AgentEval.tsx");
+    const question = {
+      evidence: [{ targets: [{ chunk_id: "target" }], status: "not_recalled" }],
+      diagnostics: {
+        graph: {
+          relation_candidates: [
+            { chunk_id: "target", kept: false, reason: "超过关系保留上限" },
+          ],
+        },
+      },
+    };
+    assert.equal(graphRelationFilter(question, 0), "超过关系保留上限");
+    question.diagnostics.graph.relation_candidates.push({
+      chunk_id: "target",
+      kept: true,
+    });
+    assert.equal(graphRelationFilter(question, 0), null);
     const render = (methods, actual, retrySearch = false) =>
       renderToStaticMarkup(
         createElement(FixedSearchResults, {
