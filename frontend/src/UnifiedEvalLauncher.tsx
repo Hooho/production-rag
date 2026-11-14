@@ -367,34 +367,6 @@ export default function UnifiedEvalLauncher({
             </>
           )}
 
-          <button
-            type="button"
-            className={`secondary-button${templateBusy === "save" ? " is-loading" : ""}`}
-            disabled={templateBusy !== null || disabled}
-            onClick={() => void persistTemplate(false)}
-          >
-            保存配置模板
-          </button>
-          {templateId && (
-            <ConfirmPopover
-              message="更新此配置模板？后续加载使用新配置，历史评测报告保留。"
-              confirmText="更新配置模板"
-              onConfirm={() => persistTemplate(true)}
-            >
-              <button
-                type="button"
-                className={`secondary-button${templateBusy === "update" ? " is-loading" : ""}`}
-                disabled={templateBusy !== null || disabled}
-              >
-                更新配置模板
-              </button>
-            </ConfirmPopover>
-          )}
-          {templateId &&
-            templateBaseline !==
-              JSON.stringify({ draft, source, suiteIds, corpusIds }) && (
-              <small>模板有未保存修改</small>
-            )}
           {(suiteIds.some(
             (id) => !data.suites.items.some((item) => item.id === id),
           ) ||
@@ -611,9 +583,39 @@ export default function UnifiedEvalLauncher({
                   ? "新配置还没保存"
                   : "已加入本次运行"}
             </span>
-            <button type="button" className="secondary-button" onClick={save}>
-              加入本次运行
-            </button>
+            <div className="unified-eval-options">
+              <button
+                type="button"
+                className={`secondary-button${templateBusy === "save" ? " is-loading" : ""}`}
+                disabled={templateBusy !== null || disabled}
+                onClick={() => void persistTemplate(false)}
+              >
+                保存配置模板
+              </button>
+              {templateId && (
+                <ConfirmPopover
+                  message="更新此配置模板？后续加载使用新配置，历史评测报告保留。"
+                  confirmText="更新配置模板"
+                  onConfirm={() => persistTemplate(true)}
+                >
+                  <button
+                    type="button"
+                    className={`secondary-button${templateBusy === "update" ? " is-loading" : ""}`}
+                    disabled={templateBusy !== null || disabled}
+                  >
+                    更新配置模板
+                  </button>
+                </ConfirmPopover>
+              )}
+              {templateId &&
+                templateBaseline !==
+                  JSON.stringify({ draft, source, suiteIds, corpusIds }) && (
+                  <small>模板有未保存修改</small>
+                )}
+              <button type="button" className="secondary-button" onClick={save}>
+                加入本次运行
+              </button>
+            </div>
           </footer>
         </div>
         <aside className="unified-eval-configs">
