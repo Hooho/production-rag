@@ -6363,15 +6363,26 @@ function CandidateChunksDialog({
           )}
         </td>
         {relations && (
-          <td>
+          <td className="diag-relations">
             {(item.graph_relation_ids ?? []).length > 0 ? (
-              <ul>
-                {item.graph_relation_ids!.map((id) => (
-                  <li key={id} style={{ whiteSpace: "pre-wrap" }}>
-                    {relations.get(id) ?? "此条历史记录未保存关系详情"}
-                  </li>
-                ))}
-              </ul>
+              <div className="diag-relation-list">
+                {item.graph_relation_ids!.map((id) => {
+                  const text =
+                    relations.get(id) ?? "此条历史记录未保存关系详情";
+                  // 关系文本第一行是「起点 → 类型 → 终点」，后面是描述和原文引用，各占一行。
+                  const [head, ...rest] = text.split("\n");
+                  return (
+                    <div className="diag-relation" key={id}>
+                      <span className="diag-relation-head">{head}</span>
+                      {rest.map((line, index) => (
+                        <span className="diag-relation-line" key={index}>
+                          {line}
+                        </span>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
             ) : item.retrieval_methods.includes("graph") ? (
               "此条历史记录未保存关系关联"
             ) : (
@@ -6446,6 +6457,7 @@ function CandidateChunksDialog({
             setPage(1);
           }}
         />
+        <p className="diag-scroll-hint">表格可左右滑动查看分数</p>
         <Table
           containerProps={{ className: "diag-table-wrap" }}
           className="diag-table diag-pool"
@@ -6454,7 +6466,7 @@ function CandidateChunksDialog({
             <tr>
               <th>序号</th>
               <th title="这一片自己的正文">分片</th>
-              {relations && <th>来自哪些关系</th>}
+              {relations && <th className="diag-relations">来自哪些关系</th>}
               <th
                 title={
                   scoreKind === "rerank"

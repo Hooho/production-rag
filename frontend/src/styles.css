@@ -3853,6 +3853,41 @@ label {
   overflow-wrap: anywhere;
 }
 
+/* 「来自哪些关系」列：宽度定住，长描述在块里换行。
+   不定宽度的话，这一列会被别的列挤到只剩几个字宽，关系文本一字一行，整行被撑到几千像素高。 */
+.diag-table.diag-pool th.diag-relations,
+.diag-table.diag-pool td.diag-relations {
+  width: 300px;
+  min-width: 300px;
+  max-width: 300px;
+}
+
+/* 每条关系一个独立模块：先看「起点 → 类型 → 终点」，再看描述和原文引用。 */
+.diag-relation-list {
+  display: grid;
+  gap: 6px;
+}
+
+.diag-relation {
+  padding: 6px 8px;
+  border: 1px solid var(--diag-line, #d6e2ee);
+  border-radius: 4px;
+  background: var(--diag-track, #eef6fc);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.diag-relation-head {
+  display: block;
+  color: var(--diag-strong, #173b5b);
+  font-weight: 600;
+}
+
+.diag-relation-line {
+  display: block;
+  color: var(--diag-text, #536d86);
+}
+
 /* 正文还没取到时的占位：形状接近正文一行，不让这一格先空着。 */
 .diag-body-loading {
   flex: 1 1 auto;
