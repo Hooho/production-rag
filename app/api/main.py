@@ -1,4 +1,5 @@
 from ..evaluation import configuration as eval_configuration
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import hashlib
@@ -743,8 +744,13 @@ def create_app(store=None, models=None, jwt_secret=None):
         # Agent 模式（app/agentic）：借用固定流程 Agent 的输入检查、读取记忆和步骤记录，中间换成 Agent 循环。
         app.state.agent_mode = AgentMode(app.state.agent)
         app.state.memory = Memory()
-        # 同一时间只允许一次界面发起的评测：评测会连续调用重排模型，并发跑多次既慢又会互相拖慢耗时统计。
+        # 同一时间只执行一次评测；新提交的任务进入串行队列，避免重排模型并发拖慢耗时统计。
         app.state.eval_lock = Lock()
+        app.state.eval_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="evaluation"
+        )
+        app.state.eval_pending = set()
+        app.state.eval_pending_lock = Lock()
         # 题目写入和 AI 起草必须串行，避免两个请求同时读取旧编号后生成重复 ID。
         app.state.eval_dataset_lock = Lock()
         app.state.eval_running = None
@@ -764,6 +770,7 @@ def create_app(store=None, models=None, jwt_secret=None):
         try:
             yield
         finally:
+            app.state.eval_executor.shutdown(wait=False, cancel_futures=True)
             app.state.agent.close()
             if store is None:
                 app.state.store.close()
@@ -3231,20 +3238,40 @@ def create_app(store=None, models=None, jwt_secret=None):
         return eval_params.options(app.state.store, app.state.models)
 
     # 界面上发起一次评测，在后台线程执行并立即返回编号，前端轮询进度。
+    def enqueue_evaluation(work, runs):
+        ids = {run["id"] for run in runs}
+        with app.state.eval_pending_lock:
+            app.state.eval_pending.update(ids)
+
+        def queued_work():
+            app.state.eval_lock.acquire()
+            try:
+                work()
+            finally:
+                with app.state.eval_pending_lock:
+                    app.state.eval_pending.difference_update(ids)
+
+        app.state.eval_executor.submit(queued_work)
+
     @app.post("/eval/runs", status_code=202, dependencies=[Depends(require_admin)])
     def create_eval_run(body: EvalRunInput, owner=Depends(identity)):
         launch = prepare_launch(body)
-        acquire_eval_lock()
+        freeze_error = None
         try:
-            run = create_launch_run(launch)
-        except Exception:
-            app.state.eval_lock.release()
-            raise
-        app.state.eval_running = run["id"]
+            freeze_launch_data([launch])
+        except Exception as error:
+            freeze_error = str(error)
+        run = create_launch_run(launch)
+        run["status"] = "queued"
+        save_run(run)
 
         def work():
             try:
-                freeze_launch_data([launch])
+                app.state.eval_running = run["id"]
+                run["status"] = "running"
+                save_run(run)
+                if freeze_error:
+                    raise ValueError(freeze_error)
                 execute_launch(launch, run)
             except Exception as error:
                 run.update(status="failed", error=f"冻结评测数据失败：{error}")
@@ -3253,8 +3280,8 @@ def create_app(store=None, models=None, jwt_secret=None):
                 app.state.eval_running = None
                 app.state.eval_lock.release()
 
-        Thread(target=work, daemon=True).start()
-        return {"id": run["id"], "status": "running"}
+        enqueue_evaluation(work, [run])
+        return {"id": run["id"], "status": "queued"}
 
     # 按某条记录的配置重新跑一次（历史列表「选项」里的重跑），生成一条新记录，原记录不动。
     @app.post(
@@ -3300,33 +3327,32 @@ def create_app(store=None, models=None, jwt_secret=None):
             except HTTPException as error:
                 label = eval_batch.arm_label(config.label, index)
                 raise HTTPException(error.status_code, f"{label}：{error.detail}")
-        acquire_eval_lock()
         batch_id = eval_batch.new_batch_id()
         runs = []
-        try:
-            for index, launch in enumerate(launches):
-                runs.append(
-                    create_launch_run(
-                        launch,
-                        {
-                            "id": batch_id,
-                            "name": body.name.strip(),
-                            "index": index,
-                            "size": len(launches),
-                            "label": eval_batch.arm_label(
-                                body.configs[index].label, index
-                            ),
-                        },
-                    )
+        for index, launch in enumerate(launches):
+            runs.append(
+                create_launch_run(
+                    launch,
+                    {
+                        "id": batch_id,
+                        "name": body.name.strip(),
+                        "index": index,
+                        "size": len(launches),
+                        "label": eval_batch.arm_label(body.configs[index].label, index),
+                    },
                 )
-        except Exception:
-            app.state.eval_lock.release()
-            raise
-        app.state.eval_batch = batch_id
+            )
+        freeze_error = None
+        try:
+            freeze_launch_data(launches)
+        except Exception as error:
+            freeze_error = str(error)
 
         def work():
             try:
-                freeze_launch_data(launches)
+                if freeze_error:
+                    raise ValueError(freeze_error)
+                app.state.eval_batch = batch_id
                 for launch, run in zip(launches, runs):
                     app.state.eval_running = run["id"]
                     run["status"] = "running"
@@ -3342,7 +3368,7 @@ def create_app(store=None, models=None, jwt_secret=None):
                 app.state.eval_batch = None
                 app.state.eval_lock.release()
 
-        Thread(target=work, daemon=True).start()
+        enqueue_evaluation(work, runs)
         return {"id": batch_id, "runs": [run["id"] for run in runs]}
 
     @app.post(
@@ -3398,11 +3424,10 @@ def create_app(store=None, models=None, jwt_secret=None):
             launch["questions"] = copy.deepcopy(source["question_snapshot"])
         if source.get("frozen"):
             launch["prepared"].update(copy.deepcopy(source["frozen"]))
-        acquire_eval_lock()
         attempt = {key: value for key, value in source.items() if key != "attempts"}
         source["attempts"] = [*(source.get("attempts") or []), attempt]
         source.update(
-            status="running",
+            status="queued",
             error=None,
             finished=None,
             summary=None,
@@ -3410,18 +3435,14 @@ def create_app(store=None, models=None, jwt_secret=None):
             by_type={},
             progress={"done": 0, "total": 0},
         )
-        app.state.eval_running = run_id
-        app.state.eval_batch = batch_id
-        try:
-            save_run(source)
-        except Exception:
-            app.state.eval_running = None
-            app.state.eval_batch = None
-            app.state.eval_lock.release()
-            raise
+        save_run(source)
 
         def work():
             try:
+                app.state.eval_running = run_id
+                app.state.eval_batch = batch_id
+                source["status"] = "running"
+                save_run(source)
                 if body.version == 2 and launch["prepared"].get("data_scope") is None:
                     freeze_launch_data([launch])
                 execute_launch(launch, source)
@@ -3433,7 +3454,7 @@ def create_app(store=None, models=None, jwt_secret=None):
                 app.state.eval_batch = None
                 app.state.eval_lock.release()
 
-        Thread(target=work, daemon=True).start()
+        enqueue_evaluation(work, [source])
         return {"id": batch_id, "run_id": run_id}
 
     # 批次报告：各组的状态、配置差异和完整结果，前端用单次评测同一套报告组件一列一列并排。
@@ -3798,10 +3819,7 @@ def create_app(store=None, models=None, jwt_secret=None):
     def current_status(run):
         if run.get("status") == "running" and run["id"] != app.state.eval_running:
             return "interrupted"
-        if (
-            run.get("status") == "queued"
-            and (run.get("batch") or {}).get("id") != app.state.eval_batch
-        ):
+        if run.get("status") == "queued" and run["id"] not in app.state.eval_pending:
             return "interrupted"
         return run.get("status")
 

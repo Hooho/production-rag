@@ -235,7 +235,7 @@ export default function UnifiedEvalLauncher({
     }
   }
   async function launch() {
-    if (!data || !configs.length || dirty) {
+    if (!data || !configs.length) {
       toast("error", "请先将当前配置加入本次运行");
       return;
     }
@@ -279,7 +279,7 @@ export default function UnifiedEvalLauncher({
         ),
       }));
       const result = await startEvalBatch("", bodies);
-      toast("success", `${configs.length} 组配置已开始评测`);
+      toast("success", `${configs.length} 组配置已提交，将依次排队运行`);
       onStarted(result.id);
     } catch (reason) {
       toast("error", errorText(reason));
@@ -710,14 +710,20 @@ export default function UnifiedEvalLauncher({
       </div>
       <footer>
         <span>已保存 {configs.length} 组；题目、语料由第一组统一选择。</span>
-        <button
-          type="button"
-          className={`primary-button${busy ? " is-loading" : ""}`}
-          disabled={busy || disabled || !configs.length || dirty}
-          onClick={() => void launch()}
+        <ConfirmPopover
+          when={dirty}
+          message="当前表单修改尚未加入本次运行，本次只运行右侧已加入的配置。是否继续？"
+          confirmText="运行已加入配置"
+          onConfirm={launch}
         >
-          运行所选配置
-        </button>
+          <button
+            type="button"
+            className={`primary-button${busy ? " is-loading" : ""}`}
+            disabled={busy || disabled || !configs.length}
+          >
+            运行所选配置
+          </button>
+        </ConfirmPopover>
       </footer>
     </section>
   );

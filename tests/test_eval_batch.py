@@ -177,3 +177,49 @@ def test_rerun_body_from_special_run():
         assert "旧书" in str(error)
     else:
         raise AssertionError("应该拒绝")
+
+
+def test_new_batch_waits_behind_active_batch(setup, eval_dir, monkeypatch, runtime):
+    from threading import Event
+    import app.api.main as api_main
+
+    client, _ = setup
+    runtime(contextual_retrieval=False)
+    monkeypatch.setattr(Models, "rerank", fake_rerank)
+    entered, release = Event(), Event()
+    original = api_main.execute_run
+    calls = []
+
+    def blocked(*args, **kwargs):
+        calls.append(True)
+        if len(calls) == 1:
+            entered.set()
+            assert release.wait(10)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(api_main, "execute_run", blocked)
+    body = {
+        "configs": [
+            {"version": 2, "split": "all", "mode": "fixed", "methods": ["keyword"]}
+        ]
+    }
+    first = client.post("/eval/batches", headers=headers(), json=body)
+    assert first.status_code == 202
+    try:
+        assert entered.wait(5)
+        second = client.post("/eval/batches", headers=headers(), json=body)
+        assert second.status_code == 202, second.text
+        waiting = client.get(
+            f"/eval/batches/{second.json()['id']}", headers=headers()
+        ).json()
+        assert waiting["arms"][0]["status"] == "queued"
+        assert len(calls) == 1
+        run_id = waiting["arms"][0]["id"]
+        assert (
+            client.delete(f"/eval/runs/{run_id}", headers=headers()).status_code == 409
+        )
+    finally:
+        release.set()
+    assert wait_batch(client, first.json()["id"])["arms"][0]["status"] == "completed"
+    assert wait_batch(client, second.json()["id"])["arms"][0]["status"] == "completed"
+    assert len(calls) == 2

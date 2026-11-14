@@ -855,7 +855,7 @@ function Evaluation({
           {/* 操作区只属于历史记录，评测集 Tab 保持为题目管理入口。 */}
           <UnifiedEvalLauncher
             initialTemplate={chosenTemplate}
-            disabled={Boolean(runningRun)}
+            disabled={false}
             onStarted={(id) => {
               onNavigate(`/eval/batches/${encodeURIComponent(id)}`);
               void refreshRuns();
