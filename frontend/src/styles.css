@@ -8797,7 +8797,17 @@ label {
 .type-stats .is-sticky-count {
   position: sticky;
   z-index: 2;
+}
+/* 固定列的底色必须是不透明的：半透明的话，横向滚动时下面几列的内容会从固定列里透出来。
+   .diag-table tbody tr:hover td 那条半透明的悬停底色优先级比 .type-stats 高，
+   所以这里用同等优先级、位置更靠后的规则盖住它，悬停时换成等效的不透明色。 */
+.type-stats tbody tr:not(:hover) td.is-sticky-type,
+.type-stats tbody tr:not(:hover) td.is-sticky-count {
   background: #fff;
+}
+.type-stats tbody tr:hover td.is-sticky-type,
+.type-stats tbody tr:hover td.is-sticky-count {
+  background: color-mix(in srgb, var(--t-2563eb) 6%, #fff);
 }
 .type-stats .is-sticky-type {
   left: 0;
