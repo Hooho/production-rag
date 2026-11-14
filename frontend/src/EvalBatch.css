@@ -212,3 +212,38 @@
   color: var(--ev-muted);
   font-size: 12px;
 }
+
+/* 每份配置一套浅色，贯穿分组标题、指标列和汇总。 */
+.batch-config-colors .batch-color-0 {
+  --batch-bg: #f0f6ff;
+  --batch-head: #e3edfc;
+  --batch-text: #356aa8;
+}
+.batch-config-colors .batch-color-1 {
+  --batch-bg: #eff9f5;
+  --batch-head: #dff1e9;
+  --batch-text: #28785d;
+}
+.batch-config-colors .batch-color-2 {
+  --batch-bg: #fff9ed;
+  --batch-head: #fbefd3;
+  --batch-text: #926c28;
+}
+.batch-config-colors .batch-color-3 {
+  --batch-bg: #f7f3fc;
+  --batch-head: #ede5f7;
+  --batch-text: #7655a2;
+}
+.type-stats.batch-config-colors tr > [class*="batch-color-"] {
+  background: var(--batch-bg);
+}
+.type-stats.batch-config-colors thead tr > [class*="batch-color-"],
+.type-stats.batch-config-colors tr.is-total > [class*="batch-color-"] {
+  background: var(--batch-head);
+}
+.type-stats.batch-config-colors th.is-group {
+  color: var(--batch-text);
+}
+.type-stats.batch-config-colors .is-col-start {
+  border-left: 2px solid #d6e0eb;
+}

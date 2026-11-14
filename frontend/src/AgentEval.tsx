@@ -4685,6 +4685,11 @@ export function BatchTypeStats({
   columns: BatchColumn[];
   order: string[];
 }) {
+  const configIds = [
+    ...new Set(columns.map((column) => column.key.split(":")[0])),
+  ];
+  const columnColor = (column: BatchColumn) =>
+    `batch-color-${configIds.indexOf(column.key.split(":")[0]) % 4}`;
   const types: string[] = [];
   const byType = new Map<string, string[]>();
   for (const key of order) {
@@ -4759,7 +4764,7 @@ export function BatchTypeStats({
       <td className="num is-sticky-count">{keys.length}</td>
       {columns.map((column) => {
         const stat = columnTypeStats(column, keys);
-        const side = column.mode === "fixed" ? "is-fixed" : "is-agent";
+        const side = `${column.mode === "fixed" ? "is-fixed" : "is-agent"} ${columnColor(column)}`;
         return (
           <Fragment key={column.key}>
             <td className={`num ${side} is-col-start`}>{score(stat.scores)}</td>
@@ -4782,7 +4787,7 @@ export function BatchTypeStats({
       containerProps={{
         className: "diag-table-wrap type-stats-wrap ag-batch-scroll",
       }}
-      className="diag-table ev-table type-stats"
+      className="diag-table ev-table type-stats batch-config-colors"
     >
       <thead>
         <tr>
@@ -4796,7 +4801,7 @@ export function BatchTypeStats({
             <th
               key={column.key}
               colSpan={5}
-              className={`${column.mode === "fixed" ? "is-fixed" : "is-agent"} is-group is-col-start`}
+              className={`${columnColor(column)} is-group is-col-start`}
             >
               {column.title}
             </th>
@@ -4804,7 +4809,7 @@ export function BatchTypeStats({
         </tr>
         <tr>
           {columns.map((column) => {
-            const side = column.mode === "fixed" ? "is-fixed" : "is-agent";
+            const side = `${column.mode === "fixed" ? "is-fixed" : "is-agent"} ${columnColor(column)}`;
             return (
               <Fragment key={column.key}>
                 <th className={`num ${side} is-col-start`}>得分</th>
