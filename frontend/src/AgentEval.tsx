@@ -12,6 +12,7 @@ import {
 import { ChunkOriginalDialog, type ChunkOriginal } from "./ChunkOriginalDialog";
 import { DetailDialog } from "./DetailDialog";
 import {
+  type ContextRelation,
   type EvalAgentCall,
   type EvalCompareKey,
   type EvalConfig,
@@ -26,6 +27,7 @@ import {
   type EvalSpecialSection,
   type EvalSummary,
 } from "./api";
+import { ContextRelationList } from "./ContextRelationList";
 import { AgentError } from "./AgentError";
 import { EvidenceFilterSummary } from "./EvidenceFilterSummary";
 import { ScoringItems } from "./ScoringItems";
@@ -282,8 +284,19 @@ function agentMaterial(question: EvalQuestion): EvalMaterial | null {
   return question.agent?.material ?? null;
 }
 
-function MaterialLine({ material }: { material: EvalMaterial | null }) {
+function MaterialLine({
+  material,
+  relations,
+  relationReason,
+}: {
+  material: EvalMaterial | null;
+  // 这次检索放进回答上下文的图谱关系：数量写在这里，点开看每一条。
+  relations?: ContextRelation[];
+  relationReason?: string | null;
+}) {
+  const [relationsOpen, setRelationsOpen] = useState(false);
   if (!material) return null;
+  const given = (relations ?? []).filter((row) => row.status === "context");
   return (
     <div className="ag-material">
       <span className="ag-tool">交给模型的资料</span>
@@ -291,6 +304,25 @@ function MaterialLine({ material }: { material: EvalMaterial | null }) {
         <b>{material.count}</b> 段 · {material.chars.toLocaleString()} 字 · 约{" "}
         {material.tokens.toLocaleString()} token
       </span>
+      {given.length > 0 && (
+        <span>
+          <button
+            type="button"
+            className="link-button"
+            title="看放进回答上下文的图谱关系"
+            onClick={() => setRelationsOpen(true)}
+          >
+            <b>{given.length}</b> 条关系
+          </button>
+        </span>
+      )}
+      {relationsOpen && (
+        <ContextRelationList
+          relations={relations ?? []}
+          reason={relationReason}
+          onClose={() => setRelationsOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -2958,6 +2990,11 @@ function FixedLog({
   const sufficiency = question.sufficiency;
   const searches = 1 + (sufficiency?.retried ? 1 : 0);
   const usedRetry = Boolean(sufficiency?.retry_used);
+  // 放进回答上下文的图谱关系：补充检索被采用时用补充检索那次的，否则用第一次的。
+  const relationDiagnostics = usedRetry
+    ? retry?.diagnostics
+    : question.diagnostics;
+  const contextRelations = relationDiagnostics?.context_relations?.items ?? [];
   // 每个计分项所在的分片（Agent 记的所在分块，旧记录用固定流程命中的分片），用来算每次检索命中了第几个计分项。
   const evidenceLists = evidenceChunkLists(question);
   const total = question.answerable ? evidenceLists.length : 0;
@@ -3163,7 +3200,13 @@ function FixedLog({
                   判断资料不足，已清空：线上会直接拒答。
                 </div>
               )}
-              <MaterialLine material={fixedMaterial(question)} />
+              <MaterialLine
+                material={fixedMaterial(question)}
+                relations={contextRelations}
+                relationReason={
+                  relationDiagnostics?.context_relations?.reason ?? null
+                }
+              />
             </>
           )}
         </div>
@@ -3285,6 +3328,18 @@ function AgentLog({ question }: { question: EvalQuestion }) {
   const evidenceChunks = new Set<string>();
   for (const item of agent.evidence ?? [])
     for (const chunkId of item.chunk_ids ?? []) evidenceChunks.add(chunkId);
+  // 放进回答上下文的图谱关系：Agent 每次检索留下的关系累加，同一条只算一次（放进过上下文的算放进过）。
+  const relationMap = new Map<string, ContextRelation>();
+  for (const call of agent.calls) {
+    for (const row of call.retrieval_diagnostics?.context_relations?.items ??
+      []) {
+      const exists = relationMap.get(row.relation_id);
+      if (!exists) relationMap.set(row.relation_id, row);
+      else if (exists.status !== "context" && row.status === "context")
+        relationMap.set(row.relation_id, row);
+    }
+  }
+  const contextRelations = [...relationMap.values()];
   return (
     <section className="ag-log">
       <div className="ag-log-title">
@@ -3468,7 +3523,10 @@ function AgentLog({ question }: { question: EvalQuestion }) {
                   ),
               )}
               {activeStep === rounds.length + 1 && (
-                <MaterialLine material={agentMaterial(question)} />
+                <MaterialLine
+                  material={agentMaterial(question)}
+                  relations={contextRelations}
+                />
               )}
             </>
           )}

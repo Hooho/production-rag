@@ -301,6 +301,11 @@
   border-radius: 4px;
 }
 
+/* 只是表示当前状态、不能点的标签（比如「放进上下文 30」）。 */
+.grt-chip.is-static {
+  cursor: default;
+}
+
 /* 关系类型的筛选钮：色相和图谱里的关系类型一致（同一份 labelHue），两处一眼能对上。
    选中时用同一个色相加深，不用蓝色盖掉分类色。 */
 .grt-chip.is-hue {
