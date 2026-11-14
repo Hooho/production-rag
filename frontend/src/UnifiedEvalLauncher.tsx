@@ -587,7 +587,7 @@ export default function UnifiedEvalLauncher({
               <button
                 type="button"
                 className={`secondary-button${templateBusy === "save" ? " is-loading" : ""}`}
-                disabled={templateBusy !== null || disabled}
+                disabled={templateBusy !== null}
                 onClick={() => void persistTemplate(false)}
               >
                 保存配置模板
@@ -601,7 +601,7 @@ export default function UnifiedEvalLauncher({
                   <button
                     type="button"
                     className={`secondary-button${templateBusy === "update" ? " is-loading" : ""}`}
-                    disabled={templateBusy !== null || disabled}
+                    disabled={templateBusy !== null}
                   >
                     更新配置模板
                   </button>
