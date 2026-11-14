@@ -8733,6 +8733,57 @@ label {
 
 .type-stats {
   width: auto;
+  /* 固定列的宽度写在这里，第二列的 left 直接引用第一列的宽度。 */
+  --sticky-type-width: 200px;
+  --sticky-count-width: 64px;
+}
+
+/* 固定列要跟着横向滚动走。合并边框（border-collapse: collapse）画出来的竖线属于整张表，
+   不会跟着单元格移动，粘住以后竖线会错位；这张表改成独立边框，竖线画在每个单元格的左边。 */
+.type-stats {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.ev-root .type-stats th,
+.ev-root .type-stats td {
+  border-right: 0;
+}
+.ev-root .type-stats th:not(:first-child),
+.ev-root .type-stats td:not(:first-child) {
+  border-left: 1px solid var(--ev-line);
+}
+
+/* 按类型表：类型、题数两列固定在左边，横向滚动时始终看得到是哪一类、几道题。 */
+.type-stats th {
+  /* 表头本身就是 sticky（top），z-index 要高于下面的固定列，滚动时不被盖住。 */
+  z-index: 3;
+}
+.type-stats .is-sticky-type,
+.type-stats .is-sticky-count {
+  position: sticky;
+  z-index: 2;
+  background: #fff;
+}
+.type-stats .is-sticky-type {
+  left: 0;
+  width: var(--sticky-type-width);
+  min-width: var(--sticky-type-width);
+  max-width: var(--sticky-type-width);
+  overflow: hidden;
+}
+.type-stats .is-sticky-count {
+  left: var(--sticky-type-width);
+  width: var(--sticky-count-width);
+  min-width: var(--sticky-count-width);
+}
+.type-stats th.is-sticky-type,
+.type-stats th.is-sticky-count {
+  z-index: 4;
+  background: var(--t-eef5fb);
+}
+/* 类型名过长时在固定列里换行，别把后面的列压住。 */
+.type-stats .is-sticky-type .tag {
+  white-space: normal;
 }
 
 .type-stat {

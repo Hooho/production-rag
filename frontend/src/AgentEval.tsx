@@ -4755,8 +4755,8 @@ export function BatchTypeStats({
     isTotal = false,
   ) => (
     <tr key={rowKey} className={isTotal ? "is-total" : ""}>
-      <td>{label}</td>
-      <td className="num">{keys.length}</td>
+      <td className="is-sticky-type">{label}</td>
+      <td className="num is-sticky-count">{keys.length}</td>
       {columns.map((column) => {
         const stat = columnTypeStats(column, keys);
         const side = column.mode === "fixed" ? "is-fixed" : "is-agent";
@@ -4786,8 +4786,10 @@ export function BatchTypeStats({
     >
       <thead>
         <tr>
-          <th rowSpan={2}>类型</th>
-          <th className="num" rowSpan={2}>
+          <th rowSpan={2} className="is-sticky-type">
+            类型
+          </th>
+          <th className="num is-sticky-count" rowSpan={2}>
             题数
           </th>
           {columns.map((column) => (
