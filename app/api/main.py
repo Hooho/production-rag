@@ -258,10 +258,8 @@ class EvalDatasetItemInput(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
     type: str = Field(min_length=1, max_length=20)
     answerable: bool
-    evidence: list[str] = Field(default_factory=list, max_length=10)
-    evidence_groups: list[EvalScoringGroupInput] | None = Field(
-        None, min_length=1, max_length=10
-    )
+    evidence: list[str] = Field(default_factory=list)
+    evidence_groups: list[EvalScoringGroupInput] | None = Field(None, min_length=1)
     reference_answer: str = Field(min_length=1, max_length=2000)
     split: str = Field("dev", pattern="^(dev|holdout)$")
     history: list[str] = Field(default_factory=list, max_length=5)
@@ -273,10 +271,8 @@ class EvalDatasetPairInput(BaseModel):
     original_question: str = Field(min_length=1, max_length=1000)
     paraphrase_question: str = Field(min_length=1, max_length=1000)
     answerable: bool
-    evidence: list[str] = Field(default_factory=list, max_length=10)
-    evidence_groups: list[EvalScoringGroupInput] | None = Field(
-        None, min_length=1, max_length=10
-    )
+    evidence: list[str] = Field(default_factory=list)
+    evidence_groups: list[EvalScoringGroupInput] | None = Field(None, min_length=1)
     reference_answer: str = Field(min_length=1, max_length=2000)
     split: str = Field("dev", pattern="^(dev|holdout)$")
 
@@ -351,10 +347,8 @@ class EvalSuiteItemInput(BaseModel):
     prelude: list[EvalPreludeTurn] = Field(default_factory=list, max_length=20)
     model_config = ConfigDict(extra="forbid")
     question: str = Field(..., max_length=500)
-    evidence: list[str] = Field(default_factory=list, max_length=10)
-    evidence_groups: list[EvalScoringGroupInput] | None = Field(
-        None, min_length=1, max_length=10
-    )
+    evidence: list[str] = Field(default_factory=list)
+    evidence_groups: list[EvalScoringGroupInput] | None = Field(None, min_length=1)
     reference_answer: str | None = Field(None, max_length=2000)
     turns: list[str] = Field(default_factory=list, max_length=20)
     # 题目类型（可选，自己起名，例如多跳、比较）：结果按类型统计通过数。

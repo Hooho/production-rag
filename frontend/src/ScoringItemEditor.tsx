@@ -137,7 +137,6 @@ export function ScoringItemEditor({
           <button
             type="button"
             className="secondary-button"
-            disabled={groups.length >= 10}
             onClick={() => onChange([...groups, { label: "", targets: [] }])}
           >
             ＋ 添加计分项

@@ -1,25 +1,90 @@
 import copy
 import unittest
 
-from app.evaluation.grouped_evidence import bind_groups, fingerprint, legacy_groups, match_evidence, validate_groups
+from app.evaluation.grouped_evidence import (
+    bind_groups,
+    fingerprint,
+    legacy_groups,
+    match_evidence,
+    validate_groups,
+)
 
 
 class GroupedEvidenceTest(unittest.TestCase):
     def setUp(self):
         self.catalog = [
-            {"title": "书", "position": 0, "content": "公司甲经营失败", "chunk_id": "new:0"},
-            {"title": "书", "position": 1, "content": "公司甲的另一处案例", "chunk_id": "new:1"},
+            {
+                "title": "书",
+                "position": 0,
+                "content": "公司甲经营失败",
+                "chunk_id": "new:0",
+            },
+            {
+                "title": "书",
+                "position": 1,
+                "content": "公司甲的另一处案例",
+                "chunk_id": "new:1",
+            },
         ]
-        self.groups = [{"label": "公司甲", "targets": [
-            {"title": row["title"], "position": row["position"], "fingerprint": fingerprint(row["content"]),
-                "quote": row["content"]} for row in self.catalog]}]
+        self.groups = [
+            {
+                "label": "公司甲",
+                "targets": [
+                    {
+                        "title": row["title"],
+                        "position": row["position"],
+                        "fingerprint": fingerprint(row["content"]),
+                        "quote": row["content"],
+                    }
+                    for row in self.catalog
+                ],
+            }
+        ]
+
+    def test_more_than_ten_scoring_items(self):
+        from app.api.main import (
+            EvalDatasetItemInput,
+            EvalDatasetPairInput,
+            EvalSuiteItemInput,
+        )
+
+        catalog = [
+            {
+                "title": row["title"],
+                "position": row["position"],
+                "fingerprint": fingerprint(row["content"]),
+                "quote": row["content"],
+            }
+            for row in self.catalog
+        ]
+        groups = [copy.deepcopy(self.groups[0]) for _ in range(25)]
+        self.assertEqual(len(validate_groups(groups, catalog)), 25)
+        common = {
+            "answerable": True,
+            "evidence": ["证据"] * 25,
+            "evidence_groups": groups,
+            "reference_answer": "答案",
+        }
+        for model, fields in [
+            (EvalDatasetItemInput, {"question": "问题", "type": "事实"}),
+            (
+                EvalDatasetPairInput,
+                {"original_question": "问题", "paraphrase_question": "另一问法"},
+            ),
+            (EvalSuiteItemInput, {"question": "问题"}),
+        ]:
+            parsed = model(**common, **fields)
+            self.assertEqual(len(parsed.evidence_groups), 25)
+            self.assertEqual(len(parsed.evidence), 25)
 
     def test_targets_score_without_reading_excerpt(self):
         groups = copy.deepcopy(self.groups)
         groups[0]["targets"][0]["quote"] = "修改展示摘录不改变命中"
         evidence = bind_groups(["修改旧展示文字"], groups, self.catalog)
         candidates = [{"chunk_id": key} for key in ("new:0", "new:1", "other")]
-        hits = match_evidence(candidates, evidence, {"other": "修改旧展示文字"}, lambda s: [s])
+        hits = match_evidence(
+            candidates, evidence, {"other": "修改旧展示文字"}, lambda s: [s]
+        )
         self.assertEqual(hits, {"new:0": [0], "new:1": [0]})
         self.assertEqual({index for values in hits.values() for index in values}, {0})
         self.assertEqual(evidence[0]["targets"][0]["quote"], "修改展示摘录不改变命中")
@@ -28,19 +93,39 @@ class GroupedEvidenceTest(unittest.TestCase):
         changed = copy.deepcopy(self.catalog)
         changed[0]["content"] = "不同的分片"
         for catalog in (changed, self.catalog[1:]):
-            with self.subTest(catalog=catalog), self.assertRaisesRegex(ValueError, "重新标注"):
+            with (
+                self.subTest(catalog=catalog),
+                self.assertRaisesRegex(ValueError, "重新标注"),
+            ):
                 bind_groups(["摘录"], self.groups, catalog)
 
     def test_legacy_matching_and_current_chunk_ids(self):
         self.assertEqual(bind_groups(["旧证据"], None, []), ["旧证据"])
-        hits = match_evidence([{"chunk_id": "a"}], ["原文||替代"], {"a": "包含替代"}, lambda s: s.split("||"))
+        hits = match_evidence(
+            [{"chunk_id": "a"}],
+            ["原文||替代"],
+            {"a": "包含替代"},
+            lambda s: s.split("||"),
+        )
         self.assertEqual(hits, {"a": [0]})
-        rebound = [{**row, "chunk_id": f"next:{row['position']}"} for row in self.catalog]
-        self.assertEqual(bind_groups(["摘录"], self.groups, rebound)[0]["targets"][0]["chunk_id"], "next:0")
+        rebound = [
+            {**row, "chunk_id": f"next:{row['position']}"} for row in self.catalog
+        ]
+        self.assertEqual(
+            bind_groups(["摘录"], self.groups, rebound)[0]["targets"][0]["chunk_id"],
+            "next:0",
+        )
 
     def test_edit_groups_validates_selection_and_uses_server_excerpt(self):
-        catalog = [{"title": row["title"], "position": row["position"],
-            "fingerprint": fingerprint(row["content"]), "quote": row["content"]} for row in self.catalog]
+        catalog = [
+            {
+                "title": row["title"],
+                "position": row["position"],
+                "fingerprint": fingerprint(row["content"]),
+                "quote": row["content"],
+            }
+            for row in self.catalog
+        ]
         groups = copy.deepcopy(self.groups)
         groups[0]["label"] = " 公司乙 "
         groups[0]["targets"][0]["quote"] = "客户端提供的任意文字"
@@ -52,22 +137,49 @@ class GroupedEvidenceTest(unittest.TestCase):
         self.assertEqual(len(validate_groups([groups[0], groups[0]], catalog)), 2)
 
     def test_edit_groups_rejects_empty_and_stale_selection(self):
-        catalog = [{"title": row["title"], "position": row["position"],
-            "fingerprint": fingerprint(row["content"]), "quote": row["content"]} for row in self.catalog]
+        catalog = [
+            {
+                "title": row["title"],
+                "position": row["position"],
+                "fingerprint": fingerprint(row["content"]),
+                "quote": row["content"],
+            }
+            for row in self.catalog
+        ]
         stale = copy.deepcopy(self.groups)
         stale[0]["targets"][0]["fingerprint"] = "0" * 64
-        for groups in ([], [{"label": "", "targets": self.groups[0]["targets"]}],
-                [{"label": "公司甲", "targets": []}], stale):
+        for groups in (
+            [],
+            [{"label": "", "targets": self.groups[0]["targets"]}],
+            [{"label": "公司甲", "targets": []}],
+            stale,
+        ):
             with self.subTest(groups=groups), self.assertRaises(ValueError):
                 validate_groups(groups, catalog)
 
     def test_legacy_conversion_preserves_alternative_targets_without_type_rules(self):
-        catalog = [{"title": row["title"], "position": row["position"],
-            "fingerprint": fingerprint(row["content"]), "quote": row["content"]} for row in self.catalog]
-        catalog.append({"title": "另一本书", "position": 0, "fingerprint": fingerprint("无关内容"), "quote": "无关内容"})
+        catalog = [
+            {
+                "title": row["title"],
+                "position": row["position"],
+                "fingerprint": fingerprint(row["content"]),
+                "quote": row["content"],
+            }
+            for row in self.catalog
+        ]
+        catalog.append(
+            {
+                "title": "另一本书",
+                "position": 0,
+                "fingerprint": fingerprint("无关内容"),
+                "quote": "无关内容",
+            }
+        )
         groups = legacy_groups(["公司甲经营失败 || 公司甲的另一处案例"], catalog)
         self.assertEqual(groups[0]["label"], "公司甲经营失败")
-        self.assertEqual([target["position"] for target in groups[0]["targets"]], [0, 1])
+        self.assertEqual(
+            [target["position"] for target in groups[0]["targets"]], [0, 1]
+        )
         self.assertEqual(validate_groups(groups, catalog), groups)
         self.assertEqual(legacy_groups([], catalog), [])
 
