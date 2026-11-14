@@ -3,6 +3,7 @@ import { getEvalChunkOriginal, type EvalChunkOriginal } from "./api";
 import { ChunkOriginalText } from "./ChunkOriginalText";
 import { DetailDialog } from "./DetailDialog";
 import { evidenceRanges } from "./evidenceRanges";
+import type { HighlightGroup } from "./HighlightedText";
 import { SourceTag, Tag } from "./Tag";
 
 export type ChunkOriginalSource = {
@@ -24,6 +25,8 @@ export type ChunkOriginal = {
   note?: string;
   sources: ChunkOriginalSource[];
   evidence: { number: number; text: string }[];
+  // 打开原文时高亮的词（例如搜索框里输入的内容）。
+  highlight?: string[];
 };
 
 export function ChunkOriginalDialog({
@@ -88,6 +91,10 @@ export function ChunkOriginalDialog({
   if (!value) return null;
   const current = loaded?.id === requestKey ? loaded : null;
   const target = value.context === "target";
+  // 搜索词高亮：这次要看的名字用 entity 样式（浅蓝底 + 下划线）。
+  const highlightGroups: HighlightGroup[] = value.highlight?.length
+    ? [{ kind: "entity", texts: value.highlight }]
+    : [];
   if (target)
     return (
       <DetailDialog open title={`${value.label} · 原文`} onClose={onClose}>
@@ -103,11 +110,19 @@ export function ChunkOriginalDialog({
             </p>
           )}
           {current?.data?.map((chunk) => (
-            <ChunkOriginalText key={chunk.chunk_id} text={chunk.content} />
+            <ChunkOriginalText
+              key={chunk.chunk_id}
+              text={chunk.content}
+              groups={highlightGroups}
+            />
           ))}
           {!chunkId &&
             value.sources.map((source) => (
-              <ChunkOriginalText key={source.key} text={source.text} />
+              <ChunkOriginalText
+                key={source.key}
+                text={source.text}
+                groups={highlightGroups}
+              />
             ))}
         </div>
       </DetailDialog>

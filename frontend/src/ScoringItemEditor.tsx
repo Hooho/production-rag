@@ -53,6 +53,8 @@ export function ScoringItemEditor({
   const group = active === null ? undefined : groups[active];
   const chosen = new Set(group?.targets.map(targetKey));
   const needle = search.trim().toLowerCase();
+  // 搜索框里输入的内容：打开原文时高亮出来，省得在一大片正文里找。
+  const searchTerms = search.trim() ? [search.trim()] : [];
   const filtered = (catalog ?? []).filter(
     (target) =>
       (!title || target.title === title) &&
@@ -100,7 +102,11 @@ export function ScoringItemEditor({
               <div className="sp-scoring-targets">
                 {item.targets.map((target) => (
                   <div className="sp-scoring-target" key={targetKey(target)}>
-                    <EvidenceTargetTags targets={[target]} number={index + 1} />
+                    <EvidenceTargetTags
+                      targets={[target]}
+                      number={index + 1}
+                      highlight={searchTerms}
+                    />
                     <button
                       type="button"
                       className="rg-link"
@@ -215,6 +221,7 @@ export function ScoringItemEditor({
                   targets={[target]}
                   number={(active ?? 0) + 1}
                   buttonLabel="查看详情"
+                  highlight={searchTerms}
                 />
               </div>
             ))}
