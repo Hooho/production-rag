@@ -6,6 +6,7 @@ import {
 } from "./api";
 import { DetailDialog } from "./DetailDialog";
 import { EvidenceTargetTags } from "./EvidenceTargetTags";
+import { foldText } from "./evidenceRanges";
 
 import "./Special.css";
 
@@ -28,7 +29,8 @@ export function ScoringItemEditor({
   const [page, setPage] = useState(1);
   const options = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (active === null || catalog) return;
+    if (active === null) return;
+    setCatalog(null);
     let cancelled = false;
     setError("");
     listEvalTargetChunks()
@@ -42,7 +44,7 @@ export function ScoringItemEditor({
     return () => {
       cancelled = true;
     };
-  }, [active, catalog]);
+  }, [active]);
   function update(index: number, changes: Partial<EvalScoringGroup>) {
     onChange(
       groups.map((group, i) =>
@@ -52,14 +54,14 @@ export function ScoringItemEditor({
   }
   const group = active === null ? undefined : groups[active];
   const chosen = new Set(group?.targets.map(targetKey));
-  const needle = search.trim().toLowerCase();
+  const needle = foldText(search).toLowerCase();
   // 搜索框里输入的内容：打开原文时高亮出来，省得在一大片正文里找。
   const searchTerms = search.trim() ? [search.trim()] : [];
   const filtered = (catalog ?? []).filter(
     (target) =>
       (!title || target.title === title) &&
       (!needle ||
-        `${target.position + 1} ${target.quote}`
+        foldText(`${target.position + 1} ${target.quote}`)
           .toLowerCase()
           .includes(needle)),
   );
