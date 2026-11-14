@@ -13,6 +13,7 @@ from app.mysql.store import metadata
 ROOT = Path(__file__).resolve().parents[1]
 # 0001 之后的迁移新建的表。
 NEW_TABLES = {
+    "eval_config_templates",
     "users",
     "user_groups",
     "user_group_members",

@@ -1,4 +1,6 @@
 import Table from "./Table";
+import EvalConfigTemplates from "./EvalConfigTemplates";
+import type { EvalConfigTemplate } from "./api";
 import { errorText, useToast } from "./Toast";
 import EvalPreludeEditor from "./EvalPreludeEditor";
 import { saveEvalDatasetPrelude, type EvalPreludeTurn } from "./api";
@@ -97,7 +99,8 @@ export type EvaluationSection =
   | "dataset"
   | "special"
   | "regression"
-  | "corpus";
+  | "corpus"
+  | "templates";
 type TopTab = EvaluationSection;
 type DetailTab = "overview" | "questions" | "sweep" | "variants";
 // 勾了 Agent 的检索评测：第一层按模式分页签（对比、固定流程、Agent），固定流程里再分原来的四个子页签。
@@ -139,6 +142,7 @@ const TOP_TAB_LABELS: Record<TopTab, string> = {
   special: "自建题集",
   regression: "巡检复测集",
   corpus: "评测语料库",
+  templates: "评测配置模板",
 };
 const DETAIL_TAB_LABELS: Record<DetailTab, string> = {
   overview: "总览",
@@ -668,6 +672,7 @@ const TAB_PATHS: Record<TopTab, string> = {
   special: "/eval/special",
   regression: "/eval/regression",
   corpus: "/eval/corpus",
+  templates: "/eval/templates",
 };
 
 function Evaluation({
@@ -680,6 +685,8 @@ function Evaluation({
   suiteId,
   onNavigate,
 }: Props) {
+  const [chosenTemplate, setChosenTemplate] =
+    useState<EvalConfigTemplate | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>("overview");
   const [runs, setRuns] = useState<EvalRunBrief[]>([]);
   const [running, setRunning] = useState<string | null>(null);
@@ -847,6 +854,7 @@ function Evaluation({
         <>
           {/* 操作区只属于历史记录，评测集 Tab 保持为题目管理入口。 */}
           <UnifiedEvalLauncher
+            initialTemplate={chosenTemplate}
             disabled={Boolean(runningRun)}
             onStarted={(id) => {
               onNavigate(`/eval/batches/${encodeURIComponent(id)}`);
@@ -856,7 +864,15 @@ function Evaluation({
         </>
       )}
       {error && <div className="error-banner">{error}</div>}
-      {section === "corpus" ? (
+      {section === "templates" && (
+        <EvalConfigTemplates
+          onUse={(item) => {
+            setChosenTemplate(item);
+            onNavigate("/eval/runs");
+          }}
+        />
+      )}
+      {section === "templates" ? null : section === "corpus" ? (
         <Corpus onToast={onToast} />
       ) : section === "regression" ? (
         <Regression

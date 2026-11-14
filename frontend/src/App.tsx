@@ -127,23 +127,23 @@ type Route =
   | { page: "knowledge"; documentId?: string }
   | { page: "data" }
   | {
-    page: "eval";
-    section: EvaluationSection;
-    runId?: string;
-    batchId?: string;
-    setId?: string;
-    suiteId?: string;
-  }
+      page: "eval";
+      section: EvaluationSection;
+      runId?: string;
+      batchId?: string;
+      setId?: string;
+      suiteId?: string;
+    }
   | { page: "inspection" }
   | { page: "graph"; tab: KnowledgeGraphTab }
   | { page: "overview" }
   | { page: "memory"; sessionId?: string; tab?: "long" }
   | {
-    page: "maintenance";
-    tab: MaintenanceTab;
-    promptId?: string;
-    reviewId?: string;
-  }
+      page: "maintenance";
+      tab: MaintenanceTab;
+      promptId?: string;
+      reviewId?: string;
+    }
   | { page: "settings" };
 type NavIconName =
   | "spark"
@@ -271,6 +271,7 @@ function readRoute(pathname = window.location.pathname): Route {
       runId: decodeURIComponent(evalRun[1]),
     };
   if (path === "/eval/dataset") return { page: "eval", section: "dataset" };
+  if (path === "/eval/templates") return { page: "eval", section: "templates" };
   if (path === "/eval/corpus") return { page: "eval", section: "corpus" };
   if (path === "/eval/special") return { page: "eval", section: "special" };
   if (path.startsWith("/eval/special/"))
@@ -565,13 +566,13 @@ function App() {
         items.some((item) => item.request_id === run.id)
           ? items
           : [
-            ...items,
-            {
-              ...run.response,
-              request_id: run.response.request_id || run.id,
-              feedback: run.feedback,
-            },
-          ],
+              ...items,
+              {
+                ...run.response,
+                request_id: run.response.request_id || run.id,
+                feedback: run.feedback,
+              },
+            ],
       );
     }
   }
@@ -1176,8 +1177,8 @@ function Chat({
             index < 0
               ? [...state.steps, step]
               : state.steps.map((item, position) =>
-                position === index ? step : item,
-              );
+                  position === index ? step : item,
+                );
           return { ...state, steps };
         }),
       onToken: (text: string) =>
@@ -1435,10 +1436,11 @@ function Chat({
                           {message.sources.length > 0 && (
                             <ContextDetail
                               title="回答来源"
-                              label={`来源 · ${message.sources.length} 条检索结果${(message.relations?.length ?? 0) > 0
-                                ? ` + ${message.relations!.length} 条图谱关系`
-                                : ""
-                                }`}
+                              label={`来源 · ${message.sources.length} 条检索结果${
+                                (message.relations?.length ?? 0) > 0
+                                  ? ` + ${message.relations!.length} 条图谱关系`
+                                  : ""
+                              }`}
                             >
                               <AnswerSourceFilters
                                 sources={message.sources}
@@ -2292,17 +2294,17 @@ function guardLayerTags(result: Record<string, unknown>) {
         : null;
   const vectors = vector
     ? [
-      mute(
-        {
-          kind: "model",
-          variant: "embedding",
-          label: String(vector.embedding_model || "向量模型"),
-        },
-        vectorSkipped,
-      ),
-      mute(LANGGRAPH("Store"), vectorSkipped),
-      mute(ALGO("余弦相似度"), vectorSkipped),
-    ]
+        mute(
+          {
+            kind: "model",
+            variant: "embedding",
+            label: String(vector.embedding_model || "向量模型"),
+          },
+          vectorSkipped,
+        ),
+        mute(LANGGRAPH("Store"), vectorSkipped),
+        mute(ALGO("余弦相似度"), vectorSkipped),
+      ]
     : [];
   const modelSkipped = !judged
     ? null
@@ -2313,18 +2315,18 @@ function guardLayerTags(result: Record<string, unknown>) {
         : null;
   const model = judged
     ? [
-      mute(
-        {
-          kind: "model",
-          variant: "small",
-          label:
-            String(judged.model || "Llama-Prompt-Guard-2-86M")
-              .split("/")
-              .pop() ?? "注入检测模型",
-        },
-        modelSkipped,
-      ),
-    ]
+        mute(
+          {
+            kind: "model",
+            variant: "small",
+            label:
+              String(judged.model || "Llama-Prompt-Guard-2-86M")
+                .split("/")
+                .pop() ?? "注入检测模型",
+          },
+          modelSkipped,
+        ),
+      ]
     : [];
   return { rules, vectors, model };
 }
@@ -2607,8 +2609,8 @@ function TraceTimeline({
                     {part
                       ? PART_PURPOSES[part]
                       : (step.status !== "failed" &&
-                        stepPurpose(step.result)) ||
-                      step.detail}
+                          stepPurpose(step.result)) ||
+                        step.detail}
                   </small>
                 </span>
                 {(part ? duration : step.duration_ms) !== undefined && (
@@ -2764,10 +2766,11 @@ function traceRows(
         step,
         part: "scope",
         title: "权限范围",
-        detail: `可检索 ${data.scope.total} 份文档${data.scope.graph_versions
-          ? `，其中 ${data.scope.graph_versions.length} 份有生效图谱`
-          : ""
-          }`,
+        detail: `可检索 ${data.scope.total} 份文档${
+          data.scope.graph_versions
+            ? `，其中 ${data.scope.graph_versions.length} 份有生效图谱`
+            : ""
+        }`,
         duration: timings.scope_ms,
       });
     rows.push({
@@ -3409,10 +3412,10 @@ function formatResult(
   );
   let entries: Array<[string, unknown]> = judged
     ? [
-      ["sufficiency_trace", result],
-      ["sufficiency_conclusion", sufficiencyConclusion(result)],
-      ...filtered,
-    ]
+        ["sufficiency_trace", result],
+        ["sufficiency_conclusion", sufficiencyConclusion(result)],
+        ...filtered,
+      ]
     : filtered;
   if (memoryRead) {
     entries = [...entries, ["audit_history", result], ["model_memory", result]];
@@ -3506,42 +3509,42 @@ function formatResult(
           ) : key === "guard_rules" ? (
             <GuardRules result={value as Record<string, unknown>} />
           ) : // 本步结果里的【滚动摘要】这类写法显示成标签，不显示方括号。
-            key === "step_detail" &&
-              typeof value === "string" &&
-              value.includes("【") ? (
-              <span>{bracketTags(value)}</span>
-            ) : key === "audit_history" ? (
-              <AuditHistory result={value as Record<string, unknown>} />
-            ) : key === "model_memory" ? (
-              <ModelMemory result={value as Record<string, unknown>} />
-            ) : key === "short_state" ? (
-              <ShortState value={value as Record<string, unknown>} />
-            ) : key === "long_memory" ? (
-              <LongMemoryUsed items={value as unknown[]} />
-            ) : key === "context_parts" ? (
-              <ContextParts result={value as Record<string, unknown>} />
-            ) : key === "memory_usage" ? (
-              <MemoryUsage result={value as Record<string, unknown>} />
-            ) : key === "answer_history" ? (
-              <AnswerHistory result={value as Record<string, unknown>} />
-            ) : key === "answer_sources" ? (
-              <AnswerSources context={value as AnswerContext} />
-            ) : // 发给模型的上下文是次要信息，默认折叠；这一步的重点是上面的识别过程和结果。
-              // 不写调用次数：小模型和大模型两次调用会合并成一段，按段数计次会误导。
-              key === "ai_memory_sent" && Array.isArray(value) ? (
-                <details className="ai-memory-collapse">
-                  <summary>展开查看</summary>
-                  <AIMemorySent items={value} />
-                </details>
-              ) : key === "ai_memory_sent" ? (
-                <strong>此条历史记录未保存模型实际输入</strong>
-              ) : key === "model_called" ||
-                key === "call_method" ||
-                key === "process_method" ? (
-                <StackField field={key} value={value} step={step} />
-              ) : (
-                <ResultFieldValue value={value} field={key} />
-              );
+          key === "step_detail" &&
+            typeof value === "string" &&
+            value.includes("【") ? (
+            <span>{bracketTags(value)}</span>
+          ) : key === "audit_history" ? (
+            <AuditHistory result={value as Record<string, unknown>} />
+          ) : key === "model_memory" ? (
+            <ModelMemory result={value as Record<string, unknown>} />
+          ) : key === "short_state" ? (
+            <ShortState value={value as Record<string, unknown>} />
+          ) : key === "long_memory" ? (
+            <LongMemoryUsed items={value as unknown[]} />
+          ) : key === "context_parts" ? (
+            <ContextParts result={value as Record<string, unknown>} />
+          ) : key === "memory_usage" ? (
+            <MemoryUsage result={value as Record<string, unknown>} />
+          ) : key === "answer_history" ? (
+            <AnswerHistory result={value as Record<string, unknown>} />
+          ) : key === "answer_sources" ? (
+            <AnswerSources context={value as AnswerContext} />
+          ) : // 发给模型的上下文是次要信息，默认折叠；这一步的重点是上面的识别过程和结果。
+          // 不写调用次数：小模型和大模型两次调用会合并成一段，按段数计次会误导。
+          key === "ai_memory_sent" && Array.isArray(value) ? (
+            <details className="ai-memory-collapse">
+              <summary>展开查看</summary>
+              <AIMemorySent items={value} />
+            </details>
+          ) : key === "ai_memory_sent" ? (
+            <strong>此条历史记录未保存模型实际输入</strong>
+          ) : key === "model_called" ||
+            key === "call_method" ||
+            key === "process_method" ? (
+            <StackField field={key} value={value} step={step} />
+          ) : (
+            <ResultFieldValue value={value} field={key} />
+          );
         return (
           <div className={`result-row result-${key}`} key={key}>
             <span>{formatResultLabel(key)}</span>
@@ -3906,8 +3909,8 @@ type VectorCheck = {
 function vectorCheck(catalog: GuardRule[]) {
   return (
     catalog.find((item) => item.rule === VECTOR_RULE) as
-    | (GuardRule & { vector?: VectorCheck })
-    | undefined
+      | (GuardRule & { vector?: VectorCheck })
+      | undefined
   )?.vector;
 }
 
@@ -3925,8 +3928,8 @@ type ModelCheck = {
 function modelCheck(catalog: GuardRule[]) {
   return (
     catalog.find((item) => item.rule === MODEL_RULE) as
-    | (GuardRule & { model_check?: ModelCheck })
-    | undefined
+      | (GuardRule & { model_check?: ModelCheck })
+      | undefined
   )?.model_check;
 }
 
@@ -4169,7 +4172,7 @@ function ModelMemory({ result }: { result: Record<string, unknown> }) {
   const total = Number(result.checkpoint_messages ?? 0);
   const summary =
     typeof result.rolling_summary === "string" &&
-      result.rolling_summary !== "尚未生成"
+    result.rolling_summary !== "尚未生成"
       ? result.rolling_summary
       : "";
   const summaryCount = summary ? 1 : 0;
@@ -4727,10 +4730,10 @@ function AIMemorySent({ items }: { items: unknown[] }) {
               </p>
             ) : null}
             {!summary &&
-              questions.length === 0 &&
-              turns.length === 0 &&
-              !hasOrder &&
-              profile.length === 0 ? (
+            questions.length === 0 &&
+            turns.length === 0 &&
+            !hasOrder &&
+            profile.length === 0 ? (
               <span>本次调用未携带历史内容</span>
             ) : null}
           </article>
@@ -4752,12 +4755,12 @@ function RetrievalSources({ items }: { items: unknown[] }) {
         const id = source.id ?? `S${index + 1}`;
         const methods = Array.isArray(source.methods)
           ? source.methods
-            .map(
-              (method) =>
-                ({ dense: "向量", keyword: "关键词" })[String(method)] ??
-                String(method),
-            )
-            .join("、")
+              .map(
+                (method) =>
+                  ({ dense: "向量", keyword: "关键词" })[String(method)] ??
+                  String(method),
+              )
+              .join("、")
           : formatResultValue(source.methods);
         return (
           <div className="retrieval-source-row" key={String(id)}>
@@ -5055,63 +5058,63 @@ function RetrievalDiagnostics({
     },
     config.reranked
       ? {
-        label: graphPoolMode
-          ? graphPoolCount > 0
-            ? `交给重排（RRF 前 ${config.rerank_candidates} + 只有图找到的 ${graphPoolCount}）`
-            : `交给重排（RRF 前 ${config.rerank_candidates}）`
-          : quotaCount > 0
-            ? `交给重排（RRF 前 ${config.rerank_candidates} + 图检索名额 ${quotaCount}）`
-            : `交给重排（RRF 前 ${config.rerank_candidates}）`,
-        // 这一行的数字能点开：看交给重排的是哪些分片。
-        kind: "pool",
-        value: rerankedCount,
-        dropped:
-          removed(
-            candidates.length - rerankedCount,
-            "排名靠后",
-            "全部交给重排",
-          ) +
-          (graphOnlyOutOfPool > 0
-            ? graphPoolMode
-              ? `（其中只有图找到、超过上限 ${config.graph_pool_size} 的 ${graphOnlyOutOfPool} 个）`
-              : `（其中只有图找到的 ${graphOnlyOutOfPool} 个）`
-            : ""),
-        hint: graphPoolMode
-          ? `其他路也找到的分片按 RRF 名次取前 ${config.rerank_candidates} 个；只被图找到的不比 RRF 名次，按图检索的名次取前 ${config.graph_pool_size} 个（这次 ${graphPoolCount} 个）。一起交给交叉编码器重新打分排序`
-          : `RRF 前 ${config.rerank_candidates} 名交给交叉编码器重新打分排序` +
-          (quotaCount > 0
-            ? `；另按图排名表的名次补进 ${quotaCount} 个图检索带回的分片（图检索名额 ${config.graph_rerank_quota}）`
-            : ""),
-      }
+          label: graphPoolMode
+            ? graphPoolCount > 0
+              ? `交给重排（RRF 前 ${config.rerank_candidates} + 只有图找到的 ${graphPoolCount}）`
+              : `交给重排（RRF 前 ${config.rerank_candidates}）`
+            : quotaCount > 0
+              ? `交给重排（RRF 前 ${config.rerank_candidates} + 图检索名额 ${quotaCount}）`
+              : `交给重排（RRF 前 ${config.rerank_candidates}）`,
+          // 这一行的数字能点开：看交给重排的是哪些分片。
+          kind: "pool",
+          value: rerankedCount,
+          dropped:
+            removed(
+              candidates.length - rerankedCount,
+              "排名靠后",
+              "全部交给重排",
+            ) +
+            (graphOnlyOutOfPool > 0
+              ? graphPoolMode
+                ? `（其中只有图找到、超过上限 ${config.graph_pool_size} 的 ${graphOnlyOutOfPool} 个）`
+                : `（其中只有图找到的 ${graphOnlyOutOfPool} 个）`
+              : ""),
+          hint: graphPoolMode
+            ? `其他路也找到的分片按 RRF 名次取前 ${config.rerank_candidates} 个；只被图找到的不比 RRF 名次，按图检索的名次取前 ${config.graph_pool_size} 个（这次 ${graphPoolCount} 个）。一起交给交叉编码器重新打分排序`
+            : `RRF 前 ${config.rerank_candidates} 名交给交叉编码器重新打分排序` +
+              (quotaCount > 0
+                ? `；另按图排名表的名次补进 ${quotaCount} 个图检索带回的分片（图检索名额 ${config.graph_rerank_quota}）`
+                : ""),
+        }
       : {
-        label: config.rerank_error ? "重排失败" : "未启用重排",
-        value: rerankedCount,
-        dropped: "按 RRF 排序",
-        hint: config.rerank_error
-          ? `重排失败：${config.rerank_error}`
-          : "重排未启用，按 RRF 排序",
-      },
+          label: config.rerank_error ? "重排失败" : "未启用重排",
+          value: rerankedCount,
+          dropped: "按 RRF 排序",
+          hint: config.rerank_error
+            ? `重排失败：${config.rerank_error}`
+            : "重排未启用，按 RRF 排序",
+        },
     config.reranked && config.min_score !== null
       ? {
-        label: `相关性 ≥ ${formatNumber(config.min_score, 2)}`,
-        // 这一行的数字能点开：看过阈值的具体是哪些分片。
-        kind: "passed",
-        value: passedCount,
-        dropped: removed(
-          rerankedCount - passedCount,
-          "相关性不足",
-          "全部通过",
-        ),
-        hint: `重排相关概率低于 ${config.min_score} 的分片被过滤`,
-      }
+          label: `相关性 ≥ ${formatNumber(config.min_score, 2)}`,
+          // 这一行的数字能点开：看过阈值的具体是哪些分片。
+          kind: "passed",
+          value: passedCount,
+          dropped: removed(
+            rerankedCount - passedCount,
+            "相关性不足",
+            "全部通过",
+          ),
+          hint: `重排相关概率低于 ${config.min_score} 的分片被过滤`,
+        }
       : {
-        label: "未做相关性过滤",
-        value: passedCount,
-        dropped: "未过滤",
-        hint: config.rerank_error
-          ? "重排失败，没有分数可用于相关性过滤"
-          : "没有重排分数或未设置阈值，不做相关性过滤",
-      },
+          label: "未做相关性过滤",
+          value: passedCount,
+          dropped: "未过滤",
+          hint: config.rerank_error
+            ? "重排失败，没有分数可用于相关性过滤"
+            : "没有重排分数或未设置阈值，不做相关性过滤",
+        },
     {
       label:
         config.source_selection_mode === "tokens"
@@ -5189,8 +5192,8 @@ function RetrievalDiagnostics({
             图检索范围：
             {scope.graph_versions.length > 0
               ? `${scope.graph_versions.length} 份文档的生效图谱（${scope.graph_versions
-                .map((item) => `${item.title} v${item.number}`)
-                .join(" · ")}）`
+                  .map((item) => `${item.title} v${item.number}`)
+                  .join(" · ")}）`
               : "没有建了图的文档"}
             {scope.total > scope.graph_versions.length
               ? `，另 ${scope.total - scope.graph_versions.length} 份没有建图`
@@ -5606,8 +5609,8 @@ function RetrievalDiagnostics({
       leadNote={
         comboByGraphRank
           ? "按图检索的名次排（不比 RRF 名次），前 " +
-          config.graph_pool_size +
-          " 个进入重排；点「原文」看分片正文"
+            config.graph_pool_size +
+            " 个进入重排；点「原文」看分片正文"
           : "按 RRF 得分排；每行写清楚这片是在哪张排名表里第几名，点「原文」看分片正文"
       }
       candidates={[...comboGroup].sort((a, b) =>
@@ -5645,9 +5648,9 @@ function RetrievalDiagnostics({
           {queries.length} 个检索词 ×{" "}
           {textLists.length > 0
             ? methods
-              .filter((method) => method !== "graph")
-              .map((method) => METHOD_LABELS[method] ?? method)
-              .join(" + ")
+                .filter((method) => method !== "graph")
+                .map((method) => METHOD_LABELS[method] ?? method)
+                .join(" + ")
             : "—"}{" "}
           = {textLists.length} 张排名表
           {graph
@@ -5802,7 +5805,9 @@ function RetrievalDiagnostics({
       {contextRelations && contextRelations.items.length > 0 && (
         <div className="diag-fusion">
           <p className="diag-part-lead">
-            <strong>图谱关系：不进融合，也不进分片重排，直接放入回答上下文</strong>
+            <strong>
+              图谱关系：不进融合，也不进分片重排，直接放入回答上下文
+            </strong>
           </p>
           <div className="diag-fold-head">
             <button
@@ -6036,8 +6041,9 @@ function RetrievalDiagnostics({
           open
           title={`过了相关性阈值的 ${passedChunks.length} 个分片`}
           lead={`重排分不低于 ${formatNumber(config.min_score, 2)} 的 ${passedChunks.length} 个分片`}
-          leadNote={`其中 ${beyondLimit} 个超过上限没有返回${mergedCount > 0 ? `，${mergedCount} 个并入父块` : ""
-            }，${returned} 条成了来源；按重排概率排，点「原文」看分片正文`}
+          leadNote={`其中 ${beyondLimit} 个超过上限没有返回${
+            mergedCount > 0 ? `，${mergedCount} 个并入父块` : ""
+          }，${returned} 条成了来源；按重排概率排，点「原文」看分片正文`}
           candidates={passedChunks}
           queries={queries}
           relations={graphRelations}
@@ -7189,10 +7195,10 @@ function Knowledge({
   const sameTitle =
     upload && !upload.replaceTarget
       ? findSameTitle(
-        documents.filter((item) => item.can_edit !== false),
-        title,
-        file,
-      )
+          documents.filter((item) => item.can_edit !== false),
+          title,
+          file,
+        )
       : null;
 
   // 以前逐个轮询列表里的版本 id，新版本处理时列表展示的仍是当前版本，会漏掉进度；
@@ -8014,18 +8020,18 @@ function DocumentMetadataPanel({ document }: { document: DocumentStatus }) {
     ],
     ...(metadata.parse_strategy === "hi_res"
       ? [
-        [
-          "OCR 语言",
-          metadata.ocr_languages?.length
-            ? metadata.ocr_languages
-              .map((code) => OCR_LANGUAGE_LABELS[code] ?? code)
-              .join(" + ")
-            : "英文（未设置，导入时的默认值）",
-          metadata.ocr_languages?.length
-            ? "PDF 里没有文字层的部分（扫描件、图片）按这些语言识别；有文字层的直接取文字"
-            : "这份 PDF 导入时还没设置 OCR 语言，扫描件里的中文可能识别不出；重新上传同一个文件会按中文重新识别",
-        ] as [string, string, string],
-      ]
+          [
+            "OCR 语言",
+            metadata.ocr_languages?.length
+              ? metadata.ocr_languages
+                  .map((code) => OCR_LANGUAGE_LABELS[code] ?? code)
+                  .join(" + ")
+              : "英文（未设置，导入时的默认值）",
+            metadata.ocr_languages?.length
+              ? "PDF 里没有文字层的部分（扫描件、图片）按这些语言识别；有文字层的直接取文字"
+              : "这份 PDF 导入时还没设置 OCR 语言，扫描件里的中文可能识别不出；重新上传同一个文件会按中文重新识别",
+          ] as [string, string, string],
+        ]
       : []),
     ["页数", metadata.page_count ? String(metadata.page_count) : missing],
     [
@@ -8561,7 +8567,7 @@ function DocumentDetail({
               }
               onRetryContexts={
                 document.status.startsWith("ready") &&
-                  document.can_edit !== false
+                document.can_edit !== false
                   ? onRetryContexts
                   : undefined
               }
@@ -8796,14 +8802,14 @@ const VISIBILITY_OPTIONS: Array<{
   label: string;
   hint: string;
 }> = [
-    { value: "private", label: "仅自己", hint: "只有你能检索和查看" },
-    {
-      value: "shared",
-      label: "指定部门",
-      hint: "你和所选部门的成员可以检索和查看",
-    },
-    { value: "public", label: "所有人", hint: "所有登录用户都可以检索和查看" },
-  ];
+  { value: "private", label: "仅自己", hint: "只有你能检索和查看" },
+  {
+    value: "shared",
+    label: "指定部门",
+    hint: "你和所选部门的成员可以检索和查看",
+  },
+  { value: "public", label: "所有人", hint: "所有登录用户都可以检索和查看" },
+];
 
 // 可见范围的简短文案；共享时列出部门名称。
 function visibilityLabel(
@@ -8839,10 +8845,10 @@ function PermissionPicker({
   const options = VISIBILITY_OPTIONS.map((option) =>
     option.value === "public" && !isAdmin
       ? {
-        ...option,
-        label: "所有人（需审核）",
-        hint: "提交公开申请，管理员审核通过后所有登录用户都可以检索和查看",
-      }
+          ...option,
+          label: "所有人（需审核）",
+          hint: "提交公开申请，管理员审核通过后所有登录用户都可以检索和查看",
+        }
       : option,
   );
   function toggleGroup(groupId: string) {
@@ -8915,7 +8921,7 @@ function PermissionPanel({
   const changed =
     visibility !== (document.visibility ?? "private") ||
     groups.slice().sort().join(",") !==
-    (document.groups ?? []).slice().sort().join(",");
+      (document.groups ?? []).slice().sort().join(",");
 
   useEffect(() => {
     setVisibility(document.visibility ?? "private");
@@ -9178,22 +9184,22 @@ function DocumentTrace({
       ? []
       : step.step_id === "graph_write"
         ? [
-          step,
-          {
-            ...step,
-            step_id: "graph_check",
-            stage: "graph_check",
-            title: "图谱检查",
-            status: overview.active
-              ? ("running" as const)
-              : overview.done
-                ? ("completed" as const)
-                : ("pending" as const),
-            detail: overview.text,
-            result: null,
-            duration_ms: null,
-          },
-        ]
+            step,
+            {
+              ...step,
+              step_id: "graph_check",
+              stage: "graph_check",
+              title: "图谱检查",
+              status: overview.active
+                ? ("running" as const)
+                : overview.done
+                  ? ("completed" as const)
+                  : ("pending" as const),
+              detail: overview.text,
+              result: null,
+              duration_ms: null,
+            },
+          ]
         : [step],
   );
   if (steps.length === 0)
@@ -9214,8 +9220,8 @@ function DocumentTrace({
         // 二次检查在写入图谱之后单独跑，不阻塞建图：有待处理的建议时只给一个入口，不标红也不标黄。
         const review =
           step.step_id === "graph_review" &&
-            step.result &&
-            "status" in step.result
+          step.result &&
+          "status" in step.result
             ? (step.result as unknown as GraphReviewReport)
             : null;
         const reviewActive =
@@ -9293,20 +9299,20 @@ function DocumentTrace({
               {review || step.step_id === "graph_rewrite"
                 ? null
                 : step.result && (
-                  <Clamp text={stepResultText(step.result)}>
-                    <span>
-                      {Object.entries(step.result).map(
-                        ([key, value], index) => (
-                          <Fragment key={key}>
-                            {index > 0 && " · "}
-                            <strong>{formatResultLabel(key)}</strong>：
-                            {stepResultValue(key, value)}
-                          </Fragment>
-                        ),
-                      )}
-                    </span>
-                  </Clamp>
-                )}
+                    <Clamp text={stepResultText(step.result)}>
+                      <span>
+                        {Object.entries(step.result).map(
+                          ([key, value], index) => (
+                            <Fragment key={key}>
+                              {index > 0 && " · "}
+                              <strong>{formatResultLabel(key)}</strong>：
+                              {stepResultValue(key, value)}
+                            </Fragment>
+                          ),
+                        )}
+                      </span>
+                    </Clamp>
+                  )}
             </div>
             {step.duration_ms !== null && step.duration_ms !== undefined && (
               <time title={durationTitle(step.duration_ms)}>

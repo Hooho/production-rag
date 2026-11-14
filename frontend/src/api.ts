@@ -1830,6 +1830,9 @@ export type EvalParamOptions = {
 
 // 一次评测跑多组配置（app/evaluation/batch.py）：每组就是一份完整的发起表单，按顺序各跑一遍，放进同一份批次报告。
 export type EvalLaunchBody = {
+  version?: 1 | 2;
+  mode?: EvalMode;
+  methods?: ("dense" | "keyword" | "graph")[];
   kind: "retrieval" | "generation" | "special";
   split?: string;
   suites?: string[];
@@ -4824,5 +4827,38 @@ export function saveEvalDocumentReferences(documentIds: string[]) {
   return request<{ saved: boolean }>("/eval/document-references", {
     method: "PUT",
     body: JSON.stringify({ document_ids: documentIds }),
+  });
+}
+
+export type EvalConfigTemplate = {
+  suite_names?: string[];
+  corpus_names?: string[];
+  issues?: string[];
+  id: string;
+  name: string;
+  config: EvalLaunchBody & {
+    mode: EvalMode;
+    methods: ("dense" | "keyword" | "graph")[];
+  };
+  created_by: string;
+  created: string;
+  updated: string;
+};
+export function listEvalConfigTemplates() {
+  return request<{ items: EvalConfigTemplate[] }>("/eval/config-templates");
+}
+export function saveEvalConfigTemplate(
+  name: string,
+  config: EvalLaunchBody,
+  id?: string,
+) {
+  return request<{ id: string }>(
+    `/eval/config-templates${id ? `/${encodeURIComponent(id)}` : ""}`,
+    { method: id ? "PUT" : "POST", body: JSON.stringify({ name, config }) },
+  );
+}
+export function deleteEvalConfigTemplate(id: string) {
+  return requestEmpty(`/eval/config-templates/${encodeURIComponent(id)}`, {
+    method: "DELETE",
   });
 }

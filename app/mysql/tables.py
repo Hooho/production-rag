@@ -18,7 +18,9 @@ from sqlalchemy.dialects import mysql
 metadata = MetaData()
 # 程序算出来的键（合并键、别名键）按字节比较：MySQL 默认的比较规则会把程序认为不同的两个键当成相同，
 # 写入时报唯一键重复。SQLite（测试）不认这个排序规则，只在 MySQL 上生效。
-BinaryKey = String(255).with_variant(mysql.VARCHAR(255, collation="utf8mb4_bin"), "mysql")
+BinaryKey = String(255).with_variant(
+    mysql.VARCHAR(255, collation="utf8mb4_bin"), "mysql"
+)
 sessions = Table(
     "sessions",
     metadata,
@@ -890,5 +892,17 @@ graph_step_judgments = Table(
     Column("data", JSON, nullable=False),
     # prompt 和模型原始输出：只在打开详情时读
     Column("trace", JSON),
+    Column("updated", String(40), nullable=False),
+)
+
+# 可复用的单组评测配置，不包含运行结果或密钥。
+eval_config_templates = Table(
+    "eval_config_templates",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("name", String(80), nullable=False),
+    Column("config", JSON, nullable=False),
+    Column("created_by", String(32), nullable=False),
+    Column("created", String(40), nullable=False),
     Column("updated", String(40), nullable=False),
 )

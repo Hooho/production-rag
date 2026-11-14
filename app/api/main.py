@@ -205,6 +205,12 @@ class EvalRunInput(BaseModel):
 
 
 # 一次评测跑多组配置：每组就是一份完整的发起表单，按顺序各跑一遍，放进同一份批次报告（app/evaluation/batch.py）。
+class EvalConfigTemplateInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=80)
+    config: EvalRunInput
+
+
 class EvalBatchInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field("", max_length=60)
@@ -3822,6 +3828,128 @@ def create_app(store=None, models=None, jwt_secret=None):
 
     # 评测语料库：评测检索的文档。上传 Markdown / 文本，评测开跑时勾选用哪几份（见 app/evaluation/corpus.py）。
     # 每份带上在评测账号里的导入情况：已导入几个分片、内容改过还没重新导入、还没导入（下次评测开跑时导入）。
+    @app.get("/eval/config-templates", dependencies=[Depends(require_admin)])
+    def list_eval_config_templates():
+        from ..mysql.store import eval_config_templates, eval_suites
+
+        with app.state.store.engine.connect() as connection:
+            rows = [
+                dict(row)
+                for row in connection.execute(
+                    select(eval_config_templates).order_by(
+                        eval_config_templates.c.updated.desc()
+                    )
+                ).mappings()
+            ]
+            suites = dict(
+                connection.execute(select(eval_suites.c.id, eval_suites.c.name)).all()
+            )
+        corpus = {
+            entry["id"]: entry
+            for entry in eval_corpus.list_entries(app.state.store.engine)
+        }
+        for row in rows:
+            config = row["config"]
+            row["suite_names"] = [
+                suites.get(key, "已删除的题集") for key in config.get("suite_ids", [])
+            ]
+            row["corpus_names"] = [
+                corpus.get(key, {}).get("title", "已移除的语料")
+                for key in config.get("corpus_ids", [])
+            ]
+            issues = []
+            if any(key not in suites for key in config.get("suite_ids", [])):
+                issues.append("题集已删除")
+            if any(
+                key not in corpus or corpus[key].get("missing")
+                for key in config.get("corpus_ids", [])
+            ):
+                issues.append("语料已移除或不可用")
+            try:
+                eval_params.prepare(
+                    app.state.store, app.state.models, config.get("params")
+                )
+            except ValueError as error:
+                issues.append(str(error))
+            row["issues"] = issues
+        return {"items": rows}
+
+    def persist_eval_template(body, admin, template_id=None):
+        from ..mysql.store import eval_config_templates
+
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(422, "请输入配置模板名称")
+        if body.config.kind == "special" or (
+            body.config.kind == "generation" and body.config.mode == "agent"
+        ):
+            raise HTTPException(422, "不支持此评测配置组合")
+        try:
+            cleaned, _ = eval_params.prepare(
+                app.state.store, app.state.models, body.config.params
+            )
+        except ValueError as error:
+            raise HTTPException(422, str(error))
+        now = datetime.now(timezone.utc).isoformat()
+        config = body.config.model_dump()
+        config["params"] = cleaned
+        config["version"] = 2
+        if len(set(body.config.methods)) != len(body.config.methods):
+            raise HTTPException(422, "检索方式不能重复")
+        values = {"name": name, "config": config, "updated": now}
+        with app.state.store.engine.begin() as connection:
+            if template_id:
+                if not connection.execute(
+                    select(eval_config_templates.c.id).where(
+                        eval_config_templates.c.id == template_id
+                    )
+                ).first():
+                    raise HTTPException(404, "配置模板不存在")
+                connection.execute(
+                    eval_config_templates.update()
+                    .where(eval_config_templates.c.id == template_id)
+                    .values(**values)
+                )
+            else:
+                template_id = str(uuid4())
+                connection.execute(
+                    eval_config_templates.insert().values(
+                        id=template_id,
+                        created_by=admin["username"],
+                        created=now,
+                        **values,
+                    )
+                )
+        return {"id": template_id}
+
+    @app.post("/eval/config-templates", status_code=201)
+    def create_eval_config_template(
+        body: EvalConfigTemplateInput, admin=Depends(require_admin)
+    ):
+        return persist_eval_template(body, admin)
+
+    @app.put("/eval/config-templates/{template_id}")
+    def update_eval_config_template(
+        template_id: str, body: EvalConfigTemplateInput, admin=Depends(require_admin)
+    ):
+        return persist_eval_template(body, admin, template_id)
+
+    @app.delete(
+        "/eval/config-templates/{template_id}", dependencies=[Depends(require_admin)]
+    )
+    def remove_eval_config_template(template_id: str):
+        from ..mysql.store import eval_config_templates
+
+        with app.state.store.engine.begin() as connection:
+            count = connection.execute(
+                eval_config_templates.delete().where(
+                    eval_config_templates.c.id == template_id
+                )
+            ).rowcount
+            if not count:
+                raise HTTPException(404, "配置模板不存在")
+        return {"deleted": True}
+
     @app.get("/eval/corpus", dependencies=[Depends(require_admin)])
     def eval_corpus_list():
         from ..evaluation import document_refs
