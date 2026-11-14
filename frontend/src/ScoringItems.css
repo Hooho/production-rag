@@ -23,6 +23,10 @@
   border: 1px solid #d5e3d8;
   border-radius: 8px;
   background: #f8fbf9;
+  /* 同一行里卡片被拉成等高后，这一行剩下的高度不要摊给内容：
+     标题和标签都保持自己的高度，多出来的空间留在卡片底部。
+     不加这句，标签容器会被拉高，里面的 flex 行跟着拉高，分片标签就变成椭圆。 */
+  align-content: start;
 }
 
 .ag-scoring-items > .ag-evidence .ag-evidence-target-tags {
