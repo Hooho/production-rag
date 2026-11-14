@@ -866,6 +866,10 @@ function Evaluation({
       {error && <div className="error-banner">{error}</div>}
       {section === "templates" && (
         <EvalConfigTemplates
+          onCreate={() => {
+            setChosenTemplate(null);
+            onNavigate("/eval/runs");
+          }}
           onUse={(item) => {
             setChosenTemplate(item);
             onNavigate("/eval/runs");

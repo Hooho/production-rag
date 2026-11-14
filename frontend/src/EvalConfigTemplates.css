@@ -1,0 +1,76 @@
+.eval-template-page {
+  color: #303846;
+  font-size: 13px;
+}
+.eval-template-heading {
+  margin-bottom: 12px;
+}
+.eval-template-heading h2 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 600;
+}
+.eval-template-heading p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 20px;
+  color: #7b8593;
+}
+.eval-template-content {
+  border: 1px solid #e2e8ef;
+  border-radius: 4px;
+  background: #fff;
+  overflow: hidden;
+}
+.eval-template-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px 16px;
+  min-height: 200px;
+  text-align: center;
+}
+.eval-template-empty svg {
+  color: #b7c6d9;
+}
+.eval-template-empty strong {
+  font-size: 14px;
+  font-weight: 500;
+  color: #414c5b;
+}
+.eval-template-empty p {
+  margin: 0;
+  font-size: 12px;
+  color: #85909e;
+  line-height: 20px;
+}
+.eval-template-content > .loading-skeleton {
+  padding: 16px;
+}
+.eval-template-page .eval-template-table th,
+.eval-template-page .eval-template-table td {
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 400;
+  border: 0;
+  border-bottom: 1px solid #edf0f4;
+  background: #fff;
+  color: #414b59;
+  vertical-align: middle;
+}
+.eval-template-page .eval-template-table th {
+  background: #fafbfd;
+  color: #707b89;
+  font-size: 12px;
+  font-weight: 500;
+}
+.eval-template-page .eval-template-table .unified-eval-options {
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+.eval-template-page .cp-remove {
+  color: #cb5158;
+}
