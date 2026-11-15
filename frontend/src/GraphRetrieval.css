@@ -11,6 +11,12 @@
   min-width: 0;
 }
 
+/* 每一步之间已经靠 .grt 的 gap 分开；.ag-delivery-dialog section 给的 margin-top: 20px
+   是给普通排版用的，在这里和 gap 叠加会让间距过大，这里去掉。 */
+.grt > .grt-step {
+  margin-top: 0;
+}
+
 .grt-step h5 {
   display: flex;
   flex-wrap: wrap;
