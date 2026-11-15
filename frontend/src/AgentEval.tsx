@@ -455,7 +455,9 @@ function EvidenceStatus({
                   ? "is-filtered"
                   : row.tone === "neutral"
                     ? "is-missed"
-                    : "is-hit"
+                    : row.label === "关系命中"
+                      ? "is-hit is-relation-hit"
+                      : "is-hit"
               }
             >
               <span className="ag-evidence-icon" aria-hidden="true">
@@ -464,7 +466,7 @@ function EvidenceStatus({
               <span className="ag-evidence-name">[{itemName(index)}]</span>
               <Tag
                 tone={row.tone}
-                hue={row.hue}
+                hue={row.label === "关系命中" ? 165 : row.hue}
                 size="sm"
                 outline={row.dashed}
                 className={row.dashed ? "is-dashed" : undefined}
