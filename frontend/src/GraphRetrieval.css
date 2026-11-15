@@ -125,17 +125,17 @@
   font-size: 12px;
 }
 
-/* 「来自哪些关系」里的来源说明：次要信息，字号比关系本身小一号。 */
-.grt-origin-source {
+/* 次要信息：字号比正文小一号（抽屉里正文是 14px，下面一条压过它）。 */
+.grt-secondary {
   font-size: 12px;
 }
 
 /* 抽屉里正文统一 14px（.ag-delivery-dialog.grt-dialog .diag :not(button)），
-   上面三条压不过它，这里用更具体的选择器再压一次：关系列表里的描述、原文引用、
-   来源说明一律 12px，图检索明细、回答步骤、评测弹窗几处一致。 */
+   上面几条压不过它，这里用更具体的选择器再压一次：关系列表里的描述、原文引用、
+   次要信息一律 12px，图检索明细、回答步骤、评测弹窗几处一致。 */
 .ag-delivery-dialog.grt-dialog .diag .grt-rel-desc,
 .ag-delivery-dialog.grt-dialog .diag .grt-evidence,
-.ag-delivery-dialog.grt-dialog .diag .grt-origin-source {
+.ag-delivery-dialog.grt-dialog .diag .grt-secondary {
   font-size: 12px;
 }
 

@@ -43,6 +43,12 @@ function ms(value: number | null | undefined) {
   return value >= 1000 ? `${(value / 1000).toFixed(1)}s` : `${value}ms`;
 }
 
+// 分片序号：分片 id 末尾是这一片的位置（从 0 开始），页面上从第 1 片数（和评测里的一致）。
+function chunkNumber(chunkId?: string | null) {
+  const index = chunkId?.match(/:(\d+)$/)?.[1];
+  return index === undefined ? null : Number(index) + 1;
+}
+
 type ChunkInfo = Pick<
   GraphRetrievalTable,
   "chunk_id" | "title" | "text" | "heading" | "version"
@@ -2093,127 +2099,134 @@ function ChunkTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <tr
-                key={row.chunk_id}
-                className={row.kept === false ? "is-dropped" : ""}
-              >
-                <td className="num">{row.kept === false ? "—" : row.rank}</td>
-                <td>
-                  <span className="diag-title">
-                    {row.title ? (
-                      <SearchText text={row.title} query={query ?? ""} />
-                    ) : (
-                      <SearchText text={row.chunk_id} query={query ?? ""} />
+            {rows.map((row) => {
+              const piece = chunkNumber(row.chunk_id);
+              return (
+                <tr
+                  key={row.chunk_id}
+                  className={row.kept === false ? "is-dropped" : ""}
+                >
+                  <td className="num">{row.kept === false ? "—" : row.rank}</td>
+                  <td>
+                    {piece && (
+                      <small className="grt-secondary">第 {piece} 片</small>
                     )}
-                  </span>
-                  {row.heading ? (
-                    <small>
-                      <SearchText text={row.heading} query={query ?? ""} />
-                    </small>
-                  ) : null}
-                  {row.kept === false ? (
-                    <span className="grt-dropped">
-                      ✕ <SearchText text={row.reason} query={query ?? ""} />
+                    <span className="diag-title">
+                      {row.title ? (
+                        <SearchText text={row.title} query={query ?? ""} />
+                      ) : (
+                        <SearchText text={row.chunk_id} query={query ?? ""} />
+                      )}
                     </span>
-                  ) : row.text ? (
-                    <InfoPopover
-                      title={row.title}
-                      content={() => {
-                        const linked = row.relation_ids
-                          .map((id) => relations.get(id))
-                          .filter(
-                            (item): item is GraphRetrievalRelation => !!item,
+                    {row.heading ? (
+                      <small>
+                        <SearchText text={row.heading} query={query ?? ""} />
+                      </small>
+                    ) : null}
+                    {row.kept === false ? (
+                      <span className="grt-dropped">
+                        ✕ <SearchText text={row.reason} query={query ?? ""} />
+                      </span>
+                    ) : row.text ? (
+                      <InfoPopover
+                        title={row.title}
+                        content={() => {
+                          const linked = row.relation_ids
+                            .map((id) => relations.get(id))
+                            .filter(
+                              (item): item is GraphRetrievalRelation => !!item,
+                            );
+                          return (
+                            <ChunkOriginalText
+                              text={row.text ?? ""}
+                              groups={[
+                                {
+                                  kind: "evidence",
+                                  texts: linked.flatMap((item) =>
+                                    (item.evidence ?? "").split("||"),
+                                  ),
+                                },
+                                {
+                                  kind: "entity",
+                                  texts: linked.flatMap((item) => [
+                                    item.source,
+                                    item.target,
+                                  ]),
+                                },
+                              ]}
+                            />
                           );
+                        }}
+                      >
+                        <button type="button" className="link-button button-sm">
+                          原文
+                        </button>
+                      </InfoPopover>
+                    ) : null}
+                  </td>
+                  <td>
+                    <ul className="grt-linked">
+                      {row.relation_ids.map((id) => {
+                        const relation = relations.get(id);
                         return (
-                          <ChunkOriginalText
-                            text={row.text ?? ""}
-                            groups={[
-                              {
-                                kind: "evidence",
-                                texts: linked.flatMap((item) =>
-                                  (item.evidence ?? "").split("||"),
-                                ),
-                              },
-                              {
-                                kind: "entity",
-                                texts: linked.flatMap((item) => [
-                                  item.source,
-                                  item.target,
-                                ]),
-                              },
-                            ]}
-                          />
-                        );
-                      }}
-                    >
-                      <button type="button" className="link-button button-sm">
-                        原文
-                      </button>
-                    </InfoPopover>
-                  ) : null}
-                </td>
-                <td>
-                  <ul className="grt-linked">
-                    {row.relation_ids.map((id) => {
-                      const relation = relations.get(id);
-                      return (
-                        <li key={id}>
-                          {relation ? (
-                            <span className="grt-rel-line">
-                              <SearchText
-                                text={relation.source}
-                                query={query ?? ""}
-                              />
-                              <span className="grt-arrow">→</span>
-                              <small
-                                className="grt-category is-hue"
-                                style={categoryStyle(relation.category)}
-                              >
+                          <li key={id}>
+                            {relation ? (
+                              <span className="grt-rel-line">
                                 <SearchText
-                                  text={relation.category}
+                                  text={relation.source}
                                   query={query ?? ""}
                                 />
-                              </small>
-                              <span className="grt-arrow">→</span>
-                              <SearchText
-                                text={relation.target}
-                                query={query ?? ""}
-                              />
-                              {relation.origins?.length ? (
-                                <small className="grt-origin-source">
-                                  来源：
+                                <span className="grt-arrow">→</span>
+                                <small
+                                  className="grt-category is-hue"
+                                  style={categoryStyle(relation.category)}
+                                >
                                   <SearchText
-                                    text={relation.origins
-                                      .map((origin) =>
-                                        origin === "global"
-                                          ? "全局关系"
-                                          : origin === relation.source_entity_id
-                                            ? (relation.source_entity ??
-                                              relation.source)
-                                            : origin ===
-                                                relation.target_entity_id
-                                              ? (relation.target_entity ??
-                                                relation.target)
-                                              : "实体一跳",
-                                      )
-                                      .join("、")}
+                                    text={relation.category}
                                     query={query ?? ""}
                                   />
                                 </small>
-                              ) : null}
-                            </span>
-                          ) : (
-                            id
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </td>
-                <td className="num">{score(row.score)}</td>
-              </tr>
-            ))}
+                                <span className="grt-arrow">→</span>
+                                <SearchText
+                                  text={relation.target}
+                                  query={query ?? ""}
+                                />
+                                {relation.origins?.length ? (
+                                  <small className="grt-origin-source">
+                                    来源：
+                                    <SearchText
+                                      text={relation.origins
+                                        .map((origin) =>
+                                          origin === "global"
+                                            ? "全局关系"
+                                            : origin ===
+                                                relation.source_entity_id
+                                              ? (relation.source_entity ??
+                                                relation.source)
+                                              : origin ===
+                                                  relation.target_entity_id
+                                                ? (relation.target_entity ??
+                                                  relation.target)
+                                                : "实体一跳",
+                                        )
+                                        .join("、")}
+                                      query={query ?? ""}
+                                    />
+                                  </small>
+                                ) : null}
+                              </span>
+                            ) : (
+                              id
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </td>
+                  <td className="num">{score(row.score)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </Table>
       )}
