@@ -310,7 +310,6 @@ function MaterialLine({
           {material.chars.toLocaleString()} 字 · 约{" "}
           {material.tokens.toLocaleString()} token
         </span>
-        {given.length > 0 && <span>{given.length} 条关系</span>}
       </div>
       <ul className="ag-material-list">
         <li>
