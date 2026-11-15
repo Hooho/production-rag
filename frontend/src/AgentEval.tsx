@@ -373,6 +373,20 @@ function agentEntries(
         extHits: main
           ? result.hits.filter((index) => !main.includes(index))
           : [],
+        source: {
+          key: result.evidence_id,
+          id: result.evidence_id,
+          title: result.title,
+          heading: result.heading ?? null,
+          text: result.text,
+          chunkId: result.chunk_id,
+          parts,
+          relevance: result.relevance,
+        },
+        evidence: result.hits.map((index) => ({
+          number: index + 1,
+          text: agent.evidence[index]?.text ?? "",
+        })),
       });
     }
   }
@@ -3111,6 +3125,10 @@ function FixedLog({
   // 每个计分项所在的分片（Agent 记的所在分块，旧记录用固定流程命中的分片），用来算每次检索命中了第几个计分项。
   const evidenceLists = evidenceChunkLists(question);
   const total = question.answerable ? evidenceLists.length : 0;
+  // 计分项的正文：打开原文时标出命中的是哪几条，和 evidenceLists 的下标一一对应。
+  const evidenceTexts = question.agent?.evidence?.length
+    ? question.agent.evidence
+    : (question.evidence ?? []);
   const queries = question.queries ?? [];
   // 按扩展查询里的顺序排每一路（旧记录没有 query_routes 时是空的，退回只列检索词）。
   const routes = [...(question.query_routes ?? [])].sort(
@@ -3345,6 +3363,20 @@ function FixedLog({
                                 evidenceLists[index]?.includes(item.chunkId)
                               ),
                           ),
+                          source: {
+                            key: item.key,
+                            id: item.id,
+                            title: item.title,
+                            heading: item.heading,
+                            text: item.text ?? "",
+                            chunkId: item.chunkId,
+                            parts: item.parts,
+                            relevance: item.relevance,
+                          },
+                          evidence: hits.map((index) => ({
+                            number: index + 1,
+                            text: evidenceTexts[index]?.text ?? "",
+                          })),
                         };
                       })
                 }

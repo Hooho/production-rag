@@ -1,7 +1,10 @@
 import { useState } from "react";
 import Table, { TablePagination } from "./Table";
 import { DetailDialog } from "./DetailDialog";
+import { InfoPopover } from "./Popover";
+import { ChunkOriginalText } from "./ChunkOriginalText";
 import { buildHaystack, normalizeSearch, SearchText } from "./searchText";
+import type { ChunkOriginalSource } from "./ChunkOriginalDialog";
 import type { EvalMaterial } from "./api";
 import "./GraphRetrieval.css";
 
@@ -16,6 +19,10 @@ export type MaterialEntry = {
   from: string;
   hits: number[];
   extHits: number[];
+  // 点「分片」看原文用：这段资料本身（标题、正文、父块由哪些分片拼成）。
+  source?: ChunkOriginalSource;
+  // 这一段含哪几条计分项（打开原文时标出来）。
+  evidence?: { number: number; text: string }[];
 };
 
 function chunkLabel(
@@ -135,10 +142,41 @@ export function MaterialListDialog({
                       <SearchText text={entry.id} query={query} />
                     </td>
                     <td>
-                      <SearchText
-                        text={chunkLabel(entry.position, entry.chunkId)}
-                        query={query}
-                      />
+                      {/* 点分片看这一段给模型的正文：浮窗里已经是第二层，用气泡展示，不叠第三层抽屉。 */}
+                      <InfoPopover
+                        title={`${chunkLabel(entry.position, entry.chunkId)} · 给模型的正文`}
+                        content={() =>
+                          entry.source?.text ? (
+                            <ChunkOriginalText
+                              text={entry.source.text}
+                              evidenceHint={false}
+                              groups={[
+                                {
+                                  kind: "evidence",
+                                  texts: (entry.evidence ?? [])
+                                    .map((item) => item.text)
+                                    .filter(Boolean),
+                                },
+                              ]}
+                            />
+                          ) : (
+                            <p className="ag-muted">
+                              这次评测没有保存这一段的正文。
+                            </p>
+                          )
+                        }
+                      >
+                        <button
+                          type="button"
+                          className="link-button"
+                          title="看这一段给模型的正文"
+                        >
+                          <SearchText
+                            text={chunkLabel(entry.position, entry.chunkId)}
+                            query={query}
+                          />
+                        </button>
+                      </InfoPopover>
                       {entry.extended ? (
                         <small>扩展 {entry.extended} 片</small>
                       ) : null}
