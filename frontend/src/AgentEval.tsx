@@ -28,6 +28,7 @@ import {
   type EvalSummary,
 } from "./api";
 import { ContextRelationList } from "./ContextRelationList";
+import { MaterialListDialog, type MaterialEntry } from "./EvalMaterialList";
 import { AgentError } from "./AgentError";
 import { EvidenceFilterSummary } from "./EvidenceFilterSummary";
 import { ScoringItems } from "./ScoringItems";
@@ -288,33 +289,59 @@ function MaterialLine({
   material,
   relations,
   relationReason,
+  entries,
 }: {
   material: EvalMaterial | null;
   // 这次检索放进回答上下文的图谱关系：数量写在这里，点开看每一条。
   relations?: ContextRelation[];
   relationReason?: string | null;
+  // 交给模型的每一段资料：点开看逐段明细。
+  entries?: MaterialEntry[];
 }) {
   const [relationsOpen, setRelationsOpen] = useState(false);
+  const [materialOpen, setMaterialOpen] = useState(false);
   if (!material) return null;
   const given = (relations ?? []).filter((row) => row.status === "context");
   return (
     <div className="ag-material">
-      <span className="ag-tool">交给模型的资料</span>
-      <span>
-        <b>{material.count}</b> 段 · {material.chars.toLocaleString()} 字 · 约{" "}
-        {material.tokens.toLocaleString()} token
-      </span>
-      {given.length > 0 && (
+      <div className="ag-material-head">
+        <span className="ag-tool">交给模型的资料</span>
         <span>
+          {material.chars.toLocaleString()} 字 · 约{" "}
+          {material.tokens.toLocaleString()} token
+        </span>
+        {given.length > 0 && <span>{given.length} 条关系</span>}
+      </div>
+      <ul className="ag-material-list">
+        <li>
           <button
             type="button"
             className="link-button"
-            title="看放进回答上下文的图谱关系"
-            onClick={() => setRelationsOpen(true)}
+            title="看逐段明细"
+            onClick={() => setMaterialOpen(true)}
           >
-            <b>{given.length}</b> 条关系
+            {material.count} 段资料
           </button>
-        </span>
+        </li>
+        {given.length > 0 && (
+          <li>
+            <button
+              type="button"
+              className="link-button"
+              title="看放进回答上下文的图谱关系"
+              onClick={() => setRelationsOpen(true)}
+            >
+              {given.length} 条关系
+            </button>
+          </li>
+        )}
+      </ul>
+      {materialOpen && (
+        <MaterialListDialog
+          material={material}
+          entries={entries ?? []}
+          onClose={() => setMaterialOpen(false)}
+        />
       )}
       {relationsOpen && (
         <ContextRelationList
@@ -324,6 +351,34 @@ function MaterialLine({
         />
       )}
     </div>
+  );
+}
+
+// Agent 的资料池：按编号顺序，每段记第一次拿到它的那次检索（同一分片再次命中沿用原编号）。
+function agentEntries(
+  agent: NonNullable<EvalQuestion["agent"]>,
+): MaterialEntry[] {
+  const seen = new Map<string, MaterialEntry>();
+  for (const call of agent.calls) {
+    for (const result of call.results ?? []) {
+      if (seen.has(result.evidence_id)) continue;
+      const parts = result.parent_chunk_ids ?? [];
+      const main = result.main_hits;
+      seen.set(result.evidence_id, {
+        id: result.evidence_id,
+        chunkId: result.chunk_id,
+        position: result.position,
+        extended: parts.filter((chunkId) => chunkId !== result.chunk_id).length,
+        from: `第 ${call.call} 次检索命中（第 ${call.round ?? "—"} 轮）`,
+        hits: result.hits,
+        extHits: main
+          ? result.hits.filter((index) => !main.includes(index))
+          : [],
+      });
+    }
+  }
+  return [...seen.values()].sort(
+    (a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)),
   );
 }
 
@@ -3265,6 +3320,35 @@ function FixedLog({
                 relationReason={
                   relationDiagnostics?.context_relations?.reason ?? null
                 }
+                entries={
+                  question.cleared
+                    ? []
+                    : (usedRetry ? retryItems : items).map((item) => {
+                        const hits = Array.from(
+                          { length: total },
+                          (_, index) => index,
+                        ).filter((index) =>
+                          (item.parts ?? []).some((chunkId) =>
+                            evidenceLists[index]?.includes(chunkId),
+                          ),
+                        );
+                        return {
+                          id: item.id,
+                          chunkId: item.chunkId ?? null,
+                          position: item.position,
+                          extended: extendedParts(item).length,
+                          from: usedRetry ? "补充检索命中" : "第 1 次检索命中",
+                          hits,
+                          extHits: hits.filter(
+                            (index) =>
+                              !(
+                                item.chunkId &&
+                                evidenceLists[index]?.includes(item.chunkId)
+                              ),
+                          ),
+                        };
+                      })
+                }
               />
             </>
           )}
@@ -3585,6 +3669,7 @@ function AgentLog({ question }: { question: EvalQuestion }) {
                 <MaterialLine
                   material={agentMaterial(question)}
                   relations={contextRelations}
+                  entries={agentEntries(agent)}
                 />
               )}
             </>
