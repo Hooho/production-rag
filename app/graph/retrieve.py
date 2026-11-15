@@ -38,7 +38,7 @@ DEFAULTS = {
     "graph_global_relation_quota": 10,
     "graph_relation_rerank_candidates": 100,
     "graph_relation_return_limit": 30,
-    "graph_relation_grouping": False,
+    "graph_relation_grouping": True,
     "graph_relation_rerank_min_score": 0.0,
     "graph_relation_min_score": 0.5,
     "graph_relation_top_k": 100,
@@ -734,7 +734,7 @@ def retrieve(
         details,
         int(setting(settings, "graph_relation_return_limit")),
         setting(settings, "graph_relation_rerank_min_score"),
-        grouping=bool((settings or {}).get("graph_relation_grouping", False)),
+        grouping=bool(setting(settings, "graph_relation_grouping")),
     )
     timings["relation_rerank_ms"] = round((time.monotonic() - step) * 1000)
     final_by_id = {item["relation_id"]: item for item in candidates}
@@ -854,8 +854,8 @@ def retrieve(
         "candidate_chunks": candidate_chunks,
         "relation_rerank_error": rerank_error,
         "relation_grouping": {
-            "enabled": bool((settings or {}).get("graph_relation_grouping", False)),
-            "applied": bool((settings or {}).get("graph_relation_grouping", False))
+            "enabled": bool(setting(settings, "graph_relation_grouping")),
+            "applied": bool(setting(settings, "graph_relation_grouping"))
             and rerank_error is None,
             "groups": len(
                 {tuple(row["group_key"]) for row in candidates if "group_key" in row}

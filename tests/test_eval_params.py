@@ -77,7 +77,7 @@ def test_eval_run_with_params(setup, eval_dir, monkeypatch, runtime):
     assert [group["key"] for group in options["groups"]] == ["common", "fixed", "agent"]
     keys = {item["key"]: item for item in options["settings"]}
     assert keys["graph_relation_grouping"]["eval"] == "common"
-    assert keys["graph_relation_grouping"]["value"] is False
+    assert keys["graph_relation_grouping"]["value"] is True
     assert runtime_config.check_overrides({"graph_relation_grouping": True}) == {
         "graph_relation_grouping": True
     }

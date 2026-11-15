@@ -294,7 +294,7 @@ SPECS = [
         "key": "graph_relation_grouping",
         "group": "retrieval",
         "type": "bool",
-        "default": False,
+        "default": True,
         "eval": "common",
         "advanced": True,
     },
