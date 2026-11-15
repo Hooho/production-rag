@@ -417,15 +417,32 @@ def evidence_found_main(sources, evidence, chunk_texts):
 
 # 扩展命中：最后交给模型的资料里拿到的证据中，不在检索命中的那一片、只在父块扩展拼进来的分片里的。
 # 记在评测行上（given_hits 拿到几条、ext_hits 其中靠扩展的几条），每条证据标 via：direct / extension。
-def mark_extension(row, sources, evidence, chunk_texts):
-    given = evidence_found(sources, evidence, chunk_texts)
+def mark_extension(row, sources, evidence, chunk_texts, relations=None):
+    chunks = evidence_found(sources, evidence, chunk_texts)
     main = evidence_found_main(sources, evidence, chunk_texts)
+    relation_found = evidence_found(relations, evidence, chunk_texts)
+    given = chunks | relation_found
     row["given_hits"] = len(given)
-    row["ext_hits"] = len(given - main)
+    row["given_recall"] = len(given) / len(evidence) if evidence else None
+    row["ext_hits"] = len(chunks - main)
+    row["relation_hits"] = len(relation_found - chunks)
+    row["relations"] = list(relations or [])
     for index, entry in enumerate(row.get("evidence") or []):
+        entry["given"] = index in given
         entry["via"] = (
-            None if index not in given else "direct" if index in main else "extension"
+            "direct"
+            if index in main
+            else "extension"
+            if index in chunks
+            else "relation"
+            if index in relation_found
+            else None
         )
+        entry["relation_ids"] = [
+            relation.get("id")
+            for relation in relations or []
+            if index in evidence_found([relation], evidence, chunk_texts)
+        ]
 
 
 # 求平均，空列表返回 None（表示这一组没有可统计的题），避免除零。
@@ -472,6 +489,7 @@ def summarize(rows):
         row["given_recall"] for row in answerable if row.get("given_recall") is not None
     ]
     summary["recall_given"] = mean(given)
+    summary["relation_hits"] = sum(row.get("relation_hits", 0) for row in rows)
     summary.update(material_summary([row.get("material") for row in rows], ""))
     # 得分：全部找到 100，部分按比例最高 90，一条没找到按证据条数扣分（规则见 score.py）。
     from .score import fixed_item, summarize_scores
@@ -491,7 +509,10 @@ def summarize(rows):
     evidence_total = sum(row["evidence_count"] for row in counted)
     summary["recall_direct"] = (
         round(
-            sum(row["given_hits"] - row["ext_hits"] for row in counted)
+            sum(
+                row["given_hits"] - row["ext_hits"] - row.get("relation_hits", 0)
+                for row in counted
+            )
             / evidence_total,
             4,
         )
@@ -887,11 +908,25 @@ def evaluate_items(
             if check.get("retried"):
                 retry = check["retry_retrieval"]
                 retry_score = score_question(item, retry, chunk_texts, pool_size)
-                mark_extension(retry_score, retry["sources"], evidence, chunk_texts)
+                mark_extension(
+                    retry_score,
+                    retry["sources"],
+                    evidence,
+                    chunk_texts,
+                    retry.get("relations"),
+                )
                 if keep_diagnostics:
                     row["retry"]["diagnostics"] = retry["diagnostics"]
                 row["retry"].update(
                     {
+                        "relations": retry_score["relations"],
+                        "relation_hits": retry_score["relation_hits"],
+                        "given_recall": retry_score["given_recall"],
+                        "found": [
+                            index
+                            for index, entry in enumerate(retry_score["evidence"])
+                            if entry.get("given")
+                        ],
                         "queries": [*queries, check["retry_query"]],
                         "query_routes": retry_score["query_routes"],
                         "evidence": retry_score["evidence"],
@@ -900,14 +935,28 @@ def evaluate_items(
                     }
                 )
             row["check_ms"] = check_ms
-            mark_extension(row, check["sources"], evidence, chunk_texts)
+            first_found = evidence_found(
+                retrieval["sources"], evidence, chunk_texts
+            ) | evidence_found(retrieval.get("relations"), evidence, chunk_texts)
+            row["first_given_recall"] = (
+                len(first_found) / len(evidence) if evidence else None
+            )
+            for index, entry in enumerate(row["evidence"]):
+                entry["first_given"] = index in first_found
+            mark_extension(
+                row, check["sources"], evidence, chunk_texts, check.get("relations")
+            )
             row["material"] = material(check["sources"])
             row["flow_latency_ms"] = rewrite["duration_ms"] + latency_ms + check_ms
             # 生成评测接着回答时直接用这次的判断结果，不再判断一次（见 results.answer_hook）。
             retrieval["sufficiency_check"] = check
         if not judge:
             mark_extension(
-                row, retrieval["sources"], item.get("evidence") or [], chunk_texts
+                row,
+                retrieval["sources"],
+                item.get("evidence") or [],
+                chunk_texts,
+                retrieval.get("relations"),
             )
             row["material"] = material(retrieval["sources"])
         if keep_diagnostics:

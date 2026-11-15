@@ -471,7 +471,9 @@ function EvidenceStatus({
               >
                 {row.label}
               </Tag>
-              {(row.tone === "danger" || row.tone === "neutral") &&
+              {(row.tone === "danger" ||
+                row.tone === "neutral" ||
+                row.label === "关系命中") &&
                 row.detail && <small>{row.detail}</small>}
             </li>
           ))}
@@ -647,7 +649,7 @@ function fixedEvidenceRows(
         );
         if (!sources.length) continue;
         matches.push({
-          label: direct ? "检索命中" : "扩展命中",
+          label: direct ? "分片命中" : "扩展命中",
           tone: "success",
           dashed: !direct,
           detail: sources
@@ -680,6 +682,33 @@ function fixedEvidenceRows(
         });
       }
       return { ...matches[0], matches };
+    }
+    const diagnostics = usedRetry ? retry?.diagnostics : question.diagnostics;
+    const relationIds = new Set(chunkIds);
+    const relationMatches =
+      (usedRetry ? retry?.relations : question.relations)?.filter(
+        (relation) => relation.chunk_id && relationIds.has(relation.chunk_id),
+      ) ?? [];
+    const contextMatches = (diagnostics?.context_relations?.items ?? []).filter(
+      (relation) =>
+        relation.status === "context" &&
+        relation.chunk_id &&
+        relationIds.has(relation.chunk_id),
+    );
+    if (
+      fixed?.via === "relation" ||
+      relationMatches.length ||
+      contextMatches.length
+    ) {
+      const chunkReason =
+        fixed?.status === "not_recalled"
+          ? "对应分片未召回到分片候选"
+          : mergeOutcome(fixed, false, config).text;
+      return {
+        label: "关系命中",
+        tone: "success",
+        detail: `对应图谱关系已进入上下文；分片：${chunkReason}`,
+      };
     }
     const row =
       usedRetry && !retry?.evidence
@@ -822,6 +851,15 @@ function fixedHits(question: EvalQuestion) {
   );
 }
 
+function fixedRelationHits(question: EvalQuestion) {
+  if (question.cleared) return 0;
+  return (
+    question.relation_hits ??
+    question.evidence.filter((item) => item.given && item.via === "relation")
+      .length
+  );
+}
+
 function fixedExtHits(question: EvalQuestion) {
   if (question.cleared) return 0;
   return (
@@ -859,7 +897,11 @@ function modeRows(
       hits: hits.reduce((sum, value) => sum + value, 0),
       ext: ran.reduce((sum, question) => sum + fixedExtHits(question), 0),
       direct: ran.reduce(
-        (sum, question, index) => sum + hits[index] - fixedExtHits(question),
+        (sum, question, index) =>
+          sum +
+          hits[index] -
+          fixedExtHits(question) -
+          fixedRelationHits(question),
         0,
       ),
       retried: questions.filter((question) => question.retry?.used).length,
@@ -1057,6 +1099,24 @@ function modeRows(
         : noVia,
     ),
   });
+  if (hasFixed)
+    rows.push({
+      group: "result",
+      label: "关系命中",
+      ...pick(
+        {
+          value: ratio(
+            answerable.reduce(
+              (sum, question) => sum + fixedRelationHits(question),
+              0,
+            ),
+            evidenceTotal,
+          ),
+          note: "目标分片未返回，仅对应关系进入上下文",
+        },
+        noVia,
+      ),
+    });
   rows.push({
     group: "result",
     label: "扩展命中",
@@ -4905,7 +4965,7 @@ function columnTypeStats(column: BatchColumn, keys: string[]) {
       stat.hits += hits;
       stat.total += question.answerable ? question.evidence_count : 0;
       stat.extension += extension;
-      stat.direct += hits - extension;
+      stat.direct += hits - extension - fixedRelationHits(question);
       if (
         question.answerable &&
         question.evidence_count > 0 &&

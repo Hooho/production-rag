@@ -1180,6 +1180,7 @@ export type EvalEvidenceGroup = {
   targets?: EvalEvidenceTarget[];
 };
 export type EvalEvidence = EvalEvidenceGroup & {
+  relation_ids?: (string | null)[];
   graph_filter_reason?: string;
   filter_candidates?: {
     status: string;
@@ -1200,7 +1201,7 @@ export type EvalEvidence = EvalEvidenceGroup & {
   given?: boolean;
   first_given?: boolean;
   // 怎么拿到的：direct 检索命中的那一片就含证据，extension 只在父块扩展拼进来的分片里（旧记录没有）。
-  via?: "direct" | "extension" | null;
+  via?: "direct" | "extension" | "relation" | null;
 };
 export type EvalJudgement = {
   refused: boolean;
@@ -1244,6 +1245,8 @@ export type EvalRewrite = {
 };
 // 补充检索：返回几段、是否被采用、补充检索的资料命中率和来源。
 export type EvalRetry = {
+  relations?: ContextRelation[];
+  relation_hits?: number;
   diagnostics?: RetrievalDiagnosticsData;
   queries?: string[];
   query_routes?: EvalQueryRoute[];
@@ -1290,6 +1293,8 @@ export type EvalFlowFields = {
   flow_latency_ms?: number | null;
 };
 export type EvalQuestion = {
+  relations?: ContextRelation[];
+  relation_hits?: number;
   prelude?: EvalPreludeTurn[];
   reference_answer?: string | null;
   id: string;
@@ -2101,7 +2106,7 @@ export type EvalSpecialQuestion = {
     status: string | null;
     given?: boolean;
     first_given?: boolean;
-    via?: "direct" | "extension" | null;
+    via?: "direct" | "extension" | "relation" | null;
     rrf_rank?: number | null;
     rerank_rank?: number | null;
     rerank_probability?: number | null;
