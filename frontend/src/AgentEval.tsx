@@ -2972,50 +2972,86 @@ export function FixedSearchResults({
           </span>
         </div>
       </div>
-      {graphSelected && dc && (
-        <div
-          className="eval-search-module eval-search-budget"
-          aria-label="图保底预算"
-        >
-          <header className="eval-search-module-head">
-            <strong>图保底预算</strong>
-            <span>
-              {dc.source_selection_mode === "tokens"
-                ? `${Math.round((dc.source_graph_budget_ratio ?? 0) * 100)}% 预留额度`
-                : "未启用"}
-            </span>
-          </header>
-          {dc.source_selection_mode === "tokens" ? (
-            <>
-              <div className="eval-search-budget-stats">
-                <span>
-                  实际使用 <b>{dc.source_graph_budget_used ?? 0}</b> /{" "}
-                  {dc.source_graph_budget_reserved ?? 0} token
-                </span>
-                <span>
-                  关系 <b>{dc.source_graph_relation_count ?? 0}</b> 条 ·{" "}
-                  {dc.source_graph_relation_tokens ?? 0} token
-                </span>
-                <span>
-                  图独有分片 <b>{dc.source_graph_budget_count ?? 0}</b> 段
-                </span>
-              </div>
-              <p className="eval-search-note">
-                先放关系，再放通过相关性过滤的图独有分片；剩余额度归还公共预算。
-              </p>
-              {diagnostics?.context_relations?.reason && (
+      {graphSelected &&
+        dc &&
+        (dc.source_allocation_policy === "relations_first_v1" ? (
+          <div
+            className="eval-search-module eval-search-budget"
+            aria-label="资料预算"
+          >
+            <header className="eval-search-module-head">
+              <strong>资料预算</strong>
+              <span>
+                {dc.source_selection_mode === "tokens"
+                  ? `${dc.source_tokens_used ?? 0} / ${dc.source_token_budget ?? 0} token`
+                  : "按条数选择来源"}
+              </span>
+            </header>
+            {dc.source_selection_mode === "tokens" && (
+              <>
+                <div className="eval-search-budget-stats">
+                  <span>
+                    关系 {dc.source_graph_relation_count ?? 0} 条 ·{" "}
+                    {dc.source_graph_relation_tokens ?? 0} token
+                  </span>
+                  <span>直接原文 {dc.source_direct_tokens ?? 0} token</span>
+                  <span>父子扩展 {dc.source_expansion_tokens ?? 0} token</span>
+                </div>
                 <p className="eval-search-note">
-                  {diagnostics.context_relations.reason}
+                  关系优先交付，所有原文按统一重排结果使用余额，最后补充父子扩展。
                 </p>
-              )}
-            </>
-          ) : (
-            <p className="eval-search-note">
-              本次未记录 token 预算图保底，或按条数选择来源。
-            </p>
-          )}
-        </div>
-      )}
+                {diagnostics?.context_relations?.reason && (
+                  <p className="eval-search-note">
+                    {diagnostics.context_relations.reason}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        ) : (
+          <div
+            className="eval-search-module eval-search-budget"
+            aria-label="图保底预算"
+          >
+            <header className="eval-search-module-head">
+              <strong>图保底预算</strong>
+              <span>
+                {dc.source_selection_mode === "tokens"
+                  ? `${Math.round((dc.source_graph_budget_ratio ?? 0) * 100)}% 预留额度`
+                  : "未启用"}
+              </span>
+            </header>
+            {dc.source_selection_mode === "tokens" ? (
+              <>
+                <div className="eval-search-budget-stats">
+                  <span>
+                    实际使用 <b>{dc.source_graph_budget_used ?? 0}</b> /{" "}
+                    {dc.source_graph_budget_reserved ?? 0} token
+                  </span>
+                  <span>
+                    关系 <b>{dc.source_graph_relation_count ?? 0}</b> 条 ·{" "}
+                    {dc.source_graph_relation_tokens ?? 0} token
+                  </span>
+                  <span>
+                    图独有分片 <b>{dc.source_graph_budget_count ?? 0}</b> 段
+                  </span>
+                </div>
+                <p className="eval-search-note">
+                  先放关系，再放通过相关性过滤的图独有分片；剩余额度归还公共预算。
+                </p>
+                {diagnostics?.context_relations?.reason && (
+                  <p className="eval-search-note">
+                    {diagnostics.context_relations.reason}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="eval-search-note">
+                本次未记录 token 预算图保底，或按条数选择来源。
+              </p>
+            )}
+          </div>
+        ))}
       {mergedEvidence && mergedEvidence.length > 0 && (
         <div className="eval-search-module eval-search-results">
           <header className="eval-search-module-head">

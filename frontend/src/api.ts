@@ -92,6 +92,9 @@ export type RetrievalDiagnosticsData = {
     // 只被图找到的分片进重排的上限和实际进了几个；旧记录没有。
     graph_pool_size?: number;
     graph_pool_count?: number;
+    source_allocation_policy?: "relations_first_v1";
+    source_direct_tokens?: number | null;
+    source_expansion_tokens?: number | null;
     source_graph_budget_ratio?: number;
     source_graph_budget_reserved?: number;
     source_graph_budget_used?: number;

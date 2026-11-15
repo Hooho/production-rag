@@ -149,7 +149,7 @@ SPECS = [
         "default": 0.25,
         "min": 0,
         "max": 1,
-        "eval": "fixed",
+        "deprecated": True,
     },
     {
         "key": "parent_context",
@@ -753,6 +753,11 @@ def snapshot():
 # 校验评测要覆盖的参数：只能是带 eval 标记的项，范围和设置页一样，合进当前值后参数之间的约束也要满足。
 # 返回整理后的值（int / float 已转换）；不合法时抛 ValueError，发起评测时直接拦下。
 def check_overrides(changes):
+    changes = {
+        key: value
+        for key, value in changes.items()
+        if key != "source_graph_budget_ratio"
+    }
     unknown = [
         key for key in changes if key not in BY_KEY or not BY_KEY[key].get("eval")
     ]
@@ -836,6 +841,8 @@ def view(engine=None):
     saved = saved_values()
     items = []
     for spec in SPECS:
+        if spec.get("deprecated"):
+            continue
         current, source = resolve(spec, saved)
         item = {
             key: spec[key]

@@ -5137,7 +5137,9 @@ function RetrievalDiagnostics({
           .join("，") || "没有分片被排除",
       hint:
         config.source_selection_mode === "tokens"
-          ? `图保底上限 ${config.source_graph_budget_reserved ?? 0} token，实际保底 ${config.source_graph_budget_used ?? 0} token（关系 ${config.source_graph_relation_count ?? 0} 条、分片 ${config.source_graph_budget_count ?? 0} 片）；其余公共竞争，原始命中合计估算 ${config.source_child_tokens ?? 0} token，剩余预算再补父子扩展；分片不截断。预算包含原文和图谱关系，不含对话与提示词。`
+          ? config.source_allocation_policy === "relations_first_v1"
+            ? `关系优先使用 ${config.source_graph_relation_tokens ?? 0} token，直接原文 ${config.source_direct_tokens ?? 0} token，父子扩展 ${config.source_expansion_tokens ?? 0} token；所有原文统一重排竞争余额。预算包含原文和图谱关系，不含对话与提示词。`
+            : `图保底上限 ${config.source_graph_budget_reserved ?? 0} token，实际保底 ${config.source_graph_budget_used ?? 0} token（关系 ${config.source_graph_relation_count ?? 0} 条、分片 ${config.source_graph_budget_count ?? 0} 片）；其余公共竞争，原始命中合计估算 ${config.source_child_tokens ?? 0} token，剩余预算再补父子扩展；分片不截断。预算包含原文和图谱关系，不含对话与提示词。`
           : `最多返回 ${config.return_limit} 条来源；并入父块的分片不单独成源，也不占名额`,
     },
   ];
@@ -5901,18 +5903,31 @@ function RetrievalDiagnostics({
         </li>
       </ol>
       <div className="diag-section-title">检索漏斗</div>
-      {config.source_selection_mode === "tokens" && (
-        <p className="diag-contrib-hint">
-          图保底 {Math.round((config.source_graph_budget_ratio ?? 0) * 100)}
-          %： 上限 {config.source_graph_budget_reserved ??
-            0} token，实际使用 {config.source_graph_budget_used ?? 0} token（
-          图谱关系 {config.source_graph_relation_count ?? 0} 条、共{" "}
-          {config.source_graph_relation_tokens ?? 0} token；只有图找到的分片{" "}
-          {config.source_graph_budget_count ?? 0} 片）。
-          先放关系，剩下的给只有图检索找到的分片；未用完的份额归还公共预算。
-          {!config.reranked && "本次重排未成功，未启用图保底。"}
-        </p>
-      )}
+      {config.source_selection_mode === "tokens" &&
+        config.source_allocation_policy === "relations_first_v1" && (
+          <p className="diag-contrib-hint">
+            资料预算 {config.source_tokens_used ?? 0} /{" "}
+            {config.source_token_budget ?? 0} token： 图谱关系{" "}
+            {config.source_graph_relation_count ?? 0} 条、
+            {config.source_graph_relation_tokens ?? 0} token； 直接原文{" "}
+            {config.source_direct_tokens ?? 0} token；父子扩展{" "}
+            {config.source_expansion_tokens ?? 0} token。
+            关系优先交付，原文按统一重排结果选择，扩展使用余额。
+          </p>
+        )}
+      {config.source_selection_mode === "tokens" &&
+        !config.source_allocation_policy && (
+          <p className="diag-contrib-hint">
+            图保底 {Math.round((config.source_graph_budget_ratio ?? 0) * 100)}
+            %： 上限 {config.source_graph_budget_reserved ??
+              0} token，实际使用 {config.source_graph_budget_used ?? 0} token（
+            图谱关系 {config.source_graph_relation_count ?? 0} 条、共{" "}
+            {config.source_graph_relation_tokens ?? 0} token；只有图找到的分片{" "}
+            {config.source_graph_budget_count ?? 0} 片）。
+            先放关系，剩下的给只有图检索找到的分片；未用完的份额归还公共预算。
+            {!config.reranked && "本次重排未成功，未启用图保底。"}
+          </p>
+        )}
       <div className="diag-funnel">
         <div className="diag-funnel-row diag-funnel-head">
           <span>阶段</span>

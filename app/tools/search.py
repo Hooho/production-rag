@@ -321,36 +321,14 @@ class DocumentSearchTool:
         budget_skipped = 0
         if budget_mode:
             from ..memory.framework import text_tokens
-        graph_budget = (
-            int(token_budget * config.get("source_graph_budget_ratio", 0.25))
-            if budget_mode and "graph" in methods
-            else 0
-        )
-        graph_guaranteed = set()
-        graph_budget_used = 0
-        # 图谱关系：图检索统一重排后留下的关系，按关系重排名次先放进图保底额度（不设占比上限），
-        # 剩下的保底额度再给只有图找到的分片。放不下的关系跳过、试下一条，和分片的填充规则一致。
         relations, relation_rows, relation_reason = self.select_relations(
-            graph,
+            graph if "graph" in methods else None,
             budget_mode,
-            graph_budget,
+            token_budget if budget_mode else 0,
             bool(rerank_count) and not fallback_used,
         )
-        for row in relations:
-            graph_budget_used += row["tokens"]
-        # 只保底真正通过相关性过滤的图候选；没有可靠重排分数时仍按公共排名选取。
-        # 只保底「仅图检索找到」的分片：向量 / 关键词也找到的分片本来就在公共竞争里，
-        # 让它占保底等于把保底用在本来就能入选的内容上，挤掉图独有的证据。
-        if graph_budget and rerank_count and not fallback_used:
-            for item in ranked:
-                if set(item["retrieval_methods"]) != {"graph"}:
-                    continue
-                clean_text, _ = sanitize_source(item["text"])
-                size = text_tokens(clean_text)
-                if graph_budget_used + size <= graph_budget:
-                    graph_guaranteed.add(item["id"])
-                    graph_budget_used += size
-            tokens_used = graph_budget_used
+        relation_tokens = sum(row["tokens"] for row in relations)
+        tokens_used = relation_tokens
         # 已被某个父块包含的分片 {分片 id: 来源编号}。两个命中分片在同一小节里相邻时，
         # 后一个直接归入前一个父块，不再重复给模型同一段文字；诊断里它的来源编号指向那个父块。
         covered = {}
@@ -393,8 +371,7 @@ class DocumentSearchTool:
                 clean_text, _ = sanitize_source(item["text"])
                 size = text_tokens(clean_text)
                 item["source_tokens"] = size
-                item["graph_budget_guaranteed"] = item["id"] in graph_guaranteed
-                additional = 0 if item["graph_budget_guaranteed"] else size
+                additional = size
                 if tokens_used + additional > token_budget:
                     item["status"] = "beyond_budget"
                     budget_skipped += 1
@@ -523,10 +500,13 @@ class DocumentSearchTool:
             "source_characters": parent_characters,
             "graph_pool_size": graph_pool_size,
             "graph_pool_count": graph_pool_count,
-            "source_graph_budget_ratio": config.get("source_graph_budget_ratio", 0.25),
-            "source_graph_budget_reserved": graph_budget,
-            "source_graph_budget_used": graph_budget_used,
-            "source_graph_budget_count": len(graph_guaranteed),
+            "source_allocation_policy": "relations_first_v1",
+            "source_direct_tokens": child_tokens - relation_tokens
+            if budget_mode
+            else None,
+            "source_expansion_tokens": tokens_used - child_tokens
+            if budget_mode
+            else None,
             "source_graph_relation_count": len(relations),
             "source_graph_relation_tokens": sum(row["tokens"] for row in relations),
             "source_graph_relation_skipped": sum(
@@ -603,10 +583,10 @@ class DocumentSearchTool:
         }
 
     # 选出放进上下文的图谱关系。返回 (交给模型的关系, 诊断里每条留下的关系及去向, 一条关系都没放时的原因)。
-    # 只在 token 预算模式、图保底比例大于 0、分片重排成功、关系重排成功时放；
-    # 关系的条数不单独设上限，由图检索留下的关系（关系重排分数线、关系保留上限）和图保底额度决定。
+    # 只在 token 预算模式、分片重排成功、关系重排成功时交付。
+    # 已入选关系按选择顺序优先使用总预算，不为图原文分配保底。
     @staticmethod
-    def select_relations(graph, budget_mode, graph_budget, reranked):
+    def select_relations(graph, budget_mode, token_budget, reranked):
         if graph is None or graph.get("status") != "ok":
             return [], [], None
         kept = [
@@ -621,10 +601,10 @@ class DocumentSearchTool:
         )
         if not budget_mode:
             reason = "按条数选来源时不放图谱关系，只在 token 预算模式下放"
-        elif not graph_budget:
-            reason = "图保底比例为 0，不放图谱关系"
+        elif token_budget <= 0:
+            reason = "总资料 token 预算不足，不放图谱关系"
         elif not reranked:
-            reason = "分片重排未成功或走了兜底，未启用图保底"
+            reason = "分片重排未成功或走了兜底，未交付图谱关系"
         elif graph.get("relation_rerank_error"):
             reason = "关系重排失败，不放图谱关系"
         elif not kept:
@@ -660,7 +640,7 @@ class DocumentSearchTool:
             if reason is None:
                 size = text_tokens(text)
                 item["tokens"] = size
-                if used + size <= graph_budget:
+                if used + size <= token_budget:
                     used += size
                     item.update(status="context", context_id=f"G{len(relations) + 1}")
                     relations.append(
@@ -993,9 +973,6 @@ class DocumentSearchTool:
                     "status": item["status"],
                     "source_id": item.get("source_id"),
                     "source_tokens": item.get("source_tokens"),
-                    "graph_budget_guaranteed": bool(
-                        item.get("graph_budget_guaranteed")
-                    ),
                     # 并入了前面某个父块：内容已经在那条来源里，不单独成源，也不占返回名额。
                     "merged": bool(item.get("merged")),
                     "retrieval_methods": item["retrieval_methods"],
@@ -1026,10 +1003,9 @@ class DocumentSearchTool:
             **{
                 key: stats.get(key)
                 for key in (
-                    "source_graph_budget_ratio",
-                    "source_graph_budget_reserved",
-                    "source_graph_budget_used",
-                    "source_graph_budget_count",
+                    "source_allocation_policy",
+                    "source_direct_tokens",
+                    "source_expansion_tokens",
                     "source_graph_relation_count",
                     "source_graph_relation_tokens",
                     "source_graph_relation_skipped",

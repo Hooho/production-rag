@@ -266,9 +266,7 @@ def test_view_returns_requires_and_cards(monkeypatch):
     result = runtime_config.view()
     items = {item["key"]: item for item in result["items"]}
     assert items["source_token_budget"]["card"] == "source_selection"
-    assert {rule["key"] for rule in items["source_graph_budget_ratio"]["requires"]} == {
-        "source_selection_mode",
-        "graph_retrieval",
-    }
+    assert "source_graph_budget_ratio" not in items
+    assert runtime_config.check_overrides({"source_graph_budget_ratio": 0.5}) == {}
     assert "requires" not in items["source_selection_mode"]
     assert result["cards"]["source_selection"]["title"] == "交给回答模型的资料"

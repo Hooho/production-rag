@@ -119,7 +119,7 @@ def test_oversized_hit_does_not_block_smaller_later_hits(runtime):
     assert result["stats"]["source_tokens_used"] == 800
 
 
-def test_graph_budget_protects_evidence_and_zero_disables_it(runtime, monkeypatch):
+def test_graph_chunks_compete_by_rerank_and_ignore_legacy_ratio(runtime, monkeypatch):
     normal = [
         dict(id=f"p{i}", title=f"p{i}", text=char * 1000, score=1 - i / 100)
         for i, char in enumerate("甲乙丙丁戊己庚")
@@ -175,24 +175,19 @@ def test_graph_budget_protects_evidence_and_zero_disables_it(runtime, monkeypatc
     ] + ["g1"]
     runtime(source_graph_budget_ratio=0.25)
     protected = run()
-    assert [row["chunk_id"] for row in protected["sources"]] == [
-        row["id"] for row in normal[:6]
-    ] + ["g1", "g2"]
-    assert protected["stats"]["source_tokens_used"] == 8000
-    assert protected["stats"]["source_graph_budget_used"] == 2000
-    # 同一分片既被普通召回又被图召回：不占图保底，按重排分数参加公共竞争，只出现一次。
+    assert protected["sources"] == shared["sources"]
+    assert protected["stats"]["source_allocation_policy"] == "relations_first_v1"
+    assert "source_graph_budget_ratio" not in protected["diagnostics"]["config"]
+    # 同一分片被多路召回时只占一次容量。
     graph_rows[:] = [dict(normal[0])]
     reused = run()
-    assert reused["stats"]["source_graph_budget_used"] == 0
-    assert reused["stats"]["source_graph_budget_count"] == 0
     assert reused["sources"][0]["chunk_id"] == "p0"
     assert reused["stats"]["source_tokens_used"] == 7000
     assert len({row["chunk_id"] for row in reused["sources"]}) == len(reused["sources"])
-    # 图内容低于相关度阈值时不因保底而入选，预算全部回归公共竞争。
+    # 图内容低于相关度阈值时不入选。
     graph_rows[:] = [dict(id="low0", title="low0", text="低" * 1000, score=0.6)]
     scores["低" * 1000] = 0.01
     rejected = run()
-    assert rejected["stats"]["source_graph_budget_count"] == 0
     assert all(row["chunk_id"] != "low0" for row in rejected["sources"])
     assert rejected["stats"]["source_tokens_used"] == 7000
 
@@ -264,12 +259,12 @@ def run_with_relations(runtime, monkeypatch, candidates, rerank_error=None, **se
     )
 
 
-def test_relations_fill_graph_budget_first_in_rerank_order(runtime, monkeypatch):
+def test_relations_fill_total_budget_first_in_selection_order(runtime, monkeypatch):
     # 名次 2 的关系排在前面；第二条太长放不下就跳过，后面放得下的照样放；没留下的关系不放。
     candidates = [
         relation("r3", 3, "短" * 600),
         relation("r1", 1, "短" * 600),
-        relation("r2", 2, "长" * 3000),
+        relation("r2", 2, "长" * 9000),
         relation("r9", 9, "不要", kept=False),
     ]
     result = run_with_relations(runtime, monkeypatch, candidates)
@@ -283,9 +278,11 @@ def test_relations_fill_graph_budget_first_in_rerank_order(runtime, monkeypatch)
     assert stats["source_graph_relation_count"] == 2
     assert stats["source_graph_relation_tokens"] == used
     assert stats["source_graph_relation_skipped"] == 1
-    # 关系先占保底，剩下的保底不够放 1000 token 的图分片，图分片去公共竞争。
-    assert stats["source_graph_budget_used"] == used
-    assert stats["source_graph_budget_count"] == 0
+    # 关系和所有原文共用总预算，关系优先。
+    assert (
+        stats["source_direct_tokens"] + stats["source_expansion_tokens"] + used
+        == stats["source_tokens_used"]
+    )
     assert stats["source_tokens_used"] <= 8000
     items = result["diagnostics"]["context_relations"]["items"]
     assert [(row["relation_id"], row["status"]) for row in items] == [
@@ -302,22 +299,19 @@ def test_group_selection_order_survives_context_budget(runtime, monkeypatch):
         {**relation("b", 2, "短" * 1000), "selection_rank": 1},
         {**relation("c", 3, "短" * 1000), "selection_rank": 2},
     ]
-    result = run_with_relations(runtime, monkeypatch, candidates)
+    result = run_with_relations(
+        runtime, monkeypatch, candidates, source_token_budget=2000
+    )
     assert [row["relation_id"] for row in result["relations"]] == ["b"]
 
 
-def test_relations_leave_rest_of_graph_budget_to_graph_only_chunks(
-    runtime, monkeypatch
-):
+def test_relations_leave_rest_of_total_budget_to_unified_chunks(runtime, monkeypatch):
     result = run_with_relations(runtime, monkeypatch, [relation("r1", 1, "短")])
     stats = result["stats"]
     assert stats["source_graph_relation_count"] == 1
-    assert stats["source_graph_budget_count"] == 1
-    assert "g1" in [row["chunk_id"] for row in result["sources"]]
-    assert (
-        stats["source_graph_budget_used"]
-        == 1000 + stats["source_graph_relation_tokens"]
-    )
+    assert [row["chunk_id"] for row in result["sources"]] == [f"p{i}" for i in range(7)]
+    assert stats["source_direct_tokens"] == 7000
+    assert stats["source_tokens_used"] == 7000 + stats["source_graph_relation_tokens"]
 
 
 def test_relations_only_in_token_mode_with_successful_relation_rerank(
@@ -337,8 +331,39 @@ def test_relations_only_in_token_mode_with_successful_relation_rerank(
     zero = run_with_relations(
         runtime, monkeypatch, candidates, source_graph_budget_ratio=0
     )
-    assert zero["relations"] == []
-    assert zero["diagnostics"]["context_relations"]["items"][0]["status"] == "off"
+    assert len(zero["relations"]) == 1
+    assert zero["diagnostics"]["context_relations"]["items"][0]["status"] == "context"
+
+
+def test_relations_can_fill_entire_budget(runtime, monkeypatch):
+    from app.memory.framework import text_tokens
+    from app.tools.search import relation_context_text
+
+    row = relation("full", 1, "事实" * 100)
+    budget = text_tokens(relation_context_text(row))
+    result = run_with_relations(
+        runtime,
+        monkeypatch,
+        [row],
+        source_token_budget=budget,
+        source_graph_budget_ratio=0,
+    )
+    assert len(result["relations"]) == 1
+    assert result["sources"] == []
+    stats = result["stats"]
+    assert stats["source_tokens_used"] == budget
+    assert stats["source_graph_relation_tokens"] == budget
+    assert stats["source_direct_tokens"] == stats["source_expansion_tokens"] == 0
+
+
+def test_unreliable_chunk_rerank_does_not_deliver_relations(runtime):
+    row = relation("r1", 1, "事实")
+    graph = {"status": "ok", "relation_candidates": [row]}
+    relations, items, reason = DocumentSearchTool.select_relations(
+        graph, True, 8000, False
+    )
+    assert relations == [] and items[0]["status"] == "off"
+    assert "分片重排未成功" in reason
 
 
 def test_relation_citations_and_prompt_block():
@@ -422,9 +447,8 @@ def test_graph_only_chunks_do_not_take_rrf_slots(runtime, monkeypatch):
     assert (config["graph_pool_size"], config["graph_pool_count"]) == (1, 1)
 
 
-def test_graph_budget_is_zero_without_graph_retrieval(runtime):
+def test_no_relation_tokens_without_graph_retrieval(runtime):
     runtime(source_graph_budget_ratio=0.5)
     result = search(runtime, 1000)
-    assert result["stats"]["source_graph_budget_reserved"] == 0
-    assert result["stats"]["source_graph_budget_used"] == 0
+    assert result["stats"]["source_graph_relation_tokens"] == 0
     assert result["stats"]["source_tokens_used"] == 800
