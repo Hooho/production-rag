@@ -100,6 +100,11 @@
   margin: 0;
 }
 
+/* 「来自哪些关系」里的来源说明：次要信息，字号比关系本身小一号。 */
+.grt-origin-source {
+  font-size: 12px;
+}
+
 /* 关系的描述：第二行，跟着第一行往下。 */
 .grt-table td small.grt-rel-desc,
 .grt-rel-desc {

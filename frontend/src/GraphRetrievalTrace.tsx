@@ -2036,7 +2036,7 @@ function ChunkTable({
                                 query={query ?? ""}
                               />
                               {relation.origins?.length ? (
-                                <small>
+                                <small className="grt-origin-source">
                                   来源：
                                   <SearchText
                                     text={relation.origins
