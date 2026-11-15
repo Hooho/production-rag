@@ -105,16 +105,18 @@
   font-size: 12px;
 }
 
-/* 关系的描述：第二行，跟着第一行往下。 */
+/* 关系的描述：第二行，跟着第一行往下。描述和原文引用是次要信息，字号比关系本身小一号。 */
 .grt-table td small.grt-rel-desc,
 .grt-rel-desc {
   display: block;
   margin-top: 2px;
+  font-size: 12px;
   color: var(--diag-text, #536d86);
 }
 
 .grt-table td small.grt-evidence {
   margin-top: 2px;
+  font-size: 12px;
   color: #8a6d1c;
 }
 
