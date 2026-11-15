@@ -27,7 +27,7 @@ import {
   type EvalSpecialSection,
   type EvalSummary,
 } from "./api";
-import { ContextRelationList } from "./ContextRelationList";
+import { EvalRelationList } from "./EvalRelationList";
 import { MaterialListDialog, type MaterialEntry } from "./EvalMaterialList";
 import { AgentError } from "./AgentError";
 import { EvidenceFilterSummary } from "./EvidenceFilterSummary";
@@ -343,7 +343,7 @@ function MaterialLine({
         />
       )}
       {relationsOpen && (
-        <ContextRelationList
+        <EvalRelationList
           relations={relations ?? []}
           reason={relationReason}
           onClose={() => setRelationsOpen(false)}

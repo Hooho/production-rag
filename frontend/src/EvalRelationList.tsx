@@ -28,7 +28,7 @@ function relationHaystack(row: ContextRelation) {
 
 // 交给模型的图谱关系：列表 + 搜索框，和图检索「详情」抽屉里的关系表一致。
 // status=context 是真的放进了回答上下文；beyond_budget 是图检索留下了但额度不够没放。
-export function ContextRelationList({
+export function EvalRelationList({
   relations,
   reason,
   onClose,

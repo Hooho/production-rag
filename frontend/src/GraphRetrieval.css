@@ -100,11 +100,6 @@
   margin: 0;
 }
 
-/* 「来自哪些关系」里的来源说明：次要信息，字号比关系本身小一号。 */
-.grt-origin-source {
-  font-size: 12px;
-}
-
 /* 关系的描述：第二行，跟着第一行往下。描述和原文引用是次要信息，字号比关系本身小一号。 */
 .grt-table td small.grt-rel-desc,
 .grt-rel-desc {
@@ -118,6 +113,20 @@
   margin-top: 2px;
   font-size: 12px;
   color: #8a6d1c;
+}
+
+/* 「来自哪些关系」里的来源说明：次要信息，字号比关系本身小一号。 */
+.grt-origin-source {
+  font-size: 12px;
+}
+
+/* 抽屉里正文统一 14px（.ag-delivery-dialog.grt-dialog .diag :not(button)），
+   上面三条压不过它，这里用更具体的选择器再压一次：关系列表里的描述、原文引用、
+   来源说明一律 12px，图检索明细、回答步骤、评测弹窗几处一致。 */
+.ag-delivery-dialog.grt-dialog .diag .grt-rel-desc,
+.ag-delivery-dialog.grt-dialog .diag .grt-evidence,
+.ag-delivery-dialog.grt-dialog .diag .grt-origin-source {
+  font-size: 12px;
 }
 
 /* 结果：留下绿色、去掉红色，带浅底色。写成 .grt .grt-kept：步骤里的 .result-grid span 会把文字统一成灰色，要压过它。 */
