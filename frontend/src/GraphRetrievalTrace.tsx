@@ -1203,12 +1203,12 @@ function RelationGroupsDetail({
   return (
     <>
       <p>共 {rows.length} 组，每组一行；组内列出全部关系及入选结果。</p>
-      <Table>
+      <Table className="grt-groups-table">
         <thead>
           <tr>
             <th>实体关系组</th>
             <th>入选 / 总数</th>
-            <th>具体关系</th>
+            <th>关系明细</th>
           </tr>
         </thead>
         <tbody>
@@ -1225,24 +1225,47 @@ function RelationGroupsDetail({
                   {group.filter((row) => row.kept).length} / {group.length}
                 </td>
                 <td>
-                  <ul className="grt-group-relations">
-                    {group.map((row) => (
-                      <li key={row.relation_id}>
-                        <RelationText relation={row} />
-                        <small>重排分数 {score(row.rerank_score)}</small>
-                        <Result
-                          row={row}
-                          trace={graph}
-                          kept={row.kept}
-                          reason={row.reason}
-                        />
-                        <OriginalButton
-                          relation={row}
-                          chunk={chunks.get(row.chunk_id)}
-                        />
-                      </li>
-                    ))}
-                  </ul>
+                  <Table
+                    className="diag-table grt-table grt-group-inner"
+                    size="compact"
+                  >
+                    <thead>
+                      <tr>
+                        <th>关系</th>
+                        <th>重排分数</th>
+                        <th>出处</th>
+                        <th>结果</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {group.map((row) => (
+                        <tr
+                          key={row.relation_id}
+                          className={row.kept ? "" : "is-dropped"}
+                        >
+                          <td>
+                            <RelationText relation={row} />
+                          </td>
+                          <td>{score(row.rerank_score)}</td>
+                          <td>
+                            <Origin relation={row} />
+                            <OriginalButton
+                              relation={row}
+                              chunk={chunks.get(row.chunk_id)}
+                            />
+                          </td>
+                          <td>
+                            <Result
+                              row={row}
+                              trace={graph}
+                              kept={row.kept}
+                              reason={row.reason}
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </Table>
                 </td>
               </tr>
             ))}

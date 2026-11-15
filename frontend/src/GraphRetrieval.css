@@ -617,16 +617,18 @@
   color: var(--diag-muted, #6f8ba4);
   font-size: 11px;
 }
-.grt-group-relations {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 12px;
+.grt-groups-table > tbody > tr > td {
+  vertical-align: top;
 }
 
-.grt-group-relations > li {
-  display: grid;
-  justify-items: start;
-  gap: 4px;
+.grt-groups-table > thead > tr > th:first-child {
+  width: 18%;
+}
+
+.grt-groups-table > thead > tr > th:nth-child(2) {
+  width: 8%;
+}
+
+.grt-group-inner td {
+  vertical-align: top;
 }
