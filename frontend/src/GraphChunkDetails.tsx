@@ -453,7 +453,11 @@ function ExtractionTables({
                         {item.category}
                       </Tag>
                     </td>
-                    <td>{item.description || "—"}</td>
+                    <td>
+                      <span className="grt-rel-desc">
+                        {item.description || "—"}
+                      </span>
+                    </td>
                     <td>
                       <button
                         type="button"

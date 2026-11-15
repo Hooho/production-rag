@@ -71,7 +71,7 @@ export function GraphRelationPanel({
               <Tag size="sm" plain>
                 {row.origin === "manual" ? "手动" : "抽取"}
               </Tag>
-              <p>{row.description}</p>
+              <small className="grt-rel-desc">{row.description}</small>
               <small>
                 《{row.document_title ?? "文档"}》 ·{" "}
                 {onOpenChunk ? (

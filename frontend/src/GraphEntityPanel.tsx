@@ -476,7 +476,9 @@ function RelationItem({
           {row.category}
         </Tag>
       </span>
-      {row.description && <small>{row.description}</small>}
+      {row.description && (
+        <small className="grt-rel-desc">{row.description}</small>
+      )}
       <small>
         原文写的是「{row.source_name}」→「{row.target_name}」 ·{" "}
         {showDocument && row.document_title ? `《${row.document_title}》` : ""}

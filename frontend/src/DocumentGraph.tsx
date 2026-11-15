@@ -844,8 +844,14 @@ export function DocumentGraph({
                           )}
                         </td>
                         <td>
-                          {row.description}
-                          {row.evidence && <small>「{row.evidence}」</small>}
+                          <span className="grt-rel-desc">
+                            {row.description}
+                          </span>
+                          {row.evidence && (
+                            <small className="grt-evidence">
+                              「{row.evidence}」
+                            </small>
+                          )}
                         </td>
                         <td className="graph-nowrap">
                           <button
