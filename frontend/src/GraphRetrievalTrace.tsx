@@ -24,7 +24,7 @@ import { buildHaystack, normalizeSearch, SearchText } from "./searchText";
 import "./GraphRetrieval.css";
 
 // 检索过程「混合检索」里的图检索模块（docs：claude/graph-retrieval-phase2-plan.md 第一部分第四节）：
-// ① 提关键词 → ② 找实体 → ③ 实体的关系 → ④ 找关系 → ⑤ 取分片 → ⑥ 关系图。
+// ① 提关键词 → ② 找实体 → ③ 实体过滤 → ④ 实体的关系 → ⑤ 找关系 → ⑥ 候选重排 → ⑦ 取分片 → ⑧ 关系图。
 // 页面上每一步只列数量和类型，明细在「详情」抽屉里（分页、按实体 / 关系类型 / 关键词分类，可带上去掉的项和原因）。
 // 权限、生效版本在查询条件里，没有「权限过滤掉多少条」。
 
@@ -347,6 +347,7 @@ type Detail =
   | {
       kind:
         | "names"
+        | "entityFilter"
         | "entityRelations"
         | "relationMatches"
         | "relationCandidates";
@@ -358,8 +359,8 @@ type Detail =
   | { kind: "chunksAll" };
 
 const CHUNK_TABLES = {
-  entity: "图 · 实体（来自 ③）",
-  relation: "图 · 关系（来自 ④）",
+  entity: "图 · 实体（来自 ④）",
+  relation: "图 · 关系（来自 ⑤）",
 };
 const PAGE_SIZE = 6;
 
@@ -859,10 +860,11 @@ function DetailFilters<T extends { kept: boolean }>({
 }
 
 const DETAIL_TITLES = {
-  relationCandidates: "⑤ 候选合并与关系重排",
+  relationCandidates: "⑥ 候选合并与关系重排",
   names: "② 找实体 · 匹配到的名字",
-  entityRelations: "③ 实体的关系",
-  relationMatches: "④ 找关系",
+  entityFilter: "③ 实体过滤 · 分数与差距",
+  entityRelations: "④ 实体的关系",
+  relationMatches: "⑤ 找关系",
 };
 
 function TraceDetail({
@@ -880,11 +882,11 @@ function TraceDetail({
 }) {
   const title =
     detail.kind === "chunks"
-      ? `${graph.pipeline ? "⑥" : "⑤"} 取分片 · ${CHUNK_TABLES[detail.table]}`
+      ? `${graph.pipeline ? "⑦" : "⑥"} 取分片 · ${CHUNK_TABLES[detail.table]}`
       : detail.kind === "chunksAll"
-        ? `${graph.pipeline ? "⑥" : "⑤"} 取分片 · 合计 ${graph.counts?.chunks ?? 0} 个分片`
+        ? `${graph.pipeline ? "⑦" : "⑥"} 取分片 · 合计 ${graph.counts?.chunks ?? 0} 个分片`
         : detail.kind === "relationCandidates" && detail.stage
-          ? `⑤ ${detail.stage === "candidates" ? "全部候选" : detail.stage === "pool" ? "进入重排" : "最终留下"} · 关系与原文`
+          ? `⑥ ${detail.stage === "candidates" ? "全部候选" : detail.stage === "pool" ? "进入重排" : "最终留下"} · 关系与原文`
           : DETAIL_TITLES[detail.kind];
   // 实体详情：点匹配到的名字或关系里的实体打开，内容和图谱里点实体一样。
   const [entity, setEntity] = useState<{
@@ -915,7 +917,7 @@ function TraceDetail({
     >
       {/* 抽屉可能挂在别的弹窗里，不在 .diag 下面：自己带上 .diag，表格颜色变量才对。 */}
       <div className="diag grt">
-        {detail.kind === "names" && (
+        {(detail.kind === "names" || detail.kind === "entityFilter") && (
           <NamesDetail graph={graph} detail={detail} onEntity={openEntity} />
         )}
         {detail.kind === "entityRelations" && (
@@ -942,7 +944,7 @@ function TraceDetail({
             first={graph.pipeline ? "完整问题" : "概括关键词"}
             firstValue={(row) => row.keyword ?? ""}
             chunks={chunks}
-            extra={(row) => (row.also_entity ? "和 ③ 重复" : undefined)}
+            extra={(row) => (row.also_entity ? "和 ④ 重复" : undefined)}
             scoreHint={relationScoreHint}
             onEntity={openEntity}
           />
@@ -1363,12 +1365,52 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
           ② 找实体
           <small>
             {graph.name_score_query
-              ? `关键词召回候选（字面匹配＋向量前 ${settings.graph_name_top_k ?? 10} 个）→ 完整问题消歧过滤 → 按归属合并，每个关键词最多 ${settings.graph_entity_top_k ?? 6} 个实体`
-              : "关键词字面匹配＋名字向量召回，按历史记录的规则筛选实体"}
+              ? `关键词召回候选：字面匹配＋名字向量前 ${settings.graph_name_top_k ?? 10} 个`
+              : "关键词字面匹配＋名字向量召回"}
           </small>
           <DetailButton
             count={graph.name_matches.length}
             onClick={() => setDetail({ kind: "names" })}
+          />
+        </h5>
+        <Table className="diag-table grt-table">
+          <thead>
+            <tr>
+              <th>关键词</th>
+              <th>召回名字</th>
+              <th>归属实体</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[...new Set(graph.name_matches.map((item) => item.keyword))].map(
+              (keyword) => {
+                const matches = graph.name_matches.filter(
+                  (item) => item.keyword === keyword,
+                );
+                return (
+                  <tr key={keyword}>
+                    <td>{keyword}</td>
+                    <td>{matches.length}</td>
+                    <td>
+                      {new Set(matches.map((item) => item.entity_id)).size}
+                    </td>
+                  </tr>
+                );
+              },
+            )}
+          </tbody>
+        </Table>
+      </section>
+      <section className="grt-step">
+        <h5>
+          ③ 实体过滤
+          <small>
+            完整问题消歧 → 按归属合并 → 每个关键词最多{" "}
+            {settings.graph_entity_top_k ?? 6} 个实体
+          </small>
+          <DetailButton
+            count={graph.name_matches.length}
+            onClick={() => setDetail({ kind: "entityFilter" })}
           />
         </h5>
         {graph.name_score_query && (
@@ -1376,7 +1418,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
             <button
               type="button"
               className="secondary-button button-sm"
-              onClick={() => setDetail({ kind: "names" })}
+              onClick={() => setDetail({ kind: "entityFilter" })}
             >
               完整问题消歧过滤 · 查看分数与差距
             </button>{" "}
@@ -1385,6 +1427,11 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
             每个关键词以字面命中最高分为基准，无字面命中则取向量候选最高分，
             比基准低超过 {settings.graph_entity_score_gap ?? 0.03}{" "}
             的去掉，再限制实体数量。
+          </p>
+        )}
+        {!graph.name_score_query && (
+          <p className="grt-note">
+            历史记录未保存完整问题消歧信息，以下展示当时的实体筛选结果。
           </p>
         )}
         {graph.name_matches.length === 0 ? (
@@ -1412,7 +1459,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
               </span>
             )}
             onDetail={(key) =>
-              setDetail({ kind: "names", dim: "keyword", value: key })
+              setDetail({ kind: "entityFilter", dim: "keyword", value: key })
             }
           />
         )}
@@ -1425,7 +1472,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
 
       <section className="grt-step">
         <h5>
-          ③ 实体的关系
+          ④ 实体的关系
           <small>
             {graph.pipeline ? (
               `完整问题 → 每个实体一跳关系内的向量＋关键词检索，每路最多 ${settings.graph_entity_relation_limit ?? 100} 条 → 融合排名`
@@ -1465,7 +1512,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
 
       <section className="grt-step">
         <h5>
-          ④ 找关系
+          ⑤ 找关系
           <small>
             {graph.pipeline ? (
               `完整问题 → 可见关系库向量＋关键词检索，每路最多 ${settings.graph_relation_top_k ?? 100} 条 → 融合排名`
@@ -1504,7 +1551,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
       {graph.pipeline && (
         <section className="grt-step">
           <h5>
-            ⑤ 候选合并与关系重排
+            ⑥ 候选合并与关系重排
             <DetailButton
               count={
                 graph.relation_candidate_counts?.total ??
@@ -1580,13 +1627,13 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
           )}
           <p className="grt-summary">
             留下的关系不进 RRF
-            融合，也不进分片重排：一边用来取出处分片（⑥），一边按预算直接放进回答上下文。
+            融合，也不进分片重排：一边用来取出处分片（⑦），一边按预算直接放进回答上下文。
           </p>
         </section>
       )}
       <section className="grt-step">
         <h5>
-          {graph.pipeline ? "⑥ 取分片" : "⑤ 取分片"}
+          {graph.pipeline ? "⑦ 取分片" : "⑥ 取分片"}
           <small>
             {graph.pipeline
               ? "保留关系的出处分片，同一片去重并保留关系 ID；按关系重排后的优先级排列。其他路也找到的分片参加 RRF 融合；只被图找到的按这个顺序单独进重排（有上限）。"
@@ -1681,7 +1728,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
 
       <section className="grt-step">
         <h5>
-          {graph.pipeline ? "⑦ 关系图" : "⑥ 关系图"}
+          {graph.pipeline ? "⑧ 关系图" : "⑦ 关系图"}
           <small>只画这道题用到的部分</small>
         </h5>
         <GraphRetrievalMap graph={graph} chunks={chunks} />
@@ -2029,7 +2076,7 @@ function ChunkTable({
   );
 }
 
-// ⑥ 关系图：② 找到的实体粗蓝边框；③ 实体路线的边蓝色，④ 关系路线的边绿色，两条都找到的紫色粗线；
+// ⑦ 关系图：② 找到的实体粗蓝边框；④ 实体路线的边蓝色，⑤ 关系路线的边绿色，两条都找到的紫色粗线；
 // 去掉的边灰色虚线（最多画 8 条，其余只在表格里）。边只写关系类别（和知识图谱一样），默认不画标签；
 // 鼠标停在边上才显示这条边的类别，提示框里给完整描述；点一条边在弹窗里看它的详情。
 const ROUTE_COLORS = {
@@ -2545,11 +2592,11 @@ function GraphRetrievalMap({
         </span>
         <span>
           <i style={{ background: ROUTE_COLORS.entity }} />
-          实体路线（③）
+          实体路线（④）
         </span>
         <span>
           <i style={{ background: ROUTE_COLORS.relation }} />
-          关系路线（④）
+          关系路线（⑤）
         </span>
         <span>
           <i style={{ background: ROUTE_COLORS.both }} />
