@@ -617,3 +617,16 @@
   color: var(--diag-muted, #6f8ba4);
   font-size: 11px;
 }
+.grt-group-relations {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.grt-group-relations > li {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+}

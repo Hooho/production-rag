@@ -958,79 +958,58 @@ function TraceDetail({
             onEntity={openEntity}
           />
         )}
-        {(detail.kind === "relationCandidates" ||
-          detail.kind === "relationGrouping") && (
+        {detail.kind === "relationCandidates" && (
           <RelationsDetail
             trace={graph}
             scoreMode={
-              (detail.stage === "kept" || detail.kind === "relationGrouping") &&
-              !graph.relation_rerank_error
+              detail.stage === "kept" && !graph.relation_rerank_error
                 ? "rerank"
                 : "fusion"
             }
             rows={(graph.relation_candidates ?? [])
               .filter((row) =>
-                detail.kind === "relationGrouping"
-                  ? row.group_round != null
-                  : detail.stage === "pool"
-                    ? row.in_pool
-                    : detail.stage === "kept"
-                      ? row.kept
-                      : true,
+                detail.stage === "pool"
+                  ? row.in_pool
+                  : detail.stage === "kept"
+                    ? row.kept
+                    : true,
               )
               .map((row) => ({
                 ...row,
                 sort_score:
-                  detail.kind === "relationGrouping"
-                    ? 1 / (row.selection_rank ?? 1)
-                    : detail.stage === "kept"
-                      ? (row.rerank_score ?? row.score ?? 0)
-                      : (row.fusion_score ?? 1 / (row.fusion_rank ?? 1)),
+                  detail.stage === "kept"
+                    ? (row.rerank_score ?? row.score ?? 0)
+                    : (row.fusion_score ?? 1 / (row.fusion_rank ?? 1)),
               }))}
             more={
               detail.stage === "candidates" || !detail.stage
                 ? graph.dropped_more?.relation_candidates
                 : 0
             }
-            dims={
-              detail.kind === "relationGrouping"
-                ? [
-                    {
-                      key: "group",
-                      label: "按实体关系组",
-                      value: (row: RelationRow) =>
-                        `${row.source_entity ?? row.source} → ${row.category} → ${row.target_entity ?? row.target}`,
-                    },
-                    ...RELATION_MATCH_DIMS.slice(1),
-                  ]
-                : RELATION_MATCH_DIMS
-            }
+            dims={RELATION_MATCH_DIMS}
             detail={detail}
-            first={
-              detail.kind === "relationGrouping" ? "实体关系组" : "召回来源"
-            }
+            first="召回来源"
             firstValue={(row) =>
-              detail.kind === "relationGrouping"
-                ? `${row.source_entity ?? row.source} → ${row.category} → ${row.target_entity ?? row.target}`
-                : (row.origins
-                    ?.map((id) =>
-                      id === "global"
-                        ? "全局"
-                        : (graph.entities.find((item) => item.entity_id === id)
-                            ?.name ?? id),
-                    )
-                    .join("、") ?? "—")
+              row.origins
+                ?.map((id) =>
+                  id === "global"
+                    ? "全局"
+                    : (graph.entities.find((item) => item.entity_id === id)
+                        ?.name ?? id),
+                )
+                .join("、") ?? "—"
             }
             chunks={chunks}
             scoreHint={
-              detail.kind === "relationGrouping"
-                ? "按分轮选择顺序排列；每组先选一条，再选第二条，每轮按重排分数排序。包括未入选项可查看容量截断原因。"
-                : graph.relation_rerank_error
-                  ? `重排失败，按融合排名回退：${graph.relation_rerank_error}`
-                  : `${detail.stage === "kept" ? "按重排分数从高到低排列" : "按融合分数从高到低排列"}，每页 6 条；原文按钮查看对应完整分片。${graph.dropped_more?.relation_candidates ? "该历史记录未保存全部候选明细，以下只展示已保存记录。" : ""}`
+              graph.relation_rerank_error
+                ? `重排失败，按融合排名回退：${graph.relation_rerank_error}`
+                : `${detail.stage === "kept" ? "按重排分数从高到低排列" : "按融合分数从高到低排列"}，每页 6 条；原文按钮查看对应完整分片。${graph.dropped_more?.relation_candidates ? "该历史记录未保存全部候选明细，以下只展示已保存记录。" : ""}`
             }
             onEntity={openEntity}
           />
+        )}
+        {detail.kind === "relationGrouping" && (
+          <RelationGroupsDetail graph={graph} chunks={chunks} />
         )}
         {detail.kind === "chunks" && (
           <ChunksDetail
@@ -1198,6 +1177,78 @@ function NamesDetail({
         </tbody>
       </Table>
       <Pager page={list.page} total={list.total} onPage={list.setPage} />
+    </>
+  );
+}
+
+function RelationGroupsDetail({
+  graph,
+  chunks,
+}: {
+  graph: GraphTrace;
+  chunks: Map<string, ChunkInfo>;
+}) {
+  const [page, setPage] = useState(1);
+  const groups = new Map<string, GraphRetrievalRelation[]>();
+  for (const row of [...(graph.relation_candidates ?? [])].sort(
+    (a, b) => (a.selection_rank ?? Infinity) - (b.selection_rank ?? Infinity),
+  )) {
+    if (!row.group_key) continue;
+    const key = JSON.stringify(row.group_key);
+    const group = groups.get(key) ?? [];
+    group.push(row);
+    groups.set(key, group);
+  }
+  const rows = [...groups.entries()];
+  return (
+    <>
+      <p>共 {rows.length} 组，每组一行；组内列出全部关系及入选结果。</p>
+      <Table>
+        <thead>
+          <tr>
+            <th>实体关系组</th>
+            <th>入选 / 总数</th>
+            <th>具体关系</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows
+            .slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+            .map(([key, group]) => (
+              <tr key={key}>
+                <td>
+                  {group[0].source_entity ?? group[0].source} →{" "}
+                  {group[0].category} →{" "}
+                  {group[0].target_entity ?? group[0].target}
+                </td>
+                <td>
+                  {group.filter((row) => row.kept).length} / {group.length}
+                </td>
+                <td>
+                  <ul className="grt-group-relations">
+                    {group.map((row) => (
+                      <li key={row.relation_id}>
+                        <RelationText relation={row} />
+                        <small>重排分数 {score(row.rerank_score)}</small>
+                        <Result
+                          row={row}
+                          trace={graph}
+                          kept={row.kept}
+                          reason={row.reason}
+                        />
+                        <OriginalButton
+                          relation={row}
+                          chunk={chunks.get(row.chunk_id)}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                </td>
+              </tr>
+            ))}
+        </tbody>
+      </Table>
+      <Pager page={page} total={rows.length} onPage={setPage} />
     </>
   );
 }
