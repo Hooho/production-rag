@@ -291,6 +291,14 @@ SPECS = [
         "advanced": True,
     },
     {
+        "key": "graph_relation_grouping",
+        "group": "retrieval",
+        "type": "bool",
+        "default": False,
+        "eval": "common",
+        "advanced": True,
+    },
+    {
         "key": "graph_relation_return_limit",
         "group": "retrieval",
         "type": "int",
@@ -625,6 +633,7 @@ REQUIRES = {
             "graph_global_relation_quota",
             "graph_relation_rerank_candidates",
             "graph_relation_return_limit",
+            "graph_relation_grouping",
             "graph_relation_rerank_min_score",
             "graph_chunk_rerank_candidates",
         )

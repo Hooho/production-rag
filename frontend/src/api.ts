@@ -154,6 +154,9 @@ export type GraphRetrievalRelation = {
   origins?: string[];
   guaranteed_by?: string[];
   rerank_rank?: number | null;
+  group_key?: string[];
+  group_round?: number;
+  selection_rank?: number;
   rerank_score?: number;
   relation_id: string;
   source: string;
@@ -189,6 +192,14 @@ export type GraphRetrievalTable = {
   heading?: string | null;
 };
 export type GraphRetrievalTrace = {
+  relation_grouping?: {
+    enabled: boolean;
+    applied: boolean;
+    groups: number;
+    eligible: number;
+    selected_groups: number;
+    selected: number;
+  };
   pipeline?: string;
   relation_candidates?: GraphRetrievalRelation[];
   candidate_chunks?: Pick<
@@ -263,7 +274,23 @@ export type GraphRetrievalTrace = {
   };
   dropped_more: Record<string, number>;
   counts?: { entity_chunks: number; relation_chunks: number; chunks: number };
-  settings?: Record<string, number>;
+  settings?: Partial<
+    Record<
+      | "graph_entity_min_score"
+      | "graph_entity_relation_limit"
+      | "graph_entity_relation_quota"
+      | "graph_entity_score_gap"
+      | "graph_entity_top_k"
+      | "graph_global_relation_quota"
+      | "graph_name_top_k"
+      | "graph_relation_min_score"
+      | "graph_relation_rerank_candidates"
+      | "graph_relation_rerank_min_score"
+      | "graph_relation_return_limit"
+      | "graph_relation_top_k",
+      number
+    >
+  > & { graph_relation_grouping?: boolean };
   timings: Record<string, number>;
 };
 export type RetrievalScope = {

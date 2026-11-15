@@ -72,7 +72,9 @@ def select_candidates(groups, capacity, entity_quota, global_quota, rrf_k=60):
     return ranked
 
 
-def rerank_candidates(models, question, candidates, details, limit, minimum):
+def rerank_candidates(
+    models, question, candidates, details, limit, minimum, grouping=False
+):
     pool = [item for item in candidates if item["in_pool"]]
     error = None
     if pool:
@@ -92,16 +94,36 @@ def rerank_candidates(models, question, candidates, details, limit, minimum):
             error = str(exc)[:500]
             for item in pool:
                 item.pop("rerank_score", None)
-    kept = 0
+    eligible = []
     for rank, item in enumerate(pool, 1):
         item["rerank_rank"] = rank if error is None else None
         if error is None and item["rerank_score"] < minimum:
             item.update(kept=False, reason="低于关系重排分数线")
-        elif kept >= limit:
-            item.update(kept=False, reason="超过关系保留上限")
         else:
-            kept += 1
-            item.update(kept=True, reason=None)
+            eligible.append(item)
+    if grouping and error is None:
+        groups = {}
+        for item in eligible:
+            row = details[item["relation_id"]]
+            # 缺少端点身份时不把未知实体当成同一个实体。
+            key = (
+                row.get("source_entity_id") or item["relation_id"],
+                row["category"],
+                row.get("target_entity_id") or item["relation_id"],
+            )
+            group = groups.setdefault(key, [])
+            group.append(item)
+            item["group_key"] = list(key)
+            item["group_round"] = len(group)
+        # 同轮仍沿用重排顺序，不改变重排分数和原排名。
+        eligible.sort(key=lambda item: (item["group_round"], item["rerank_rank"]))
+    for rank, item in enumerate(eligible, 1):
+        if grouping and error is None:
+            item["selection_rank"] = rank
+        item.update(
+            kept=rank <= limit,
+            reason=None if rank <= limit else "超过关系保留上限",
+        )
     for item in candidates:
         if not item["in_pool"]:
             item.update(kept=False, reason="超过关系重排候选上限")

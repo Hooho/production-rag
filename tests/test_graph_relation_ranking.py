@@ -73,3 +73,47 @@ def test_rerank_recovers_investment_and_failure_keeps_fusion_order():
     assert rerank_candidates(broken, "问题", fresh, details, 1, 0.99)
     assert [row["relation_id"] for row in fresh if row["kept"]] == ["r0"]
     assert all("rerank_score" not in row for row in fresh)
+
+
+def test_optional_grouping_uses_entity_ids_and_preserves_scores():
+    details = {}
+    for i, (target, category) in enumerate(
+        [
+            ("ge", "投资"),
+            ("ge", "投资"),
+            ("tencent", "投资"),
+            ("apple", "投资"),
+            ("ge", "评价"),
+            ("other", "投资"),
+        ]
+    ):
+        details[f"r{i}"] = {
+            "source": "段永平",
+            "source_entity_id": "duan",
+            "target": "GE" if i == 0 else "通用电气" if i == 1 else target,
+            "target_entity_id": target,
+            "category": category,
+            "description": "事实",
+        }
+    model = SimpleNamespace(rerank=lambda *args: [0.99, 0.98, 0.97, 0.96, 0.95, 0.1])
+
+    def run(grouping, limit=4, models=model):
+        candidates = select_candidates({"global": rows("r", 6)}, 6, 0, 0)
+        rerank_candidates(models, "问题", candidates, details, limit, 0.5, grouping)
+        return candidates
+
+    original = run(False)
+    assert [r["relation_id"] for r in original if r["kept"]] == ["r0", "r1", "r2", "r3"]
+    grouped = run(True)
+    assert [r["relation_id"] for r in grouped if r["kept"]] == ["r0", "r2", "r3", "r4"]
+    assert grouped[1]["group_key"] == grouped[0]["group_key"]
+    assert grouped[1]["group_round"] == 2
+    assert grouped[1]["rerank_rank"] == 2
+    assert grouped[1]["selection_rank"] == 5
+    assert grouped[1]["rerank_score"] == 0.98
+    assert "group_round" not in grouped[5]  # 低相关关系不参加分组。
+    assert sum(r["kept"] for r in run(True, 6)) == 5  # 第二轮仍可选入。
+    broken = SimpleNamespace(rerank=lambda *args: None)
+    fallback = run(True, models=broken)
+    assert [r["kept"] for r in fallback] == [True, True, True, True, False, False]
+    assert all("group_round" not in r for r in fallback)

@@ -614,6 +614,7 @@ class DocumentSearchTool:
         ]
         kept.sort(
             key=lambda row: (
+                row.get("selection_rank") or float("inf"),
                 row.get("rerank_rank") or float("inf"),
                 row.get("fusion_rank") or float("inf"),
             )

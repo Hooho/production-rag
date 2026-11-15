@@ -201,7 +201,8 @@ function Result({
     if (
       (kept || reason === "超过关系保留上限") &&
       row.rerank_rank != null &&
-      limit != null
+      limit != null &&
+      row.group_round == null
     ) {
       details.push(
         `重排名次第 ${row.rerank_rank} 名，${kept ? "在保留的" : "超出保留的"}前 ${limit} 条${kept ? "内" : "上限"}`,
@@ -212,6 +213,12 @@ function Result({
       details.push(
         `重排候选池${capacity != null ? `最多 ${capacity} 条，` : "："}未参与重排`,
       );
+    }
+    if (row.group_round != null) {
+      details.push(
+        `组内第 ${row.group_round} 条 · 第 ${row.group_round} 轮 · 选择顺序第 ${row.selection_rank} 名`,
+      );
+      if (limit != null) details.push(`分轮选取最多保留 ${limit} 条`);
     }
     if (trace?.relation_rerank_error && kept) {
       details.push("重排未成功，按融合排名保留");
@@ -350,7 +357,8 @@ type Detail =
         | "entityFilter"
         | "entityRelations"
         | "relationMatches"
-        | "relationCandidates";
+        | "relationCandidates"
+        | "relationGrouping";
       dim?: string;
       value?: string;
       stage?: "candidates" | "pool" | "kept";
@@ -860,6 +868,7 @@ function DetailFilters<T extends { kept: boolean }>({
 }
 
 const DETAIL_TITLES = {
+  relationGrouping: "⑦ 关系分组",
   relationCandidates: "⑥ 候选合并与关系重排",
   names: "② 找实体 · 匹配到的名字",
   entityFilter: "③ 实体过滤 · 分数与差距",
@@ -882,9 +891,9 @@ function TraceDetail({
 }) {
   const title =
     detail.kind === "chunks"
-      ? `${graph.pipeline ? "⑦" : "⑥"} 取分片 · ${CHUNK_TABLES[detail.table]}`
+      ? `${graph.relation_grouping?.enabled ? "⑧" : graph.pipeline ? "⑦" : "⑥"} 取分片 · ${CHUNK_TABLES[detail.table]}`
       : detail.kind === "chunksAll"
-        ? `${graph.pipeline ? "⑦" : "⑥"} 取分片 · 合计 ${graph.counts?.chunks ?? 0} 个分片`
+        ? `${graph.relation_grouping?.enabled ? "⑧" : graph.pipeline ? "⑦" : "⑥"} 取分片 · 合计 ${graph.counts?.chunks ?? 0} 个分片`
         : detail.kind === "relationCandidates" && detail.stage
           ? `⑥ ${detail.stage === "candidates" ? "全部候选" : detail.stage === "pool" ? "进入重排" : "最终留下"} · 关系与原文`
           : DETAIL_TITLES[detail.kind];
@@ -949,52 +958,76 @@ function TraceDetail({
             onEntity={openEntity}
           />
         )}
-        {detail.kind === "relationCandidates" && (
+        {(detail.kind === "relationCandidates" ||
+          detail.kind === "relationGrouping") && (
           <RelationsDetail
             trace={graph}
             scoreMode={
-              detail.stage === "kept" && !graph.relation_rerank_error
+              (detail.stage === "kept" || detail.kind === "relationGrouping") &&
+              !graph.relation_rerank_error
                 ? "rerank"
                 : "fusion"
             }
             rows={(graph.relation_candidates ?? [])
               .filter((row) =>
-                detail.stage === "pool"
-                  ? row.in_pool
-                  : detail.stage === "kept"
-                    ? row.kept
-                    : true,
+                detail.kind === "relationGrouping"
+                  ? row.group_round != null
+                  : detail.stage === "pool"
+                    ? row.in_pool
+                    : detail.stage === "kept"
+                      ? row.kept
+                      : true,
               )
               .map((row) => ({
                 ...row,
                 sort_score:
-                  detail.stage === "kept"
-                    ? (row.rerank_score ?? row.score ?? 0)
-                    : (row.fusion_score ?? 1 / (row.fusion_rank ?? 1)),
+                  detail.kind === "relationGrouping"
+                    ? 1 / (row.selection_rank ?? 1)
+                    : detail.stage === "kept"
+                      ? (row.rerank_score ?? row.score ?? 0)
+                      : (row.fusion_score ?? 1 / (row.fusion_rank ?? 1)),
               }))}
             more={
               detail.stage === "candidates" || !detail.stage
                 ? graph.dropped_more?.relation_candidates
                 : 0
             }
-            dims={RELATION_MATCH_DIMS}
+            dims={
+              detail.kind === "relationGrouping"
+                ? [
+                    {
+                      key: "group",
+                      label: "按实体关系组",
+                      value: (row: RelationRow) =>
+                        `${row.source_entity ?? row.source} → ${row.category} → ${row.target_entity ?? row.target}`,
+                    },
+                    ...RELATION_MATCH_DIMS.slice(1),
+                  ]
+                : RELATION_MATCH_DIMS
+            }
             detail={detail}
-            first="召回来源"
+            first={
+              detail.kind === "relationGrouping" ? "实体关系组" : "召回来源"
+            }
             firstValue={(row) =>
-              row.origins
-                ?.map((id) =>
-                  id === "global"
-                    ? "全局"
-                    : (graph.entities.find((item) => item.entity_id === id)
-                        ?.name ?? id),
-                )
-                .join("、") ?? "—"
+              detail.kind === "relationGrouping"
+                ? `${row.source_entity ?? row.source} → ${row.category} → ${row.target_entity ?? row.target}`
+                : (row.origins
+                    ?.map((id) =>
+                      id === "global"
+                        ? "全局"
+                        : (graph.entities.find((item) => item.entity_id === id)
+                            ?.name ?? id),
+                    )
+                    .join("、") ?? "—")
             }
             chunks={chunks}
             scoreHint={
-              graph.relation_rerank_error
-                ? `重排失败，按融合排名回退：${graph.relation_rerank_error}`
-                : `${detail.stage === "kept" ? "按重排分数从高到低排列" : "按融合分数从高到低排列"}，每页 6 条；原文按钮查看对应完整分片。${graph.dropped_more?.relation_candidates ? "该历史记录未保存全部候选明细，以下只展示已保存记录。" : ""}`
+              detail.kind === "relationGrouping"
+                ? "按分轮选择顺序排列；每组先选一条，再选第二条，每轮按重排分数排序。包括未入选项可查看容量截断原因。"
+                : graph.relation_rerank_error
+                  ? `重排失败，按融合排名回退：${graph.relation_rerank_error}`
+                  : `${detail.stage === "kept" ? "按重排分数从高到低排列" : "按融合分数从高到低排列"}，每页 6 条；原文按钮查看对应完整分片。${graph.dropped_more?.relation_candidates ? "该历史记录未保存全部候选明细，以下只展示已保存记录。" : ""}`
             }
             onEntity={openEntity}
           />
@@ -1568,6 +1601,9 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
             {settings.graph_relation_rerank_candidates ?? 100}{" "}
             条进入重排，最多保留 {settings.graph_relation_return_limit ?? 30}{" "}
             条。
+            {graph.relation_grouping?.enabled
+              ? "达标关系交给下一步分组选择。"
+              : "按重排分数选择。"}
           </p>
           <ol className="grt-stages" aria-label="关系候选筛选步骤">
             {(
@@ -1627,16 +1663,47 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
           )}
           <p className="grt-summary">
             留下的关系不进 RRF
-            融合，也不进分片重排：一边用来取出处分片（⑦），一边按预算直接放进回答上下文。
+            融合，也不进分片重排：一边用来取出处分片，一边按预算直接放进回答上下文。
           </p>
+        </section>
+      )}
+      {graph.relation_grouping?.enabled && (
+        <section className="grt-step">
+          <h5>
+            ⑦ 关系分组
+            {graph.relation_grouping.applied && (
+              <DetailButton
+                count={graph.relation_grouping.eligible}
+                onClick={() =>
+                  setDetail({ kind: "relationGrouping", dim: "group" })
+                }
+              />
+            )}
+          </h5>
+          {graph.relation_grouping.applied ? (
+            <p>
+              {graph.relation_grouping.eligible} 条达标关系，分为{" "}
+              {graph.relation_grouping.groups} 组； 分轮选入{" "}
+              {graph.relation_grouping.selected} 条，覆盖{" "}
+              {graph.relation_grouping.selected_groups} 组。
+              每组先选一条，再选第二条，每轮按重排分数排序；最多保留{" "}
+              {settings.graph_relation_return_limit ?? 30} 条。
+            </p>
+          ) : (
+            <p>关系重排未成功，本次未应用分组，按融合排名选择。</p>
+          )}
         </section>
       )}
       <section className="grt-step">
         <h5>
-          {graph.pipeline ? "⑦ 取分片" : "⑥ 取分片"}
+          {graph.relation_grouping?.enabled
+            ? "⑧ 取分片"
+            : graph.pipeline
+              ? "⑦ 取分片"
+              : "⑥ 取分片"}
           <small>
             {graph.pipeline
-              ? "保留关系的出处分片，同一片去重并保留关系 ID；按关系重排后的优先级排列。其他路也找到的分片参加 RRF 融合；只被图找到的按这个顺序单独进重排（有上限）。"
+              ? "保留关系的出处分片，同一片去重并保留关系 ID；按关系选择顺序排列。其他路也找到的分片参加 RRF 融合；只被图找到的按这个顺序单独进重排（有上限）。"
               : "关系的出处分片，同一片去重，名次按这一片对应的关系里相似度最高的那条"}
           </small>
         </h5>
@@ -1728,7 +1795,11 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
 
       <section className="grt-step">
         <h5>
-          {graph.pipeline ? "⑧ 关系图" : "⑦ 关系图"}
+          {graph.relation_grouping?.enabled
+            ? "⑨ 关系图"
+            : graph.pipeline
+              ? "⑧ 关系图"
+              : "⑦ 关系图"}
           <small>只画这道题用到的部分</small>
         </h5>
         <GraphRetrievalMap graph={graph} chunks={chunks} />

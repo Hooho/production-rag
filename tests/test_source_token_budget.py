@@ -296,6 +296,16 @@ def test_relations_fill_graph_budget_first_in_rerank_order(runtime, monkeypatch)
     assert result["diagnostics"]["context_relations"]["reason"] is None
 
 
+def test_group_selection_order_survives_context_budget(runtime, monkeypatch):
+    candidates = [
+        {**relation("a", 1, "短" * 1000), "selection_rank": 3},
+        {**relation("b", 2, "短" * 1000), "selection_rank": 1},
+        {**relation("c", 3, "短" * 1000), "selection_rank": 2},
+    ]
+    result = run_with_relations(runtime, monkeypatch, candidates)
+    assert [row["relation_id"] for row in result["relations"]] == ["b"]
+
+
 def test_relations_leave_rest_of_graph_budget_to_graph_only_chunks(
     runtime, monkeypatch
 ):

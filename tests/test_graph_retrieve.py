@@ -39,8 +39,10 @@ def graph(setup, monkeypatch):
 
 # Agent 给了关键词：不调用模型；具体关键词找到实体「段永平」（阿段归在它下面），一跳取它的两条关系；
 # 概括关键词「投资」找到投资那条关系；两张排名表都是出处分片。
-def test_retrieve_with_given_keywords(graph):
+@pytest.mark.parametrize("grouping", [False, True])
+def test_retrieve_with_given_keywords(graph, grouping, monkeypatch):
     client, store, models, document_id = graph
+    monkeypatch.setattr(models, "rerank", lambda question, texts: [0.9] * len(texts))
     scope = store.readable_scope("alice")
     result = graph_retrieve.retrieve(
         store,
@@ -50,6 +52,7 @@ def test_retrieve_with_given_keywords(graph):
         {
             "graph_relation_min_score": 0.3,
             "graph_entity_min_score": 0.3,
+            "graph_relation_grouping": grouping,
         },
         entities=["段永平"],
         themes=["投资"],
@@ -85,6 +88,16 @@ def test_retrieve_with_given_keywords(graph):
     assert all(row["also_entity"] for row in result["relation_matches"])
     assert result["keywords"]["themes"] == []
     assert result["pipeline"] == "hybrid_relations_v2"
+    assert result["settings"]["graph_relation_grouping"] is grouping
+    assert result["relation_grouping"]["applied"] is grouping
+    if grouping:
+        assert result["relation_grouping"]["groups"] == 2
+        assert result["relation_grouping"]["selected_groups"] == 2
+        assert all(
+            "selection_rank" in row
+            for row in result["relation_candidates"]
+            if row["kept"]
+        )
     assert result["sources"]["unified"] and result["sources"]["unified"]
     first = result["sources"]["unified"][0]
     assert (
