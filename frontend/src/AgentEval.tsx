@@ -4858,6 +4858,12 @@ function leadingNumber(text: string) {
 // 汇总卡片：和单次报告的「固定流程 / Agent」卡片一样，一列一张。
 export function BatchModeCards({ columns }: { columns: BatchColumn[] }) {
   const [detailOpen, setDetailOpen] = useState(false);
+  // 每份配置一套浅色，和下面「按类型」的表对应（同一份配置同一套颜色）。
+  const configIds = [
+    ...new Set(columns.map((column) => column.key.split(":")[0])),
+  ];
+  const colorOf = (column: BatchColumn) =>
+    `batch-color-${configIds.indexOf(column.key.split(":")[0]) % 4}`;
   const cards = columns.map((column) => {
     const questions = [...column.questions.values()];
     const rows = modeRows(
@@ -4906,13 +4912,16 @@ export function BatchModeCards({ columns }: { columns: BatchColumn[] }) {
       </p>
       <div className="ag-batch-scroll">
         <div
-          className={`ag-mode-cards ag-batch-cards${detailOpen ? "" : " is-collapsed"}`}
+          className={`ag-mode-cards ag-batch-cards batch-config-colors${detailOpen ? "" : " is-collapsed"}`}
           style={{
             gridTemplateColumns: `repeat(${cards.length}, minmax(300px, 1fr))`,
           }}
         >
           {cards.map(({ column, questions, rows }) => (
-            <section className="ag-mode-card" key={column.key}>
+            <section
+              className={`ag-mode-card ${colorOf(column)}`}
+              key={column.key}
+            >
               <h4>{column.title}</h4>
               {rows.map((row, index) => {
                 const cell = row[column.mode];
