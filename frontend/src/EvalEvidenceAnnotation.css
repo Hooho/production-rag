@@ -10,10 +10,24 @@
 }
 
 .eval-evidence-annotation .tag {
+  font-size: 12px;
   white-space: normal;
   text-align: left;
 }
 
 .eval-evidence-unmatched {
   color: var(--ev-muted, #71849a);
+}
+
+.eval-evidence-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.eval-evidence-filter > button[aria-pressed="true"] {
+  color: #1677ff;
+  border-color: #1677ff;
+  background: #e6f4ff;
 }

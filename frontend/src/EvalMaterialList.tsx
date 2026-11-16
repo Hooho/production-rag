@@ -7,7 +7,11 @@ import { buildHaystack, normalizeSearch, SearchText } from "./searchText";
 import type { ChunkOriginalSource } from "./ChunkOriginalDialog";
 import type { EvalMaterial } from "./api";
 import "./GraphRetrieval.css";
-import { EvalEvidenceAnnotation } from "./EvalEvidenceAnnotation";
+import {
+  EvalEvidenceAnnotation,
+  EvalEvidenceFilter,
+  useEvalEvidenceFilter,
+} from "./EvalEvidenceAnnotation";
 
 const PAGE_SIZE = 8;
 
@@ -65,9 +69,16 @@ export function MaterialListDialog({
   const filtered = needle
     ? entries.filter((entry) => entryHaystack(entry).includes(needle))
     : entries;
-  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const evidenceFilter = useEvalEvidenceFilter(filtered, (entry) => ({
+    chunkId: entry.chunkId,
+    text: entry.source?.text,
+  }));
+  const pages = Math.max(1, Math.ceil(evidenceFilter.rows.length / PAGE_SIZE));
   const current = Math.min(page, pages);
-  const rows = filtered.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
+  const rows = evidenceFilter.rows.slice(
+    (current - 1) * PAGE_SIZE,
+    current * PAGE_SIZE,
+  );
   const search = (next: string) => {
     setQuery(next);
     setPage(1);
@@ -111,6 +122,10 @@ export function MaterialListDialog({
         <p className="grt-hint">
           编号是这一份资料里的顺序；「含证据」写的是命中的计分项，标了扩展的是在父块扩展拼进来的分片里。
         </p>
+        <EvalEvidenceFilter
+          filter={evidenceFilter}
+          onChange={() => setPage(1)}
+        />
         {rows.length === 0 ? (
           <p className="grt-empty">
             {query ? `没有匹配「${query}」的资料` : "没有交给模型的资料"}
@@ -232,7 +247,7 @@ export function MaterialListDialog({
         <TablePagination
           page={current}
           pageSize={PAGE_SIZE}
-          total={filtered.length}
+          total={evidenceFilter.rows.length}
           onPageChange={setPage}
         />
       </div>

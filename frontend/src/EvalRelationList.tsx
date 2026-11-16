@@ -7,7 +7,11 @@ import { buildHaystack, normalizeSearch, SearchText } from "./searchText";
 import { labelHue } from "./hues";
 import type { ContextRelation } from "./api";
 import "./GraphRetrieval.css";
-import { EvalEvidenceAnnotation } from "./EvalEvidenceAnnotation";
+import {
+  EvalEvidenceAnnotation,
+  EvalEvidenceFilter,
+  useEvalEvidenceFilter,
+} from "./EvalEvidenceAnnotation";
 
 const PAGE_SIZE = 6;
 
@@ -48,9 +52,15 @@ export function EvalRelationList({
   const filtered = needle
     ? pool.filter((row) => relationHaystack(row).includes(needle))
     : pool;
-  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const evidenceFilter = useEvalEvidenceFilter(filtered, (row) => ({
+    chunkId: row.chunk_id,
+  }));
+  const pages = Math.max(1, Math.ceil(evidenceFilter.rows.length / PAGE_SIZE));
   const current = Math.min(page, pages);
-  const rows = filtered.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
+  const rows = evidenceFilter.rows.slice(
+    (current - 1) * PAGE_SIZE,
+    current * PAGE_SIZE,
+  );
   const search = (next: string) => {
     setQuery(next);
     setPage(1);
@@ -104,6 +114,10 @@ export function EvalRelationList({
             包括没放进去的 {skipped.length} 条{reason ? `（${reason}）` : ""}
           </label>
         )}
+        <EvalEvidenceFilter
+          filter={evidenceFilter}
+          onChange={() => setPage(1)}
+        />
         <p className="grt-hint">
           每条关系按「起点 → 关系类型 → 终点：描述」写给模型，另附原文引用。
         </p>
@@ -225,7 +239,7 @@ export function EvalRelationList({
         <TablePagination
           page={current}
           pageSize={PAGE_SIZE}
-          total={filtered.length}
+          total={evidenceFilter.rows.length}
           onPageChange={setPage}
         />
       </div>

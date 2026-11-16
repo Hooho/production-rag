@@ -1,4 +1,4 @@
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 import { InfoPopover } from "./Popover";
 import { Tag } from "./Tag";
 import { evidenceRanges } from "./evidenceRanges";
@@ -42,6 +42,91 @@ export function matchingScoringItems(
           evidenceRanges(text, [item.text]).length > 0;
     return matched ? [{ item, number: index + 1 }] : [];
   });
+}
+
+type EvidenceFilterValue = "all" | "evidence" | "non-evidence";
+type EvidenceLocation = { chunkId?: string | null; text?: string };
+
+export function filterEvidenceRows<T>(
+  rows: T[],
+  matches: (row: T) => boolean,
+  value: EvidenceFilterValue,
+) {
+  const marked = rows.map((row) => ({ row, evidence: matches(row) }));
+  const evidence = marked.filter((item) => item.evidence).length;
+  return {
+    rows: marked
+      .filter(
+        (item) => value === "all" || item.evidence === (value === "evidence"),
+      )
+      .map((item) => item.row),
+    counts: {
+      all: rows.length,
+      evidence,
+      "non-evidence": rows.length - evidence,
+    },
+  };
+}
+
+export function useEvalEvidenceFilter<T>(
+  rows: T[],
+  locate?: (row: T) => EvidenceLocation,
+) {
+  const items = useContext(EvalEvidenceContext);
+  const [value, setValue] = useState<EvidenceFilterValue>("all");
+  const enabled = items !== undefined && locate !== undefined;
+  const result = filterEvidenceRows(
+    rows,
+    (row) => {
+      const location = locate?.(row);
+      return (
+        !!location &&
+        matchingScoringItems(items ?? [], location.chunkId, location.text)
+          .length > 0
+      );
+    },
+    enabled ? value : "all",
+  );
+  return { ...result, enabled, value, setValue };
+}
+
+export function EvalEvidenceFilter({
+  filter,
+  onChange,
+}: {
+  filter: {
+    enabled: boolean;
+    value: EvidenceFilterValue;
+    counts: Record<EvidenceFilterValue, number>;
+    setValue: (value: EvidenceFilterValue) => void;
+  };
+  onChange?: () => void;
+}) {
+  if (!filter.enabled) return null;
+  return (
+    <div className="eval-evidence-filter" role="group" aria-label="证据筛选">
+      {(
+        [
+          ["all", "全部"],
+          ["evidence", "证据"],
+          ["non-evidence", "非证据"],
+        ] as const
+      ).map(([value, label]) => (
+        <button
+          key={value}
+          type="button"
+          className="secondary-button button-sm"
+          aria-pressed={filter.value === value}
+          onClick={() => {
+            filter.setValue(value);
+            onChange?.();
+          }}
+        >
+          {label} {filter.counts[value]}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 export function EvalEvidenceAnnotation({

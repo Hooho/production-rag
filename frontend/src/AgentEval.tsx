@@ -1,4 +1,9 @@
-import { withEvalEvidence } from "./EvalEvidenceAnnotation";
+import {
+  withEvalEvidence,
+  EvalEvidenceAnnotation,
+  EvalEvidenceFilter,
+  useEvalEvidenceFilter,
+} from "./EvalEvidenceAnnotation";
 import Table from "./Table";
 import "./EvalSearchModules.css";
 import { GraphRetrievalTrace } from "./GraphRetrievalTrace";
@@ -2426,6 +2431,20 @@ function FinalDelivery({
     }
     groups.set(item.id, rows);
   }
+  const evidenceFilter = useEvalEvidenceFilter(
+    [...groups.values()].flatMap((rows) => [...rows.values()]),
+    (row) => ({ chunkId: row.chunkId }),
+  );
+  const visibleRows = new Set(evidenceFilter.rows);
+  const visibleGroups = [...groups]
+    .map(
+      ([id, rows]) =>
+        [
+          id,
+          new Map([...rows].filter(([, row]) => visibleRows.has(row))),
+        ] as const,
+    )
+    .filter(([, rows]) => rows.size > 0);
   const directChunks = new Set(
     items
       .filter((item) => !item.key.startsWith("context-"))
@@ -2462,6 +2481,9 @@ function FinalDelivery({
           {groups.size} 条来源 · {chunks.size} 个分片（含扩展{" "}
           {expandedChunks.size} 片）
         </p>
+        {!unavailable && groups.size > 0 && (
+          <EvalEvidenceFilter filter={evidenceFilter} />
+        )}
         {unavailable ? (
           <p className="ag-muted">这次评测没有保存最终交付资料。</p>
         ) : groups.size === 0 ? (
@@ -2470,9 +2492,11 @@ function FinalDelivery({
               ? "资料已清空，没有最终交付。"
               : "没有最终交付资料。"}
           </p>
+        ) : visibleGroups.length === 0 ? (
+          <p className="ag-muted">没有符合筛选条件的分片。</p>
         ) : (
           <ul className="ag-delivery-groups">
-            {[...groups]
+            {visibleGroups
               .sort(([a], [b]) =>
                 a.localeCompare(b, undefined, { numeric: true }),
               )
@@ -2523,6 +2547,7 @@ function FinalDelivery({
                             ].join("、");
                             return (
                               <li key={key}>
+                                <EvalEvidenceAnnotation chunkId={row.chunkId} />
                                 <button
                                   type="button"
                                   className={`ag-delivery-row ${row.hits.length ? "" : "is-non-evidence"}`}

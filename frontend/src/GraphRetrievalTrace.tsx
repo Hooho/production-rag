@@ -1,5 +1,9 @@
 import { Tag } from "./Tag";
-import { EvalEvidenceAnnotation } from "./EvalEvidenceAnnotation";
+import {
+  EvalEvidenceAnnotation,
+  EvalEvidenceFilter,
+  useEvalEvidenceFilter,
+} from "./EvalEvidenceAnnotation";
 import Table, { TablePagination } from "./Table";
 import {
   useEffect,
@@ -722,6 +726,7 @@ function useDetailList<
   initialDim?: string,
   initialValue?: string,
   searchOf?: (item: T) => string,
+  evidenceOf?: (item: T) => { chunkId?: string | null; text?: string },
 ) {
   const [dimKey, setDimKey] = useState(initialDim ?? dims[0]?.key ?? "");
   const [value, setValue] = useState<string | null>(initialValue ?? null);
@@ -746,7 +751,8 @@ function useDetailList<
   const filtered = needle
     ? byDim.filter((item) => (searchOf?.(item) ?? "").includes(needle))
     : byDim;
-  const ordered = [...filtered].sort(
+  const evidenceFilter = useEvalEvidenceFilter(filtered, evidenceOf);
+  const ordered = [...evidenceFilter.rows].sort(
     (a, b) =>
       (b.sort_score ?? b.score ?? -Infinity) -
       (a.sort_score ?? a.score ?? -Infinity),
@@ -754,6 +760,8 @@ function useDetailList<
   const pages = Math.max(1, Math.ceil(ordered.length / PAGE_SIZE));
   const current = Math.min(page, pages);
   return {
+    evidenceFilter,
+    setEvidenceFilter: () => setPage(1),
     dims,
     dimKey,
     setDim: (key: string) => {
@@ -799,6 +807,10 @@ function DetailFilters<T extends { kept: boolean }>({
   const hueDim = list.dims.find((item) => item.key === list.dimKey)?.hue;
   return (
     <div className="grt-filters">
+      <EvalEvidenceFilter
+        filter={list.evidenceFilter}
+        onChange={list.setEvidenceFilter}
+      />
       <div className="grt-filter-top">
         {list.dims.length > 1 && (
           <div className="grt-chips" role="tablist">
@@ -1201,7 +1213,11 @@ function RelationGroupsDetail({
 }) {
   const [page, setPage] = useState(1);
   const groups = new Map<string, GraphRetrievalRelation[]>();
-  for (const row of [...(graph.relation_candidates ?? [])].sort(
+  const evidenceFilter = useEvalEvidenceFilter(
+    (graph.relation_candidates ?? []).filter((row) => !!row.group_key),
+    (row) => ({ chunkId: row.chunk_id }),
+  );
+  for (const row of [...evidenceFilter.rows].sort(
     (a, b) => (a.selection_rank ?? Infinity) - (b.selection_rank ?? Infinity),
   )) {
     if (!row.group_key) continue;
@@ -1213,7 +1229,10 @@ function RelationGroupsDetail({
   const rows = [...groups.entries()];
   return (
     <>
-      <p>共 {rows.length} 组，每组一行；组内列出全部关系及入选结果。</p>
+      <p>
+        共 {rows.length} 组，每组一行；组内列出符合筛选条件的关系及入选结果。
+      </p>
+      <EvalEvidenceFilter filter={evidenceFilter} onChange={() => setPage(1)} />
       <Table className="grt-groups-table">
         <thead>
           <tr>
@@ -1323,6 +1342,7 @@ function RelationsDetail({
     detail.dim,
     detail.value,
     (row) => relationHaystack(row, firstValue(row)),
+    (row) => ({ chunkId: row.chunk_id }),
   );
   return (
     <>
@@ -1367,8 +1387,13 @@ function ChunksDetail({
         .map((row) => ({ ...row, kept: row.kept !== false })),
     [rows, result],
   );
-  const list = useDetailList(items, [], undefined, undefined, (row) =>
-    chunkHaystack(row, relations),
+  const list = useDetailList(
+    items,
+    [],
+    undefined,
+    undefined,
+    (row) => chunkHaystack(row, relations),
+    (row) => ({ chunkId: row.chunk_id, text: row.text }),
   );
   return (
     <>

@@ -10,8 +10,13 @@ test("evaluation annotations follow scoring chunks without claiming relation sup
     appType: "custom",
   });
   try {
-    const { matchingScoringItems, EvalEvidenceAnnotation, withEvalEvidence } =
-      await server.ssrLoadModule("/src/EvalEvidenceAnnotation.tsx");
+    const {
+      matchingScoringItems,
+      EvalEvidenceAnnotation,
+      withEvalEvidence,
+      filterEvidenceRows,
+      EvalEvidenceFilter,
+    } = await server.ssrLoadModule("/src/EvalEvidenceAnnotation.tsx");
     const items = [
       {
         label: "理念甲",
@@ -53,6 +58,56 @@ test("evaluation annotations follow scoring chunks without claiming relation sup
     assert.equal(
       renderToStaticMarkup(
         React.createElement(EvalEvidenceAnnotation, { chunkId: "a" }),
+      ),
+      "",
+    );
+    const rows = [
+      { chunk_id: "a", kept: false },
+      { chunk_id: "b", kept: true },
+      { chunk_id: "other", kept: true },
+    ];
+    const matches = (row) =>
+      matchingScoringItems(items, row.chunk_id).length > 0;
+    const all = filterEvidenceRows(rows, matches, "all");
+    assert.deepEqual(all.counts, { all: 3, evidence: 2, "non-evidence": 1 });
+    assert.deepEqual(
+      filterEvidenceRows(rows, matches, "evidence").rows,
+      rows.slice(0, 2),
+    );
+    assert.deepEqual(
+      filterEvidenceRows(rows, matches, "non-evidence").rows,
+      rows.slice(2),
+    );
+    assert.deepEqual(
+      filterEvidenceRows(
+        rows.filter((row) => row.kept),
+        matches,
+        "all",
+      ).counts,
+      { all: 2, evidence: 1, "non-evidence": 1 },
+    );
+    assert.deepEqual(filterEvidenceRows([], matches, "evidence").counts, {
+      all: 0,
+      evidence: 0,
+      "non-evidence": 0,
+    });
+    const filter = {
+      enabled: true,
+      value: "all",
+      counts: all.counts,
+      setValue() {},
+    };
+    const controls = renderToStaticMarkup(
+      React.createElement(EvalEvidenceFilter, { filter }),
+    );
+    assert.match(controls, /证据筛选/);
+    assert.match(controls, /全部 3/);
+    assert.match(controls, /非证据 1/);
+    assert.equal(
+      renderToStaticMarkup(
+        React.createElement(EvalEvidenceFilter, {
+          filter: { ...filter, enabled: false },
+        }),
       ),
       "",
     );
