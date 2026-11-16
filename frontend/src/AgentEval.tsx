@@ -396,6 +396,8 @@ function agentEntries(
 }
 
 // 计分项命中情况：每个计分项一个结果标签（检索命中 / 父块扩展命中 / 读前后文拿到 / 被过滤 / 没召回 / 没拿到），后面写细节。
+// 关系命中用青色，和分片命中的绿、被过滤的红区分开。
+const RELATION_HIT_HUE = 190;
 type EvidenceStatusEntry = {
   label: string;
   tone: "success" | "danger" | "neutral" | "info";
@@ -466,7 +468,7 @@ function EvidenceStatus({
               <span className="ag-evidence-name">[{itemName(index)}]</span>
               <Tag
                 tone={row.tone}
-                hue={row.label === "关系命中" ? 165 : row.hue}
+                hue={row.hue}
                 size="sm"
                 outline={row.dashed}
                 className={row.dashed ? "is-dashed" : undefined}
@@ -709,6 +711,7 @@ function fixedEvidenceRows(
       return {
         label: "关系命中",
         tone: "success",
+        hue: RELATION_HIT_HUE,
         detail: `对应图谱关系已进入上下文；分片：${chunkReason}`,
       };
     }

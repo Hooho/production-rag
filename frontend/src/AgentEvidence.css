@@ -28,7 +28,7 @@
 
 .ag-evidence-status > ul > li.is-relation-hit {
   display: block;
-  color: #0f766e;
+  color: hsl(190 62% 30%);
   line-height: 1.8;
 }
 
