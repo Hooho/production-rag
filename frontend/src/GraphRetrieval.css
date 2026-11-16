@@ -685,4 +685,15 @@
 
 .ag-delivery-dialog.graph-retrieval-dialog .diag .tag {
   padding: 0 5px;
+  border-radius: 4px;
+}
+
+/* 计分证据标注有独立字号规则，图检索弹窗内仍采用紧凑标签。 */
+.ag-delivery-dialog.graph-retrieval-dialog .diag .eval-evidence-annotation .tag,
+.ag-delivery-dialog.graph-retrieval-dialog
+  .diag
+  .eval-evidence-annotation
+  .tag
+  * {
+  font-size: 10px;
 }
