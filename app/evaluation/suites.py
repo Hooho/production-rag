@@ -580,6 +580,7 @@ def run_search_suite(
             # 和 Agent 逐题对比时要用：过滤后的召回、证据去向、交给回答模型的来源、检索词和耗时。
             "recall_final": found,
             "given_recall": row.get("given_recall"),
+            "graph_hits": row.get("graph_hits"),
             # 证据去向：status（没召回 / 没进候选池 / 低于阈值被过滤 / 超出返回段数 / 交给模型）和合并名次、重排名次、重排分，
             # 页面据此写出「召回到了但丢在哪一步」。
             "fixed_evidence": [

@@ -1210,6 +1210,7 @@ export type EvalEvidenceGroup = {
   targets?: EvalEvidenceTarget[];
 };
 export type EvalEvidence = EvalEvidenceGroup & {
+  graph_paths?: ("entity" | "global")[];
   relation_ids?: (string | null)[];
   graph_filter_reason?: string;
   filter_candidates?: {
@@ -1311,7 +1312,13 @@ export type EvalMaterial = {
   tokens: number;
   items?: { chunk_id: string | null; chars: number; tokens: number }[];
 };
+export type EvalGraphHits = {
+  entity_only: number;
+  global_only: number;
+  both: number;
+};
 export type EvalFlowFields = {
+  graph_hits?: EvalGraphHits | null;
   material?: EvalMaterial | null;
   query_routes?: EvalQueryRoute[] | null;
   given_hits?: number | null;
@@ -1435,6 +1442,7 @@ export type EvalAgentRound = {
   duration_ms?: number | null;
 };
 export type EvalAgentQuestion = {
+  graph_hits?: EvalGraphHits | null;
   round_logs?: EvalAgentRound[];
   // 交给模型的资料：资料池里全部资料（旧记录没有）。
   material?: EvalMaterial;

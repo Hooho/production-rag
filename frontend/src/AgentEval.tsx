@@ -16,6 +16,7 @@ import {
   type EvalAgentCall,
   type EvalCompareKey,
   type EvalConfig,
+  type EvalGraphHits,
   type EvalMaterial,
   type EvalMode,
   type EvalParams,
@@ -411,6 +412,29 @@ type EvidenceStatusRow = EvidenceStatusEntry & {
   hitCount?: number;
 };
 
+export function GraphHitSummary({
+  enabled,
+  hits,
+}: {
+  enabled: boolean;
+  hits?: EvalGraphHits | null;
+}) {
+  if (!enabled) return null;
+  return (
+    <section className="ag-graph-hits" aria-label="图检索命中">
+      <strong>图检索命中</strong>
+      {hits ? (
+        <div>
+          实体关系独有 <b>{hits.entity_only}</b> · 全局关系独有{" "}
+          <b>{hits.global_only}</b> · 两路共同 <b>{hits.both}</b>
+        </div>
+      ) : (
+        <div>本次记录未保存命中路径，无法统计</div>
+      )}
+    </section>
+  );
+}
+
 // 卡片显示简洁摘要，完整计分项命中记录通过标题旁的详情按钮查看。
 function EvidenceStatus({
   question,
@@ -419,6 +443,7 @@ function EvidenceStatus({
   onToggle,
   children,
   agent = false,
+  graphEnabled = false,
 }: {
   question: EvalQuestion;
   rows: EvidenceStatusRow[];
@@ -426,8 +451,10 @@ function EvidenceStatus({
   onToggle: () => void;
   children?: ReactNode;
   agent?: boolean;
+  graphEnabled?: boolean;
 }) {
   const [detailOpen, setDetailOpen] = useState(false);
+  const graphHits = agent ? question.agent?.graph_hits : question.graph_hits;
   const itemName = (index: number) => {
     const label =
       question.agent?.evidence[index]?.label ||
@@ -485,6 +512,7 @@ function EvidenceStatus({
       ) : (
         <p className="ag-muted">没有答案的题，不看计分项。</p>
       )}
+      <GraphHitSummary enabled={graphEnabled} hits={graphHits} />
       {children}
       <button
         type="button"
@@ -2688,7 +2716,12 @@ function QuestionDetail({
         {hasFixed && (
           <FixedLog question={question} params={params} config={config} />
         )}
-        {agent && <AgentLog question={question} />}
+        {agent && (
+          <AgentLog
+            question={question}
+            graphEnabled={config.methods?.includes("graph")}
+          />
+        )}
       </div>
     </div>
   );
@@ -3271,6 +3304,9 @@ function FixedLog({
       <EvidenceStatus
         question={question}
         rows={fixedEvidenceRows(question, config)}
+        graphEnabled={Boolean(
+          config.methods?.includes("graph") || question.graph_hits,
+        )}
         expanded={expanded}
         onToggle={() => setExpanded(!expanded)}
       >
@@ -3565,7 +3601,13 @@ function SufficiencySteps({
 }
 
 // （资料池逐段列表已去掉，只显示段数；计分项怎么拿到的看「计分项命中情况」。）
-function AgentLog({ question }: { question: EvalQuestion }) {
+function AgentLog({
+  question,
+  graphEnabled = false,
+}: {
+  question: EvalQuestion;
+  graphEnabled?: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [selectedStep, setSelectedStep] = useState(0);
   const [reasoningDetail, setReasoningDetail] = useState<{
@@ -3634,6 +3676,12 @@ function AgentLog({ question }: { question: EvalQuestion }) {
         question={question}
         agent
         rows={agentEvidenceRows(question)}
+        graphEnabled={
+          graphEnabled ||
+          agent.calls.some(
+            (call) => call.retrieval_diagnostics?.graph !== undefined,
+          )
+        }
         expanded={expanded}
         onToggle={() => setExpanded(!expanded)}
       >
@@ -4528,6 +4576,7 @@ function fromSpecial(
     retry: question.retry,
     cleared: question.cleared,
     flow_latency_ms: question.flow_latency_ms,
+    graph_hits: question.graph_hits,
     material: question.material,
     sufficiency: question.sufficiency ?? undefined,
     query_routes: question.query_routes,
@@ -5460,7 +5509,12 @@ export function BatchQuestionList({
                                     message={item.agent.error}
                                   />
                                 )}
-                                <AgentLog question={item} />
+                                <AgentLog
+                                  question={item}
+                                  graphEnabled={column.config?.methods?.includes(
+                                    "graph",
+                                  )}
+                                />
                               </>
                             )}
                           </div>

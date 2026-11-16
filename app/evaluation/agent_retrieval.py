@@ -31,6 +31,8 @@ from ..runtime_config import snapshot as runtime_snapshot
 from .dataset import QUESTION_TYPES, select_split
 
 from .retrieval import (
+    graph_evidence_paths,
+    graph_hit_summary,
     EVAL_OWNER,
     current_chunk_texts,
     evidence_hits,
@@ -378,6 +380,31 @@ def evaluate_agent(agent_mode, store, models, item, chunk_texts, positions=None)
             "answer": answer[:ANSWER_LIMIT],
         }
     )
+    graph_paths = [set() for _ in evidence]
+    graph_known = True
+    for call in searches:
+        diagnostics = call.get("retrieval_diagnostics") or {}
+        if "graph" not in diagnostics:
+            continue
+        paths = graph_evidence_paths(
+            diagnostics,
+            call.get("results"),
+            [
+                relation
+                for relation in (diagnostics.get("context_relations") or {}).get(
+                    "items", []
+                )
+                if relation.get("status") == "context"
+            ],
+            evidence,
+            chunk_texts,
+        )
+        if paths is None:
+            graph_known = False
+        else:
+            for combined, routes in zip(graph_paths, paths):
+                combined.update(routes)
+    row["graph_hits"] = graph_hit_summary(graph_paths if graph_known else None)
     return row
 
 

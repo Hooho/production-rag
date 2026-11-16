@@ -22,6 +22,21 @@
   font-size: 11px;
 }
 
+.ag-graph-hits {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border-radius: 4px;
+  background: hsl(190 45% 95%);
+  color: hsl(190 50% 28%);
+  font-size: 11px;
+  line-height: 1.8;
+}
+
+.ag-graph-hits > strong {
+  display: block;
+  font-size: 12px;
+}
+
 .ag-evidence-status > ul > li.is-hit {
   color: var(--tone-success-text);
 }

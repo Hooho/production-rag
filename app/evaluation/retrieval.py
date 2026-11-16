@@ -417,7 +417,46 @@ def evidence_found_main(sources, evidence, chunk_texts):
 
 # 扩展命中：最后交给模型的资料里拿到的证据中，不在检索命中的那一片、只在父块扩展拼进来的分片里的。
 # 记在评测行上（given_hits 拿到几条、ext_hits 其中靠扩展的几条），每条证据标 via：direct / extension。
-def mark_extension(row, sources, evidence, chunk_texts, relations=None):
+def graph_evidence_paths(diagnostics, sources, relations, evidence, chunk_texts):
+    """只追踪最终保留、且原文或关系实际交付的图关系，不给父块邻片归因。"""
+    graph = (diagnostics or {}).get("graph")
+    if graph is None:
+        return None
+    candidates = graph.get("relation_candidates")
+    if candidates is None:
+        return [[] for _ in evidence] if graph.get("status") != "ok" else None
+    main = {
+        str(source["chunk_id"]) for source in sources or [] if source.get("chunk_id")
+    }
+    delivered = {relation["relation_id"] for relation in relations or []}
+    paths = [set() for _ in evidence]
+    for relation in candidates:
+        if not relation.get("kept") or not (
+            str(relation["chunk_id"]) in main or relation["relation_id"] in delivered
+        ):
+            continue
+        origins = relation.get("origins")
+        if not origins:
+            return None  # 旧记录缺失来源，不能当成零命中。
+        routes = {"global" if origin == "global" else "entity" for origin in origins}
+        for index in evidence_found([relation], evidence, chunk_texts):
+            paths[index].update(routes)
+    return [sorted(routes) for routes in paths]
+
+
+def graph_hit_summary(paths):
+    if paths is None:
+        return None
+    return {
+        "entity_only": sum(set(routes) == {"entity"} for routes in paths),
+        "global_only": sum(set(routes) == {"global"} for routes in paths),
+        "both": sum(set(routes) == {"entity", "global"} for routes in paths),
+    }
+
+
+def mark_extension(
+    row, sources, evidence, chunk_texts, relations=None, diagnostics=None
+):
     chunks = evidence_found(sources, evidence, chunk_texts)
     main = evidence_found_main(sources, evidence, chunk_texts)
     relation_found = evidence_found(relations, evidence, chunk_texts)
@@ -427,8 +466,12 @@ def mark_extension(row, sources, evidence, chunk_texts, relations=None):
     row["ext_hits"] = len(chunks - main)
     row["relation_hits"] = len(relation_found - chunks)
     row["relations"] = list(relations or [])
+    paths = graph_evidence_paths(diagnostics, sources, relations, evidence, chunk_texts)
+    row["graph_hits"] = graph_hit_summary(paths)
     for index, entry in enumerate(row.get("evidence") or []):
         entry["given"] = index in given
+        if paths is not None:
+            entry["graph_paths"] = paths[index]
         entry["via"] = (
             "direct"
             if index in main
@@ -914,6 +957,7 @@ def evaluate_items(
                     evidence,
                     chunk_texts,
                     retry.get("relations"),
+                    retry.get("diagnostics"),
                 )
                 if keep_diagnostics:
                     row["retry"]["diagnostics"] = retry["diagnostics"]
@@ -921,6 +965,7 @@ def evaluate_items(
                     {
                         "relations": retry_score["relations"],
                         "relation_hits": retry_score["relation_hits"],
+                        "graph_hits": retry_score["graph_hits"],
                         "given_recall": retry_score["given_recall"],
                         "found": [
                             index
@@ -944,7 +989,14 @@ def evaluate_items(
             for index, entry in enumerate(row["evidence"]):
                 entry["first_given"] = index in first_found
             mark_extension(
-                row, check["sources"], evidence, chunk_texts, check.get("relations")
+                row,
+                check["sources"],
+                evidence,
+                chunk_texts,
+                check.get("relations"),
+                (check.get("retry_retrieval") or {}).get("diagnostics")
+                if check.get("retry_used")
+                else retrieval.get("diagnostics"),
             )
             row["material"] = material(check["sources"])
             row["flow_latency_ms"] = rewrite["duration_ms"] + latency_ms + check_ms
@@ -957,6 +1009,7 @@ def evaluate_items(
                 item.get("evidence") or [],
                 chunk_texts,
                 retrieval.get("relations"),
+                retrieval.get("diagnostics"),
             )
             row["material"] = material(retrieval["sources"])
         if keep_diagnostics:
