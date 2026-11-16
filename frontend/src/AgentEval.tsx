@@ -3285,6 +3285,7 @@ function FixedLog({
         title="固定流程 · 检索详情"
         onClose={() => setExpanded(false)}
         className="ag-retrieval-dialog"
+        size="table"
       >
         <div className="ag-retrieval-content">
           {expanded && (
@@ -3640,6 +3641,7 @@ function AgentLog({ question }: { question: EvalQuestion }) {
         title="Agent · 检索详情"
         onClose={() => setExpanded(false)}
         className="ag-retrieval-dialog"
+        size="table"
       >
         <div className="ag-retrieval-content">
           {expanded && (
