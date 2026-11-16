@@ -235,6 +235,9 @@ type ModeCell = {
   note?: string;
   best?: boolean;
   custom?: boolean;
+  // 这组配置没开这个能力，这一格没有意义：数字显示「—」，整行变灰，鼠标停上去说原因。
+  disabled?: boolean;
+  reason?: string;
 };
 type ModeRow = {
   group: "result" | "process" | "config";
@@ -902,6 +905,74 @@ function fixedExtHits(question: EvalQuestion) {
   );
 }
 
+// 这组配置有没有开图检索：统一配置（版本 2）看 methods；旧记录的 methods 恒是 dense+keyword，
+// 只能看当时的全局开关 graph_retrieval。都拿不到返回 undefined（不知道，不置灰）。
+function graphOn(config?: EvalConfig): boolean | undefined {
+  if (config?.version === 2) return Boolean(config.methods?.includes("graph"));
+  const flag = (config?.settings as Record<string, unknown> | undefined)
+    ?.graph_retrieval;
+  return typeof flag === "boolean" ? flag : undefined;
+}
+
+// 父子扩展开没开：固定流程看 parent_context，Agent 有自己的一套 agent_parent_context。
+function parentOn(
+  config: EvalConfig | undefined,
+  mode: "fixed" | "agent",
+): boolean | undefined {
+  const settings = (config?.settings ?? {}) as Record<string, unknown>;
+  if (mode === "agent") {
+    const agent = config?.agent?.parent_context;
+    if (typeof agent === "boolean") return agent;
+    const value = settings.agent_parent_context;
+    return typeof value === "boolean" ? value : undefined;
+  }
+  const value = settings.parent_context;
+  return typeof value === "boolean" ? value : undefined;
+}
+
+// 这一行在这组配置下有没有意义：返回没有意义的原因（undefined = 有意义，照常显示）。
+// 没开图检索就没有关系命中，没开父子扩展就没有扩展命中，固定流程没有轮次和输入 token。
+function notApplicable(
+  label: string,
+  mode: "fixed" | "agent",
+  facts: {
+    graph?: boolean;
+    parent?: boolean;
+    rerankOff: boolean;
+    excellentOff: boolean;
+    sufficiencyOff: boolean;
+  },
+): string | undefined {
+  const parentOff =
+    mode === "agent" ? "这组配置没开 Agent 父子扩展" : "这组配置没开父子扩展";
+  switch (label) {
+    case "关系命中":
+      if (mode === "agent") return "Agent 模式不统计关系命中，只有固定流程有";
+      if (facts.graph === false) return "这组配置没开图检索，没有关系可命中";
+      return undefined;
+    case "扩展命中":
+      return facts.parent === false ? `${parentOff}，没有扩展命中` : undefined;
+    case "轮数":
+      return mode === "fixed" ? "固定流程没有轮次，只有 Agent 有" : undefined;
+    case "输入 token":
+      return mode === "fixed"
+        ? "固定流程没记录输入 token，只有 Agent 有"
+        : undefined;
+    case "重排模型":
+    case "重排候选":
+    case "重排阈值":
+      return facts.rerankOff ? "重排未启用" : undefined;
+    case "优秀阈值":
+      return facts.excellentOff ? "优秀阈值未启用" : undefined;
+    case "父块扩展":
+      return facts.parent === false ? parentOff : undefined;
+    case "充分性判断模型":
+      return facts.sufficiencyOff ? "这组配置没启用充分性判断" : undefined;
+    default:
+      return undefined;
+  }
+}
+
 function modeRows(
   questions: EvalQuestion[],
   config: EvalConfig | undefined,
@@ -1147,7 +1218,8 @@ function modeRows(
           ),
           note: "目标分片未返回，仅对应关系进入上下文",
         },
-        noVia,
+        // Agent 不记关系命中（后端只在固定流程统计），不是「没记录」。
+        { value: "—", note: "Agent 模式不统计关系命中" },
       ),
     });
   rows.push({
@@ -1531,6 +1603,31 @@ function modeRows(
       ...pick(mark(model.fixed, fixedKeys), mark(model.agent, agentKeys)),
     });
   }
+  // 这组配置没开的能力，这一行没有意义：数字换成「—」，整行变灰，鼠标停上去说原因。
+  // 优秀阈值：1（或没记）表示不启用；重排没开时相关几项都不适用。
+  const excellentOff = (side: "fixed" | "agent") => {
+    if (rerankOff) return true;
+    const value =
+      side === "fixed"
+        ? (settings.rerank_excellent_score as number | undefined)
+        : (agentConfig?.excellent_score ??
+          (settings.agent_excellent_score as number | undefined));
+    return value === undefined || value >= 1;
+  };
+  for (const row of rows) {
+    for (const side of ["fixed", "agent"] as const) {
+      const cell = row[side];
+      if (!cell) continue;
+      const reason = notApplicable(row.label, side, {
+        graph: graphOn(config),
+        parent: parentOn(config, side),
+        rerankOff,
+        excellentOff: excellentOff(side),
+        sufficiencyOff: Boolean(flow && !flow.sufficiency),
+      });
+      if (reason) row[side] = { ...cell, value: "—", disabled: true, reason };
+    }
+  }
   return rows;
 }
 
@@ -1568,7 +1665,8 @@ function ModeCards({
         return (
           <Fragment key={row.label}>
             <div
-              className={`ag-mode-row is-${row.group}${index > 0 && rows[index - 1].group !== row.group ? " is-break" : ""}`}
+              className={`ag-mode-row is-${row.group}${index > 0 && rows[index - 1].group !== row.group ? " is-break" : ""}${cell.disabled ? " is-disabled" : ""}`}
+              title={cell.reason}
             >
               <span className="ag-mode-label">{row.label}</span>
               <span className="ag-mode-value">
@@ -4981,7 +5079,8 @@ export function BatchModeCards({ columns }: { columns: BatchColumn[] }) {
                 return (
                   <Fragment key={row.label}>
                     <div
-                      className={`ag-mode-row is-${row.group}${index > 0 && rows[index - 1].group !== row.group ? " is-break" : ""}`}
+                      className={`ag-mode-row is-${row.group}${index > 0 && rows[index - 1].group !== row.group ? " is-break" : ""}${cell.disabled ? " is-disabled" : ""}`}
+                      title={cell.reason}
                     >
                       <span className="ag-mode-label">{row.label}</span>
                       <span className="ag-mode-value">

@@ -9084,6 +9084,17 @@ label {
   padding-top: 11px;
 }
 
+/* 这组配置没开这个能力，这一行没有意义：数字换成「—」，标签和说明一起变淡，
+   鼠标停上去（title）说明为什么没有。 */
+.ag-mode-row.is-disabled .ag-mode-label,
+.ag-mode-row.is-disabled .ag-mode-value small {
+  opacity: 0.5;
+}
+
+.ag-mode-row.is-disabled .ag-mode-value b {
+  color: var(--ev-muted);
+}
+
 .ag-mode-label {
   font-size: 12px;
   color: var(--ev-muted);

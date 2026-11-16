@@ -1583,6 +1583,8 @@ export type EvalHistoryMetrics = {
 };
 export type EvalConfig = {
   split: string | null;
+  // 统一配置（版本 2）的记录才有：2 = 检索方式（methods）按这组配置自己定；旧记录没有这个字段。
+  version?: number;
   suites: string[];
   // 自建题集：选了哪些题集（此时 split 固定是 all）和当时的名字；旧记录的名字由后端按当前题集补上。
   suite_ids?: string[];
