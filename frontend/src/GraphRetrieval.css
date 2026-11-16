@@ -44,6 +44,23 @@
   background: rgb(241 245 249 / 0.6);
 }
 
+/* 分片文字和「原文」按钮并排：按钮跟在内容末尾，不单独占一行。 */
+.grt-chunk-body {
+  display: block;
+}
+
+.grt-chunk-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.grt-chunk-line .diag-title {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
 .grt-rel {
   display: inline;
   line-height: 1.6;

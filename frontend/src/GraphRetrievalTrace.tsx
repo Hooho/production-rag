@@ -2132,6 +2132,52 @@ function ChunkTable({
           <tbody>
             {rows.map((row) => {
               const piece = chunkNumber(row.chunk_id);
+              const titleNode = (
+                <span className="diag-title">
+                  {row.title ? (
+                    <SearchText text={row.title} query={query ?? ""} />
+                  ) : (
+                    <SearchText text={row.chunk_id} query={query ?? ""} />
+                  )}
+                </span>
+              );
+              const originalButton =
+                row.kept === false || !row.text ? null : (
+                  <InfoPopover
+                    title={row.title}
+                    content={() => {
+                      const linked = row.relation_ids
+                        .map((id) => relations.get(id))
+                        .filter(
+                          (item): item is GraphRetrievalRelation => !!item,
+                        );
+                      return (
+                        <ChunkOriginalText
+                          text={row.text ?? ""}
+                          groups={[
+                            {
+                              kind: "evidence",
+                              texts: linked.flatMap((item) =>
+                                (item.evidence ?? "").split("||"),
+                              ),
+                            },
+                            {
+                              kind: "entity",
+                              texts: linked.flatMap((item) => [
+                                item.source,
+                                item.target,
+                              ]),
+                            },
+                          ]}
+                        />
+                      );
+                    }}
+                  >
+                    <button type="button" className="link-button button-sm">
+                      原文
+                    </button>
+                  </InfoPopover>
+                );
               return (
                 <tr
                   key={row.chunk_id}
@@ -2146,57 +2192,32 @@ function ChunkTable({
                     {piece && (
                       <small className="grt-secondary">第 {piece} 片</small>
                     )}
-                    <span className="diag-title">
-                      {row.title ? (
-                        <SearchText text={row.title} query={query ?? ""} />
+                    {/* 分片文字和「原文」按钮并排：按钮跟在内容末尾，不单独占一行。 */}
+                    <span className="grt-chunk-body">
+                      {row.heading ? (
+                        <>
+                          {titleNode}
+                          <span className="grt-chunk-line">
+                            <small>
+                              <SearchText
+                                text={row.heading}
+                                query={query ?? ""}
+                              />
+                            </small>
+                            {originalButton}
+                          </span>
+                        </>
                       ) : (
-                        <SearchText text={row.chunk_id} query={query ?? ""} />
+                        <span className="grt-chunk-line">
+                          {titleNode}
+                          {originalButton}
+                        </span>
                       )}
                     </span>
-                    {row.heading ? (
-                      <small>
-                        <SearchText text={row.heading} query={query ?? ""} />
-                      </small>
-                    ) : null}
                     {row.kept === false ? (
                       <span className="grt-dropped">
                         ✕ <SearchText text={row.reason} query={query ?? ""} />
                       </span>
-                    ) : row.text ? (
-                      <InfoPopover
-                        title={row.title}
-                        content={() => {
-                          const linked = row.relation_ids
-                            .map((id) => relations.get(id))
-                            .filter(
-                              (item): item is GraphRetrievalRelation => !!item,
-                            );
-                          return (
-                            <ChunkOriginalText
-                              text={row.text ?? ""}
-                              groups={[
-                                {
-                                  kind: "evidence",
-                                  texts: linked.flatMap((item) =>
-                                    (item.evidence ?? "").split("||"),
-                                  ),
-                                },
-                                {
-                                  kind: "entity",
-                                  texts: linked.flatMap((item) => [
-                                    item.source,
-                                    item.target,
-                                  ]),
-                                },
-                              ]}
-                            />
-                          );
-                        }}
-                      >
-                        <button type="button" className="link-button button-sm">
-                          原文
-                        </button>
-                      </InfoPopover>
                     ) : null}
                   </td>
                   <td>
