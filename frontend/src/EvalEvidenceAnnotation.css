@@ -1,0 +1,19 @@
+.eval-evidence-annotation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px dashed var(--ev-border, #d8e2ec);
+  font-size: 12px;
+}
+
+.eval-evidence-annotation .tag {
+  white-space: normal;
+  text-align: left;
+}
+
+.eval-evidence-unmatched {
+  color: var(--ev-muted, #71849a);
+}

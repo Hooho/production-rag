@@ -1,3 +1,4 @@
+import { withEvalEvidence } from "./EvalEvidenceAnnotation";
 import Table from "./Table";
 import "./EvalSearchModules.css";
 import { GraphRetrievalTrace } from "./GraphRetrievalTrace";
@@ -3389,7 +3390,8 @@ function FixedLog({
     { ...question, retry: undefined, sufficiency: undefined, cleared: false },
     config,
   );
-  return (
+  return withEvalEvidence(
+    question.evidence ?? [],
     <section className="ag-log">
       <div className="ag-log-title">
         固定流程
@@ -3621,7 +3623,7 @@ function FixedLog({
           )}
         </div>
       </DetailDialog>
-    </section>
+    </section>,
   );
 }
 
@@ -3756,7 +3758,8 @@ function AgentLog({
     }
   }
   const contextRelations = [...relationMap.values()];
-  return (
+  return withEvalEvidence(
+    agent.evidence,
     <section className="ag-log">
       <div className="ag-log-title">
         Agent
@@ -3964,7 +3967,7 @@ function AgentLog({
       >
         <div className="ag-round-text">{reasoningDetail?.text}</div>
       </DetailDialog>
-    </section>
+    </section>,
   );
 }
 

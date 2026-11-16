@@ -7,6 +7,7 @@ import { buildHaystack, normalizeSearch, SearchText } from "./searchText";
 import { labelHue } from "./hues";
 import type { ContextRelation } from "./api";
 import "./GraphRetrieval.css";
+import { EvalEvidenceAnnotation } from "./EvalEvidenceAnnotation";
 
 const PAGE_SIZE = 6;
 
@@ -135,6 +136,10 @@ export function EvalRelationList({
                   </td>
                   <td>
                     <span className="grt-rel">
+                      <EvalEvidenceAnnotation
+                        chunkId={row.chunk_id}
+                        relationEvidence={row.evidence ?? null}
+                      />
                       <span className="grt-rel-line">
                         <b>
                           <SearchText text={row.source} query={query} />

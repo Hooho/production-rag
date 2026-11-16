@@ -7,6 +7,7 @@ import { buildHaystack, normalizeSearch, SearchText } from "./searchText";
 import type { ChunkOriginalSource } from "./ChunkOriginalDialog";
 import type { EvalMaterial } from "./api";
 import "./GraphRetrieval.css";
+import { EvalEvidenceAnnotation } from "./EvalEvidenceAnnotation";
 
 const PAGE_SIZE = 8;
 
@@ -143,6 +144,10 @@ export function MaterialListDialog({
                     </td>
                     <td>
                       {/* 点分片看这一段给模型的正文：浮窗里已经是第二层，用气泡展示，不叠第三层抽屉。 */}
+                      <EvalEvidenceAnnotation
+                        chunkId={entry.chunkId}
+                        text={entry.source?.text}
+                      />
                       <InfoPopover
                         title={`${chunkLabel(entry.position, entry.chunkId)} · 给模型的正文`}
                         content={() =>

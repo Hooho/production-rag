@@ -1,4 +1,5 @@
 import { Tag } from "./Tag";
+import { EvalEvidenceAnnotation } from "./EvalEvidenceAnnotation";
 import Table, { TablePagination } from "./Table";
 import {
   useEffect,
@@ -138,6 +139,10 @@ function RelationText({
     );
   return (
     <span className="grt-rel">
+      <EvalEvidenceAnnotation
+        chunkId={relation.chunk_id}
+        relationEvidence={relation.evidence ?? null}
+      />
       <span className="grt-rel-line">
         {entityName(
           relation.source,
@@ -2134,6 +2139,10 @@ function ChunkTable({
                 >
                   <td className="num">{row.kept === false ? "—" : row.rank}</td>
                   <td>
+                    <EvalEvidenceAnnotation
+                      chunkId={row.chunk_id}
+                      text={row.text}
+                    />
                     {piece && (
                       <small className="grt-secondary">第 {piece} 片</small>
                     )}
