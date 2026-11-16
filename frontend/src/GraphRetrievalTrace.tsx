@@ -2157,6 +2157,9 @@ function ChunkTable({
           <tbody>
             {rows.map((row) => {
               const piece = chunkNumber(row.chunk_id);
+              const pieceNode = piece ? (
+                <small className="grt-secondary">第 {piece} 片</small>
+              ) : null;
               const titleNode = (
                 <span className="diag-title">
                   {row.title ? (
@@ -2214,14 +2217,14 @@ function ChunkTable({
                       chunkId={row.chunk_id}
                       text={row.text}
                     />
-                    {piece && (
-                      <small className="grt-secondary">第 {piece} 片</small>
-                    )}
                     {/* 分片文字和「原文」按钮并排：按钮跟在内容末尾，不单独占一行。 */}
                     <span className="grt-chunk-body">
                       {row.heading ? (
                         <>
-                          {titleNode}
+                          <span className="grt-chunk-line">
+                            {pieceNode}
+                            {titleNode}
+                          </span>
                           <span className="grt-chunk-line">
                             <small>
                               <SearchText
@@ -2234,6 +2237,7 @@ function ChunkTable({
                         </>
                       ) : (
                         <span className="grt-chunk-line">
+                          {pieceNode}
                           {titleNode}
                           {originalButton}
                         </span>
