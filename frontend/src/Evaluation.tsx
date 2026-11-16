@@ -34,6 +34,7 @@ import {
   getEvalParamOptions,
   startEvalBatch,
   rerunEvalRun,
+  rerunEvalBatch,
   type EvalLaunchBody,
   type EvalCorpusEntry,
   type EvalParamGroup,
@@ -795,6 +796,18 @@ function Evaluation({
     }
   }
 
+  // 历史列表批次行的「重跑」：照这份报告里每组的配置整批重新跑一份，新报告独立，原报告不动。
+  async function rerunBatch(batchId: string) {
+    try {
+      const started = await rerunEvalBatch(batchId);
+      onNavigate(`/eval/batches/${encodeURIComponent(started.id)}`);
+      await refreshRuns();
+      onToast("success", "已按这份报告的配置重新开始评测。");
+    } catch (reason) {
+      onToast("error", errorText(reason));
+    }
+  }
+
   async function removeRun(runId: string) {
     try {
       await deleteEvalRun(runId);
@@ -949,6 +962,7 @@ function Evaluation({
           onDelete={removeRun}
           running={Boolean(running)}
           onRerun={(id) => void rerunRun(id)}
+          onRerunBatch={rerunBatch}
         />
       )}
     </section>
@@ -3337,6 +3351,7 @@ function RunHistory({
   onNote,
   running,
   onRerun,
+  onRerunBatch,
 }: {
   runs: EvalRunBrief[];
   onOpen: (id: string) => void;
@@ -3345,6 +3360,7 @@ function RunHistory({
   onNote: (id: string, note: string) => void;
   running: boolean;
   onRerun: (id: string) => void;
+  onRerunBatch: (id: string) => Promise<void>;
 }) {
   const toast = useToast();
   const historyRows = runs.filter(
@@ -3372,6 +3388,8 @@ function RunHistory({
   }
   const [picked, setPicked] = useState<string[]>([]);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // 正在重跑的批次：只有被点的那一个按钮转圈，同一行的其他按钮只禁用。
+  const [rerunningId, setRerunningId] = useState<string | null>(null);
   // 指标子项不能跨表格行使用 details；显式记录展开项。记录默认都收起，点一行才展开它的指标。
   const [expandedMetricRuns, setExpandedMetricRuns] = useState<string[]>([]);
   const [comparison, setComparison] = useState<EvalComparison | null>(null);
@@ -3525,10 +3543,32 @@ function RunHistory({
                       <button
                         type="button"
                         className="secondary-button button-sm"
-                        disabled={deletingId !== null}
+                        disabled={deletingId !== null || rerunningId !== null}
                         onClick={() => onOpenBatch(item.batch!.id)}
                       >
                         查看
+                      </button>
+                      <button
+                        type="button"
+                        className={`secondary-button button-sm${rerunningId === item.batch.id ? " is-loading" : ""}`}
+                        disabled={
+                          Boolean(active) || running || rerunningId !== null
+                        }
+                        title={
+                          active
+                            ? "评测正在运行或排队，不能重跑"
+                            : running
+                              ? "已有评测在运行，跑完再重跑"
+                              : "照这份报告里每组的配置重新跑一份，原报告不动"
+                        }
+                        onClick={() => {
+                          setRerunningId(item.batch!.id);
+                          void onRerunBatch(item.batch!.id).finally(() =>
+                            setRerunningId(null),
+                          );
+                        }}
+                      >
+                        重跑
                       </button>
                       <ConfirmPopover
                         danger
@@ -3554,7 +3594,11 @@ function RunHistory({
                         <button
                           type="button"
                           className={`delete-button button-sm${deletingId === item.batch.id ? " is-loading" : ""}`}
-                          disabled={Boolean(active) || deletingId !== null}
+                          disabled={
+                            Boolean(active) ||
+                            deletingId !== null ||
+                            rerunningId !== null
+                          }
                           title={
                             active
                               ? "评测正在运行或排队，不能删除"

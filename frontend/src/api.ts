@@ -1919,6 +1919,14 @@ export function rerunEvalRun(runId: string) {
   );
 }
 
+// 按某个批次报告保存的配置整批重新跑一次，返回新批次的编号和其中的记录编号。
+export function rerunEvalBatch(batchId: string) {
+  return request<{ id: string; runs: string[] }>(
+    `/eval/batches/${encodeURIComponent(batchId)}/rerun`,
+    { method: "POST" },
+  );
+}
+
 export function getEvalBatch(batchId: string) {
   return request<EvalBatchReport>(
     `/eval/batches/${encodeURIComponent(batchId)}`,

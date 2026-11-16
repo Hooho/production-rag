@@ -3365,6 +3365,38 @@ def create_app(store=None, models=None, jwt_secret=None):
         enqueue_evaluation(work, runs)
         return {"id": batch_id, "runs": [run["id"] for run in runs]}
 
+    # 按某个批次报告的配置整批重跑一次（历史列表批次行的「重跑」）：照原来每组配置重新发起一份新报告，
+    # 原报告不动。新报告沿用原来的批次名和每组的名字，方便两份报告对照。
+    @app.post(
+        "/eval/batches/{batch_id}/rerun",
+        status_code=202,
+        dependencies=[Depends(require_admin)],
+    )
+    def rerun_eval_batch(batch_id: str, owner=Depends(identity)):
+        try:
+            eval_batch.check_batch_id(batch_id)
+        except ValueError:
+            raise HTTPException(404, "批次不存在")
+        briefs = [
+            run for run in list_runs() if (run.get("batch") or {}).get("id") == batch_id
+        ]
+        if not briefs:
+            raise HTTPException(404, "批次不存在")
+        briefs.sort(key=lambda run: (run.get("batch") or {}).get("index", 0))
+        entries = eval_corpus.list_entries(app.state.store.engine)
+        configs = []
+        for brief in briefs:
+            source = load_run(brief["id"]) or brief
+            try:
+                body = EvalRunInput(**eval_batch.rerun_body(source, entries))
+            except ValueError as error:
+                raise HTTPException(422, str(error))
+            # 组名沿用原来那份（没起名的还是「配置 A、B…」）。
+            body.label = (source.get("batch") or {}).get("label")
+            configs.append(body)
+        name = (briefs[0].get("batch") or {}).get("name") or ""
+        return create_eval_batch(EvalBatchInput(name=name, configs=configs), owner)
+
     @app.post(
         "/eval/batches/{batch_id}/arms/{run_id}/retry",
         status_code=202,
