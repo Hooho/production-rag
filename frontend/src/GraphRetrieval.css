@@ -649,3 +649,40 @@
 .grt-group-inner td {
   vertical-align: top;
 }
+
+/* 图检索表格明细：满高浏览，列标题保持单行，宽表在内容区滚动。 */
+.ag-delivery-dialog.graph-retrieval-dialog:is([open], :popover-open) {
+  height: calc(100dvh - 32px);
+  max-height: calc(100dvh - 32px);
+}
+
+.ag-delivery-dialog.graph-retrieval-dialog .diag :not(button) {
+  font-size: 12px;
+}
+
+.ag-delivery-dialog.graph-retrieval-dialog .diag .diag-table th {
+  font-size: 11px;
+  white-space: nowrap;
+  padding: 5px 8px;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.ag-delivery-dialog.graph-retrieval-dialog .diag-table {
+  table-layout: auto;
+  min-width: 100%;
+}
+
+.ag-delivery-dialog.graph-retrieval-dialog .diag-table-wrap {
+  overflow: auto;
+}
+
+.ag-delivery-dialog.graph-retrieval-dialog
+  .diag
+  :is(.tag, .tag *, .grt-kept, .grt-dropped) {
+  font-size: 10px;
+}
+
+.ag-delivery-dialog.graph-retrieval-dialog .diag .tag {
+  padding: 0 5px;
+}

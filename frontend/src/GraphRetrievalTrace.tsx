@@ -943,7 +943,7 @@ function TraceDetail({
     <DetailDialog
       open
       title={title}
-      className="grt-dialog"
+      className="grt-dialog graph-retrieval-dialog"
       size="table"
       onClose={onClose}
     >
