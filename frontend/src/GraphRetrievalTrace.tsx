@@ -803,30 +803,53 @@ function DetailFilters<T extends { kept: boolean }>({
   more?: number;
   placeholder?: string;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+  const optionsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const node = optionsRef.current;
+    if (!node) return;
+    const observer = new ResizeObserver(() =>
+      setOverflowing(node.scrollHeight > 58),
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [list.dimKey, list.options.length]);
   // 关系类型这一维按 hues.ts 的 labelHue 上色，和图谱里的关系类型一个颜色。
   const hueDim = list.dims.find((item) => item.key === list.dimKey)?.hue;
   return (
     <div className="grt-filters">
-      <EvalEvidenceFilter
-        filter={list.evidenceFilter}
-        onChange={list.setEvidenceFilter}
-      />
       <div className="grt-filter-top">
+        <EvalEvidenceFilter
+          filter={list.evidenceFilter}
+          onChange={list.setEvidenceFilter}
+        />
         {list.dims.length > 1 && (
-          <div className="grt-chips" role="tablist">
+          <div className="grt-chips grt-filter-group" role="tablist">
             {list.dims.map((dim) => (
               <button
                 key={dim.key}
                 type="button"
                 role="tab"
                 aria-selected={list.dimKey === dim.key}
-                className={`grt-chip is-dim${list.dimKey === dim.key ? " is-active" : ""}`}
+                className={`secondary-button button-sm grt-chip is-dim${list.dimKey === dim.key ? " is-active" : ""}`}
                 onClick={() => list.setDim(dim.key)}
               >
                 {dim.label}
               </button>
             ))}
           </div>
+        )}
+        {list.droppedCount > 0 && (
+          <label className="grt-dropped-toggle">
+            <input
+              type="checkbox"
+              checked={list.dropped}
+              onChange={(event) => list.setDropped(event.target.checked)}
+            />
+            包括去掉的 {list.droppedCount} 条
+            {more ? `（另有 ${more} 条只记了数量）` : ""}
+          </label>
         )}
         {/* 搜索框在右上角：按这一行看得见的文字过滤，和分类、「包括去掉的」取交集。 */}
         <div className="grt-search">
@@ -849,42 +872,46 @@ function DetailFilters<T extends { kept: boolean }>({
           )}
         </div>
       </div>
-      {list.dims.length > 0 && (
-        <div className="grt-chips">
-          <button
-            type="button"
-            className={`grt-chip${list.value === null ? " is-active" : ""}`}
-            onClick={() => list.setValue(null)}
+      {list.dims.length > 0 && list.options.some(([name]) => name !== "—") && (
+        <div className="grt-category-row">
+          <div
+            ref={optionsRef}
+            className={`secondary-button button-sm grt-chips grt-category-values${expanded ? " is-expanded" : ""}`}
           >
-            全部 <em>{list.poolTotal}</em>
-          </button>
-          {list.options.map(([name, count]) => (
             <button
-              key={name}
               type="button"
-              className={`grt-chip${list.value === name ? " is-active" : ""}${hueDim ? " is-hue" : ""}`}
-              style={
-                hueDim
-                  ? ({ "--tag-h": labelHue(name) } as CSSProperties)
-                  : undefined
-              }
-              onClick={() => list.setValue(name)}
+              className={`secondary-button button-sm grt-chip${list.value === null ? " is-active" : ""}`}
+              onClick={() => list.setValue(null)}
             >
-              {name} <em>{count}</em>
+              全部 <em>{list.poolTotal}</em>
             </button>
-          ))}
+            {list.options.map(([name, count]) => (
+              <button
+                key={name}
+                type="button"
+                className={`secondary-button button-sm grt-chip${list.value === name ? " is-active" : ""}${hueDim ? " is-hue" : ""}`}
+                style={
+                  hueDim
+                    ? ({ "--tag-h": labelHue(name) } as CSSProperties)
+                    : undefined
+                }
+                onClick={() => list.setValue(name)}
+              >
+                {name} <em>{count}</em>
+              </button>
+            ))}
+          </div>
+          {overflowing && (
+            <button
+              type="button"
+              className="link-button button-sm"
+              aria-expanded={expanded}
+              onClick={() => setExpanded(!expanded)}
+            >
+              {expanded ? "收起" : "展开"}
+            </button>
+          )}
         </div>
-      )}
-      {list.droppedCount > 0 && (
-        <label className="grt-dropped-toggle">
-          <input
-            type="checkbox"
-            checked={list.dropped}
-            onChange={(event) => list.setDropped(event.target.checked)}
-          />
-          包括去掉的 {list.droppedCount} 条
-          {more ? `（另有 ${more} 条只记了数量）` : ""}
-        </label>
       )}
     </div>
   );

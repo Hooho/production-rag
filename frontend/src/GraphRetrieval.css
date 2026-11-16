@@ -311,14 +311,17 @@
   gap: 6px;
 }
 
-.grt-chip {
+.grt-chip:not(.secondary-button) {
   padding: 2px 10px;
-  border: 1px solid var(--diag-line, #d6e2ee);
   border-radius: 999px;
-  background: #fff;
-  color: var(--diag-text, #536d86);
   font-size: 12px;
   line-height: 20px;
+}
+
+.grt-chip {
+  border: 1px solid var(--diag-line, #d6e2ee);
+  background: #fff;
+  color: var(--diag-text, #536d86);
   cursor: pointer;
 }
 
@@ -696,4 +699,55 @@
   .tag
   * {
   font-size: 10px;
+}
+
+/* 图检索筛选工具栏：条件同排、搜索居右，分类值另起一行。 */
+.graph-retrieval-dialog .grt-filters {
+  gap: 6px;
+  margin: 0 0 8px;
+}
+.graph-retrieval-dialog .grt-filter-top {
+  justify-content: flex-start;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.graph-retrieval-dialog .grt-filter-top > * {
+  flex-shrink: 0;
+}
+.graph-retrieval-dialog .grt-filter-top .grt-chips,
+.graph-retrieval-dialog .grt-filter-top .eval-evidence-filter {
+  flex-wrap: nowrap;
+  gap: 4px;
+  margin: 0;
+}
+.graph-retrieval-dialog .grt-filter-group,
+.graph-retrieval-dialog .grt-dropped-toggle {
+  border-left: 1px solid var(--diag-line);
+  padding-left: 8px;
+}
+.graph-retrieval-dialog .grt-category-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.graph-retrieval-dialog .grt-category-values {
+  flex: 1;
+  min-width: 0;
+  gap: 4px;
+  max-height: 56px;
+  overflow: hidden;
+}
+.graph-retrieval-dialog .grt-category-values.is-expanded {
+  max-height: none;
+}
+.graph-retrieval-dialog .grt-category-row > button {
+  flex-shrink: 0;
+}
+.ag-delivery-dialog.graph-retrieval-dialog .diag .grt-hint {
+  margin: 4px 0 8px;
+  font-size: 11px;
+}
+.graph-retrieval-dialog .ag-delivery-dialog-head {
+  margin-bottom: 8px;
 }
