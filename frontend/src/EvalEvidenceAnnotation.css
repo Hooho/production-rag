@@ -37,3 +37,14 @@
   border-color: #1677ff;
   background: #e6f4ff;
 }
+
+/* 非证据标记与计分证据标签采用相同紧凑形式。 */
+.ag-delivery-dialog.grt-dialog
+  .diag
+  .eval-evidence-annotation
+  .tag.eval-evidence-unmatched,
+.eval-evidence-annotation .tag.eval-evidence-unmatched {
+  font-size: 10px;
+  border-radius: 4px;
+  padding: 0 5px;
+}

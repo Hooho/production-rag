@@ -178,7 +178,9 @@ export function EvalEvidenceAnnotation({
           </InfoPopover>
         ))
       ) : (
-        <span className="eval-evidence-unmatched">未匹配计分证据</span>
+        <Tag tone="neutral" className="eval-evidence-unmatched">
+          不是证据
+        </Tag>
       )}
     </span>
   );
