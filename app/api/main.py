@@ -341,6 +341,10 @@ class EvalSuiteInput(BaseModel):
 
 
 # 专项的一道题，字段随评测方式不同：检索要问题和证据，回答再加参考答案，多轮对话是前面几轮提问 + 最后一问 + 参考答案。
+class EvalSuiteItemEnabledInput(BaseModel):
+    enabled: bool
+
+
 class EvalSuiteItemInput(BaseModel):
     version: Literal[1, 2] = 1
     answerable: bool = True
@@ -4174,6 +4178,20 @@ def create_app(store=None, models=None, jwt_secret=None):
             )
         except ValueError as error:
             raise HTTPException(422, str(error))
+        if result is None:
+            raise HTTPException(404, "题目不存在")
+        return result
+
+    @app.patch(
+        "/eval/suites/{suite_id}/items/{item_id}/enabled",
+        dependencies=[Depends(require_admin)],
+    )
+    def eval_suite_item_enabled(
+        suite_id: str, item_id: str, body: EvalSuiteItemEnabledInput
+    ):
+        result = special_suites.set_item_enabled(
+            app.state.store.engine, suite_id, item_id, body.enabled
+        )
         if result is None:
             raise HTTPException(404, "题目不存在")
         return result

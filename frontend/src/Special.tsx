@@ -1,3 +1,4 @@
+import { errorText } from "./Toast";
 import EvalPreludeEditor from "./EvalPreludeEditor";
 import type { EvalPreludeTurn } from "./api";
 import "./UnifiedEval.css";
@@ -6,6 +7,7 @@ import { useEffect, useState } from "react";
 import { SpecialAgentResults, rewriteLabel } from "./AgentEval";
 import {
   addEvalSuiteItem,
+  setEvalSuiteItemEnabled,
   createEvalSuite,
   deleteEvalSuite,
   deleteEvalSuiteItem,
@@ -243,6 +245,7 @@ function SuiteDetail({
   const [description, setDescription] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [toggling, setToggling] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   // 题目和运行记录分两个页签；发起运行后自动切到运行记录。
   const [tab, setTab] = useState<"items" | "runs">("items");
@@ -318,6 +321,19 @@ function SuiteDetail({
       onBack();
     } catch (reason) {
       onToast("error", (reason as Error).message);
+    }
+  }
+
+  async function toggleItem(item: EvalSuiteItem) {
+    setToggling(item.id);
+    try {
+      const enabled = item.enabled === false;
+      setData(await setEvalSuiteItemEnabled(suiteId, item.id, enabled));
+      onToast("success", enabled ? "已启用题目" : "已禁用题目，后续评测将跳过");
+    } catch (reason) {
+      onToast("error", errorText(reason));
+    } finally {
+      setToggling(null);
     }
   }
 
@@ -493,7 +509,11 @@ function SuiteDetail({
             </div>
           )}
           <div className="rg-section-head">
-            <span className="rg-muted">{data.items.length} 题</span>
+            <span className="rg-muted">
+              {data.items.length} 题 · 启用{" "}
+              {data.items.filter((item) => item.enabled !== false).length} ·
+              禁用 {data.items.filter((item) => item.enabled === false).length}
+            </span>
             {!adding && (
               <button
                 type="button"
@@ -544,6 +564,9 @@ function SuiteDetail({
                         <div className="rg-item-question">{item.question}</div>
                         <div className="rg-item-meta">
                           <TypeTag type={item.type} hues={hues} />
+                          {item.enabled === false && (
+                            <Tag tone="neutral">已禁用</Tag>
+                          )}
                           {item.turns && item.turns.length > 0 && (
                             <span>前面 {item.turns.length} 轮提问</span>
                           )}
@@ -575,6 +598,14 @@ function SuiteDetail({
                     </details>
                   </div>
                   <div className="rg-item-actions">
+                    <button
+                      type="button"
+                      className={`link-button button-sm${toggling === item.id ? " is-loading" : ""}`}
+                      disabled={toggling !== null}
+                      onClick={() => void toggleItem(item)}
+                    >
+                      {item.enabled === false ? "启用" : "禁用"}
+                    </button>
                     <button
                       type="button"
                       className="rg-link is-edit"

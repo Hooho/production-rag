@@ -390,6 +390,7 @@ def update_item(engine, suite_id, item_id, data):
                 eval_suite_items.c.suite_id == suite_id,
             )
         ).scalar()
+        cleaned["enabled"] = (previous or {}).get("enabled", True)
         if (
             previous
             and previous.get("evidence_groups")
@@ -408,6 +409,28 @@ def update_item(engine, suite_id, item_id, data):
         ).rowcount
         if not updated:
             return None
+    return get_suite(engine, suite_id)
+
+
+def set_item_enabled(engine, suite_id, item_id, enabled):
+    now = now_text()
+    with engine.begin() as connection:
+        condition = (eval_suite_items.c.suite_id == suite_id) & (
+            eval_suite_items.c.id == item_id
+        )
+        previous = connection.execute(
+            select(eval_suite_items.c.data).where(condition).with_for_update()
+        ).scalar()
+        if previous is None:
+            return None
+        connection.execute(
+            eval_suite_items.update()
+            .where(condition)
+            .values(data={**previous, "enabled": enabled}, updated=now)
+        )
+        connection.execute(
+            eval_suites.update().where(eval_suites.c.id == suite_id).values(updated=now)
+        )
     return get_suite(engine, suite_id)
 
 
@@ -447,8 +470,11 @@ def load_for_run(engine, suite_ids):
                 .mappings()
                 .all()
             )
+            items = [
+                item for item in items if (item["data"] or {}).get("enabled", True)
+            ]
             if not items:
-                raise ValueError(f"「{row['name']}」还没有题目")
+                raise ValueError(f"「{row['name']}」没有启用的题目")
             loaded.append(
                 {
                     "id": row["id"],

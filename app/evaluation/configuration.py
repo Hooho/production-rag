@@ -11,6 +11,8 @@ def questions(dataset, split, suites=()):
     result = []
     for suite in suites:
         for source in suite["items"]:
+            if source.get("enabled") is False:
+                continue
             item = copy.deepcopy(source)
             if item.get("turns") and not item.get("prelude"):
                 raise ValueError(

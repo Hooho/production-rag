@@ -2085,6 +2085,7 @@ export function listEvalTargetChunks() {
   return request<{ items: EvalScoringTarget[] }>("/eval/target-chunks");
 }
 export type EvalSuiteItem = {
+  enabled?: boolean;
   answerable?: boolean;
   prelude?: EvalPreludeTurn[];
   evidence_groups?: EvalScoringGroup[];
@@ -2300,6 +2301,21 @@ export function updateEvalSuiteItem(
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function setEvalSuiteItemEnabled(
+  suiteId: string,
+  itemId: string,
+  enabled: boolean,
+) {
+  return request<EvalSuiteFull>(
+    `/eval/suites/${encodeURIComponent(suiteId)}/items/${encodeURIComponent(itemId)}/enabled`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
     },
   );
 }
