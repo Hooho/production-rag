@@ -15,6 +15,12 @@
   text-align: left;
 }
 
+/* 明细弹窗的 14px 正文规则不能放大证据标注及其内部文字。 */
+.ag-delivery-dialog.grt-dialog .diag .eval-evidence-annotation,
+.ag-delivery-dialog.grt-dialog .diag .eval-evidence-annotation :not(button) {
+  font-size: 12px;
+}
+
 .eval-evidence-unmatched {
   color: var(--ev-muted, #71849a);
 }
