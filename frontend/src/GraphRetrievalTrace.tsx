@@ -1351,15 +1351,38 @@ function ChunksDetail({
   rows: GraphRetrievalTable[];
   relations: Map<string, GraphRetrievalRelation>;
 }) {
+  const [result, setResult] = useState("all");
   const items = useMemo(
-    () => rows.map((row) => ({ ...row, kept: row.kept !== false })),
-    [rows],
+    () =>
+      rows
+        .filter(
+          (row) =>
+            result === "all" || (row.delivery_status ?? "unknown") === result,
+        )
+        .map((row) => ({ ...row, kept: row.kept !== false })),
+    [rows, result],
   );
   const list = useDetailList(items, [], undefined, undefined, (row) =>
     chunkHaystack(row, relations),
   );
   return (
     <>
+      <p className="grt-hint">
+        共 {rows.length} 片 · 已交给模型{" "}
+        {rows.filter((row) => row.delivery_status === "returned").length} 片 ·
+        已过滤 {rows.filter((row) => row.delivery_status === "filtered").length}{" "}
+        片 · 未记录 {rows.filter((row) => !row.delivery_status).length} 片
+      </p>
+      <select
+        aria-label="分片交付结果"
+        value={result}
+        onChange={(event) => setResult(event.target.value)}
+      >
+        <option value="all">全部</option>
+        <option value="returned">已交给模型</option>
+        <option value="filtered">已过滤</option>
+        <option value="unknown">未记录</option>
+      </select>
       <DetailFilters list={list} placeholder="搜标题或分片正文" />
       <ChunkTable rows={list.rows} relations={relations} query={list.query} />
       <Pager page={list.page} total={list.total} onPage={list.setPage} />
@@ -2095,7 +2118,10 @@ function ChunkTable({
               <th>名次</th>
               <th>分片</th>
               <th>来自哪些关系</th>
-              <th>得分</th>
+              <th title="关联关系排名的倒数，取最高值；不是原文相关度评分">
+                关系优先级
+              </th>
+              <th>结果</th>
             </tr>
           </thead>
           <tbody>
@@ -2224,6 +2250,26 @@ function ChunkTable({
                     </ul>
                   </td>
                   <td className="num">{score(row.score)}</td>
+                  <td>
+                    <Tag
+                      tone={
+                        row.delivery_status === "returned"
+                          ? "success"
+                          : "neutral"
+                      }
+                    >
+                      {row.delivery_status === "returned"
+                        ? "已交给模型"
+                        : row.delivery_status === "filtered"
+                          ? "已过滤"
+                          : "未记录"}
+                    </Tag>
+                    {row.delivery_reason && (
+                      <small className="grt-secondary">
+                        {row.delivery_reason}
+                      </small>
+                    )}
+                  </td>
                 </tr>
               );
             })}

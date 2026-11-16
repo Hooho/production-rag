@@ -183,6 +183,8 @@ export type GraphRetrievalRelation = {
   reason: string | null;
 };
 export type GraphRetrievalTable = {
+  delivery_status?: "returned" | "filtered";
+  delivery_reason?: string | null;
   chunk_id: string;
   score: number;
   relation_ids: string[];

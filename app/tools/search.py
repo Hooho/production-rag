@@ -568,6 +568,26 @@ class DocumentSearchTool:
             diagnostics["graph"] = {
                 key: value for key, value in graph.items() if key != "sources"
             }
+            delivered = {
+                cid
+                for source in sources
+                for cid in source.get("parent_chunk_ids", [source["chunk_id"]])
+            }
+            reasons = {
+                "not_in_pool": "未进入重排候选池",
+                "filtered_low_score": "原文重排分数低于门槛",
+                "beyond_limit": "超出最终返回条数上限",
+                "beyond_budget": "超出最终资料预算",
+            }
+            for table in diagnostics["graph"].get("tables", {}).values():
+                for row in table:
+                    cid = row["chunk_id"]
+                    status = candidates.get(cid, {}).get("status")
+                    if cid in delivered:
+                        row["delivery_status"] = "returned"
+                    elif status in reasons:
+                        row["delivery_status"] = "filtered"
+                        row["delivery_reason"] = reasons[status]
             if scope:
                 diagnostics["scope"]["graph_versions"] = graph.get("scope") or []
             # 图检索留下的关系和去向：放进上下文（G 编号）还是额度不够没放；没放任何关系时写明原因。
