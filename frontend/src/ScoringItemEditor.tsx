@@ -5,6 +5,7 @@ import {
   type EvalScoringTarget,
 } from "./api";
 import { DetailDialog } from "./DetailDialog";
+import { ConfirmPopover } from "./ConfirmPopover";
 import { EvidenceTargetTags } from "./EvidenceTargetTags";
 import { foldText } from "./evidenceRanges";
 
@@ -92,13 +93,16 @@ export function ScoringItemEditor({
                   }
                 />
               </label>
-              <button
-                type="button"
-                className="rg-link"
-                onClick={() => onChange(groups.filter((_, i) => i !== index))}
+              <ConfirmPopover
+                message={`移除计分项 ${index + 1}？这一项和它选的分片一起没了。`}
+                confirmText="移除"
+                danger
+                onConfirm={() => onChange(groups.filter((_, i) => i !== index))}
               >
-                移除计分项
-              </button>
+                <button type="button" className="rg-link">
+                  移除计分项
+                </button>
+              </ConfirmPopover>
             </div>
             {item.targets.length > 0 && (
               <div className="sp-scoring-targets">
@@ -109,11 +113,11 @@ export function ScoringItemEditor({
                       number={index + 1}
                       highlight={searchTerms}
                     />
-                    <button
-                      type="button"
-                      className="rg-link"
-                      aria-label={`移除第 ${target.position + 1} 片`}
-                      onClick={() =>
+                    <ConfirmPopover
+                      message={`移除第 ${target.position + 1} 片？这一项就不再按它算命中。`}
+                      confirmText="移除"
+                      danger
+                      onConfirm={() =>
                         update(index, {
                           targets: item.targets.filter(
                             (chosen) => targetKey(chosen) !== targetKey(target),
@@ -121,8 +125,14 @@ export function ScoringItemEditor({
                         })
                       }
                     >
-                      ×
-                    </button>
+                      <button
+                        type="button"
+                        className="rg-link"
+                        aria-label={`移除第 ${target.position + 1} 片`}
+                      >
+                        ×
+                      </button>
+                    </ConfirmPopover>
                   </div>
                 ))}
               </div>

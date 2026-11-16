@@ -893,13 +893,16 @@ function GeneratePanel({
                         </td>
                       ))}
                       <td>
-                        <button
-                          type="button"
-                          className="delete-button"
-                          onClick={() => removeRow(index)}
+                        <ConfirmPopover
+                          danger
+                          message="移除这一行？导入时就不会写入这一行。"
+                          confirmText="移除"
+                          onConfirm={() => removeRow(index)}
                         >
-                          移除
-                        </button>
+                          <button type="button" className="delete-button">
+                            移除
+                          </button>
+                        </ConfirmPopover>
                         {row.errors._row && (
                           <small className="data-field-error">
                             {row.errors._row}
