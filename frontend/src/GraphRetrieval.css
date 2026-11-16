@@ -540,8 +540,7 @@
 }
 
 /* 明细抽屉里的文字统一 14px（步骤里是 12px，抽屉空间大，放大好读）。按钮按规范，不改。 */
-.ag-delivery-dialog.grt-dialog .diag :not(button),
-.ag-delivery-dialog.grt-dialog .grt-chip {
+.ag-delivery-dialog.grt-dialog .diag :not(button) {
   font-size: 14px;
 }
 
@@ -750,4 +749,12 @@
 }
 .graph-retrieval-dialog .ag-delivery-dialog-head {
   margin-bottom: 8px;
+}
+
+/* 分类值只靠底色和文字表示选择，保留透明边框避免切换时跳动。 */
+.graph-retrieval-dialog .grt-category-values .grt-chip,
+.graph-retrieval-dialog .grt-category-values .grt-chip:hover,
+.graph-retrieval-dialog .grt-category-values .grt-chip.is-active {
+  border-color: transparent;
+  box-shadow: none;
 }
