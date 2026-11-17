@@ -20,6 +20,7 @@ test("evaluation annotations follow scoring chunks without claiming relation sup
     const items = [
       {
         label: "理念甲",
+        relations: [{ relation_id: "Y" }],
         targets: [
           { chunk_id: "a", quote: "依据甲" },
           { chunk_id: "b", quote: "另一处依据" },
@@ -47,10 +48,15 @@ test("evaluation annotations follow scoring chunks without claiming relation sup
       );
     assert.match(render({ chunkId: "a" }), /计分证据 · 第 1 项：理念甲/);
     assert.match(
-      render({ chunkId: "a", relationEvidence: "学习巴菲特" }),
-      /关联计分证据/,
+      render({ chunkId: "a", relationId: "Y", relationEvidence: "学习巴菲特" }),
+      /关系证据/,
     );
-    assert.match(render({ chunkId: "other" }), /未匹配计分证据/);
+    assert.equal(render({ chunkId: "other" }), "");
+    assert.equal(
+      render({ chunkId: "a", relationId: "X", relationEvidence: "其他关系" }),
+      "",
+    );
+    assert.match(render({ chunkId: "a", origin: true }), /分片证据/);
     assert.doesNotMatch(
       render({ chunkId: "a" }, [{ targets: [{ chunk_id: "z" }] }]),
       /理念甲/,

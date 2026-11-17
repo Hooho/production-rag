@@ -54,6 +54,7 @@ export function EvalRelationList({
     : pool;
   const evidenceFilter = useEvalEvidenceFilter(filtered, (row) => ({
     chunkId: row.chunk_id,
+    relationId: row.relation_id,
   }));
   const pages = Math.max(1, Math.ceil(evidenceFilter.rows.length / PAGE_SIZE));
   const current = Math.min(page, pages);
@@ -153,6 +154,7 @@ export function EvalRelationList({
                       <EvalEvidenceAnnotation
                         chunkId={row.chunk_id}
                         relationEvidence={row.evidence ?? null}
+                        relationId={row.relation_id}
                       />
                       <span className="grt-rel-line">
                         <b>
@@ -187,6 +189,7 @@ export function EvalRelationList({
                     </span>
                   </td>
                   <td>
+                    <EvalEvidenceAnnotation chunkId={row.chunk_id} origin />
                     <span className="grt-origin">
                       <SearchText text={row.title} query={query} />
                       {row.version ? <em>图 v{row.version}</em> : null}

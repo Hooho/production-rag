@@ -75,6 +75,12 @@ def scoring_item(store, item):
         return item
     from .document_refs import rows
 
+    if any(group.get("relations") for group in item["evidence_groups"]):
+        from .evidence import target_catalog
+        from .grouped_evidence import validate_groups
+
+        validate_groups(item["evidence_groups"], target_catalog(store.engine))
+
     catalog = [
         {
             "title": row[1],
@@ -247,14 +253,13 @@ def score_question(item, retrieval, chunk_texts, pool_size):
         )
     # 关系召回后在关系筛选阶段丢失，也属于已召回后过滤；不改变分片候选池指标。
     relations = (diagnostics.get("graph") or {}).get("relation_candidates") or []
-    relation_hits = evidence_hits(relations, evidence, chunk_texts)
     for index, row in enumerate(evidence_rows):
         if row["status"] != "not_recalled":
             continue
         matched = [
             relation
             for relation in relations
-            if index in relation_hits.get(relation["chunk_id"], [])
+            if index in evidence_found([relation], evidence, chunk_texts)
         ]
         if matched and all(not relation.get("kept") for relation in matched):
             reasons = list(
@@ -395,7 +400,11 @@ def material_summary(materials, prefix):
 # 一批来源交给模型的分片（含父块扩展拼进来的）里找到了哪几条证据，返回证据序号集合。
 def evidence_found(sources, evidence, chunk_texts):
     hits = evidence_hits(
-        [{"chunk_id": chunk_id} for chunk_id in given_chunk_ids(sources)],
+        (
+            [source for source in sources if source.get("relation_id")]
+            if sources and all(source.get("relation_id") for source in sources)
+            else [{"chunk_id": chunk_id} for chunk_id in given_chunk_ids(sources)]
+        ),
         evidence,
         chunk_texts,
     )
@@ -439,7 +448,13 @@ def graph_evidence_paths(diagnostics, sources, relations, evidence, chunk_texts)
         if not origins:
             return None  # 旧记录缺失来源，不能当成零命中。
         routes = {"global" if origin == "global" else "entity" for origin in origins}
-        for index in evidence_found([relation], evidence, chunk_texts):
+        # 图通过任意关系找回有效原文，也有召回贡献；关系自身计分必须显式选择。
+        material = (
+            {"chunk_id": relation["chunk_id"]}
+            if str(relation["chunk_id"]) in main
+            else relation
+        )
+        for index in evidence_found([material], evidence, chunk_texts):
             paths[index].update(routes)
     return [sorted(routes) for routes in paths]
 

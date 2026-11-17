@@ -146,6 +146,7 @@ function RelationText({
       <EvalEvidenceAnnotation
         chunkId={relation.chunk_id}
         relationEvidence={relation.evidence ?? null}
+        relationId={relation.relation_id}
       />
       <span className="grt-rel-line">
         {entityName(
@@ -354,6 +355,7 @@ function Origin({
 }) {
   return (
     <span className="grt-origin">
+      <EvalEvidenceAnnotation chunkId={relation.chunk_id} origin />
       {relation.title ? (
         <SearchText text={relation.title} query={query ?? ""} />
       ) : (
@@ -726,7 +728,11 @@ function useDetailList<
   initialDim?: string,
   initialValue?: string,
   searchOf?: (item: T) => string,
-  evidenceOf?: (item: T) => { chunkId?: string | null; text?: string },
+  evidenceOf?: (item: T) => {
+    chunkId?: string | null;
+    text?: string;
+    relationId?: string;
+  },
 ) {
   const [dimKey, setDimKey] = useState(initialDim ?? dims[0]?.key ?? "");
   const [value, setValue] = useState<string | null>(initialValue ?? null);
@@ -1242,7 +1248,7 @@ function RelationGroupsDetail({
   const groups = new Map<string, GraphRetrievalRelation[]>();
   const evidenceFilter = useEvalEvidenceFilter(
     (graph.relation_candidates ?? []).filter((row) => !!row.group_key),
-    (row) => ({ chunkId: row.chunk_id }),
+    (row) => ({ chunkId: row.chunk_id, relationId: row.relation_id }),
   );
   for (const row of [...evidenceFilter.rows].sort(
     (a, b) => (a.selection_rank ?? Infinity) - (b.selection_rank ?? Infinity),
@@ -1369,7 +1375,7 @@ function RelationsDetail({
     detail.dim,
     detail.value,
     (row) => relationHaystack(row, firstValue(row)),
-    (row) => ({ chunkId: row.chunk_id }),
+    (row) => ({ chunkId: row.chunk_id, relationId: row.relation_id }),
   );
   return (
     <>

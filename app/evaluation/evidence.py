@@ -65,12 +65,40 @@ def target_catalog(engine):
     from .grouped_evidence import fingerprint
 
     rows = stored_chunk_rows(engine) or file_chunks(engine)
+    from ..mysql.tables import graph_versions
+    from ..graph.query import relation_rows
+
+    with engine.connect() as connection:
+        versions = list(
+            connection.execute(
+                select(graph_versions.c.id).where(graph_versions.c.active.is_(True))
+            ).scalars()
+        )
+        relations = relation_rows(connection, versions)
+    by_chunk = {}
+    for relation in relations:
+        by_chunk.setdefault(str(relation["chunk_id"]), []).append(
+            {
+                "relation_id": relation["id"],
+                "build_id": relation["build_id"],
+                "source": relation["source_name"],
+                "target": relation["target_name"],
+                "category": relation["category"],
+                "description": relation["description"] or "",
+                "evidence": relation["evidence"] or "",
+            }
+        )
     return [
         {
             "title": row["title"],
             "position": row["position"],
             "fingerprint": fingerprint(row["content"]),
             "quote": row["content"],
+            **(
+                {"relations": by_chunk[str(row["chunk_id"])]}
+                if str(row["chunk_id"]) in by_chunk
+                else {}
+            ),
         }
         for row in rows
     ]

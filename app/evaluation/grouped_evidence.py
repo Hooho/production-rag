@@ -29,7 +29,10 @@ def legacy_groups(texts, catalog):
             {
                 "label": pieces[0][:100] if pieces else f"要点 {index + 1}",
                 "targets": [
-                    row
+                    {
+                        key: row[key]
+                        for key in ("title", "position", "fingerprint", "quote")
+                    }
                     for row, content in rows
                     if any(variant in content for variant in variants)
                 ],
@@ -63,7 +66,14 @@ def bind_groups(texts, groups, catalog):
             )
         if not targets:
             raise ValueError("汇总题计分项缺少目标分片")
-        evidence.append({"text": text, "label": group["label"], "targets": targets})
+        evidence.append(
+            {
+                "text": text,
+                "label": group["label"],
+                "targets": targets,
+                "relations": group.get("relations", []),
+            }
+        )
     return evidence
 
 
@@ -97,7 +107,29 @@ def validate_groups(groups, catalog):
                     }
                 )
                 seen.add(key)
-        result.append({"label": label, "targets": targets})
+        allowed = {
+            relation["relation_id"]: relation
+            for target in targets
+            for relation in available[
+                (target["title"], target["position"], target["fingerprint"])
+            ].get("relations", [])
+        }
+        relations = []
+        for relation in group.get("relations", []):
+            current = allowed.get(relation["relation_id"])
+            if current is None or current != relation:
+                raise ValueError(
+                    f"计分项「{label}」关系或图谱版本已变化，请重新选择关系证据"
+                )
+            if current not in relations:
+                relations.append(current)
+        result.append(
+            {
+                "label": label,
+                "targets": targets,
+                **({"relations": relations} if relations else {}),
+            }
+        )
     return result
 
 
@@ -119,8 +151,13 @@ def match_evidence(candidates, evidence, chunk_texts, legacy_variants):
                     part in chunk_texts.get(chunk_id, "") for part in variants[index]
                 )
             )
+            if "relation_id" in candidate:
+                matched = isinstance(value, dict) and any(
+                    relation["relation_id"] == candidate["relation_id"]
+                    for relation in value.get("relations", [])
+                )
             if matched:
                 found.append(index)
         if found:
-            hits[chunk_id] = found
+            hits[chunk_id] = sorted(set(hits.get(chunk_id, [])) | set(found))
     return hits

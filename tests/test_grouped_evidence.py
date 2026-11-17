@@ -186,3 +186,41 @@ class GroupedEvidenceTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_explicit_relation_targets_validate_against_active_catalog_and_survive_binding():
+    relation = {
+        "relation_id": "Y",
+        "build_id": "v1",
+        "source": "段永平",
+        "target": "黄峥",
+        "category": "评价",
+        "description": "认同能力",
+        "evidence": "信任为人",
+    }
+    target = {
+        "title": "书",
+        "position": 0,
+        "fingerprint": fingerprint("原文"),
+        "quote": "原文",
+    }
+    catalog = [{**target, "relations": [relation]}]
+    group = {"label": "黄峥", "targets": [target], "relations": [relation]}
+    assert validate_groups([group], catalog) == [group]
+    bound = bind_groups(
+        ["黄峥"],
+        [group],
+        [{"title": "书", "position": 0, "content": "原文", "chunk_id": "a"}],
+    )
+    assert bound[0]["relations"] == [relation]
+    from app.api.main import EvalScoringGroupInput
+
+    assert EvalScoringGroupInput.model_validate(group).model_dump() == group
+    import pytest
+
+    with pytest.raises(ValueError, match="关系或图谱版本已变化"):
+        validate_groups([group], [{**target, "relations": []}])
+    with pytest.raises(ValueError, match="关系或图谱版本已变化"):
+        validate_groups(
+            [{**group, "relations": [{**relation, "description": "伪造"}]}], catalog
+        )

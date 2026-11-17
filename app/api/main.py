@@ -226,10 +226,24 @@ class EvalTargetInput(BaseModel):
     quote: str = ""
 
 
+class EvalRelationTargetInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    relation_id: str
+    build_id: str
+    source: str
+    target: str
+    category: str
+    description: str = ""
+    evidence: str = ""
+
+
 class EvalScoringGroupInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     label: str = Field(..., min_length=1, max_length=100)
     targets: list[EvalTargetInput] = Field(..., min_length=1, max_length=100)
+    relations: list[EvalRelationTargetInput] = Field(
+        default_factory=list, max_length=500
+    )
 
 
 # 手动录入一道评测题；编号、来源和审核状态由服务端统一生成，避免客户端伪造元数据。

@@ -1208,6 +1208,7 @@ export type EvalEvidenceTarget = {
   quote: string;
 };
 export type EvalEvidenceGroup = {
+  relations?: EvalRelationTarget[];
   label?: string;
   targets?: EvalEvidenceTarget[];
 };
@@ -2074,13 +2075,27 @@ export type EvalSuiteBrief = {
   item_count: number;
   latest: EvalSuiteRunEntry | null;
 };
+export type EvalRelationTarget = {
+  relation_id: string;
+  build_id: string;
+  source: string;
+  target: string;
+  category: string;
+  description: string;
+  evidence: string;
+};
 export type EvalScoringTarget = {
   title: string;
   position: number;
   fingerprint: string;
   quote: string;
+  relations?: EvalRelationTarget[];
 };
-export type EvalScoringGroup = { label: string; targets: EvalScoringTarget[] };
+export type EvalScoringGroup = {
+  label: string;
+  targets: EvalScoringTarget[];
+  relations?: EvalRelationTarget[];
+};
 export function listEvalTargetChunks() {
   return request<{ items: EvalScoringTarget[] }>("/eval/target-chunks");
 }

@@ -1,10 +1,16 @@
+import { RelationEvidenceCards } from "./RelationEvidenceCards";
+import type { EvalRelationTarget } from "./api";
 import { EvidenceTargetTags, type EvidenceTarget } from "./EvidenceTargetTags";
 import "./ScoringItems.css";
 
 export function ScoringItems({
   items,
 }: {
-  items: { label?: string; targets?: EvidenceTarget[] }[];
+  items: {
+    label?: string;
+    targets?: EvidenceTarget[];
+    relations?: EvalRelationTarget[];
+  }[];
 }) {
   return (
     <div className="ag-evidence-list ag-scoring-items">
@@ -16,6 +22,7 @@ export function ScoringItems({
             </strong>
           </p>
           <EvidenceTargetTags targets={item.targets ?? []} number={index + 1} />
+          <RelationEvidenceCards relations={item.relations ?? []} />
         </div>
       ))}
     </div>
