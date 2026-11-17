@@ -66,8 +66,8 @@
 .sp-scoring-editor {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  /* 每行卡片一样高，「添加计分项」卡片也跟着等高。 */
-  grid-auto-rows: 1fr;
+  /* 仅同一行卡片等高，各行按自身内容确定高度。 */
+  grid-auto-rows: auto;
   gap: 12px;
   min-width: 0;
 }
