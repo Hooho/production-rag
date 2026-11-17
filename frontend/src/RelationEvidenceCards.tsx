@@ -1,4 +1,4 @@
-import type { EvalRelationTarget } from "./api";
+import type { EvalRelationTarget, EvalScoringTarget } from "./api";
 import "./RelationEvidenceCards.css";
 
 export function RelationEvidenceCards({
@@ -55,8 +55,10 @@ export function RelationEvidenceCards({
 
 export function RelationEvidenceList({
   relations,
+  catalog = [],
 }: {
   relations: EvalRelationTarget[];
+  catalog?: EvalScoringTarget[];
 }) {
   if (!relations.length) return null;
   return (
@@ -64,6 +66,14 @@ export function RelationEvidenceList({
       {relations.map((relation) => (
         <li key={relation.relation_id}>
           {relation.source} → {relation.category} → {relation.target}
+          {catalog
+            .filter((chunk) =>
+              chunk.relations?.some(
+                (row) => row.relation_id === relation.relation_id,
+              ),
+            )
+            .map((chunk) => `（第 ${chunk.position + 1} 片）`)
+            .join("、")}
         </li>
       ))}
     </ul>

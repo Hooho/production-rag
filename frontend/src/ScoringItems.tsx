@@ -1,3 +1,6 @@
+import { errorText, useToast } from "./Toast";
+import { useEffect, useState } from "react";
+import { listEvalTargetChunks, type EvalScoringTarget } from "./api";
 import { RelationEvidenceList } from "./RelationEvidenceCards";
 import type { EvalRelationTarget } from "./api";
 import { EvidenceTargetTags, type EvidenceTarget } from "./EvidenceTargetTags";
@@ -12,6 +15,23 @@ export function ScoringItems({
     relations?: EvalRelationTarget[];
   }[];
 }) {
+  const toast = useToast();
+  const [catalog, setCatalog] = useState<EvalScoringTarget[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    if (items.some((item) => item.relations?.length)) {
+      listEvalTargetChunks()
+        .then((data) => {
+          if (!cancelled) setCatalog(data.items);
+        })
+        .catch((reason) => {
+          if (!cancelled) toast("error", errorText(reason));
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [items, toast]);
   return (
     <div className="ag-evidence-list ag-scoring-items">
       {items.map((item, index) => (
@@ -22,7 +42,10 @@ export function ScoringItems({
             </strong>
           </p>
           <EvidenceTargetTags targets={item.targets ?? []} number={index + 1} />
-          <RelationEvidenceList relations={item.relations ?? []} />
+          <RelationEvidenceList
+            relations={item.relations ?? []}
+            catalog={catalog}
+          />
         </div>
       ))}
     </div>

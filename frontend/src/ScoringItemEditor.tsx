@@ -33,6 +33,7 @@ export function ScoringItemEditor({
   const [relationTab, setRelationTab] = useState<"select" | "selected">(
     "select",
   );
+  const [relationDocument, setRelationDocument] = useState("");
   const [relationChunk, setRelationChunk] = useState("");
   const [active, setActive] = useState<number | null>(null);
   const [catalog, setCatalog] = useState<EvalScoringTarget[] | null>(null);
@@ -42,7 +43,8 @@ export function ScoringItemEditor({
   const [page, setPage] = useState(1);
   const options = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (active === null) return;
+    if (active === null && !groups.some((group) => group.relations?.length))
+      return;
     setCatalog(null);
     let cancelled = false;
     setError("");
@@ -184,6 +186,7 @@ export function ScoringItemEditor({
               className="link-button button-sm"
               disabled={!item.targets.length}
               onClick={() => {
+                setRelationDocument("");
                 setRelationTab("select");
                 setRelationChunk(targetKey(item.targets[0]));
                 setMode("relations");
@@ -192,7 +195,10 @@ export function ScoringItemEditor({
             >
               配置关系证据（已选 {item.relations?.length ?? 0} 条）
             </button>
-            <RelationEvidenceList relations={item.relations ?? []} />
+            <RelationEvidenceList
+              relations={item.relations ?? []}
+              catalog={catalog ?? []}
+            />
           </div>
         ))}
         <div className="sp-scoring-add">
@@ -245,19 +251,57 @@ export function ScoringItemEditor({
                 </button>
               </div>
               {relationTab === "select" && (
-                <div className="sp-chunk-filters">
-                  <select
-                    aria-label="筛选关系出处分片"
-                    value={relationChunk}
-                    onChange={(event) => setRelationChunk(event.target.value)}
+                <>
+                  <div
+                    className="sp-chunk-filters"
+                    role="group"
+                    aria-label="筛选关系出处文档"
                   >
-                    {group?.targets.map((target) => (
-                      <option key={targetKey(target)} value={targetKey(target)}>
-                        第 {target.position + 1} 片 · {target.title}
-                      </option>
+                    {[
+                      "",
+                      ...new Set(group?.targets.map((target) => target.title)),
+                    ].map((name) => (
+                      <button
+                        key={name}
+                        type="button"
+                        className="secondary-button button-sm"
+                        aria-pressed={relationDocument === name}
+                        onClick={() => {
+                          setRelationDocument(name);
+                          const first = group?.targets.find(
+                            (target) => !name || target.title === name,
+                          );
+                          setRelationChunk(first ? targetKey(first) : "");
+                        }}
+                      >
+                        {name || "全部文档"}
+                      </button>
                     ))}
-                  </select>
-                </div>
+                  </div>
+                  <div
+                    className="sp-chunk-filters"
+                    role="group"
+                    aria-label="筛选关系出处分片"
+                  >
+                    {group?.targets
+                      .filter(
+                        (target) =>
+                          !relationDocument ||
+                          target.title === relationDocument,
+                      )
+                      .map((target) => (
+                        <button
+                          key={targetKey(target)}
+                          type="button"
+                          className="secondary-button button-sm"
+                          aria-pressed={relationChunk === targetKey(target)}
+                          onClick={() => setRelationChunk(targetKey(target))}
+                        >
+                          第 {target.position + 1} 片
+                        </button>
+                      ))}
+                  </div>
+                </>
               )}
               {relationTab === "selected" && (
                 <>
