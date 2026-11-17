@@ -17,9 +17,10 @@ export function ScoringItems({
 }) {
   const toast = useToast();
   const [catalog, setCatalog] = useState<EvalScoringTarget[]>([]);
+  const hasRelations = items.some((item) => item.relations?.length);
   useEffect(() => {
     let cancelled = false;
-    if (items.some((item) => item.relations?.length)) {
+    if (hasRelations) {
       listEvalTargetChunks()
         .then((data) => {
           if (!cancelled) setCatalog(data.items);
@@ -31,7 +32,7 @@ export function ScoringItems({
     return () => {
       cancelled = true;
     };
-  }, [items, toast]);
+  }, [hasRelations, toast]);
   return (
     <div className="ag-evidence-list ag-scoring-items">
       {items.map((item, index) => (

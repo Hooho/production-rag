@@ -42,10 +42,10 @@ export function ScoringItemEditor({
   const [title, setTitle] = useState("");
   const [page, setPage] = useState(1);
   const options = useRef<HTMLDivElement>(null);
+  const needsCatalog =
+    active !== null || groups.some((group) => group.relations?.length);
   useEffect(() => {
-    if (active === null && !groups.some((group) => group.relations?.length))
-      return;
-    setCatalog(null);
+    if (!needsCatalog) return;
     let cancelled = false;
     setError("");
     listEvalTargetChunks()
@@ -61,7 +61,7 @@ export function ScoringItemEditor({
     return () => {
       cancelled = true;
     };
-  }, [active, mode, toast]);
+  }, [needsCatalog, toast]);
   function update(index: number, changes: Partial<EvalScoringGroup>) {
     if (changes.targets) {
       changes = {
