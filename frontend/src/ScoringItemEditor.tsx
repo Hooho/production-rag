@@ -10,7 +10,10 @@ import { EvidenceTargetTags } from "./EvidenceTargetTags";
 import { foldText } from "./evidenceRanges";
 
 import "./Special.css";
-import { RelationEvidenceCards } from "./RelationEvidenceCards";
+import {
+  RelationEvidenceCards,
+  RelationEvidenceList,
+} from "./RelationEvidenceCards";
 import { errorText, useToast } from "./Toast";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 
@@ -27,6 +30,10 @@ export function ScoringItemEditor({
 }) {
   const toast = useToast();
   const [mode, setMode] = useState<"chunks" | "relations">("chunks");
+  const [relationTab, setRelationTab] = useState<"select" | "selected">(
+    "select",
+  );
+  const [relationChunk, setRelationChunk] = useState("");
   const [active, setActive] = useState<number | null>(null);
   const [catalog, setCatalog] = useState<EvalScoringTarget[] | null>(null);
   const [error, setError] = useState("");
@@ -177,13 +184,15 @@ export function ScoringItemEditor({
               className="link-button button-sm"
               disabled={!item.targets.length}
               onClick={() => {
+                setRelationTab("select");
+                setRelationChunk(targetKey(item.targets[0]));
                 setMode("relations");
                 setActive(index);
               }}
             >
               配置关系证据（已选 {item.relations?.length ?? 0} 条）
             </button>
-            <RelationEvidenceCards relations={item.relations ?? []} />
+            <RelationEvidenceList relations={item.relations ?? []} />
           </div>
         ))}
         <div className="sp-scoring-add">
@@ -213,80 +222,156 @@ export function ScoringItemEditor({
             </LoadingSkeleton>
           ) : (
             <>
-              {error && <p className="rg-muted">{error}</p>}
-              {group?.targets.map((target) => {
-                const current = catalog.find(
-                  (row) => targetKey(row) === targetKey(target),
-                );
-                const relations = current?.relations ?? [];
-                return (
-                  <section key={targetKey(target)}>
-                    <strong>
-                      第 {target.position + 1} 片 · {target.title}
-                    </strong>
-                    <EvidenceTargetTags
-                      targets={[target]}
-                      number={(active ?? 0) + 1}
-                    />
-                    {!relations.length && (
-                      <p className="rg-muted">此分片没有生效的图谱关系</p>
-                    )}
-                    <RelationEvidenceCards
-                      relations={relations}
-                      selected={
-                        new Set(group.relations?.map((row) => row.relation_id))
-                      }
-                      onToggle={(relation, checked) => {
-                        if (active === null) return;
-                        update(active, {
-                          relations: checked
-                            ? [...(group.relations ?? []), relation]
-                            : (group.relations ?? []).filter(
-                                (row) =>
-                                  row.relation_id !== relation.relation_id,
-                              ),
-                        });
-                      }}
-                    />
-                  </section>
-                );
-              })}
-              {(group?.relations ?? [])
-                .filter(
-                  (relation) =>
-                    !catalog.some(
-                      (target) =>
-                        group?.targets.some(
-                          (row) => targetKey(row) === targetKey(target),
-                        ) &&
-                        target.relations?.some(
-                          (row) => row.relation_id === relation.relation_id,
-                        ),
-                    ),
-                )
-                .map((relation) => (
-                  <div key={relation.relation_id}>
-                    <p>已选关系不在当前分片或生效图谱中，请重新选择。</p>
-                    <RelationEvidenceCards relations={[relation]} />
-                    <ConfirmPopover
-                      message="移除这条失效的关系证据？保存题目后生效。"
-                      confirmText="移除"
-                      danger
-                      onConfirm={() =>
-                        active !== null &&
-                        update(active, {
-                          relations: group?.relations?.filter(
-                            (row) => row.relation_id !== relation.relation_id,
+              <div
+                className="sp-chunk-filters"
+                role="group"
+                aria-label="关系证据视图"
+              >
+                <button
+                  type="button"
+                  className="secondary-button button-sm"
+                  aria-pressed={relationTab === "select"}
+                  onClick={() => setRelationTab("select")}
+                >
+                  选择
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button button-sm"
+                  aria-pressed={relationTab === "selected"}
+                  onClick={() => setRelationTab("selected")}
+                >
+                  已选（{group?.relations?.length ?? 0} 条）
+                </button>
+              </div>
+              {relationTab === "select" && (
+                <div className="sp-chunk-filters">
+                  <select
+                    aria-label="筛选关系出处分片"
+                    value={relationChunk}
+                    onChange={(event) => setRelationChunk(event.target.value)}
+                  >
+                    {group?.targets.map((target) => (
+                      <option key={targetKey(target)} value={targetKey(target)}>
+                        第 {target.position + 1} 片 · {target.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {relationTab === "selected" && (
+                <>
+                  {!group?.relations?.length && (
+                    <p className="rg-muted">尚未选择关系证据</p>
+                  )}
+                  <RelationEvidenceCards
+                    relations={(group?.relations ?? []).filter((relation) =>
+                      catalog.some(
+                        (target) =>
+                          group?.targets.some(
+                            (row) => targetKey(row) === targetKey(target),
+                          ) &&
+                          target.relations?.some(
+                            (row) => row.relation_id === relation.relation_id,
                           ),
-                        })
-                      }
-                    >
-                      <button type="button" className="delete-button button-sm">
-                        移除失效关系
-                      </button>
-                    </ConfirmPopover>
-                  </div>
-                ))}
+                      ),
+                    )}
+                    selected={
+                      new Set(group?.relations?.map((row) => row.relation_id))
+                    }
+                    onToggle={(relation, checked) => {
+                      if (active === null || checked) return;
+                      update(active, {
+                        relations: group?.relations?.filter(
+                          (row) => row.relation_id !== relation.relation_id,
+                        ),
+                      });
+                    }}
+                  />
+                </>
+              )}
+              {relationTab === "select" &&
+                group?.targets
+                  .filter((target) => targetKey(target) === relationChunk)
+                  .map((target) => {
+                    const current = catalog.find(
+                      (row) => targetKey(row) === targetKey(target),
+                    );
+                    const relations = current?.relations ?? [];
+                    return (
+                      <section key={targetKey(target)}>
+                        <strong>
+                          第 {target.position + 1} 片 · {target.title}
+                        </strong>
+                        <EvidenceTargetTags
+                          targets={[target]}
+                          number={(active ?? 0) + 1}
+                        />
+                        {!relations.length && (
+                          <p className="rg-muted">此分片没有生效的图谱关系</p>
+                        )}
+                        <RelationEvidenceCards
+                          relations={relations}
+                          selected={
+                            new Set(
+                              group.relations?.map((row) => row.relation_id),
+                            )
+                          }
+                          onToggle={(relation, checked) => {
+                            if (active === null) return;
+                            update(active, {
+                              relations: checked
+                                ? [...(group.relations ?? []), relation]
+                                : (group.relations ?? []).filter(
+                                    (row) =>
+                                      row.relation_id !== relation.relation_id,
+                                  ),
+                            });
+                          }}
+                        />
+                      </section>
+                    );
+                  })}
+              {relationTab === "selected" &&
+                (group?.relations ?? [])
+                  .filter(
+                    (relation) =>
+                      !catalog.some(
+                        (target) =>
+                          group?.targets.some(
+                            (row) => targetKey(row) === targetKey(target),
+                          ) &&
+                          target.relations?.some(
+                            (row) => row.relation_id === relation.relation_id,
+                          ),
+                      ),
+                  )
+                  .map((relation) => (
+                    <div key={relation.relation_id}>
+                      <p>已选关系不在当前分片或生效图谱中，请重新选择。</p>
+                      <RelationEvidenceCards relations={[relation]} />
+                      <ConfirmPopover
+                        message="移除这条失效的关系证据？保存题目后生效。"
+                        confirmText="移除"
+                        danger
+                        onConfirm={() =>
+                          active !== null &&
+                          update(active, {
+                            relations: group?.relations?.filter(
+                              (row) => row.relation_id !== relation.relation_id,
+                            ),
+                          })
+                        }
+                      >
+                        <button
+                          type="button"
+                          className="delete-button button-sm"
+                        >
+                          移除失效关系
+                        </button>
+                      </ConfirmPopover>
+                    </div>
+                  ))}
               <button
                 type="button"
                 className="primary-button"

@@ -52,3 +52,20 @@ export function RelationEvidenceCards({
     </div>
   );
 }
+
+export function RelationEvidenceList({
+  relations,
+}: {
+  relations: EvalRelationTarget[];
+}) {
+  if (!relations.length) return null;
+  return (
+    <ul className="relation-evidence-list">
+      {relations.map((relation) => (
+        <li key={relation.relation_id}>
+          {relation.source} → {relation.category} → {relation.target}
+        </li>
+      ))}
+    </ul>
+  );
+}

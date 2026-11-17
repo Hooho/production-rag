@@ -31,3 +31,13 @@ label.relation-evidence-card {
 .relation-evidence-quote {
   color: #8a6914;
 }
+
+.relation-evidence-list {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+.sp-chunk-filters button[aria-pressed="true"] {
+  color: #1677ff;
+  border-color: #1677ff;
+  background: #e6f4ff;
+}

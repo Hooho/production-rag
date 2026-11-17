@@ -1,4 +1,4 @@
-import { RelationEvidenceCards } from "./RelationEvidenceCards";
+import { RelationEvidenceList } from "./RelationEvidenceCards";
 import type { EvalRelationTarget } from "./api";
 import { EvidenceTargetTags, type EvidenceTarget } from "./EvidenceTargetTags";
 import "./ScoringItems.css";
@@ -22,7 +22,7 @@ export function ScoringItems({
             </strong>
           </p>
           <EvidenceTargetTags targets={item.targets ?? []} number={index + 1} />
-          <RelationEvidenceCards relations={item.relations ?? []} />
+          <RelationEvidenceList relations={item.relations ?? []} />
         </div>
       ))}
     </div>
