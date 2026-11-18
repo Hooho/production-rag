@@ -1,3 +1,4 @@
+import { formatJsonOutput } from "./formatJsonOutput";
 import { Tag } from "./Tag";
 import {
   EvalEvidenceAnnotation,
@@ -1992,7 +1993,8 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
             </pre>
           ))}
           <pre className="grt-pre">
-            输出：{words.raw_output || words.error || "（空）"}
+            输出：
+            {formatJsonOutput(words.raw_output) || words.error || "（空）"}
           </pre>
         </DetailDialog>
       )}

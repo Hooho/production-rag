@@ -1,3 +1,4 @@
+import { formatJsonOutput } from "./formatJsonOutput";
 import Table from "./Table";
 import { useEffect, useId, useState } from "react";
 import {
@@ -240,7 +241,7 @@ export function GraphChunkDetails({
                           onClick={() =>
                             setSourceDetail({
                               title: `第 ${chunk.position + 1} 片 · 模型原始输出`,
-                              text: graph.raw_output!,
+                              text: formatJsonOutput(graph.raw_output),
                               original: false,
                             })
                           }

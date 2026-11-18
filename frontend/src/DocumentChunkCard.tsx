@@ -1,3 +1,4 @@
+import { formatJsonOutput } from "./formatJsonOutput";
 import { useState, type ReactNode } from "react";
 import { DetailDialog } from "./DetailDialog";
 import { GraphEntityPanel } from "./GraphEntityPanel";
@@ -539,7 +540,7 @@ function ChunkGraphSection({
                       `【${message.role === "system" ? "系统提示词" : "用户消息"}】\n${message.content}`,
                   )
                   .join("\n\n")
-              : graph.raw_output}
+              : formatJsonOutput(graph.raw_output)}
           </pre>
         </DetailDialog>
       )}
