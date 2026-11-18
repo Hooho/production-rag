@@ -474,7 +474,9 @@ function ChunkGraphSection({
                   {item.source}
                   <span className="chunk-graph-arrow">─{item.category}→</span>
                   {item.target}
-                  <small className="grt-rel-desc">{item.description}</small>
+                  <small className="grt-rel-desc">
+                    【原文】{item.description}
+                  </small>
                 </li>
               ))}
             </ul>
