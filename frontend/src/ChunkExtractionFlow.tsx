@@ -29,12 +29,12 @@ function FlowTable<T>({
           </tr>
         </thead>
         <tbody>
-          {(expanded ? rows : rows.slice(0, 10)).map((row, index) => (
+          {(expanded ? rows : rows.slice(0, 5)).map((row, index) => (
             <tr key={index}>{render(row)}</tr>
           ))}
         </tbody>
       </Table>
-      {rows.length > 10 && (
+      {rows.length > 5 && (
         <button
           type="button"
           className="link-button button-sm"
