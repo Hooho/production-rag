@@ -691,6 +691,16 @@ def chunk_graph(engine, document_id, chunk_ids):
             .mappings()
             .all()
         )
+        current_relations = [
+            item
+            for item in relation_rows(connection, [versions.read_id(connection, build)])
+            if item["chunk_id"] in chunk_ids
+        ]
+        processing = [
+            item
+            for item in merge_rows(connection, versions.read_id(connection, build))
+            if set(item["chunk_ids"]) & set(chunk_ids)
+        ]
         schema = schema_name(connection, build["schema_id"])
     mentions = {}
     for row in mention_rows:
@@ -720,6 +730,17 @@ def chunk_graph(engine, document_id, chunk_ids):
             )
         entities = (row["result"] or {}).get("entities") or []
         result[row["chunk_id"]] = {
+            "model": build["model"],
+            "prompt_tag": build["prompt_tag"],
+            "parsed_result": row["result"],
+            "current_relations": [
+                item
+                for item in current_relations
+                if item["chunk_id"] == row["chunk_id"]
+            ],
+            "processing": [
+                item for item in processing if row["chunk_id"] in item["chunk_ids"]
+            ],
             "status": row["status"],
             "empty": row["status"] != "failed" and not entities,
             "error": row["error"],

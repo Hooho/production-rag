@@ -4056,6 +4056,27 @@ export type ChunkGraphRelation = {
   target_entity?: string | null;
 };
 export type ChunkGraph = {
+  model?: string;
+  prompt_tag?: string;
+  parsed_result?: {
+    entities?: ChunkGraphMention[];
+    relations?: ChunkGraphRelation[];
+  } | null;
+  current_relations?: {
+    id: string;
+    source_entity: string;
+    target_entity: string;
+    category: string;
+    description: string;
+    evidence: string;
+  }[];
+  processing?: {
+    name: string;
+    entity_name: string;
+    method_label: string;
+    scope_label: string;
+    review?: unknown;
+  }[];
   status: "extracted" | "reused" | "failed";
   empty: boolean;
   error: string | null;

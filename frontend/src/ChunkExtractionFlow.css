@@ -1,0 +1,46 @@
+.chunk-extraction-flow {
+  font-size: 12px;
+}
+.chunk-extraction-flow .tag {
+  font-size: 10px;
+  border-radius: 4px;
+}
+.extraction-summary {
+  color: var(--muted);
+}
+.extraction-steps {
+  list-style: none;
+  padding: 0;
+}
+.extraction-steps > li {
+  position: relative;
+  padding: 0 0 20px 36px;
+  border-left: 1px solid #d9e5ee;
+  margin-left: 12px;
+}
+.extraction-number {
+  position: absolute;
+  left: -13px;
+  top: 0;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #e6f4ff;
+  color: #1677ff;
+}
+.extraction-steps summary {
+  cursor: pointer;
+  min-height: 26px;
+}
+.extraction-steps details > div {
+  padding-top: 8px;
+}
+.chunk-extraction-flow pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 60vh;
+  overflow: auto;
+  font-size: 12px;
+}

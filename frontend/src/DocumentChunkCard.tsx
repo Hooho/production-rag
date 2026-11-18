@@ -1,4 +1,4 @@
-import { formatJsonOutput } from "./formatJsonOutput";
+import { ChunkExtractionFlow } from "./ChunkExtractionFlow";
 import { useState, type ReactNode } from "react";
 import { DetailDialog } from "./DetailDialog";
 import { GraphEntityPanel } from "./GraphEntityPanel";
@@ -204,6 +204,7 @@ export function DocumentChunkCard({
           {chunk.graph && (
             <ChunkGraphSection
               chunkId={chunk.chunk_id}
+              originalText={chunk.content}
               graph={chunk.graph}
               onRetry={onRetryGraph}
               onSelectEntity={setEntityId}
@@ -379,171 +380,23 @@ function highlight(
   });
 }
 
-// 这一片的抽取结果：名字 → 归到哪个实体、关系、丢掉的项；发给模型的完整提示词和原始输出点击弹窗查看。
 function ChunkGraphSection({
-  chunkId,
   graph,
+  originalText,
+  chunkId,
   onRetry,
-  onSelectEntity,
 }: {
+  originalText: string;
   chunkId: string;
   graph: ChunkGraph;
   onRetry?: (chunkId: string) => void;
   onSelectEntity: (id: string) => void;
 }) {
-  const [sourceDetail, setSourceDetail] = useState<"prompt" | "output" | null>(
-    null,
-  );
-  const tokens =
-    graph.input_tokens != null
-      ? ` · token 输入 ${graph.input_tokens}，输出 ${graph.output_tokens ?? 0}`
-      : "";
-  const seconds =
-    graph.duration_ms != null
-      ? ` · ${(graph.duration_ms / 1000).toFixed(1)} 秒`
-      : "";
   return (
-    <section className="chunk-group">
-      <h4>
-        实体关系
-        <small>
-          {GRAPH_STATUS_LABELS[graph.status] ?? graph.status}
-          {graph.status === "reused"
-            ? "（分片、清单、模型、提示词都和以前一样，沿用当时的结果）"
-            : ""}
-          {tokens}
-          {seconds}
-        </small>
-      </h4>
-      {graph.status === "failed" ? (
-        <p className="chunk-note is-warn">
-          抽取失败：{graph.error}
-          {onRetry && (
-            <>
-              {" "}
-              <button
-                type="button"
-                className="link-button"
-                title="重新抽取当前分片的实体和关系"
-                onClick={() => onRetry(chunkId)}
-              >
-                重试这一片
-              </button>
-            </>
-          )}
-        </p>
-      ) : graph.mentions.length === 0 ? (
-        <small className="chunk-note">这一片没有抽出实体</small>
-      ) : (
-        <>
-          <ul className="chunk-graph-list">
-            {graph.mentions.map((item) => (
-              <li key={item.name}>
-                <strong>{item.name}</strong>（{item.type}
-                {item.type_fixed_from
-                  ? `，模型写的是「${item.type_fixed_from}」，不在清单里`
-                  : ""}
-                ）<span className="chunk-graph-arrow">→</span>
-                {item.entity_id ? (
-                  <button
-                    type="button"
-                    className="link-button"
-                    title={`查看「${item.entity_name ?? item.canonical ?? item.name}」的实体详情`}
-                    aria-label={`查看「${item.entity_name ?? item.canonical ?? item.name}」的实体详情`}
-                    onClick={() => onSelectEntity(item.entity_id!)}
-                  >
-                    {item.entity_name ?? item.canonical}
-                  </button>
-                ) : (
-                  (item.entity_name ?? item.canonical)
-                )}
-                {item.method_label && (
-                  <small>
-                    {item.method_label}
-                    {item.canonical && item.canonical !== item.name
-                      ? `：模型给的标准名「${item.canonical}」`
-                      : ""}
-                  </small>
-                )}
-              </li>
-            ))}
-          </ul>
-          {graph.relations.length > 0 && (
-            <ul className="chunk-graph-list">
-              {graph.relations.map((item, index) => (
-                <li key={index}>
-                  {item.source}
-                  <span className="chunk-graph-arrow">─{item.category}→</span>
-                  {item.target}
-                  <small className="grt-rel-desc">
-                    【原文】{item.description}
-                  </small>
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
-      )}
-      {graph.dropped.length > 0 && (
-        <details className="chunk-graph-raw">
-          <summary>
-            丢掉了 {graph.dropped.length}{" "}
-            项（格式不对、重复、关系的起点终点对不上）
-          </summary>
-          <ul className="chunk-graph-list">
-            {graph.dropped.map((item, index) => (
-              <li key={index}>
-                {item.reason}
-                <small>{JSON.stringify(item.item)}</small>
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
-      {graph.prompt && (
-        <div className="chunk-graph-raw">
-          <button
-            type="button"
-            className="link-button"
-            title="打开弹窗，查看发送给模型的完整提示词"
-            onClick={() => setSourceDetail("prompt")}
-          >
-            发给模型的完整提示词
-          </button>
-        </div>
-      )}
-      {graph.raw_output != null && (
-        <div className="chunk-graph-raw">
-          <button
-            type="button"
-            className="link-button"
-            title="打开弹窗，查看模型原始输出"
-            onClick={() => setSourceDetail("output")}
-          >
-            模型原始输出
-          </button>
-        </div>
-      )}
-      {sourceDetail && (
-        <DetailDialog
-          open
-          title={
-            sourceDetail === "prompt" ? "发给模型的完整提示词" : "模型原始输出"
-          }
-          onClose={() => setSourceDetail(null)}
-        >
-          <pre className="graph-prompt">
-            {sourceDetail === "prompt"
-              ? graph.prompt
-                  ?.map(
-                    (message) =>
-                      `【${message.role === "system" ? "系统提示词" : "用户消息"}】\n${message.content}`,
-                  )
-                  .join("\n\n")
-              : formatJsonOutput(graph.raw_output)}
-          </pre>
-        </DetailDialog>
-      )}
-    </section>
+    <ChunkExtractionFlow
+      graph={graph}
+      originalText={originalText}
+      onRetry={onRetry ? () => onRetry(chunkId) : undefined}
+    />
   );
 }
