@@ -16,7 +16,7 @@ export function ChunkExtractionFlow({
   originalText: string;
   onRetry?: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState<number | null>(null);
   const parsed = graph.parsed_result;
   const failed = graph.status === "failed";
   const state = failed
@@ -190,32 +190,41 @@ export function ChunkExtractionFlow({
         {graph.mentions.length} 个实体 · {graph.relations.length} 条关系 · 去掉{" "}
         {graph.dropped.length} 项
       </p>
-      <p className="extraction-summary">
-        请求 AI → 模型返回 → 解析校验 → 实体归并 → 关系入图 → 当前结果
-      </p>
-      <button className="link-button button-sm" onClick={() => setOpen(true)}>
-        查看流程
-      </button>
-      {open && (
+      <ol className="extraction-steps" aria-label="分片抽取流程">
+        {steps.map((step, i) => (
+          <li key={step.title} className={selected === i ? "is-selected" : ""}>
+            <span className="extraction-number" aria-hidden="true">
+              {i + 1}
+            </span>
+            <button
+              type="button"
+              className="link-button button-sm extraction-step-title"
+              onClick={() => setSelected(i)}
+              aria-label={`查看${step.title}详情`}
+            >
+              {step.title}
+            </button>
+            <span className="extraction-step-status">{step.status}</span>
+            <button
+              type="button"
+              className="link-button button-sm extraction-step-open"
+              onClick={() => setSelected(i)}
+              aria-label={`打开${step.title}详情`}
+            >
+              查看 ›
+            </button>
+          </li>
+        ))}
+      </ol>
+      {selected !== null && (
         <DetailDialog
           open
-          title="分片抽取流程"
-          onClose={() => setOpen(false)}
-          className="chunk-extraction-flow"
+          title={`${selected + 1} · ${steps[selected].title}`}
+          onClose={() => setSelected(null)}
+          className="chunk-extraction-flow extraction-step-dialog"
         >
-          <ol className="extraction-steps">
-            {steps.map((step, i) => (
-              <li key={step.title}>
-                <span className="extraction-number">{i + 1}</span>
-                <details>
-                  <summary>
-                    {step.title} <Tag tone="neutral">{step.status}</Tag>
-                  </summary>
-                  <div>{step.body}</div>
-                </details>
-              </li>
-            ))}
-          </ol>
+          <p className="extraction-detail-status">{steps[selected].status}</p>
+          {steps[selected].body}
         </DetailDialog>
       )}
     </section>
