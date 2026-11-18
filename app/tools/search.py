@@ -91,12 +91,18 @@ class DocumentSearchTool:
         scope=None,
         return_limit=None,
         excellent_score=None,
+        source_selection_mode=None,
+        source_token_budget=None,
         graph_keywords=None,
         graph_question=None,
         graph_question_source=None,
     ):
         # 一次检索只读一次参数，整条检索用同一份；实际用到的值写进诊断配置，事后能查到这次用的是哪组参数。
         config = runtime_snapshot()
+        if source_selection_mode is not None:
+            config["source_selection_mode"] = source_selection_mode
+        if source_token_budget is not None:
+            config["source_token_budget"] = source_token_budget
         # 召回方式：不传就是向量 + 关键词，设置页打开了图检索再加上图（固定流程、Agent 的 hybrid 都走这里）。
         # 调用方明确传了 methods（Agent 的 vector / keyword 模式、评测的消融）时，只有里面有 graph 才走图。
         if selected_methods() is not None:

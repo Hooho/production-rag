@@ -405,6 +405,23 @@ SPECS = [
     # 每次要几条由 Agent 自己定（search_knowledge 的 top_k），这里只是上限；超过上限时工具会告诉它没给全。
     # 默认和固定流程一样（6 条、做父块扩展），行为不变；要不要放宽先在评测里单独指定对比。
     {
+        "key": "agent_source_selection_mode",
+        "group": "answer",
+        "type": "choice",
+        "default": "count",
+        "choices": ["count", "tokens"],
+        "eval": "agent",
+    },
+    {
+        "key": "agent_source_token_budget",
+        "group": "answer",
+        "type": "int",
+        "default": 8000,
+        "min": 100,
+        "max": 128000,
+        "eval": "agent",
+    },
+    {
         "key": "agent_return_limit",
         "group": "answer",
         "type": "int",
@@ -603,6 +620,9 @@ def _is(key, value):
 
 
 REQUIRES = {
+    "agent_return_limit": [_is("agent_source_selection_mode", "count")],
+    "agent_excellent_score": [_is("agent_source_selection_mode", "count")],
+    "agent_source_token_budget": [_is("agent_source_selection_mode", "tokens")],
     "rerank_min_score": [_on("rerank_enabled")],
     "rerank_fallback_min_score": [_on("rerank_enabled")],
     # 优秀阈值只在按条数选来源时放行（按 token 预算时不受条数限制，也就用不上它）。

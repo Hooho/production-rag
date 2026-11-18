@@ -98,6 +98,7 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
     if isinstance(top_k, bool) or not isinstance(top_k, int):
         return invalid("top_k 应为整数")
     settings = runtime_snapshot()
+    budget_mode = settings.get("agent_source_selection_mode", "count") == "tokens"
     cap = settings["agent_return_limit"]
     requested = top_k
     top_k = max(1, min(top_k, cap))
@@ -116,15 +117,17 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
         return_limit=cap,
         excellent_score=settings["agent_excellent_score"],
         graph_question_source="Agent 的检索词",
+        source_selection_mode=settings.get("agent_source_selection_mode", "count"),
+        source_token_budget=settings.get("agent_source_token_budget", 8000),
     )
     # 过了相关度阈值的资料，最多给 agent_return_limit 条；模型要得更少（top_k）就再少取，不能绕过阈值。
     # 不低于 Agent 优秀阈值的资料全部给，不受模型自己要的 top_k 限制（检索那边也已经不受上限限制）。
     stats = retrieval.get("stats") or {}
     given = max(top_k, stats.get("excellent", 0))
-    sources = retrieval["sources"][:given]
+    sources = retrieval["sources"] if budget_mode else retrieval["sources"][:given]
     # 过了阈值却没给模型的条数：超出上限被截掉的，加上模型自己要得少没取的。以前不说，模型以为拿到的就是全部。
     hidden = len(retrieval["sources"]) - len(sources) + stats.get("beyond_limit", 0)
-    if not sources:
+    if not sources and not retrieval.get("relations"):
         return result(
             "没有找到相关资料。可以换一种问法，或者用 keyword 模式搜索名称、编号等原话。",
             query=query,
@@ -134,6 +137,23 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
             evidence_ids=[],
             retrieval=retrieval,
         )
+    delivered = {
+        cid
+        for source in sources
+        for cid in source.get("parent_chunk_ids", [source["chunk_id"]])
+    }
+    for table in (
+        retrieval.get("diagnostics", {}).get("graph", {}).get("tables", {})
+    ).values():
+        for row in table:
+            if (
+                row.get("delivery_status") == "returned"
+                and row["chunk_id"] not in delivered
+            ):
+                row.update(
+                    delivery_status="filtered",
+                    delivery_reason="超出 Agent 本次请求段数",
+                )
     blocks = []
     evidence_ids = []
     repeated = []
@@ -175,7 +195,7 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
         )
     # 这次返回的资料前面全都给过：明确告诉模型这次检索没有新资料。原来只逐条写“同一段资料”，模型要自己比对编号，
     # 评测里常见换几种说法反复拿回同一批资料（无新增检索）。这里只给信息、不强制停，查不查由模型决定。
-    if len(repeated) == len(evidence_ids):
+    if evidence_ids and len(repeated) == len(evidence_ids) and not relation_blocks:
         blocks.insert(
             0,
             f"这次检索没有新资料：返回的 {'、'.join(repeated)} 前面都已经给过。"
@@ -185,7 +205,7 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
     truncated = truncation_note(
         requested, top_k, cap, hidden, len(sources), stats.get("excellent_score")
     )
-    if truncated:
+    if truncated and not budget_mode:
         blocks.insert(0, truncated)
     return result(
         "\n\n".join(blocks),
@@ -198,7 +218,9 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
         evidence_ids=evidence_ids,
         relation_ids=relation_ids,
         retrieval=retrieval,
-        no_new=len(repeated) == len(evidence_ids),
+        no_new=bool(evidence_ids)
+        and len(repeated) == len(evidence_ids)
+        and not relation_blocks,
     )
 
 
@@ -376,7 +398,12 @@ def tool_definitions(ctx):
         function(
             "search_knowledge",
             "在知识库中检索资料（制度、政策、说明文档等）。内部会做召回、融合、重排和相关性过滤，"
-            "返回带编号的资料 [S1]、[S2]…。",
+            "返回带编号的资料 [S1]、[S2]…。"
+            + (
+                f"每次检索资料预算约 {runtime_snapshot().get('agent_source_token_budget', 8000)} token，包含原文和图关系，不按段数截断。"
+                if runtime_snapshot().get("agent_source_selection_mode") == "tokens"
+                else ""
+            ),
             {
                 "query": {
                     "type": "string",
@@ -388,12 +415,18 @@ def tool_definitions(ctx):
                     "enum": list(SEARCH_MODES),
                     "description": "检索方式，默认 hybrid。",
                 },
-                "top_k": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": cap,
-                    "description": f"最多返回几条，默认 {min(TOP_K_DEFAULT, cap)}，最多 {cap}。",
-                },
+                **(
+                    {}
+                    if runtime_snapshot().get("agent_source_selection_mode") == "tokens"
+                    else {
+                        "top_k": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": cap,
+                            "description": f"最多返回几条，默认 {min(TOP_K_DEFAULT, cap)}，最多 {cap}。",
+                        }
+                    }
+                ),
                 "query_explanation": QUERY_EXPLANATION_SCHEMA,
             },
             ["query", "query_explanation"],

@@ -145,16 +145,26 @@ export default function EvalParamsPanel({
     const effective = (key: string) =>
       value.settings?.[key] ??
       options.settings.find((item) => item.key === key)?.value;
-    const mode = effective("source_selection_mode");
+    const mode = effective(
+      group.key === "agent"
+        ? "agent_source_selection_mode"
+        : "source_selection_mode",
+    );
     const settings = options.settings
       .filter((item) => {
         if (item.eval !== group.key) return false;
         if (
           item.key === "return_limit" ||
-          item.key === "rerank_excellent_score"
+          item.key === "rerank_excellent_score" ||
+          item.key === "agent_return_limit" ||
+          item.key === "agent_excellent_score"
         )
           return mode !== "tokens";
-        if (item.key === "source_token_budget") return mode === "tokens";
+        if (
+          item.key === "source_token_budget" ||
+          item.key === "agent_source_token_budget"
+        )
+          return mode === "tokens";
         if (item.key === "source_graph_budget_ratio")
           return (
             mode === "tokens" &&
@@ -166,6 +176,9 @@ export default function EvalParamsPanel({
       })
       .sort((a, b) => {
         const order = [
+          "agent_source_selection_mode",
+          "agent_return_limit",
+          "agent_source_token_budget",
           "source_selection_mode",
           "return_limit",
           "source_token_budget",
