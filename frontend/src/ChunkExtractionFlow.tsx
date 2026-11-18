@@ -47,6 +47,18 @@ function FlowTable<T>({
   );
 }
 
+function CategoryTag({ value }: { value?: string | null }) {
+  return value && value !== "未记录" ? (
+    <Tag hue size="sm">
+      {value}
+    </Tag>
+  ) : (
+    <Tag tone="neutral" size="sm">
+      未记录
+    </Tag>
+  );
+}
+
 function droppedText(value: unknown): string {
   if (typeof value === "string") return value;
   if (!value || typeof value !== "object") return String(value ?? "空项");
@@ -173,7 +185,9 @@ export function ChunkExtractionFlow({
             render={(item) => (
               <>
                 <td>{item.name}</td>
-                <td>{item.type}</td>
+                <td>
+                  <CategoryTag value={item.type} />
+                </td>
                 <td>{item.canonical ?? "未记录"}</td>
               </>
             )}
@@ -185,7 +199,9 @@ export function ChunkExtractionFlow({
             render={(item) => (
               <>
                 <td>{item.source}</td>
-                <td>{item.category}</td>
+                <td>
+                  <CategoryTag value={item.category} />
+                </td>
                 <td>{item.target}</td>
                 <td>{item.description}</td>
                 <td>{evidence(item.evidence)}</td>
@@ -201,14 +217,22 @@ export function ChunkExtractionFlow({
                 render={(item) => (
                   <>
                     <td>
-                      {item.kind === "entity"
-                        ? "实体"
-                        : item.kind === "relation"
-                          ? "关系"
-                          : item.kind}
+                      <CategoryTag
+                        value={
+                          item.kind === "entity"
+                            ? "实体"
+                            : item.kind === "relation"
+                              ? "关系"
+                              : item.kind
+                        }
+                      />
                     </td>
                     <td>{droppedText(item.item)}</td>
-                    <td>{item.reason}</td>
+                    <td>
+                      <Tag tone="warning" size="sm">
+                        {item.reason}
+                      </Tag>
+                    </td>
                   </>
                 )}
               />
@@ -230,7 +254,9 @@ export function ChunkExtractionFlow({
             <>
               <td>{item.name}</td>
               <td>{item.entity_name ?? "未记录"}</td>
-              <td>{item.method_label ?? "未记录"}</td>
+              <td>
+                <CategoryTag value={item.method_label} />
+              </td>
             </>
           )}
         />
@@ -250,10 +276,15 @@ export function ChunkExtractionFlow({
             render={(item) => (
               <>
                 <td>
-                  {item.source_entity ?? item.source} → {item.category} →{" "}
+                  {item.source_entity ?? item.source} →{" "}
+                  <CategoryTag value={item.category} /> →{" "}
                   {item.target_entity ?? item.target}
                 </td>
-                <td>未记录</td>
+                <td>
+                  <Tag tone="neutral" size="sm">
+                    未记录
+                  </Tag>
+                </td>
               </>
             )}
           />
@@ -276,8 +307,12 @@ export function ChunkExtractionFlow({
               <>
                 <td>{item.name}</td>
                 <td>{item.entity_name}</td>
-                <td>{item.method_label}</td>
-                <td>{item.scope_label}</td>
+                <td>
+                  <CategoryTag value={item.method_label} />
+                </td>
+                <td>
+                  <CategoryTag value={item.scope_label} />
+                </td>
               </>
             )}
           />
@@ -289,8 +324,8 @@ export function ChunkExtractionFlow({
               render={(item) => (
                 <>
                   <td>
-                    {item.source_entity} → {item.category} →{" "}
-                    {item.target_entity}
+                    {item.source_entity} → <CategoryTag value={item.category} />{" "}
+                    → {item.target_entity}
                   </td>
                   <td>{item.description}</td>
                   <td>{evidence(item.evidence)}</td>
