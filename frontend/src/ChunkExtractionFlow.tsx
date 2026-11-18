@@ -1,11 +1,62 @@
 import { useState, type ReactNode } from "react";
 import type { ChunkGraph } from "./api";
 import { DetailDialog } from "./DetailDialog";
-import { InfoPopover } from "./Popover";
 import { HighlightedText } from "./HighlightedText";
 import { Tag } from "./Tag";
+import Table from "./Table";
 import { formatJsonOutput } from "./formatJsonOutput";
 import "./ChunkExtractionFlow.css";
+
+function FlowTable<T>({
+  rows,
+  headers,
+  render,
+}: {
+  rows: T[];
+  headers: string[];
+  render: (row: T) => ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  if (!rows.length) return <p className="extraction-step-status">无记录项</p>;
+  return (
+    <>
+      <Table className="extraction-data-table">
+        <thead>
+          <tr>
+            {headers.map((title) => (
+              <th key={title}>{title}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {(expanded ? rows : rows.slice(0, 10)).map((row, index) => (
+            <tr key={index}>{render(row)}</tr>
+          ))}
+        </tbody>
+      </Table>
+      {rows.length > 10 && (
+        <button
+          type="button"
+          className="link-button button-sm"
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? "收起" : `展开全部 ${rows.length} 项`}
+        </button>
+      )}
+    </>
+  );
+}
+
+function droppedText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object") return String(value ?? "空项");
+  return Object.entries(value)
+    .map(
+      ([key, item]) =>
+        `${key}：${typeof item === "object" ? droppedText(item) : String(item)}`,
+    )
+    .join("；");
+}
 
 export function ChunkExtractionFlow({
   graph,
@@ -16,8 +67,13 @@ export function ChunkExtractionFlow({
   originalText: string;
   onRetry?: () => void;
 }) {
-  const [selected, setSelected] = useState<number | null>(null);
+  const [detail, setDetail] = useState<{
+    title: string;
+    text: string;
+    evidence?: string;
+  } | null>(null);
   const parsed = graph.parsed_result;
+  const relations = parsed?.relations ?? [];
   const failed = graph.status === "failed";
   const state = failed
     ? "失败"
@@ -25,9 +81,28 @@ export function ChunkExtractionFlow({
       ? "复用历史抽取"
       : "已抽取";
   const input = graph.prompt
-    ?.map((m) => `【${m.role}】\n${m.content}`)
+    ?.map((message) => `【${message.role}】\n${message.content}`)
     .join("\n\n");
-  const relations = parsed?.relations ?? [];
+  const evidence = (text: string) => (
+    <>
+      {text || "未记录"}
+      {text && (
+        <button
+          type="button"
+          className="link-button button-sm"
+          onClick={() =>
+            setDetail({
+              title: "完整分片原文",
+              text: originalText,
+              evidence: text,
+            })
+          }
+        >
+          原文
+        </button>
+      )}
+    </>
+  );
   const steps: { title: string; status: string; body: ReactNode }[] = [
     {
       title: "请求 AI",
@@ -39,15 +114,17 @@ export function ChunkExtractionFlow({
       body: (
         <>
           <p>
-            状态：{state} · 模型：{graph.model ?? "未记录"} · 提示词：
+            模型：{graph.model ?? "未记录"} · 提示词：
             {graph.prompt_tag ?? "未记录"}
           </p>
-          {input ? (
-            <InfoPopover title="完整请求" content={() => <pre>{input}</pre>}>
-              <button className="link-button button-sm">查看完整请求</button>
-            </InfoPopover>
-          ) : (
-            <p>未记录</p>
+          {input && (
+            <button
+              type="button"
+              className="link-button button-sm"
+              onClick={() => setDetail({ title: "完整请求", text: input })}
+            >
+              完整请求
+            </button>
           )}
         </>
       ),
@@ -66,12 +143,18 @@ export function ChunkExtractionFlow({
           </p>
           {graph.error && <p>{graph.error}</p>}
           {graph.raw_output != null && (
-            <InfoPopover
-              title="模型原始输出"
-              content={() => <pre>{formatJsonOutput(graph.raw_output)}</pre>}
+            <button
+              type="button"
+              className="link-button button-sm"
+              onClick={() =>
+                setDetail({
+                  title: "模型原始输出",
+                  text: formatJsonOutput(graph.raw_output),
+                })
+              }
             >
-              <button className="link-button button-sm">查看格式化 JSON</button>
-            </InfoPopover>
+              原始输出
+            </button>
           )}
         </>
       ),
@@ -81,61 +164,99 @@ export function ChunkExtractionFlow({
       status: parsed
         ? `保留 ${parsed.entities?.length ?? 0} 实体 / ${relations.length} 关系，丢弃 ${graph.dropped.length} 项`
         : "未记录",
-      body: (
+      body: parsed ? (
         <>
-          <h5>抽取时结果</h5>
-          {parsed ? (
-            <pre>{JSON.stringify(parsed, null, 2)}</pre>
-          ) : (
-            <p>未记录</p>
+          <h5>实体</h5>
+          <FlowTable
+            rows={parsed.entities ?? []}
+            headers={["实体名称", "类型", "模型标准名"]}
+            render={(item) => (
+              <>
+                <td>{item.name}</td>
+                <td>{item.type}</td>
+                <td>{item.canonical ?? "未记录"}</td>
+              </>
+            )}
+          />
+          <h5>关系</h5>
+          <FlowTable
+            rows={relations}
+            headers={["起点", "关系", "终点", "描述", "原文依据"]}
+            render={(item) => (
+              <>
+                <td>{item.source}</td>
+                <td>{item.category}</td>
+                <td>{item.target}</td>
+                <td>{item.description}</td>
+                <td>{evidence(item.evidence)}</td>
+              </>
+            )}
+          />
+          {graph.dropped.length > 0 && (
+            <>
+              <h5>丢弃项</h5>
+              <FlowTable
+                rows={graph.dropped}
+                headers={["类型", "内容", "原因"]}
+                render={(item) => (
+                  <>
+                    <td>
+                      {item.kind === "entity"
+                        ? "实体"
+                        : item.kind === "relation"
+                          ? "关系"
+                          : item.kind}
+                    </td>
+                    <td>{droppedText(item.item)}</td>
+                    <td>{item.reason}</td>
+                  </>
+                )}
+              />
+            </>
           )}
-          {graph.dropped.map((item, i) => (
-            <div key={i}>
-              <Tag tone="neutral">{item.reason}</Tag>
-              <pre>{JSON.stringify(item.item, null, 2)}</pre>
-            </div>
-          ))}
         </>
+      ) : (
+        <p>解析结果未记录</p>
       ),
     },
     {
       title: "实体归并",
       status: `${graph.mentions.length} 个实体`,
-      body: graph.mentions.map((item, i) => (
-        <p key={i}>
-          {item.name} → {item.entity_name ?? "未记录"}{" "}
-          <Tag tone="neutral">{item.method_label ?? "归并依据未记录"}</Tag>
-        </p>
-      )),
+      body: (
+        <FlowTable
+          rows={graph.mentions}
+          headers={["抽取名称", "图谱实体", "归并依据"]}
+          render={(item) => (
+            <>
+              <td>{item.name}</td>
+              <td>{item.entity_name ?? "未记录"}</td>
+              <td>{item.method_label ?? "未记录"}</td>
+            </>
+          )}
+        />
+      ),
     },
     {
       title: "关系入图",
       status: "历史写入过程未记录",
       body: (
         <>
-          <p>下列为抽取时通过校验的关系，不作为历史写入成功凭据。</p>
-          {relations.map((item, i) => (
-            <div key={i}>
-              <strong>
-                {item.source} → {item.category} → {item.target}
-              </strong>
-              <p>描述：{item.description}</p>
-              <p>原文依据：{item.evidence || "未记录"}</p>
-              {item.evidence && (
-                <InfoPopover
-                  title="原文依据"
-                  content={() => (
-                    <HighlightedText
-                      text={originalText}
-                      groups={[{ kind: "evidence", texts: [item.evidence] }]}
-                    />
-                  )}
-                >
-                  <button className="link-button button-sm">查看原文</button>
-                </InfoPopover>
-              )}
-            </div>
-          ))}
+          <p className="extraction-step-status">
+            下列为抽取关系的当前实体映射；历史写入状态未记录。
+          </p>
+          <FlowTable
+            rows={graph.relations}
+            headers={["归并后关系", "历史写入状态"]}
+            render={(item) => (
+              <>
+                <td>
+                  {item.source_entity ?? item.source} → {item.category} →{" "}
+                  {item.target_entity ?? item.target}
+                </td>
+                <td>未记录</td>
+              </>
+            )}
+          />
         </>
       ),
     },
@@ -146,25 +267,36 @@ export function ChunkExtractionFlow({
         : "未记录",
       body: (
         <>
-          <h5>处理记录</h5>
-          <p>以下为已保存的归并依据；完整操作时间线未记录。</p>
-          {graph.processing?.map((item, i) => (
-            <p key={i}>
-              {item.name} → {item.entity_name} · {item.method_label} ·{" "}
-              {item.scope_label}
-            </p>
-          ))}
+          <h5>已保存的处理依据</h5>
+          <p className="extraction-step-status">完整操作时间线未记录。</p>
+          <FlowTable
+            rows={graph.processing ?? []}
+            headers={["名称", "当前实体", "处理方式", "范围"]}
+            render={(item) => (
+              <>
+                <td>{item.name}</td>
+                <td>{item.entity_name}</td>
+                <td>{item.method_label}</td>
+                <td>{item.scope_label}</td>
+              </>
+            )}
+          />
           <h5>当前入图关系</h5>
           {graph.current_relations ? (
-            graph.current_relations.map((item) => (
-              <div key={item.id}>
-                <strong>
-                  {item.source_entity} → {item.category} → {item.target_entity}
-                </strong>
-                <p>描述：{item.description}</p>
-                <p>原文依据：{item.evidence || "未记录"}</p>
-              </div>
-            ))
+            <FlowTable
+              rows={graph.current_relations}
+              headers={["关系", "描述", "原文依据"]}
+              render={(item) => (
+                <>
+                  <td>
+                    {item.source_entity} → {item.category} →{" "}
+                    {item.target_entity}
+                  </td>
+                  <td>{item.description}</td>
+                  <td>{evidence(item.evidence)}</td>
+                </>
+              )}
+            />
           ) : (
             <p>未记录</p>
           )}
@@ -186,45 +318,33 @@ export function ChunkExtractionFlow({
           重试这一片
         </button>
       )}
-      <p>
-        {graph.mentions.length} 个实体 · {graph.relations.length} 条关系 · 去掉{" "}
-        {graph.dropped.length} 项
-      </p>
       <ol className="extraction-steps" aria-label="分片抽取流程">
-        {steps.map((step, i) => (
-          <li key={step.title} className={selected === i ? "is-selected" : ""}>
+        {steps.map((step, index) => (
+          <li key={step.title}>
             <span className="extraction-number" aria-hidden="true">
-              {i + 1}
+              {index + 1}
             </span>
-            <button
-              type="button"
-              className="link-button button-sm extraction-step-title"
-              onClick={() => setSelected(i)}
-              aria-label={`查看${step.title}详情`}
-            >
-              {step.title}
-            </button>
+            <strong className="extraction-step-title">{step.title}</strong>
             <span className="extraction-step-status">{step.status}</span>
-            <button
-              type="button"
-              className="link-button button-sm extraction-step-open"
-              onClick={() => setSelected(i)}
-              aria-label={`打开${step.title}详情`}
-            >
-              查看 ›
-            </button>
+            <div className="extraction-step-body">{step.body}</div>
           </li>
         ))}
       </ol>
-      {selected !== null && (
+      {detail && (
         <DetailDialog
           open
-          title={`${selected + 1} · ${steps[selected].title}`}
-          onClose={() => setSelected(null)}
+          title={detail.title}
+          onClose={() => setDetail(null)}
           className="chunk-extraction-flow extraction-step-dialog"
         >
-          <p className="extraction-detail-status">{steps[selected].status}</p>
-          {steps[selected].body}
+          {detail.evidence ? (
+            <HighlightedText
+              text={detail.text}
+              groups={[{ kind: "evidence", texts: [detail.evidence] }]}
+            />
+          ) : (
+            <pre>{detail.text}</pre>
+          )}
         </DetailDialog>
       )}
     </section>
