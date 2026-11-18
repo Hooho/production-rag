@@ -352,10 +352,10 @@ export default function UnifiedEvalLauncher({
           </select>
           {pendingTemplate !== null && (
             <>
-              <ConfirmPopover
-                message="切换会覆盖当前未保存的表单修改，是否继续？"
-                confirmText="切换模板"
-                onConfirm={() => {
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
                   const template = templates.find(
                     (item) => item.id === pendingTemplate,
                   );
@@ -367,10 +367,8 @@ export default function UnifiedEvalLauncher({
                   }
                 }}
               >
-                <button type="button" className="secondary-button">
-                  加载选中模板
-                </button>
-              </ConfirmPopover>
+                加载选中模板
+              </button>
               <button
                 type="button"
                 className="link-button"
