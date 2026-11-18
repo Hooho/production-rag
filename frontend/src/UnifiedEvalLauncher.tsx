@@ -55,7 +55,21 @@ export default function UnifiedEvalLauncher({
   const [templateId, setTemplateId] = useState("");
   const [templateBusy, setTemplateBusy] = useState<string | null>(null);
   const [templateBaseline, setTemplateBaseline] = useState("");
+  const [dragging, setDragging] = useState<number | null>(null);
   const [configs, setConfigs] = useState<Config[]>([]);
+  function reorder(from: number, to: number) {
+    if (from === to || to < 0 || to >= configs.length) return;
+    const next = [...configs];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setConfigs(next);
+    setEditing((current) => {
+      if (current === from) return to;
+      if (from < current && current <= to) return current - 1;
+      if (to <= current && current < from) return current + 1;
+      return current;
+    });
+  }
   const [draft, setDraft] = useState<Config>(empty(0));
   const [editing, setEditing] = useState(0);
   const [source, setSource] = useState("dev");
@@ -624,8 +638,41 @@ export default function UnifiedEvalLauncher({
           {configs.map((config, index) => (
             <article
               key={index}
-              className={editing === index ? "is-current" : ""}
+              className={`${editing === index ? "is-current" : ""}${dragging === index ? " is-dragging" : ""}`}
+              onDragOver={(event) => {
+                if (dragging !== null) {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                }
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                if (dragging !== null) reorder(dragging, index);
+                setDragging(null);
+              }}
             >
+              <button
+                type="button"
+                className="link-button button-sm unified-eval-drag-handle"
+                draggable={!busy}
+                disabled={busy}
+                aria-label={`拖动调整${config.label}的顺序，也可按上下方向键移动`}
+                title="拖动排序；第一项为比较基准"
+                onDragStart={(event) => {
+                  setDragging(index);
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/plain", String(index));
+                }}
+                onDragEnd={() => setDragging(null)}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+                    event.preventDefault();
+                    reorder(index, index + (event.key === "ArrowUp" ? -1 : 1));
+                  }
+                }}
+              >
+                ⠿
+              </button>
               <strong>
                 {config.label}
                 {index === 0 ? " · 比较基准" : ""}

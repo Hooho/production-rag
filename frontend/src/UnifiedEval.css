@@ -193,3 +193,23 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+.unified-eval-configs > article {
+  position: relative;
+}
+.unified-eval-configs > article > strong {
+  display: block;
+  padding-right: 28px;
+}
+.unified-eval-configs .unified-eval-drag-handle {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  cursor: grab;
+}
+.unified-eval-configs .unified-eval-drag-handle:active {
+  cursor: grabbing;
+}
+.unified-eval-configs > article.is-dragging {
+  opacity: 0.5;
+}
