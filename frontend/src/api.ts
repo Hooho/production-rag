@@ -4971,3 +4971,50 @@ export function deleteEvalConfigTemplate(id: string) {
     method: "DELETE",
   });
 }
+
+export type GraphExperiment = {
+  id: string;
+  status: string;
+  created: string;
+  updated: string;
+  data: {
+    text: string;
+    llm: { provider: string; model: string };
+    prompt_version: number;
+    system_prompt: string;
+    schema: GraphSchema;
+    reference: { version?: { id: string; number: number } };
+    steps: {
+      name: string;
+      status: string;
+      duration_ms?: number;
+      error?: string;
+      input: unknown;
+      output: unknown;
+    }[];
+  };
+};
+export const listGraphExperiments = () =>
+  request<{ items: Omit<GraphExperiment, "data">[] }>("/graph/experiments");
+export const getGraphExperiment = (id: string) =>
+  request<GraphExperiment>(`/graph/experiments/${id}`);
+export const getGraphExperimentOptions = () =>
+  request<{ references: { id: string; title: string; number: number }[] }>(
+    "/graph/experiments/options",
+  );
+export const createGraphExperiment = (payload: {
+  text: string;
+  schema_id: string | null;
+  llm: { provider: string; model: string } | null;
+  prompt_version: number | null;
+  reference_id: string | null;
+}) =>
+  request<GraphExperiment>("/graph/experiments", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+export const retryGraphExperiment = (id: string) =>
+  request<GraphExperiment>(`/graph/experiments/${id}/retry`, {
+    method: "POST",
+  });

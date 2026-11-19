@@ -82,7 +82,7 @@ def resolve_mention(connection, space, mention, cache):
     canonical_key = merge_key(entity_type, mention["canonical"])
     key = canonical_key
     entity = cache["entities"].get(key)
-    if entity is None:
+    if entity is None and not cache.get("restricted"):
         entity = connection.execute(
             select(graph_entities.c.id, graph_entities.c.name).where(
                 graph_entities.c.space == space, graph_entities.c.merge_key == key
@@ -146,7 +146,9 @@ def remove_orphans(connection, space):
 
 # 只计算归属和待写入数据，不修改数据库；写入步骤统一事务提交。
 # extractions：[{"id", "chunk_id", "document_id", "result"}]，只传成功（新抽取或复用）的。
-def prepare_build(connection, space, build_id, extractions, created_by="system"):
+def prepare_build(
+    connection, space, build_id, extractions, created_by="system", reference=None
+):
     aliases = {
         row[0]: row[1]
         for row in connection.execute(
@@ -156,6 +158,12 @@ def prepare_build(connection, space, build_id, extractions, created_by="system")
         ).all()
     }
     cache = {"aliases": aliases, "entities": {}, "new_entities": []}
+    if reference is not None:
+        cache.update(
+            aliases=dict(reference["aliases"]),
+            entities=dict(reference["entities"]),
+            restricted=True,
+        )
     mentions, merges, relations = [], [], []
     methods = {}
     entity_ids = set()

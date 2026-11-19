@@ -906,3 +906,16 @@ eval_config_templates = Table(
     Column("created", String(40), nullable=False),
     Column("updated", String(40), nullable=False),
 )
+
+
+graph_experiments = Table(
+    "graph_experiments",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("owner", String(32), nullable=False),
+    Column("status", String(20), nullable=False),
+    Column("created", String(40), nullable=False),
+    Column("updated", String(40), nullable=False),
+    Column("data", JSON, nullable=False),
+    Index("ix_graph_experiments_created", "created"),
+)

@@ -360,7 +360,9 @@ def get_build(engine, build_id):
 def enqueue_vectors(store, version_ids):
     store.cache.rpush(
         QUEUE,
-        json.dumps({"type": "graph", "stage": "vectors", "version_ids": list(version_ids)}),
+        json.dumps(
+            {"type": "graph", "stage": "vectors", "version_ids": list(version_ids)}
+        ),
     )
 
 
@@ -545,6 +547,11 @@ def mark_failed(store, build, message, step_id="graph_extract", duration_ms=None
 
 # worker 处理一个建图任务：抽一批分片，还有剩下的就重新排队，全部抽完后合并实体、写入图谱。
 def run_job(store, models, payload):
+    if payload.get("stage") == "experiment":
+        from .experiments import run
+
+        run(store, models, payload["experiment_id"])
+        return
     if payload.get("stage") == "vectors":
         vectors.run_job(store, models, payload.get("version_ids"))
         return

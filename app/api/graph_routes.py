@@ -21,6 +21,14 @@ from ..graph.schemas import DEFAULT_SCHEMA_ID, MATCHING_RULES, get_schema, list_
 from ..mysql.tables import documents
 
 
+class ExperimentInput(BaseModel):
+    text: str = Field(min_length=1, max_length=100000)
+    schema_id: str | None = None
+    llm: dict[str, str] | None = None
+    prompt_version: int | None = Field(None, ge=0)
+    reference_id: UUID | None = None
+
+
 class LLMChoice(BaseModel):
     provider: str = Field(min_length=1, max_length=32)
     model: str | None = Field(None, max_length=128)
@@ -109,6 +117,47 @@ EXAMPLE_CHUNK = {
 
 def build_router(current_user, identity, require_admin):
     router = APIRouter()
+
+    from ..graph import experiments
+
+    @router.get("/graph/experiments/options", dependencies=[Depends(require_admin)])
+    def experiment_options(request: Request):
+        return {"references": experiments.references(request.app.state.store.engine)}
+
+    @router.get("/graph/experiments", dependencies=[Depends(require_admin)])
+    def experiment_list(request: Request):
+        return {"items": experiments.listing(request.app.state.store.engine)}
+
+    @router.post("/graph/experiments", dependencies=[Depends(require_admin)])
+    def experiment_create(
+        body: ExperimentInput, request: Request, username=Depends(identity)
+    ):
+        try:
+            payload = body.model_dump(mode="json")
+            return experiments.create(
+                request.app.state.store, request.app.state.models, payload, username
+            )
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from None
+
+    @router.get(
+        "/graph/experiments/{experiment_id}", dependencies=[Depends(require_admin)]
+    )
+    def experiment_get(experiment_id: UUID, request: Request):
+        try:
+            return experiments.get(request.app.state.store.engine, str(experiment_id))
+        except ValueError as error:
+            raise HTTPException(404, str(error)) from None
+
+    @router.post(
+        "/graph/experiments/{experiment_id}/retry",
+        dependencies=[Depends(require_admin)],
+    )
+    def experiment_retry(experiment_id: UUID, request: Request):
+        try:
+            return experiments.retry(request.app.state.store, str(experiment_id))
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from None
 
     def readable(request_state, username, document_id):
         row = request_state.store.readable_document(username, str(document_id))

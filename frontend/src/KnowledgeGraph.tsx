@@ -1,3 +1,4 @@
+import { GraphExperiments } from "./GraphExperiments";
 import Table from "./Table";
 import { graphHops } from "./graphHops";
 import { GraphHistoryControls, useGraphHistory } from "./GraphHistory";
@@ -31,7 +32,7 @@ import { Tag } from "./Tag";
 import { errorText } from "./Toast";
 
 type ShowToast = (kind: "success" | "error", message: string) => void;
-export type KnowledgeGraphTab = "overview" | "tasks";
+export type KnowledgeGraphTab = "overview" | "tasks" | "experiments";
 
 // 全局「知识图谱」（只有管理员能看）：所有文档当前版本的图合在一起看，以及每份文档的建图状态。
 // 第 1 期只能查看和建图；跨文档合并、拆分、别名表等维护功能在第 3 期。
@@ -71,8 +72,16 @@ export default function KnowledgeGraph({
         >
           建图任务
         </button>
+        <button
+          className={tab === "experiments" ? "active" : ""}
+          onClick={() => onNavigate("/graph/experiments")}
+        >
+          提取实验
+        </button>
       </div>
-      {tab === "overview" ? (
+      {tab === "experiments" ? (
+        <GraphExperiments />
+      ) : tab === "overview" ? (
         <Overview onNavigate={onNavigate} />
       ) : (
         <Tasks onNavigate={onNavigate} onToast={onToast} />

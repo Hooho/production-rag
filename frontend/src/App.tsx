@@ -291,6 +291,8 @@ function readRoute(pathname = window.location.pathname): Route {
   if (path === "/inspection") return { page: "inspection" };
   // 知识图谱（只对管理员显示）：/graph 总图，/graph/tasks 建图任务。
   if (path === "/graph") return { page: "graph", tab: "overview" };
+  if (path === "/graph/experiments")
+    return { page: "graph", tab: "experiments" };
   if (path === "/graph/tasks") return { page: "graph", tab: "tasks" };
   if (path === "/overview") return { page: "overview" };
   if (path === "/memory") return { page: "memory" };
