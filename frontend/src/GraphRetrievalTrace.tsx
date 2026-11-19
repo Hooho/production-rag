@@ -1904,7 +1904,10 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
             </li>
             {graph.relation_grouping?.applied && (
               <li>
-                <span>达标 {graph.relation_grouping.eligible} 条</span>
+                <span>
+                  <span className="grt-stage-number">3</span> 达标{" "}
+                  {graph.relation_grouping.eligible} 条
+                </span>
                 <span className="grt-stage-arrow" aria-hidden="true">
                   →
                 </span>
@@ -1919,7 +1922,9 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
                   setDetail({ kind: "relationGrouping", dim: "group" })
                 }
               >
-                <span className="grt-stage-number">3</span>
+                <span className="grt-stage-number">
+                  {graph.relation_grouping?.applied ? 4 : 3}
+                </span>
                 {graph.relation_grouping?.enabled
                   ? graph.relation_grouping.applied
                     ? `分为 ${graph.relation_grouping.groups} 组`
