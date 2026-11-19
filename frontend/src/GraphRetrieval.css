@@ -758,3 +758,17 @@
   border-color: transparent;
   box-shadow: none;
 }
+
+.grt-source-filter {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 4px;
+  border-right: 1px solid var(--diag-line);
+  padding-right: 8px;
+}
+.grt-source-filter button[aria-pressed="true"] {
+  background: #e6f4ff;
+  color: #1677ff;
+  border-color: #1677ff;
+}

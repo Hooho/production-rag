@@ -513,7 +513,7 @@ function CountTable({
           <tr>
             <th>{first}</th>
             <th>匹配到</th>
-            <th>留下</th>
+            {distinctLabel !== "关系类型" && <th>留下</th>}
             <th>{distinctLabel}</th>
             <th />
           </tr>
@@ -527,7 +527,9 @@ function CountTable({
                 <td className="num">
                   {group.total} {unit}
                 </td>
-                <td className="num">{group.kept}</td>
+                {distinctLabel !== "关系类型" && (
+                  <td className="num">{group.kept}</td>
+                )}
                 <td>
                   {group.distinct.size === 0
                     ? "—"
@@ -805,10 +807,12 @@ function DetailFilters<T extends { kept: boolean }>({
   list,
   more,
   placeholder,
+  sourceFilter,
 }: {
   list: ReturnType<typeof useDetailList<T>>;
   more?: number;
   placeholder?: string;
+  sourceFilter?: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
@@ -827,6 +831,7 @@ function DetailFilters<T extends { kept: boolean }>({
   return (
     <div className="grt-filters">
       <div className="grt-filter-top">
+        {sourceFilter}
         <EvalEvidenceFilter
           filter={list.evidenceFilter}
           onChange={list.setEvidenceFilter}
@@ -925,7 +930,7 @@ function DetailFilters<T extends { kept: boolean }>({
 }
 
 const DETAIL_TITLES = {
-  relationGrouping: "⑦ 关系分组",
+  relationGrouping: "⑥ 关系分组",
   relationCandidates: "⑥ 候选合并与关系重排",
   names: "② 找实体 · 匹配到的名字",
   entityFilter: "③ 实体过滤 · 分数与差距",
@@ -948,9 +953,9 @@ function TraceDetail({
 }) {
   const title =
     detail.kind === "chunks"
-      ? `${graph.relation_grouping?.enabled ? "⑧" : graph.pipeline ? "⑦" : "⑥"} 取分片 · ${CHUNK_TABLES[detail.table]}`
+      ? `${graph.pipeline ? "⑦" : "⑥"} 取分片 · ${CHUNK_TABLES[detail.table]}`
       : detail.kind === "chunksAll"
-        ? `${graph.relation_grouping?.enabled ? "⑧" : graph.pipeline ? "⑦" : "⑥"} 取分片 · 合计 ${graph.counts?.chunks ?? 0} 个分片`
+        ? `${graph.pipeline ? "⑦" : "⑥"} 取分片 · 合计 ${graph.counts?.chunks ?? 0} 个分片`
         : detail.kind === "relationCandidates" && detail.stage
           ? `⑥ ${detail.stage === "candidates" ? "全部候选" : detail.stage === "pool" ? "进入重排" : "最终留下"} · 关系与原文`
           : DETAIL_TITLES[detail.kind];
@@ -1357,7 +1362,11 @@ function RelationsDetail({
   trace?: GraphTrace;
   rows: RelationRow[];
   dims: Dim<RelationRow>[];
-  detail: { dim?: string; value?: string };
+  detail: {
+    dim?: string;
+    value?: string;
+    stage?: "candidates" | "pool" | "kept";
+  };
   more?: number;
   first: string;
   firstValue: (row: RelationRow) => string;
@@ -1367,12 +1376,54 @@ function RelationsDetail({
   scoreMode?: "fusion" | "rerank";
   onEntity?: (entityId: string, documentId: string) => void;
 }) {
+  const early = scoreMode !== "rerank";
+  const [source, setSource] = useState("all");
+  const sourceMatch = (row: RelationRow, value: string) => {
+    const origins = row.origins ?? [];
+    const global = origins.includes("global");
+    const entity = origins.some((origin) => origin !== "global");
+    return (
+      value === "all" ||
+      (value === "entity" && entity) ||
+      (value === "global" && global) ||
+      (value === "both" && entity && global)
+    );
+  };
+  const visibleRows = rows
+    .filter((row) => sourceMatch(row, source))
+    .map((row) =>
+      early
+        ? {
+            ...row,
+            kept: true,
+            reason: null,
+            rerank_score: undefined,
+            rerank_rank: undefined,
+            fusion_score: scoreMode
+              ? row.fusion_score
+              : (row.recall_fusion_score ?? row.fusion_score),
+            fusion_rank: scoreMode
+              ? row.fusion_rank
+              : (row.recall_fusion_rank ?? row.fusion_rank),
+            selection: detail.stage === "pool" ? row.selection : undefined,
+            score:
+              (scoreMode ? row.fusion_score : row.recall_fusion_score) ??
+              row.fusion_score ??
+              row.score,
+            sort_score:
+              (scoreMode ? row.fusion_score : row.recall_fusion_score) ??
+              row.fusion_score ??
+              row.score ??
+              0,
+          }
+        : row,
+    );
   const list = useDetailList(
-    rows.map((row) => ({
+    visibleRows.map((row) => ({
       ...row,
       sort_score: row.sort_score ?? row.rerank_score ?? row.score ?? 0,
     })),
-    dims,
+    early ? dims.filter((dim) => dim.key !== "result") : dims,
     detail.dim,
     detail.value,
     (row) => relationHaystack(row, firstValue(row)),
@@ -1381,11 +1432,42 @@ function RelationsDetail({
   return (
     <>
       <DetailFilters
+        sourceFilter={
+          (detail.stage || scoreMode) && (
+            <div
+              className="grt-source-filter"
+              role="group"
+              aria-label="召回来源"
+            >
+              {[
+                ["all", "全部"],
+                ["entity", "实体关系"],
+                ["global", "全局关系"],
+                ["both", "两路都有"],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className="secondary-button button-sm"
+                  aria-pressed={source === value}
+                  onClick={() => {
+                    setSource(value);
+                    list.setPage(1);
+                  }}
+                >
+                  {label} {rows.filter((row) => sourceMatch(row, value)).length}
+                </button>
+              ))}
+            </div>
+          )
+        }
         list={list}
         more={more}
         placeholder="搜实体、关系描述或原文"
       />
       <RelationTable
+        early={early}
+        poolStage={detail.stage === "pool"}
         startIndex={(list.page - 1) * PAGE_SIZE}
         trace={trace}
         rows={list.rows}
@@ -1394,7 +1476,7 @@ function RelationsDetail({
         chunks={chunks}
         extra={extra}
         scoreHint={scoreHint}
-        scoreMode={scoreMode}
+        scoreMode={early ? "fusion" : scoreMode}
         query={list.query}
         onEntity={onEntity}
       />
@@ -1697,7 +1779,12 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
           <CountTable
             first="实体"
             groups={groupCounts(
-              graph.entity_relations,
+              graph.entity_relations.map((row) => ({
+                ...row,
+                kept: true,
+                rerank_score: undefined,
+                score: row.recall_fusion_score ?? row.fusion_score ?? row.score,
+              })),
               (item) => item.entity_name ?? item.entity_id,
               (item) => item.category,
             )}
@@ -1735,7 +1822,12 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
           <CountTable
             first={graph.pipeline ? "完整问题" : "概括关键词"}
             groups={groupCounts(
-              graph.relation_matches,
+              graph.relation_matches.map((row) => ({
+                ...row,
+                kept: true,
+                rerank_score: undefined,
+                score: row.recall_fusion_score ?? row.fusion_score ?? row.score,
+              })),
               (item) => item.keyword,
               (item) => item.category,
             )}
@@ -1769,60 +1861,104 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
             条进入重排，最多保留 {settings.graph_relation_return_limit ?? 30}{" "}
             条。
             {graph.relation_grouping?.enabled
-              ? "达标关系交给下一步分组选择。"
+              ? "重排达标后分组，再分轮选择。"
               : "按重排分数选择。"}
           </p>
           <ol className="grt-stages" aria-label="关系候选筛选步骤">
-            {(
-              [
-                {
-                  stage: "candidates",
-                  label: "候选",
-                  count:
-                    graph.relation_candidate_counts?.total ??
-                    graph.relation_candidates?.length ??
-                    0,
-                },
-                {
-                  stage: "pool",
-                  label: "进入重排",
-                  count:
-                    graph.relation_candidate_counts?.in_pool ??
-                    graph.relation_candidates?.filter((row) => row.in_pool)
-                      .length ??
-                    0,
-                },
-                {
-                  stage: "kept",
-                  label: "留下",
-                  count:
-                    graph.relation_candidate_counts?.kept ??
-                    graph.relation_candidates?.filter((row) => row.kept)
-                      .length ??
-                    0,
-                },
-              ] as const
-            ).map((item, index) => (
-              <li key={item.stage}>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  title={`查看${item.label}的 ${item.count} 条关系及对应分片`}
-                  onClick={() =>
-                    setDetail({ kind: "relationCandidates", stage: item.stage })
-                  }
-                >
-                  <span className="grt-stage-number">{index + 1}</span>
-                  {item.label} {item.count} 条
-                </button>
-                {index < 2 && (
-                  <span className="grt-stage-arrow" aria-hidden="true">
-                    →
-                  </span>
-                )}
+            <li>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() =>
+                  setDetail({ kind: "relationCandidates", stage: "candidates" })
+                }
+              >
+                <span className="grt-stage-number">1</span>候选{" "}
+                {graph.relation_candidate_counts?.total ??
+                  graph.relation_candidates?.length ??
+                  0}{" "}
+                条
+              </button>
+              <span className="grt-stage-arrow" aria-hidden="true">
+                →
+              </span>
+            </li>
+            <li>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() =>
+                  setDetail({ kind: "relationCandidates", stage: "pool" })
+                }
+              >
+                <span className="grt-stage-number">2</span>进入重排{" "}
+                {graph.relation_candidate_counts?.in_pool ??
+                  graph.relation_candidates?.filter((row) => row.in_pool)
+                    .length ??
+                  0}{" "}
+                条
+              </button>
+              <span className="grt-stage-arrow" aria-hidden="true">
+                →
+              </span>
+            </li>
+            {graph.relation_grouping?.applied && (
+              <li>
+                <span>达标 {graph.relation_grouping.eligible} 条</span>
+                <span className="grt-stage-arrow" aria-hidden="true">
+                  →
+                </span>
               </li>
-            ))}
+            )}
+            <li>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={!graph.relation_grouping?.applied}
+                onClick={() =>
+                  setDetail({ kind: "relationGrouping", dim: "group" })
+                }
+              >
+                <span className="grt-stage-number">3</span>
+                {graph.relation_grouping?.enabled
+                  ? graph.relation_grouping.applied
+                    ? `分为 ${graph.relation_grouping.groups} 组`
+                    : "关系分组 · 未应用"
+                  : "关系分组 · 未开启"}
+              </button>
+              <span className="grt-stage-arrow" aria-hidden="true">
+                →
+              </span>
+            </li>
+            <li>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() =>
+                  setDetail({ kind: "relationCandidates", stage: "kept" })
+                }
+              >
+                <span className="grt-stage-number">
+                  {graph.relation_grouping?.applied ? 5 : 4}
+                </span>
+                留下{" "}
+                {graph.relation_candidate_counts?.kept ??
+                  graph.relation_candidates?.filter((row) => row.kept).length ??
+                  0}{" "}
+                条
+                {graph.relation_grouping?.applied
+                  ? ` · 覆盖 ${graph.relation_grouping.selected_groups} 组`
+                  : ""}
+              </button>
+            </li>
           </ol>
+          {graph.relation_grouping?.applied && (
+            <p>每组先选一条，再选第二条，每轮按重排分数排序。</p>
+          )}
+          {graph.relation_grouping?.enabled &&
+            !graph.relation_grouping.applied && (
+              <p>关系重排未成功，本次未应用分组，按融合排名选择。</p>
+            )}
           {graph.relation_rerank_error && (
             <p>
               关系重排未完成，已回退到融合排名：{graph.relation_rerank_error}
@@ -1834,40 +1970,9 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
           </p>
         </section>
       )}
-      {graph.relation_grouping?.enabled && (
-        <section className="grt-step">
-          <h5>
-            ⑦ 关系分组
-            {graph.relation_grouping.applied && (
-              <DetailButton
-                count={graph.relation_grouping.eligible}
-                onClick={() =>
-                  setDetail({ kind: "relationGrouping", dim: "group" })
-                }
-              />
-            )}
-          </h5>
-          {graph.relation_grouping.applied ? (
-            <p>
-              {graph.relation_grouping.eligible} 条达标关系，分为{" "}
-              {graph.relation_grouping.groups} 组； 分轮选入{" "}
-              {graph.relation_grouping.selected} 条，覆盖{" "}
-              {graph.relation_grouping.selected_groups} 组。
-              每组先选一条，再选第二条，每轮按重排分数排序；最多保留{" "}
-              {settings.graph_relation_return_limit ?? 30} 条。
-            </p>
-          ) : (
-            <p>关系重排未成功，本次未应用分组，按融合排名选择。</p>
-          )}
-        </section>
-      )}
       <section className="grt-step">
         <h5>
-          {graph.relation_grouping?.enabled
-            ? "⑧ 取分片"
-            : graph.pipeline
-              ? "⑦ 取分片"
-              : "⑥ 取分片"}
+          {graph.pipeline ? "⑦ 取分片" : "⑥ 取分片"}
           <small>
             {graph.pipeline
               ? "保留关系的出处分片，同一片去重并保留关系 ID；按关系选择顺序排列。其他路也找到的分片参加 RRF 融合；只被图找到的按这个顺序单独进重排（有上限）。"
@@ -1962,11 +2067,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
 
       <section className="grt-step">
         <h5>
-          {graph.relation_grouping?.enabled
-            ? "⑨ 关系图"
-            : graph.pipeline
-              ? "⑧ 关系图"
-              : "⑦ 关系图"}
+          {graph.pipeline ? "⑧ 关系图" : "⑦ 关系图"}
           <small>只画这道题用到的部分</small>
         </h5>
         <GraphRetrievalMap graph={graph} chunks={chunks} />
@@ -2010,6 +2111,8 @@ type RelationRow = GraphRetrievalRelation &
   }>;
 
 function RelationTable({
+  early = false,
+  poolStage = false,
   trace,
   startIndex = 0,
   rows,
@@ -2022,6 +2125,8 @@ function RelationTable({
   query,
   onEntity,
 }: {
+  early?: boolean;
+  poolStage?: boolean;
   trace?: GraphTrace;
   startIndex?: number;
   rows: RelationRow[];
@@ -2063,7 +2168,8 @@ function RelationTable({
                   : "关系相似度"}
             </th>
             <th>出处</th>
-            <th>结果</th>
+            {!early && <th>结果</th>}
+            {early && poolStage && <th>选择依据</th>}
           </tr>
         </thead>
         <tbody>
@@ -2143,16 +2249,19 @@ function RelationTable({
                   chunk={chunks.get(row.chunk_id)}
                 />
               </td>
-              <td>
-                <Result
-                  kept={row.kept}
-                  reason={row.reason}
-                  extra={extra?.(row)}
-                  row={row}
-                  trace={trace}
-                  query={query}
-                />
-              </td>
+              {!early && (
+                <td>
+                  <Result
+                    kept={row.kept}
+                    reason={row.reason}
+                    extra={extra?.(row)}
+                    row={row}
+                    trace={trace}
+                    query={query}
+                  />
+                </td>
+              )}
+              {early && poolStage && <td>{row.selection ?? "未记录"}</td>}
             </tr>
           ))}
         </tbody>

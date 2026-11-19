@@ -751,6 +751,8 @@ def retrieve(
             **relation_view(details[row["relation_id"]], versions, score),
             **row,
             **final,
+            "recall_fusion_score": row.get("fusion_score"),
+            "recall_fusion_rank": row.get("fusion_rank"),
             "score": score,
         }
 

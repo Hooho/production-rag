@@ -149,6 +149,8 @@ export type GraphRetrievalRelation = {
   keyword_rank?: number;
   vector_score?: number;
   keyword_score?: number;
+  recall_fusion_score?: number;
+  recall_fusion_rank?: number;
   fusion_rank?: number;
   fusion_score?: number;
   sort_score?: number;
