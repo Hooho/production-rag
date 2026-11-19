@@ -1,6 +1,24 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import "./DetailDialog.css";
+
+const DialogHeaderContext = createContext<HTMLDivElement | null>(null);
+
+export function DetailDialogHeaderActions({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  const host = useContext(DialogHeaderContext);
+  return host ? createPortal(children, host) : null;
+}
 
 const dialogTriggers = new WeakMap<HTMLDialogElement, HTMLElement>();
 
@@ -23,6 +41,9 @@ export function DetailDialog({
   size?: "default" | "table";
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const [headerActions, setHeaderActions] = useState<HTMLDivElement | null>(
+    null,
+  );
   const [host, setHost] = useState<HTMLDialogElement | null>(null);
   const instance = useRef(Symbol("companion"));
   const closeHandler = useRef(onClose);
@@ -108,7 +129,10 @@ export function DetailDialog({
         !header ||
         !element ||
         event.button !== 0 ||
-        (event.target instanceof Element && event.target.closest("button"))
+        (event.target instanceof Element &&
+          event.target.closest(
+            "button, input, select, textarea, a, [contenteditable]",
+          ))
       )
         return;
       const panel = element.getBoundingClientRect();
@@ -249,6 +273,7 @@ export function DetailDialog({
       )}
       <div className="ag-delivery-dialog-head">
         <strong>{title}</strong>
+        <div className="ag-dialog-header-actions" ref={setHeaderActions} />
         <button
           type="button"
           className="secondary-button"
@@ -258,7 +283,9 @@ export function DetailDialog({
           关闭
         </button>
       </div>
-      {children}
+      <DialogHeaderContext.Provider value={headerActions}>
+        {children}
+      </DialogHeaderContext.Provider>
     </dialog>
   );
   return host ? createPortal(content, host) : content;

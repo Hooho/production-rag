@@ -20,7 +20,7 @@ import type {
   GraphRetrievalTable,
   GraphRetrievalTrace as GraphTrace,
 } from "./api";
-import { DetailDialog } from "./DetailDialog";
+import { DetailDialog, DetailDialogHeaderActions } from "./DetailDialog";
 import { GraphEntityDialog } from "./GraphEntityDialog";
 import { typeColor } from "./GraphView";
 import { ChunkOriginalText } from "./ChunkOriginalText";
@@ -864,25 +864,26 @@ function DetailFilters<T extends { kept: boolean }>({
           </label>
         )}
         {/* 搜索框在右上角：按这一行看得见的文字过滤，和分类、「包括去掉的」取交集。 */}
-        <div className="grt-search">
-          <input
-            type="search"
-            className="input-sm"
-            value={list.query}
-            placeholder={placeholder ?? "搜索"}
-            aria-label={placeholder ?? "搜索"}
-            onChange={(event) => list.setQuery(event.target.value)}
-          />
-          {list.query && (
-            <button
-              type="button"
-              className="link-button button-sm"
-              onClick={() => list.setQuery("")}
-            >
-              清空
-            </button>
-          )}
-        </div>
+        <DetailDialogHeaderActions>
+          <div className="grt-search">
+            <input
+              type="search"
+              value={list.query}
+              placeholder={placeholder ?? "搜索"}
+              aria-label={placeholder ?? "搜索"}
+              onChange={(event) => list.setQuery(event.target.value)}
+            />
+            {list.query && (
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => list.setQuery("")}
+              >
+                清空
+              </button>
+            )}
+          </div>
+        </DetailDialogHeaderActions>
       </div>
       {list.dims.length > 0 && list.options.some(([name]) => name !== "—") && (
         <div className="grt-category-row">
@@ -1384,8 +1385,8 @@ function RelationsDetail({
     const entity = origins.some((origin) => origin !== "global");
     return (
       value === "all" ||
-      (value === "entity" && entity) ||
-      (value === "global" && global) ||
+      (value === "entity" && entity && !global) ||
+      (value === "global" && global && !entity) ||
       (value === "both" && entity && global)
     );
   };
@@ -1441,8 +1442,8 @@ function RelationsDetail({
             >
               {[
                 ["all", "全部"],
-                ["entity", "实体关系"],
-                ["global", "全局关系"],
+                ["entity", "只有实体"],
+                ["global", "只有全局"],
                 ["both", "两路都有"],
               ].map(([value, label]) => (
                 <button
