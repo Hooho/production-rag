@@ -1904,10 +1904,17 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
             </li>
             {graph.relation_grouping?.applied && (
               <li>
-                <span>
-                  <span className="grt-stage-number">3</span> 达标{" "}
-                  {graph.relation_grouping.eligible} 条
-                </span>
+                <div className="grt-stage-with-note">
+                  <span>
+                    <span className="grt-stage-number">3</span> 达标{" "}
+                    {graph.relation_grouping.eligible} 条
+                  </span>
+                  <small className="grt-stage-note">
+                    {settings.graph_relation_rerank_min_score != null
+                      ? `重排分数 ≥ ${settings.graph_relation_rerank_min_score.toFixed(2)}`
+                      : "重排门槛未记录"}
+                  </small>
+                </div>
                 <span className="grt-stage-arrow" aria-hidden="true">
                   →
                 </span>

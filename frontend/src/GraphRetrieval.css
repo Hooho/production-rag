@@ -772,3 +772,18 @@
   color: #1677ff;
   border-color: #1677ff;
 }
+
+.grt-stage-with-note {
+  position: relative;
+}
+.grt-stage-note {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  white-space: nowrap;
+  color: var(--diag-muted, #6f8ba4);
+  font-size: 11px;
+}
+.grt-stages:has(.grt-stage-note) {
+  margin-bottom: 32px;
+}
