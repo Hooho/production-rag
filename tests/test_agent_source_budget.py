@@ -31,6 +31,16 @@ def check():
         truncation_note=lambda *args: "",
     )
     exec(compile(ast.Module(body=[node], type_ignores=[]), "<tool>", "exec"), namespace)
+    truncation = next(
+        n
+        for n in tree.body
+        if isinstance(n, ast.FunctionDef) and n.name == "truncation_note"
+    )
+    exec(
+        compile(ast.Module(body=[truncation], type_ignores=[]), "<tool>", "exec"),
+        namespace,
+    )
+    assert namespace["truncation_note"](1, 1, 1, 0, 2, None) == ""
     ctx = MagicMock()
     ctx.evidence.add.return_value = ("S1", True)
     ctx.search_tool.execute.return_value = dict(

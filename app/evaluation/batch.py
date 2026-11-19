@@ -142,6 +142,9 @@ def rerun_body(run, entries):
 # 批次报告：runs 是这个批次的完整评测记录（按组的顺序）。每组的完整结果原样带上（还没跑完的组是 None），
 # 前端用和单次评测同一套报告组件，一组配置的一个模式一列。
 def report(batch_id, runs):
+    from .results import with_execution_status
+
+    runs = [with_execution_status(run) for run in runs]
     arms = []
     for index, run in enumerate(runs):
         batch = run.get("batch") or {}

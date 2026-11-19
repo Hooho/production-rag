@@ -202,8 +202,12 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
             "换说法再查大多还是拿回同一批资料；已有资料能回答用户的问题就直接回答，"
             "还缺某一部分时，只针对缺的那部分换一个角度查，或者用 keyword 模式查名称、编号、原话。",
         )
-    truncated = truncation_note(
-        requested, top_k, cap, hidden, len(sources), stats.get("excellent_score")
+    truncated = (
+        ""
+        if budget_mode
+        else truncation_note(
+            requested, top_k, cap, hidden, len(sources), stats.get("excellent_score")
+        )
     )
     if truncated and not budget_mode:
         blocks.insert(0, truncated)
@@ -227,7 +231,7 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
 # 还有过了相关度阈值、没给模型的资料时，告诉它没给全、为什么没给全，下一步怎么做由它自己决定。
 # given 比 top_k 多：多出来的是相关性不低于优秀阈值（excellent）的资料，也告诉模型为什么比它要的多。
 def truncation_note(requested, top_k, cap, hidden, given=None, excellent=None):
-    if given is not None and given > top_k:
+    if given is not None and given > top_k and excellent is not None:
         note = f"你要了 {top_k} 条，相关性 {excellent:.2f} 以上的资料有 {given} 条，都给你了。"
         if hidden > 0:
             note += f"另有 {hidden} 条相关性低一些、过了相关度线没有返回；需要时换一个更具体的说法再查。"

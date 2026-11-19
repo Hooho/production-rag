@@ -120,7 +120,40 @@ def target_engine(engine=None):
 
 # 保存（新建或覆盖）一次评测：列表要用的概要单独存一列，读列表时不用把逐题明细一起读出来。
 # 评测进行中会反复保存进度，每次整条覆盖，读到的总是完整的一版。
+def execution_errors(value):
+    errors = []
+    if isinstance(value, dict):
+        if value.get("status") in ("error", "failed"):
+            reason = (
+                value.get("error")
+                or (value.get("trace") or {}).get("error")
+                or value.get("content")
+            )
+            if reason:
+                errors.append(str(reason)[:500])
+        for key, child in value.items():
+            if key not in ("attempts", "config", "effective", "params"):
+                errors.extend(execution_errors(child))
+    elif isinstance(value, list):
+        for child in value:
+            errors.extend(execution_errors(child))
+    return list(dict.fromkeys(errors))
+
+
+def with_execution_status(run):
+    if run and run.get("status") == "completed":
+        errors = execution_errors(run)
+        if errors:
+            return {
+                **run,
+                "status": "failed",
+                "error": "评测执行出错：" + "；".join(errors)[:1500],
+            }
+    return run
+
+
 def save_run(run, engine=None):
+    run = with_execution_status(run)
     check_run_id(run["id"])
     values = {
         "kind": run.get("kind") or "",
@@ -150,7 +183,7 @@ def load_run(run_id, engine=None):
                 settings_table.c.key == NOTE_PREFIX + run_id
             )
         ).scalar()
-    return {**data, **(note or {})} if data is not None else None
+    return with_execution_status({**data, **(note or {})}) if data is not None else None
 
 
 def save_run_note(run_id, note, author, engine=None):
