@@ -256,3 +256,21 @@
 .batch-config-colors .ag-mode-card h4 {
   color: var(--batch-text);
 }
+
+/* 逐题多配置对比独立滚动，宽列和长内容不撑开外层报告。 */
+.ag-batch-scroll {
+  min-width: 0;
+  max-width: 100%;
+}
+.ag-batch-scroll .ag-columns {
+  min-width: 0;
+  max-width: 100%;
+  max-height: 70dvh;
+  overflow: auto;
+  overscroll-behavior: contain;
+  align-items: start;
+}
+.ag-batch-scroll .ag-batch-column {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
