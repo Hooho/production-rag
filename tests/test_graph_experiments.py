@@ -156,3 +156,21 @@ def test_migration_creates_experiment_table_without_existing_graph_tables():
             migration.upgrade()
             migration.upgrade()
         assert inspect(connection).get_table_names() == ["graph_experiments"]
+
+
+def test_queue_dispatch_and_recovery(experiment):
+    import json
+
+    store, models = experiment
+    run = experiments.create(store, models, {"text": "苹果"}, "admin")
+    payload = json.loads(store.cache.rpush.call_args.args[1])
+    assert payload["type"] == "graph"
+    assert payload["stage"] == "experiment"
+    store.cache.lrange = Mock(return_value=[])
+    store.cache.rpush.reset_mock()
+    assert experiments.recover(store) == 1
+    assert json.loads(store.cache.rpush.call_args.args[1])["experiment_id"] == run["id"]
+    store.cache.lrange = Mock(return_value=[store.cache.rpush.call_args.args[1]])
+    store.cache.rpush.reset_mock()
+    experiments.recover(store)
+    store.cache.rpush.assert_not_called()

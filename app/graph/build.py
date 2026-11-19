@@ -1013,6 +1013,9 @@ def note_version(store, document_id, version_id, note):
 
 # worker 启动时把被中断的建图任务重新放回队列（和 recover_jobs 一样以 MySQL 状态为准）。
 def recover(store):
+    from .experiments import recover as recover_experiments
+
+    experiment_count = recover_experiments(store)
     queued = set()
     for raw in store.cache.lrange(QUEUE, 0, -1):
         queued.add(json.loads(raw).get("build_id"))
@@ -1054,7 +1057,7 @@ def recover(store):
             if build and build["status"] in ("completed", "partial"):
                 enqueue(store, build_id, "review")
                 count += 1
-    return count
+    return count + experiment_count
 
 
 # 删除文档时一起删掉它所有版本的图谱数据，再清理没有任何名字的实体。

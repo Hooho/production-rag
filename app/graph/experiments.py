@@ -142,7 +142,9 @@ def enqueue(store, experiment_id):
     try:
         store.cache.rpush(
             build.QUEUE,
-            json.dumps({"stage": "experiment", "experiment_id": experiment_id}),
+            json.dumps(
+                {"type": "graph", "stage": "experiment", "experiment_id": experiment_id}
+            ),
         )
     except Exception:
         with store.engine.begin() as connection:
@@ -286,3 +288,32 @@ def run(store, models, experiment_id):
     except Exception as error:
         steps[-1].update(status="failed", error=str(error)[:2000])
         save(store, experiment_id, data, "failed")
+
+
+def recover(store):
+    queued = {
+        json.loads(raw).get("experiment_id")
+        for raw in store.cache.lrange(build.QUEUE, 0, -1)
+    }
+    with store.engine.begin() as connection:
+        rows = (
+            connection.execute(
+                select(table).where(table.c.status.in_(("queued", "running")))
+            )
+            .mappings()
+            .all()
+        )
+        for row in rows:
+            data = copy.deepcopy(row["data"])
+            data["steps"] = [
+                step for step in data["steps"] if step["status"] == "completed"
+            ]
+            connection.execute(
+                table.update()
+                .where(table.c.id == row["id"])
+                .values(status="queued", data=data, updated=now())
+            )
+    for row in rows:
+        if row["id"] not in queued:
+            enqueue(store, row["id"])
+    return len(rows)
