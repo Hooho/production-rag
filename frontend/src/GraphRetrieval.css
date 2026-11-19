@@ -787,3 +787,17 @@
 .grt-stages:has(.grt-stage-note) {
   margin-bottom: 32px;
 }
+
+/* 候选筛选步骤采用公共紧凑按钮，节点与间距同步收紧。 */
+.grt-stages {
+  gap: 6px;
+}
+.grt-stages li,
+.grt-stages button {
+  gap: 6px;
+}
+.grt-stages .grt-stage-number {
+  width: 16px;
+  height: 16px;
+  font-size: 10px;
+}

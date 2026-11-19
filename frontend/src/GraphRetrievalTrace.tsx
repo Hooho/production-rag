@@ -1869,12 +1869,12 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
             <li>
               <button
                 type="button"
-                className="secondary-button"
+                className="secondary-button button-sm"
                 onClick={() =>
                   setDetail({ kind: "relationCandidates", stage: "candidates" })
                 }
               >
-                <span className="grt-stage-number">1</span>候选{" "}
+                <span className="grt-stage-number">1</span>召回去重{" "}
                 {graph.relation_candidate_counts?.total ??
                   graph.relation_candidates?.length ??
                   0}{" "}
@@ -1887,12 +1887,12 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
             <li>
               <button
                 type="button"
-                className="secondary-button"
+                className="secondary-button button-sm"
                 onClick={() =>
                   setDetail({ kind: "relationCandidates", stage: "pool" })
                 }
               >
-                <span className="grt-stage-number">2</span>进入重排{" "}
+                <span className="grt-stage-number">2</span>保底＋RRF 选入{" "}
                 {graph.relation_candidate_counts?.in_pool ??
                   graph.relation_candidates?.filter((row) => row.in_pool)
                     .length ??
@@ -1907,7 +1907,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
               <li>
                 <div className="grt-stage-with-note">
                   <span>
-                    <span className="grt-stage-number">3</span> 达标{" "}
+                    <span className="grt-stage-number">3</span> 重排过线{" "}
                     {graph.relation_grouping.eligible} 条
                   </span>
                   <small className="grt-stage-note">
@@ -1924,7 +1924,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
             <li>
               <button
                 type="button"
-                className="secondary-button"
+                className="secondary-button button-sm"
                 disabled={!graph.relation_grouping?.applied}
                 onClick={() =>
                   setDetail({ kind: "relationGrouping", dim: "group" })
@@ -1946,7 +1946,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
             <li>
               <button
                 type="button"
-                className="secondary-button"
+                className="secondary-button button-sm"
                 onClick={() =>
                   setDetail({ kind: "relationCandidates", stage: "kept" })
                 }
@@ -1954,7 +1954,7 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
                 <span className="grt-stage-number">
                   {graph.relation_grouping?.applied ? 5 : 4}
                 </span>
-                留下{" "}
+                {graph.relation_grouping?.applied ? "分组选取" : "最终选取"}{" "}
                 {graph.relation_candidate_counts?.kept ??
                   graph.relation_candidates?.filter((row) => row.kept).length ??
                   0}{" "}
