@@ -384,6 +384,7 @@ export function GraphExperiments() {
                     </button>
                   </div>
                   <StepOutput
+                    stage={index}
                     value={step.output}
                     onSource={(entity, evidence) =>
                       setDetail({
@@ -425,97 +426,163 @@ export function GraphExperiments() {
     </div>
   );
 }
+type ExperimentRow = Record<string, unknown>;
+const mergeMethods: Record<string, string> = {
+  exact: "同名匹配",
+  normalized: "规范化匹配",
+  canonical: "标准名匹配",
+  alias: "别名匹配",
+  new: "新实体",
+};
+function ResultTable({
+  title,
+  columns,
+  rows,
+}: {
+  title: string;
+  columns: string[];
+  rows: React.ReactNode[][];
+}) {
+  return (
+    <div className="gx-table">
+      <h4>
+        {title} · {rows.length}
+      </h4>
+      {rows.length ? (
+        <table>
+          <thead>
+            <tr>
+              {columns.map((column) => (
+                <th key={column}>{column}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr key={index}>
+                {row.map((cell, i) => (
+                  <td key={i}>{cell}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p className="graph-note">无</p>
+      )}
+    </div>
+  );
+}
 function StepOutput({
   value,
+  stage,
   onSource,
 }: {
   value: unknown;
+  stage: number;
   onSource: (entity: string, evidence: string) => void;
 }) {
   if (!value || typeof value !== "object") return null;
-  const data = value as Record<string, unknown>;
-  const result = (data.result ?? data) as Record<string, unknown>;
-  const arrays = Object.entries(result).filter(
-    ([, rows]) => Array.isArray(rows) && rows.length,
+  const data = value as ExperimentRow;
+  const result = (data.result ?? data) as ExperimentRow;
+  const rows = (key: string): ExperimentRow[] =>
+    Array.isArray(result[key]) ? (result[key] as ExperimentRow[]) : [];
+  const text = (value: unknown) => (typeof value === "string" ? value : "");
+  const source = (row: ExperimentRow) => (
+    <button
+      className="link-button button-sm"
+      onClick={() => onSource(text(row.name ?? row.source), text(row.evidence))}
+    >
+      原文
+    </button>
   );
-  const labels: Record<string, string> = {
-    entities: "实体",
-    relations: "关系",
-    dropped: "丢弃项",
-    mentions: "实体归属",
-    merges: "合并记录",
-  };
+  const relations = () => (
+    <ResultTable
+      title={stage === 0 ? "抽取关系" : "最终关系"}
+      columns={["起点 → 关系类型 → 终点", "关系描述", "原文引用", "操作"]}
+      rows={rows("relations").map((row) => [
+        `${text(row.source)} → ${text(row.category)} → ${text(row.target)}`,
+        text(row.description) || "—",
+        text(row.evidence) || "—",
+        source(row),
+      ])}
+    />
+  );
+  if (stage === 1) {
+    const mentions = rows("mentions");
+    const merges = rows("merges");
+    const scopes: Record<string, string> = {
+      new: "本次新建",
+      document: "本段实体",
+      global: "已有图谱实体",
+    };
+    return (
+      <ResultTable
+        title="实体合并过程"
+        columns={["原实体", "类型", "合并到", "处理方式", "匹配范围", "操作"]}
+        rows={mentions.map((row) => {
+          const merge = merges.find((item) => item.mention_id === row.id);
+          const detail = (merge?.detail ?? {}) as ExperimentRow;
+          const method = text(row.resolve_method);
+          return [
+            text(row.name),
+            text(row.type),
+            text(row.resolved_name ?? row.canonical ?? row.name),
+            mergeMethods[method] ?? method,
+            scopes[text(detail.scope)] ?? "—",
+            source(row),
+          ];
+        })}
+      />
+    );
+  }
+  const entities = rows("entities");
+  const finalEntities =
+    stage === 2
+      ? [
+          ...new Map(
+            entities.map((row, index) => [row.entity_id ?? index, row]),
+          ).values(),
+        ]
+      : entities;
   return (
     <>
-      {arrays.map(([key, rows]) => (
-        <div className="gx-table" key={key}>
-          <h4>
-            {labels[key] ?? key} · {(rows as unknown[]).length}
-          </h4>
-          <table>
-            <thead>
-              <tr>
-                <th>实体 / 关系</th>
-                <th>类型 / 处理</th>
-                <th>描述与依据</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(rows as Record<string, unknown>[]).map((row, i) => (
-                <tr key={i}>
-                  <td>
-                    {String(row.name ?? row.source ?? row.mention_id ?? "—")}
-                    {row.target ? ` → ${row.target}` : ""}
-                    {(row.resolved_name ?? row.canonical) &&
-                    (row.resolved_name ?? row.canonical) !== row.name ? (
-                      <small>
-                        归属：{String(row.resolved_name ?? row.canonical)}
-                      </small>
-                    ) : null}
-                  </td>
-                  <td>
-                    {String(
-                      row.type ?? row.category ?? row.method ?? row.kind ?? "—",
-                    )}
-                    {row.resolve_method ? (
-                      <small>{String(row.resolve_method)}</small>
-                    ) : null}
-                  </td>
-                  <td>
-                    {String(row.description ?? row.reason ?? "")}
-                    {row.detail ? (
-                      <small>{JSON.stringify(row.detail)}</small>
-                    ) : null}
-                    {row.evidence ? (
-                      <small>「{String(row.evidence)}」</small>
-                    ) : null}
-                    {row.name || row.source || row.evidence ? (
-                      <button
-                        className="link-button button-sm"
-                        onClick={() =>
-                          onSource(
-                            String(row.name ?? row.source ?? ""),
-                            String(row.evidence ?? ""),
-                          )
-                        }
-                      >
-                        原文
-                      </button>
-                    ) : null}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ))}
-      {!arrays.length && <p className="graph-note">暂无实体或关系</p>}
-      {data.raw_output ? (
-        <div>
-          <h4>模型原始回复</h4>
-          <pre className="gx-text">{String(data.raw_output)}</pre>
-        </div>
-      ) : null}
+      <ResultTable
+        title={stage === 0 ? "抽取实体" : "最终实体"}
+        columns={
+          stage === 0
+            ? ["实体名称", "标准名", "实体类型", "描述", "操作"]
+            : ["实体名称", "实体类型", "描述", "操作"]
+        }
+        rows={finalEntities.map((row) =>
+          stage === 0
+            ? [
+                text(row.name),
+                text(row.canonical) || text(row.name),
+                text(row.type),
+                text(row.description) || "—",
+                source(row),
+              ]
+            : [
+                text(row.resolved_name ?? row.canonical ?? row.name),
+                text(row.type),
+                text(row.description) || "—",
+                source(row),
+              ],
+        )}
+      />
+      {relations()}
+      {stage === 0 && rows("dropped").length > 0 && (
+        <ResultTable
+          title="丢弃内容"
+          columns={["内容类型", "原始内容", "丢弃原因"]}
+          rows={rows("dropped").map((row) => [
+            row.kind === "entity" ? "实体" : "关系",
+            JSON.stringify(row.item),
+            text(row.reason),
+          ])}
+        />
+      )}
     </>
   );
 }
