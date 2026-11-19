@@ -379,7 +379,7 @@ type Detail =
         | "relationGrouping";
       dim?: string;
       value?: string;
-      stage?: "candidates" | "pool" | "kept";
+      stage?: "candidates" | "pool" | "eligible" | "kept";
     }
   | { kind: "chunks"; table: "entity" | "relation" }
   | { kind: "chunksAll" };
@@ -958,7 +958,7 @@ function TraceDetail({
       : detail.kind === "chunksAll"
         ? `${graph.pipeline ? "⑦" : "⑥"} 取分片 · 合计 ${graph.counts?.chunks ?? 0} 个分片`
         : detail.kind === "relationCandidates" && detail.stage
-          ? `⑥ ${detail.stage === "candidates" ? "全部候选" : detail.stage === "pool" ? "进入重排" : "最终留下"} · 关系与原文`
+          ? `⑥ ${detail.stage === "candidates" ? "全部候选" : detail.stage === "pool" ? "进入重排" : detail.stage === "eligible" ? "重排过线" : "最终留下"} · 关系与原文`
           : DETAIL_TITLES[detail.kind];
   // 实体详情：点匹配到的名字或关系里的实体打开，内容和图谱里点实体一样。
   const [entity, setEntity] = useState<{
@@ -1025,7 +1025,8 @@ function TraceDetail({
           <RelationsDetail
             trace={graph}
             scoreMode={
-              detail.stage === "kept" && !graph.relation_rerank_error
+              (detail.stage === "kept" || detail.stage === "eligible") &&
+              !graph.relation_rerank_error
                 ? "rerank"
                 : "fusion"
             }
@@ -1033,14 +1034,23 @@ function TraceDetail({
               .filter((row) =>
                 detail.stage === "pool"
                   ? row.in_pool
-                  : detail.stage === "kept"
-                    ? row.kept
-                    : true,
+                  : detail.stage === "eligible"
+                    ? row.in_pool &&
+                      row.rerank_score != null &&
+                      graph.settings?.graph_relation_rerank_min_score != null &&
+                      row.rerank_score >=
+                        graph.settings.graph_relation_rerank_min_score
+                    : detail.stage === "kept"
+                      ? row.kept
+                      : true,
               )
               .map((row) => ({
                 ...row,
+                ...(detail.stage === "eligible"
+                  ? { kept: true, reason: null }
+                  : {}),
                 sort_score:
-                  detail.stage === "kept"
+                  detail.stage === "kept" || detail.stage === "eligible"
                     ? (row.rerank_score ?? row.score ?? 0)
                     : (row.fusion_score ?? 1 / (row.fusion_rank ?? 1)),
               }))}
@@ -1066,7 +1076,7 @@ function TraceDetail({
             scoreHint={
               graph.relation_rerank_error
                 ? `重排失败，按融合排名回退：${graph.relation_rerank_error}`
-                : `${detail.stage === "kept" ? "按重排分数从高到低排列" : "按融合分数从高到低排列"}，每页 6 条；原文按钮查看对应完整分片。${graph.dropped_more?.relation_candidates ? "该历史记录未保存全部候选明细，以下只展示已保存记录。" : ""}`
+                : `${detail.stage === "kept" || detail.stage === "eligible" ? "按重排分数从高到低排列" : "按融合分数从高到低排列"}，每页 6 条；原文按钮查看对应完整分片。${graph.dropped_more?.relation_candidates ? "该历史记录未保存全部候选明细，以下只展示已保存记录。" : ""}`
             }
             onEntity={openEntity}
           />
@@ -1366,7 +1376,7 @@ function RelationsDetail({
   detail: {
     dim?: string;
     value?: string;
-    stage?: "candidates" | "pool" | "kept";
+    stage?: "candidates" | "pool" | "eligible" | "kept";
   };
   more?: number;
   first: string;
@@ -1424,7 +1434,9 @@ function RelationsDetail({
       ...row,
       sort_score: row.sort_score ?? row.rerank_score ?? row.score ?? 0,
     })),
-    early ? dims.filter((dim) => dim.key !== "result") : dims,
+    early || detail.stage === "eligible"
+      ? dims.filter((dim) => dim.key !== "result")
+      : dims,
     detail.dim,
     detail.value,
     (row) => relationHaystack(row, firstValue(row)),
@@ -1467,7 +1479,7 @@ function RelationsDetail({
         placeholder="搜实体、关系描述或原文"
       />
       <RelationTable
-        early={early}
+        early={early || detail.stage === "eligible"}
         poolStage={detail.stage === "pool"}
         startIndex={(list.page - 1) * PAGE_SIZE}
         trace={trace}
@@ -1906,10 +1918,19 @@ export function GraphRetrievalTrace({ graph }: { graph: GraphTrace }) {
             {graph.relation_grouping?.applied && (
               <li>
                 <div className="grt-stage-with-note">
-                  <span>
+                  <button
+                    type="button"
+                    className="secondary-button button-sm"
+                    onClick={() =>
+                      setDetail({
+                        kind: "relationCandidates",
+                        stage: "eligible",
+                      })
+                    }
+                  >
                     <span className="grt-stage-number">3</span> 重排过线{" "}
                     {graph.relation_grouping.eligible} 条
-                  </span>
+                  </button>
                   <small className="grt-stage-note">
                     {settings.graph_relation_rerank_min_score != null
                       ? `重排分数 ≥ ${settings.graph_relation_rerank_min_score.toFixed(2)}`
