@@ -275,7 +275,7 @@ async function main() {
   process.once("SIGINT", stop);
   try {
     run("node", ["--version"]);
-    run("tar", ["--version"]);
+
     if (git("branch", "--show-current") !== "main")
       throw new Error("正式发布和预览都请在 main 独立工作目录中运行");
     const stateDir = git(
@@ -302,7 +302,7 @@ async function main() {
       .filter((s) => !s.complete);
     const mode = await choice("选择操作", [
       "预览打包（不修改项目）",
-      "正式发布到 GitHub",
+      "发布版本号到 GitHub（不测试、不打包）",
       ...(pending.length ? ["继续未完成的发布"] : []),
     ]);
     const publish = mode !== 0;
@@ -474,6 +474,7 @@ async function main() {
       return r.stdout || "";
     };
     const skipChecks =
+      publish ||
       (await choice("打包检查方式", [
         "运行测试和构建后打包",
         "跳过测试和构建，直接打包源码",
@@ -515,9 +516,9 @@ async function main() {
       throw new Error("检查改变了源码，请处理后重新验证");
     const tree = run("git", ["write-tree"], candidate);
     const paths = run("git", ["ls-files"], candidate).split("\n");
-    checkFiles(candidate, paths);
+    if (!publish) checkFiles(candidate, paths);
     console.log(
-      `\n最终清单\n版本：${version}\n标签：v${version}\n基准：main ${base}\n修改：${changed.join(", ")}\n目标：${git("remote", "get-url", "origin")}\n方式：${publish ? "推送并公开 GitHub Release" : "仅生成 preview 包"}\n输出：${temp}\n测试及构建：${skipChecks ? "已跳过（未经测试和构建验证）" : "全部通过，无后端测试跳过"}\n${notes}`,
+      `\n最终清单\n版本：${version}\n标签：v${version}\n基准：main ${base}\n修改：${changed.join(", ")}\n目标：${git("remote", "get-url", "origin")}\n方式：${publish ? "仅更新版本、推送标签并公开 GitHub Release（无附件）" : "仅生成 preview 包"}\n输出：${temp}\n测试及构建：${skipChecks ? "已跳过（未经测试和构建验证）" : "全部通过，无后端测试跳过"}\n${notes}`,
     );
     if (!(await yes("确认执行？"))) return;
     clean();
@@ -533,6 +534,7 @@ async function main() {
     const repo = githubRepository(origin);
     run("gh", ["repo", "view", repo, "--json", "nameWithOwner"]);
     const s = {
+      versionOnly: true,
       origin,
       notesHash: hash(notesFile),
       version,
@@ -614,13 +616,15 @@ async function finish(s, file, candidate) {
   save("tagged");
   const name = `production-rag-${s.version}`;
   const archive = join(s.temp, `${name}.tar.gz`);
-  if (!existsSync(archive)) pack(root, s.tag, s.temp, name, s.version);
-  else if (
-    !existsSync(join(s.temp, "SHA256SUMS")) ||
-    read(join(s.temp, "SHA256SUMS")) !== `${hash(archive)}  ${name}.tar.gz\n`
-  )
-    throw new Error("已有发布包校验失败，拒绝覆盖");
-  save("packed");
+  if (!s.versionOnly) {
+    if (!existsSync(archive)) pack(root, s.tag, s.temp, name, s.version);
+    else if (
+      !existsSync(join(s.temp, "SHA256SUMS")) ||
+      read(join(s.temp, "SHA256SUMS")) !== `${hash(archive)}  ${name}.tar.gz\n`
+    )
+      throw new Error("已有发布包校验失败，拒绝覆盖");
+    save("packed");
+  }
   const remote = git(
     "ls-remote",
     "origin",
@@ -680,7 +684,7 @@ async function finish(s, file, candidate) {
     release.tag_name !== s.tag
   )
     throw new Error("已有 Release 说明与本次内容不一致，拒绝覆盖");
-  for (const p of [archive, join(s.temp, "SHA256SUMS")]) {
+  for (const p of s.versionOnly ? [] : [archive, join(s.temp, "SHA256SUMS")]) {
     const name = p.split("/").at(-1);
     const asset = release.assets.find((a) => a.name === name);
     if (asset) {
@@ -711,7 +715,7 @@ async function finish(s, file, candidate) {
   s.complete = true;
   save("complete");
   console.log(
-    `发布完成：${s.tag}\n提交：${s.commit}\n附件：${s.temp}\nhttps://github.com/${s.repo}/releases/tag/${s.tag}`,
+    `发布完成：${s.tag}\n提交：${s.commit}\n${s.versionOnly ? "仅发布版本号，无打包附件" : `附件：${s.temp}`}\nhttps://github.com/${s.repo}/releases/tag/${s.tag}`,
   );
 }
 if (
