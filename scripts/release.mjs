@@ -309,8 +309,6 @@ async function main() {
     if (publish) {
       git("var", "GIT_AUTHOR_IDENT");
       git("var", "GIT_COMMITTER_IDENT");
-      run("gh", ["--version"]);
-      run("gh", ["auth", "status"]);
     }
     if (mode === 2) {
       const index = await choice(
@@ -326,7 +324,7 @@ async function main() {
     clean();
     const base = git("rev-parse", "HEAD");
     if (publish) {
-      console.log("检查 GitHub 远端 main 与本地提交是否一致…");
+      console.log("检查远端 main 与本地提交是否一致…");
       remoteCheck(base);
     }
     const current = versions(root);
@@ -518,7 +516,7 @@ async function main() {
       .filter(Boolean);
     if (!publish) checkFiles(candidate, paths);
     console.log(
-      `\n最终清单\n版本：${version}\n标签：v${version}\n基准：main ${base}\n修改：${changed.join(", ")}\n目标：${git("remote", "get-url", "origin")}\n方式：${publish ? "仅更新版本、推送标签并公开 GitHub Release（无附件）" : "仅生成 preview 包"}\n输出：${temp}\n测试及构建：${skipChecks ? "已跳过（未经测试和构建验证）" : "全部通过，无后端测试跳过"}\n${notes}`,
+      `\n最终清单\n版本：${version}\n标签：v${version}\n基准：main ${base}\n修改：${changed.join(", ")}\n目标：${git("remote", "get-url", "origin")}\n方式：${publish ? "仅更新版本并推送 main 和 Git 标签" : "仅生成 preview 包"}\n输出：${temp}\n测试及构建：${skipChecks ? "已跳过（未经测试和构建验证）" : "全部通过，无后端测试跳过"}\n${notes}`,
     );
     if (!(await yes("确认执行？"))) return;
     clean();
@@ -532,7 +530,6 @@ async function main() {
     }
     const origin = git("remote", "get-url", "origin");
     const repo = githubRepository(origin);
-    run("gh", ["repo", "view", repo, "--json", "nameWithOwner"]);
     const s = {
       versionOnly: true,
       origin,
@@ -656,66 +653,10 @@ async function finish(s, file, candidate) {
       `refs/tags/${s.tag}:refs/tags/${s.tag}`,
     );
   save("pushed");
-  const gh = (args) => run("gh", args);
-  let release;
-  try {
-    release = JSON.parse(gh(["api", `repos/${s.repo}/releases/tags/${s.tag}`]));
-  } catch (e) {
-    if (!/404/.test(e.message)) throw e;
-  }
-  if (!release) {
-    gh([
-      "release",
-      "create",
-      s.tag,
-      "--repo",
-      s.repo,
-      "--verify-tag",
-      "--draft",
-      "--title",
-      s.tag,
-      "--notes-file",
-      s.notesFile,
-    ]);
-    release = JSON.parse(gh(["api", `repos/${s.repo}/releases/tags/${s.tag}`]));
-  }
-  if (
-    release.body?.trim() !== read(s.notesFile).trim() ||
-    release.tag_name !== s.tag
-  )
-    throw new Error("已有 Release 说明与本次内容不一致，拒绝覆盖");
-  for (const p of s.versionOnly ? [] : [archive, join(s.temp, "SHA256SUMS")]) {
-    const name = p.split("/").at(-1);
-    const asset = release.assets.find((a) => a.name === name);
-    if (asset) {
-      const r = spawnSync(
-        "gh",
-        [
-          "api",
-          "-H",
-          "Accept: application/octet-stream",
-          `repos/${s.repo}/releases/assets/${asset.id}`,
-        ],
-        { maxBuffer: 512 * 1024 * 1024 },
-      );
-      if (
-        r.status !== 0 ||
-        createHash("sha256").update(r.stdout).digest("hex") !== hash(p)
-      )
-        throw new Error(`已有附件校验失败：${name}`);
-    } else {
-      if (!release.draft)
-        throw new Error("已公开 Release 缺少附件，停止自动修改");
-      gh(["release", "upload", s.tag, p, "--repo", s.repo]);
-    }
-  }
-  save("uploaded");
-  if (release.draft)
-    gh(["release", "edit", s.tag, "--repo", s.repo, "--draft=false"]);
   s.complete = true;
   save("complete");
   console.log(
-    `发布完成：${s.tag}\n提交：${s.commit}\n${s.versionOnly ? "仅发布版本号，无打包附件" : `附件：${s.temp}`}\nhttps://github.com/${s.repo}/releases/tag/${s.tag}`,
+    `发布完成：${s.tag}\n提交：${s.commit}\n${s.versionOnly ? "仅发布版本号，无打包附件" : `附件：${s.temp}`}\nhttps://github.com/${s.repo}/tree/${s.tag}`,
   );
 }
 if (
