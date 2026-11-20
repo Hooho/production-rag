@@ -158,6 +158,38 @@ export function pack(cwd, ref, output, name, version) {
     throw new Error("校验和不一致");
   return archive;
 }
+export function preparePython(source, cache, execute = run) {
+  const requirements = ["requirements.txt", "requirements-test.txt"];
+  const fingerprint = createHash("sha256")
+    .update(requirements.map((p) => read(join(source, p))).join("\n"))
+    .digest("hex");
+  const python = join(cache, "bin", "python");
+  const marker = join(cache, "release-requirements.sha256");
+  if (!existsSync(python)) {
+    console.log("初始化发布测试环境（Python 3.11）");
+    execute("python3.11", ["-m", "venv", cache]);
+  }
+  let healthy = false;
+  try {
+    execute(python, ["-c", "import pytest"]);
+    execute(python, ["-m", "pip", "check"]);
+    healthy = true;
+  } catch {}
+  if (!healthy || !existsSync(marker) || read(marker) !== fingerprint) {
+    console.log("安装或更新发布测试依赖（后续发布复用）");
+    execute(
+      python,
+      ["-m", "pip", "install", "-r", join(source, "requirements-test.txt")],
+      source,
+      { timeout: 900_000 },
+    );
+    execute(python, ["-m", "pip", "check"]);
+    execute(python, ["-c", "import pytest"]);
+    writeFileSync(marker, fingerprint);
+  }
+  return python;
+}
+
 async function main() {
   if (compare(process.versions.node, "22.18.0") < 0)
     throw new Error("需要 Node.js 22.18.0 或以上");
@@ -429,7 +461,10 @@ async function main() {
       return r.stdout || "";
     };
     check(process.execPath, ["--test", "scripts/release.test.mjs"]);
-    check(process.env.RELEASE_PYTHON || "python3", [
+    const python =
+      process.env.RELEASE_PYTHON ||
+      preparePython(candidate, join(stateDir, "python-env"));
+    check(python, [
       "-m",
       "pytest",
       "tests",

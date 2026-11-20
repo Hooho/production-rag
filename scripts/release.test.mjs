@@ -235,3 +235,33 @@ for (const failing of [false, true]) {
     },
   );
 }
+
+import { preparePython } from "./release.mjs";
+
+test("release Python environment is initialized once and refreshed when requirements change", () => {
+  const dir = mkdtempSync(join(tmpdir(), "release-python-test-"));
+  const cache = join(dir, "env");
+  writeFileSync(join(dir, "requirements.txt"), "example==1");
+  writeFileSync(join(dir, "requirements-test.txt"), "pytest");
+  const calls = [];
+  const execute = (cmd, args) => {
+    calls.push([cmd, ...args]);
+    if (args.includes("venv")) {
+      mkdirSync(join(cache, "bin"), { recursive: true });
+      writeFileSync(join(cache, "bin", "python"), "");
+    }
+    return "";
+  };
+  preparePython(dir, cache, execute);
+  assert.equal(calls.filter((c) => c.includes("venv")).length, 1);
+  assert.equal(calls.filter((c) => c.includes("install")).length, 1);
+  calls.length = 0;
+  preparePython(dir, cache, execute);
+  assert.equal(
+    calls.filter((c) => c.includes("install") || c.includes("venv")).length,
+    0,
+  );
+  writeFileSync(join(dir, "requirements.txt"), "example==2");
+  preparePython(dir, cache, execute);
+  assert.equal(calls.filter((c) => c.includes("install")).length, 1);
+});
