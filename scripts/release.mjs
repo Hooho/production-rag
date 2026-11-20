@@ -325,11 +325,9 @@ async function main() {
     }
     clean();
     const base = git("rev-parse", "HEAD");
-    try {
+    if (publish) {
+      console.log("检查 GitHub 远端 main 与本地提交是否一致…");
       remoteCheck(base);
-    } catch (e) {
-      if (publish) throw e;
-      console.log(`预览提示：${e.message}`);
     }
     const current = versions(root);
     const tags = git("tag", "--list")
