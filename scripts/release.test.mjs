@@ -117,9 +117,11 @@ test("release repository is derived from origin, not gh environment defaults", (
 import { copyFileSync, chmodSync } from "node:fs";
 import { spawn } from "node:child_process";
 
-for (const failing of [false, true]) {
+for (const scenario of ["success", "failure", "skip"]) {
+  const failing = scenario === "failure";
+  const skip = scenario === "skip";
   test(
-    `preview orchestration with simulated dependencies: ${failing ? "test failure leaves source unchanged" : "successful archive leaves source unchanged"}`,
+    `preview orchestration with simulated dependencies: ${skip ? "skip tests and build produces archive" : failing ? "test failure leaves source unchanged" : "successful archive leaves source unchanged"}`,
     { timeout: 30000 },
     async () => {
       const base = mkdtempSync(join(tmpdir(), "release-flow-test-"));
@@ -211,7 +213,9 @@ for (const failing of [false, true]) {
         const count = [...output.matchAll(/（↑↓ 选择，回车确认）/g)].length;
         while (promptCount < count) {
           child.stdin.write(
-            ["\r", "\r", "\x1b[B\r", "\x1b[B\r"][promptCount++],
+            ["\r", "\r", "\x1b[B\r", skip ? "\x1b[B\r" : "\r", "\x1b[B\r"][
+              promptCount++
+            ],
           );
         }
       });
@@ -223,6 +227,10 @@ for (const failing of [false, true]) {
         child.on("exit", resolve);
       });
       assert.equal(code, failing ? 1 : 0, output);
+      if (skip) {
+        assert.match(output, /已跳过（未经测试和构建验证）/);
+        assert.doesNotMatch(output, /检查：.*(?:pytest|npm|--test)/);
+      }
       assert.equal(git("rev-parse", "HEAD"), head);
       assert.equal(git("status", "--porcelain"), "");
       assert.equal(git("tag", "--list"), "");

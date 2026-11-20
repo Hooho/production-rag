@@ -473,34 +473,43 @@ async function main() {
       if (r.error || r.status !== 0) throw new Error(`检查失败，日志：${log}`);
       return r.stdout || "";
     };
-    check(process.execPath, ["--test", "scripts/release.test.mjs"]);
-    const python =
-      process.env.RELEASE_PYTHON ||
-      preparePython(candidate, join(stateDir, "python-env"));
-    check(python, [
-      "-m",
-      "pytest",
-      "tests",
-      `--junitxml=${join(temp, "pytest.xml")}`,
-    ]);
-    verifyReport(read(join(temp, "pytest.xml")));
-    check("npm", ["ci", "--prefix", "frontend"]);
-    const frontendTests = readdirSync(join(candidate, "frontend/tests"))
-      .filter((n) => /\.test\.(mjs|cjs|js)$/.test(n))
-      .sort();
-    if (!frontendTests.length) throw new Error("未找到前端测试");
-    const tap = check(process.execPath, [
-      "--test",
-      "--test-reporter=tap",
-      ...frontendTests.map((n) => `frontend/tests/${n}`),
-    ]);
-    if (
-      !/# tests [1-9]\d*/.test(tap) ||
-      !/# skipped 0(?:\r?\n|$)/.test(tap) ||
-      !/# todo 0(?:\r?\n|$)/.test(tap)
-    )
-      throw new Error("前端测试被跳过或没有实际运行");
-    check("npm", ["run", "build", "--prefix", "frontend"]);
+    const skipChecks =
+      (await choice("打包检查方式", [
+        "运行测试和构建后打包",
+        "跳过测试和构建，直接打包源码",
+      ])) === 1;
+    if (!skipChecks) {
+      check(process.execPath, ["--test", "scripts/release.test.mjs"]);
+      const python =
+        process.env.RELEASE_PYTHON ||
+        preparePython(candidate, join(stateDir, "python-env"));
+      check(python, [
+        "-m",
+        "pytest",
+        "tests",
+        `--junitxml=${join(temp, "pytest.xml")}`,
+      ]);
+      verifyReport(read(join(temp, "pytest.xml")));
+      check("npm", ["ci", "--prefix", "frontend"]);
+      const frontendTests = readdirSync(join(candidate, "frontend/tests"))
+        .filter((n) => /\.test\.(mjs|cjs|js)$/.test(n))
+        .sort();
+      if (!frontendTests.length) throw new Error("未找到前端测试");
+      const tap = check(process.execPath, [
+        "--test",
+        "--test-reporter=tap",
+        ...frontendTests.map((n) => `frontend/tests/${n}`),
+      ]);
+      if (
+        !/# tests [1-9]\d*/.test(tap) ||
+        !/# skipped 0(?:\r?\n|$)/.test(tap) ||
+        !/# todo 0(?:\r?\n|$)/.test(tap)
+      )
+        throw new Error("前端测试被跳过或没有实际运行");
+      check("npm", ["run", "build", "--prefix", "frontend"]);
+    } else {
+      writeFileSync(log, "用户选择跳过测试和构建，仅执行源码打包检查。\n");
+    }
     run("git", ["add", "--", ...changed], candidate);
     if (run("git", ["diff"], candidate))
       throw new Error("检查改变了源码，请处理后重新验证");
@@ -508,7 +517,7 @@ async function main() {
     const paths = run("git", ["ls-files"], candidate).split("\n");
     checkFiles(candidate, paths);
     console.log(
-      `\n最终清单\n版本：${version}\n标签：v${version}\n基准：main ${base}\n修改：${changed.join(", ")}\n目标：${git("remote", "get-url", "origin")}\n方式：${publish ? "推送并公开 GitHub Release" : "仅生成 preview 包"}\n输出：${temp}\n测试及构建：全部通过，无后端测试跳过\n${notes}`,
+      `\n最终清单\n版本：${version}\n标签：v${version}\n基准：main ${base}\n修改：${changed.join(", ")}\n目标：${git("remote", "get-url", "origin")}\n方式：${publish ? "推送并公开 GitHub Release" : "仅生成 preview 包"}\n输出：${temp}\n测试及构建：${skipChecks ? "已跳过（未经测试和构建验证）" : "全部通过，无后端测试跳过"}\n${notes}`,
     );
     if (!(await yes("确认执行？"))) return;
     clean();
