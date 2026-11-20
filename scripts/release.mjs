@@ -167,7 +167,20 @@ export function preparePython(source, cache, execute = run) {
   const marker = join(cache, "release-requirements.sha256");
   if (!existsSync(python)) {
     console.log("初始化发布测试环境（Python 3.11）");
-    execute("python3.11", ["-m", "venv", cache]);
+    let systemPython = false;
+    try {
+      execute("python3.11", ["--version"]);
+      systemPython = true;
+    } catch {}
+    if (systemPython) {
+      execute("python3.11", ["-m", "venv", cache]);
+    } else {
+      console.log("未找到 Python 3.11，使用 uv 自动下载并创建测试环境");
+      execute("uv", ["venv", "--python", "3.11", "--seed", cache], source, {
+        timeout: 900_000,
+        stdio: "inherit",
+      });
+    }
   }
   let healthy = false;
   try {

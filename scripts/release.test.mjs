@@ -265,3 +265,26 @@ test("release Python environment is initialized once and refreshed when requirem
   preparePython(dir, cache, execute);
   assert.equal(calls.filter((c) => c.includes("install")).length, 1);
 });
+
+test("missing system Python uses uv to provision Python 3.11", () => {
+  const dir = mkdtempSync(join(tmpdir(), "release-python-bootstrap-"));
+  const cache = join(dir, "env");
+  writeFileSync(join(dir, "requirements.txt"), "example==1");
+  writeFileSync(join(dir, "requirements-test.txt"), "pytest");
+  const calls = [];
+  preparePython(dir, cache, (cmd, args) => {
+    calls.push([cmd, ...args]);
+    if (cmd === "python3.11") throw new Error("ENOENT");
+    if (cmd === "uv") {
+      mkdirSync(join(cache, "bin"), { recursive: true });
+      writeFileSync(join(cache, "bin", "python"), "");
+    }
+    return "";
+  });
+  assert.ok(
+    calls.some(
+      (c) => c[0] === "uv" && c.includes("3.11") && c.includes("--seed"),
+    ),
+  );
+  assert.ok(calls.some((c) => c.includes("install")));
+});
