@@ -194,7 +194,7 @@ export function preparePython(source, cache, execute = run) {
       python,
       ["-m", "pip", "install", "-r", join(source, "requirements-test.txt")],
       source,
-      { timeout: 900_000 },
+      { timeout: 900_000, stdio: "inherit" },
     );
     execute(python, ["-m", "pip", "check"]);
     execute(python, ["-c", "import pytest"]);
