@@ -125,9 +125,9 @@ function checkFiles(cwd, paths) {
     if (!paths.includes(p)) throw new Error(`缺少运行文件：${p}`);
 }
 export function pack(cwd, ref, output, name, version) {
-  const paths = run("git", ["ls-tree", "-r", "--name-only", ref], cwd).split(
-    "\n",
-  );
+  const paths = run("git", ["ls-tree", "-r", "--name-only", "-z", ref], cwd)
+    .split("\0")
+    .filter(Boolean);
   checkFiles(cwd, paths);
   const archive = join(output, `${name}.tar.gz`);
   if (existsSync(archive)) throw new Error(`拒绝覆盖 ${archive}`);
@@ -513,7 +513,9 @@ async function main() {
     if (run("git", ["diff"], candidate))
       throw new Error("检查改变了源码，请处理后重新验证");
     const tree = run("git", ["write-tree"], candidate);
-    const paths = run("git", ["ls-files"], candidate).split("\n");
+    const paths = run("git", ["ls-files", "-z"], candidate)
+      .split("\0")
+      .filter(Boolean);
     if (!publish) checkFiles(candidate, paths);
     console.log(
       `\n最终清单\n版本：${version}\n标签：v${version}\n基准：main ${base}\n修改：${changed.join(", ")}\n目标：${git("remote", "get-url", "origin")}\n方式：${publish ? "仅更新版本、推送标签并公开 GitHub Release（无附件）" : "仅生成 preview 包"}\n输出：${temp}\n测试及构建：${skipChecks ? "已跳过（未经测试和构建验证）" : "全部通过，无后端测试跳过"}\n${notes}`,

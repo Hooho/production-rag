@@ -76,6 +76,7 @@ test("archive uses Git tree, verifies contents and never overwrites output", () 
     "CHANGELOG.md",
   ])
     writeFileSync(join(dir, p), "example\n");
+  writeFileSync(join(dir, "中文 文件.md"), "中文内容\n");
   writeFileSync(join(dir, "VERSION"), "1.0.0\n");
   exec("add", ".");
   const tree = exec("write-tree");
