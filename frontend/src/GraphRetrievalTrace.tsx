@@ -1226,7 +1226,7 @@ function NamesDetail({
                       : ""}
                   {filtering && graph.name_score_query
                     ? "完整问题相似度 "
-                    : "关键词向量分数 "}
+                    : "向量相似度 "}
                   {(filtering ? match.score : match.keyword_score) == null ? (
                     "未记录"
                   ) : (
