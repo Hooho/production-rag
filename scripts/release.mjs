@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
+import { emitKeypressEvents } from "node:readline";
 
 export function githubRepository(remote) {
   const match =
@@ -161,20 +162,59 @@ async function main() {
   if (compare(process.versions.node, "22.18.0") < 0)
     throw new Error("需要 Node.js 22.18.0 或以上");
   if (!process.stdin.isTTY) throw new Error("请在交互终端运行 npm run release");
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const ask = async (q) => (await rl.question(`${q} `)).trim();
-  const choice = async (title, labels, fallback = 0) => {
-    for (;;) {
-      console.log(
-        `\n${title}\n${labels.map((s, i) => `${i + 1}. ${s}`).join("\n")}`,
-      );
-      const a = await ask(`[默认 ${fallback + 1}]：`);
-      const n = a ? Number(a) - 1 : fallback;
-      if (Number.isInteger(n) && n >= 0 && n < labels.length) return n;
+  const ask = async (q) => {
+    const rl = createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    try {
+      return (await rl.question(`${q} `)).trim();
+    } finally {
+      rl.close();
     }
   };
-  const yes = async (q) =>
-    (await ask(`${q} 输入 yes 确认（默认取消）：`)) === "yes";
+  const choice = async (title, labels, fallback = 0) => {
+    const input = process.stdin;
+    const output = process.stdout;
+    const wasRaw = input.isRaw;
+    let selected = fallback;
+    console.log(`\n${title}（↑↓ 选择，回车确认）`);
+    const render = () =>
+      output.write(
+        labels
+          .map((label, i) => `\x1b[2K${i === selected ? "❯" : " "} ${label}\n`)
+          .join(""),
+      );
+    emitKeypressEvents(input);
+    input.setRawMode(true);
+    input.resume();
+    output.write("\x1b[?25l");
+    render();
+    try {
+      return await new Promise((resolveChoice, reject) => {
+        const onKey = (_text, key = {}) => {
+          if (key.name === "return" || (key.ctrl && key.name === "c")) {
+            input.removeListener("keypress", onKey);
+            if (key.ctrl) reject(new Error("已取消操作"));
+            else resolveChoice(selected);
+            return;
+          }
+          if (key.name !== "up" && key.name !== "down") return;
+          selected =
+            (selected + (key.name === "up" ? -1 : 1) + labels.length) %
+            labels.length;
+          output.write(`\x1b[${labels.length}A`);
+          render();
+        };
+        input.on("keypress", onKey);
+      });
+    } finally {
+      input.setRawMode(Boolean(wasRaw));
+      input.pause();
+      output.write("\x1b[?25h");
+    }
+  };
+  const yes = async (q) => (await choice(q, ["取消", "确认执行"])) === 1;
   let stateFile;
   let lockFile;
   const stop = () => {
@@ -188,7 +228,6 @@ async function main() {
     process.exit(130);
   };
   process.once("SIGINT", stop);
-  rl.on("SIGINT", stop);
   try {
     run("node", ["--version"]);
     run("tar", ["--version"]);
@@ -454,7 +493,6 @@ async function main() {
     writeFileSync(stateFile, JSON.stringify(s, null, 2));
     await finish(s, stateFile, candidate);
   } finally {
-    rl.close();
     process.removeListener("SIGINT", stop);
     if (lockFile) unlinkSync(lockFile);
   }

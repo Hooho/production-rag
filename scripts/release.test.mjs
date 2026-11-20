@@ -188,7 +188,7 @@ for (const failing of [false, true]) {
       const preload = join(base, "tty.mjs");
       writeFileSync(
         preload,
-        "Object.defineProperty(process.stdin,'isTTY',{value:true});\n",
+        "Object.defineProperty(process.stdin,'isTTY',{value:true}); process.stdin.setRawMode = () => {};\n",
       );
       const childEnv = { ...process.env };
       delete childEnv.NODE_TEST_CONTEXT;
@@ -208,12 +208,11 @@ for (const failing of [false, true]) {
       let promptCount = 0;
       child.stdout.on("data", (data) => {
         output += data;
-        const count = [...output.matchAll(/\[默认 \d+\]：/g)].length;
-        while (promptCount < count)
-          child.stdin.write(["1\n", "1\n", "2\n"][promptCount++]);
-        if (output.includes("确认执行？") && !output.includes("ANSWER_SENT")) {
-          output += "ANSWER_SENT";
-          child.stdin.write("yes\n");
+        const count = [...output.matchAll(/（↑↓ 选择，回车确认）/g)].length;
+        while (promptCount < count) {
+          child.stdin.write(
+            ["\r", "\r", "\x1b[B\r", "\x1b[B\r"][promptCount++],
+          );
         }
       });
       child.stderr.on("data", (data) => {
