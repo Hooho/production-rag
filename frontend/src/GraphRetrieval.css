@@ -200,7 +200,10 @@
 
 /* 名字向量用的那段文字：次要信息，限宽换行，不把整张表撑开。 */
 .grt-vector-text {
-  display: block;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
   max-width: 300px;
   color: var(--diag-muted, #6f8ba4);
   line-height: 1.5;

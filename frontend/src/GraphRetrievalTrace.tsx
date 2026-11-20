@@ -990,7 +990,13 @@ function TraceDetail({
       {/* 抽屉可能挂在别的弹窗里，不在 .diag 下面：自己带上 .diag，表格颜色变量才对。 */}
       <div className="diag grt">
         {(detail.kind === "names" || detail.kind === "entityFilter") && (
-          <NamesDetail graph={graph} detail={detail} onEntity={openEntity} />
+          <NamesDetail
+            key={detail.kind}
+            graph={graph}
+            detail={detail}
+            filtering={detail.kind === "entityFilter"}
+            onEntity={openEntity}
+          />
         )}
         {detail.kind === "entityRelations" && (
           <RelationsDetail
@@ -1112,14 +1118,23 @@ function NamesDetail({
   graph,
   detail,
   onEntity,
+  filtering,
 }: {
   graph: GraphTrace;
+  filtering: boolean;
   detail: { dim?: string; value?: string };
   onEntity?: (entityId: string, documentId: string) => void;
 }) {
   const list = useDetailList(
-    graph.name_matches,
-    NAME_DIMS,
+    filtering
+      ? graph.name_matches
+      : graph.name_matches.map((match) => ({
+          ...match,
+          kept: true,
+          reason: null,
+          score: match.keyword_score ?? 0,
+        })),
+    filtering ? NAME_DIMS : NAME_DIMS.filter((dim) => dim.key !== "result"),
     detail.dim,
     detail.value,
     nameHaystack,
@@ -1143,14 +1158,14 @@ function NamesDetail({
             <th>出自</th>
             <th>匹配方式</th>
             <th>归到实体</th>
-            <th>结果</th>
+            {filtering && <th>结果</th>}
           </tr>
         </thead>
         <tbody>
           {list.rows.map((match, index) => (
             <tr
               key={`${match.keyword}-${match.entity_id}-${match.name}-${index}`}
-              className={match.kept ? "" : "is-dropped"}
+              className={!filtering || match.kept ? "" : "is-dropped"}
             >
               <td>
                 <SearchText text={match.keyword} query={list.query} />
@@ -1209,14 +1224,16 @@ function NamesDetail({
                     : match.match === "contains"
                       ? "字面包含 · "
                       : ""}
-                  {graph.name_score_query ? "完整问题相似度 " : "向量相似度 "}
-                  {match.score == null ? (
+                  {filtering && graph.name_score_query
+                    ? "完整问题相似度 "
+                    : "关键词向量分数 "}
+                  {(filtering ? match.score : match.keyword_score) == null ? (
                     "未记录"
                   ) : (
                     <SearchText text={score(match.score)} query={list.query} />
                   )}
                 </small>
-                {graph.name_score_query && (
+                {filtering && graph.name_score_query && (
                   <small>
                     {match.baseline
                       ? "基准"
@@ -1238,13 +1255,15 @@ function NamesDetail({
                   <small>（{match.entity_type}）</small>
                 ) : null}
               </td>
-              <td>
-                <Result
-                  kept={match.kept}
-                  reason={match.reason}
-                  query={list.query}
-                />
-              </td>
+              {filtering && (
+                <td>
+                  <Result
+                    kept={match.kept}
+                    reason={match.reason}
+                    query={list.query}
+                  />
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
