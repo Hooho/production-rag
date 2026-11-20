@@ -1,0 +1,806 @@
+/* 检索过程里的图检索模块（GraphRetrievalTrace.tsx）。颜色跟着 .diag 的变量走。 */
+.grt {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.grt-step {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 每一步之间已经靠 .grt 的 gap 分开；.ag-delivery-dialog section 给的 margin-top: 20px
+   是给普通排版用的，在这里和 gap 叠加会让间距过大，这里去掉。 */
+.grt > .grt-step {
+  margin-top: 0;
+}
+
+.grt-step h5 {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  margin: 0;
+  color: var(--diag-strong, #173b5b);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.grt-step h5 small {
+  color: var(--diag-muted, #6f8ba4);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.grt-table td small {
+  display: block;
+  color: var(--diag-muted, #6f8ba4);
+}
+
+.grt-table tr.is-dropped td {
+  color: var(--diag-muted, #6f8ba4);
+  background: rgb(241 245 249 / 0.6);
+}
+
+/* 分片文字和「原文」按钮并排：按钮跟在内容末尾，不单独占一行。 */
+.grt-chunk-body {
+  display: block;
+}
+
+.grt-chunk-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.grt-chunk-line .diag-title {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.grt-rel {
+  display: inline;
+  line-height: 1.6;
+}
+
+/* 关系的第一行：起点 → 关系类型 → 终点。描述和原文引用各占一行，在下面。 */
+.grt-rel-line {
+  display: block;
+}
+
+.grt-rel b {
+  color: var(--diag-strong, #173b5b);
+  font-weight: 600;
+}
+
+/* 关系里的实体名字可以点开看详情。 */
+.grt-entity-name {
+  font-weight: 600;
+}
+
+.grt-arrow {
+  margin: 0 4px;
+  color: var(--diag-muted, #6f8ba4);
+}
+
+.grt-table td small.grt-entity-of,
+.grt-entity-of {
+  display: inline;
+  color: var(--diag-muted, #6f8ba4);
+}
+
+/* 图检索各表格共用的紧凑关系类型标签。 */
+.grt-table td small.grt-category,
+.grt-category {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 3px;
+  font-size: 11px;
+  line-height: 16px;
+  vertical-align: middle;
+  white-space: nowrap;
+  border: 1px solid var(--diag-line, #d6e2ee);
+  border-radius: 3px;
+  color: var(--diag-muted, #6f8ba4);
+}
+
+/* 关系类型的徽标：颜色跟着图谱里的关系类型走（同一份 labelHue 色相），两处一眼能对上。 */
+.grt-table td small.grt-category.is-hue,
+.grt-category.is-hue {
+  border-color: var(--tag-border);
+  background: var(--tag-bg);
+  color: var(--tag-text);
+}
+
+/* 关系类型在第一行中间，两边各留一点距离。
+   用两级类名压过外层的「.xxx small { display: block }」（如 .intent-trace small），
+   否则放进这些列表里时关系类型会单独占一整行。 */
+.grt-rel-line .grt-category {
+  display: inline-block;
+  margin: 0;
+}
+
+/* 关系的描述：第二行，跟着第一行往下。 */
+.grt-table td small.grt-rel-desc,
+.grt-rel-desc {
+  display: block;
+  margin-top: 2px;
+  color: var(--diag-text, #536d86);
+}
+
+.grt-table td small.grt-evidence {
+  margin-top: 2px;
+  color: #8a6d1c;
+}
+
+/* 描述和原文引用是次要信息，字号比关系本身小一号；所有关系列表统一用这条。 */
+.grt-rel-desc,
+.grt-evidence {
+  font-size: 12px;
+}
+
+/* 次要信息：字号比正文小一号（抽屉里正文是 14px，下面一条压过它）。 */
+.grt-secondary {
+  font-size: 12px;
+}
+
+/* 抽屉里正文统一 14px（.ag-delivery-dialog.grt-dialog .diag :not(button)），
+   上面几条压不过它，这里用更具体的选择器再压一次：关系列表里的描述、原文引用、
+   次要信息一律 12px，图检索明细、回答步骤、评测弹窗几处一致。 */
+.ag-delivery-dialog.grt-dialog .diag .grt-rel-desc,
+.ag-delivery-dialog.grt-dialog .diag .grt-evidence,
+.ag-delivery-dialog.grt-dialog .diag .grt-secondary {
+  font-size: 12px;
+}
+
+/* 结果：留下绿色、去掉红色，带浅底色。写成 .grt .grt-kept：步骤里的 .result-grid span 会把文字统一成灰色，要压过它。 */
+.grt .grt-kept,
+.grt .grt-dropped {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.grt .grt-kept {
+  background: var(--tone-success-bg, #e8f6ef);
+  color: var(--tone-success-text, #178a63);
+}
+
+.grt .grt-dropped {
+  background: var(--tone-danger-bg, #fdecee);
+  color: var(--tone-danger-text, #c83f4e);
+}
+
+.grt-origin {
+  display: block;
+}
+
+.grt-origin em,
+.grt-v {
+  margin-left: 4px;
+  color: var(--diag-muted, #6f8ba4);
+  font-style: normal;
+}
+
+.grt-summary {
+  margin: 0;
+  color: var(--diag-strong, #173b5b);
+}
+
+.grt-note {
+  margin: 0;
+  padding: 4px 8px;
+  border-left: 3px solid var(--diag-warning, #c28a1b);
+  background: #fdf8ec;
+}
+
+/* 名字向量用的那段文字：次要信息，限宽换行，不把整张表撑开。 */
+.grt-vector-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  max-width: 300px;
+  color: var(--diag-muted, #6f8ba4);
+  line-height: 1.5;
+}
+
+/* 提关键词时按的是哪个问题、来自哪条流程：诊断里记下来的，说明为什么是这些关键词。 */
+.grt-question {
+  margin: 0;
+  color: var(--diag-strong, #173b5b);
+}
+
+.grt-empty,
+.grt-hint {
+  margin: 0;
+  color: var(--diag-muted, #6f8ba4);
+}
+
+/* 「关系相似度」是拿什么和什么比出来的：表格上方的一句说明，和表格之间留点空。 */
+.grt-hint {
+  margin-bottom: 6px;
+  line-height: 1.5;
+}
+
+.grt-status {
+  margin: 0;
+  color: var(--diag-muted, #6f8ba4);
+}
+
+.grt-status.is-failed {
+  color: var(--diag-critical, #c83f4e);
+}
+
+.grt-pre {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--diag-line, #d6e2ee);
+  background: #f8fafc;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 提示词在弹窗里：整块由弹窗滚动，段落不再单独限高，避免两层滚动条。 */
+.ag-delivery-dialog .grt-pre {
+  max-height: none;
+}
+
+/* 每一步的数量表：只列数量和类型，明细点「详情」在抽屉里看。 */
+.grt-step h5 .grt-detail-button {
+  margin-left: auto;
+}
+
+.grt-count-table td.num small {
+  display: block;
+}
+
+.grt-count-action {
+  width: 1%;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* 明细抽屉：分类方式 → 分类值 → 是否带上去掉的；下面表格分页。 */
+
+.grt-filters {
+  display: grid;
+  gap: 8px;
+}
+
+/* 第一行：左边的分类方式，右上角的搜索框。 */
+.grt-filter-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.grt-filter-top > .grt-chips {
+  min-width: 0;
+}
+
+.grt-search {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  /* 没有分类标签时（取分片）搜索框也靠右。 */
+  margin-left: auto;
+}
+
+.grt-search input {
+  width: 200px;
+}
+
+/* 搜索命中的文字：和原文引用同一个黄底，一眼能看出是搜到的。 */
+.grt-hit {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: #fff1a8;
+  color: inherit;
+}
+
+.grt-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.grt-chip:not(.secondary-button) {
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.grt-chip {
+  border: 1px solid var(--diag-line, #d6e2ee);
+  background: #fff;
+  color: var(--diag-text, #536d86);
+  cursor: pointer;
+}
+
+.grt-chip em {
+  margin-left: 2px;
+  color: var(--diag-muted, #6f8ba4);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.grt-chip:hover {
+  border-color: #1d6ff2;
+  color: #1d6ff2;
+}
+
+.grt-chip.is-active {
+  border-color: #1d6ff2;
+  background: #e8f1ff;
+  color: #1d6ff2;
+}
+
+.grt-chip.is-dim {
+  border-radius: 4px;
+}
+
+/* 只是表示当前状态、不能点的标签（比如「放进上下文 30」）。 */
+.grt-chip.is-static {
+  cursor: default;
+}
+
+/* 关系类型的筛选钮：色相和图谱里的关系类型一致（同一份 labelHue），两处一眼能对上。
+   选中时用同一个色相加深，不用蓝色盖掉分类色。 */
+.grt-chip.is-hue {
+  border-color: var(--tag-border);
+  background: var(--tag-bg);
+  color: var(--tag-text);
+}
+
+.grt-chip.is-hue em {
+  color: inherit;
+}
+
+.grt-chip.is-hue:hover {
+  border-color: hsl(var(--tag-h) 55% 45%);
+  color: var(--tag-text);
+}
+
+.grt-chip.is-hue.is-active {
+  border-color: hsl(var(--tag-h) 55% 45%);
+  background: hsl(var(--tag-h) 80% 90%);
+  color: var(--tag-text);
+  box-shadow: inset 0 0 0 1px hsl(var(--tag-h) 55% 45%);
+}
+
+.grt-dropped-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--diag-muted, #6f8ba4);
+  font-size: 12px;
+}
+
+.grt-pager {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--diag-muted, #6f8ba4);
+  font-size: 12px;
+}
+
+.grt-linked {
+  margin: 0;
+  padding-left: 14px;
+}
+
+.grt-map {
+  display: grid;
+  gap: 6px;
+}
+
+/* 关系图顶部的实体列表：点一个实体，图里只看和它相连的关系。 */
+.grt-map-entities {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.grt-map-entities-label {
+  color: var(--diag-muted, #6f8ba4);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* 实体多的时候列表会顶掉整张图，限高三行，多的在里面滚。 */
+.grt-map-entities .grt-chips {
+  max-height: 92px;
+  overflow-y: auto;
+  align-content: flex-start;
+}
+
+.grt-entity-chip {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+/* 圆点用实体类型的颜色，和图里节点的描边色一致。 */
+.grt-entity-dot {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* 关系类型筛选：和实体列表并排放在同一行。 */
+.grt-map-filter {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--diag-muted, #6f8ba4);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.grt-map-filter select {
+  width: auto;
+  min-width: 120px;
+  max-width: 190px;
+}
+
+/* 列表里都是 ② 找到的实体，在图里是粗蓝边框，这里用一圈蓝环对上。 */
+.grt-entity-chip .grt-entity-dot {
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 3.5px #1d4ed8;
+}
+
+.grt-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  color: var(--diag-muted, #6f8ba4);
+  font-size: 12px;
+}
+
+.grt-map-legend span {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.grt-map-legend i {
+  display: inline-block;
+  width: 18px;
+  height: 3px;
+}
+
+.grt-map-legend i.grt-node-found {
+  width: 14px;
+  height: 10px;
+  border: 3px solid #1d4ed8;
+  border-radius: 3px;
+  background: #eef4ff;
+}
+
+.grt-map-legend i.grt-edge-dropped {
+  height: 0;
+  border-top: 2px dashed #cbd5e1;
+}
+
+.grt-map-canvas {
+  height: 340px;
+  border: 1px solid var(--diag-line, #d6e2ee);
+  background: #fbfdff;
+}
+
+.grt-map-detail {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--diag-line, #d6e2ee);
+}
+
+.grt-map-detail blockquote,
+.grt-original-missing blockquote {
+  margin: 0;
+  padding: 4px 8px;
+  border-left: 3px solid #f2c94c;
+  background: #fffbea;
+}
+
+.grt-original-missing p {
+  margin: 0 0 6px;
+}
+
+/* ② 留下的实体直接列出来（每个关键词最多几个），字面命中的标「字面」。 */
+.grt-entity-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.grt-entity-list small.grt-literal {
+  display: inline;
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 1px solid #b7d0f7;
+  border-radius: 3px;
+  color: #1d6ff2;
+  font-size: 12px;
+}
+
+/* 明细抽屉里的文字统一 14px（步骤里是 12px，抽屉空间大，放大好读）。按钮按规范，不改。 */
+.ag-delivery-dialog.grt-dialog .diag :not(button) {
+  font-size: 14px;
+}
+
+.grt-stages {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+  margin: 14px 0;
+}
+.grt-stages li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.grt-stages button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.grt-stage-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #eaf1ff;
+  color: #2563eb;
+}
+.grt-stage-arrow {
+  color: #8494ab;
+}
+
+/* 检索与重排步骤：同一列内用固定颜色区分各阶段。 */
+.grt-score-vector {
+  color: #2563a6;
+}
+.grt-score-keyword {
+  color: #087e8b;
+}
+.grt-score-fusion {
+  color: #8055ad;
+}
+.grt-score-rerank {
+  color: #a56516;
+}
+
+.grt-result {
+  min-width: 180px;
+}
+.grt .grt-table td .grt-result small.grt-result-detail {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--diag-muted, #6f8ba4);
+  white-space: normal;
+}
+.grt .grt-pool-dropped {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: #fff3df;
+  color: #996014;
+}
+
+.grt .grt-table td small.grt-score-ranks {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--diag-muted, #6f8ba4);
+  white-space: nowrap;
+}
+
+.grt-result-steps {
+  display: grid;
+  gap: 5px;
+}
+.grt .grt-step-muted {
+  color: var(--diag-muted, #6f8ba4);
+  font-size: 11px;
+}
+.grt-table td small.grt-result-source {
+  display: inline-block;
+  justify-self: start;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #eef3f8;
+  color: var(--diag-muted, #6f8ba4);
+  font-size: 11px;
+}
+.grt-groups-table > tbody > tr > td {
+  vertical-align: top;
+}
+
+.grt-groups-table > thead > tr > th:first-child {
+  width: 18%;
+}
+
+.grt-groups-table > thead > tr > th:nth-child(2) {
+  width: 8%;
+}
+
+.grt-group-inner td {
+  vertical-align: top;
+}
+
+/* 图检索表格明细：满高浏览，列标题保持单行，宽表在内容区滚动。 */
+.ag-delivery-dialog.graph-retrieval-dialog:is([open], :popover-open) {
+  height: calc(100dvh - 32px);
+  max-height: calc(100dvh - 32px);
+}
+
+.ag-delivery-dialog.graph-retrieval-dialog .diag :not(button) {
+  font-size: 12px;
+}
+
+.ag-delivery-dialog.graph-retrieval-dialog .diag .diag-table th {
+  font-size: 11px;
+  white-space: nowrap;
+  padding: 5px 8px;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.ag-delivery-dialog.graph-retrieval-dialog .diag-table {
+  table-layout: auto;
+  min-width: 100%;
+}
+
+.ag-delivery-dialog.graph-retrieval-dialog .diag-table-wrap {
+  overflow: auto;
+}
+
+.ag-delivery-dialog.graph-retrieval-dialog
+  .diag
+  :is(.tag, .tag *, .grt-kept, .grt-dropped) {
+  font-size: 10px;
+}
+
+.ag-delivery-dialog.graph-retrieval-dialog .diag .tag {
+  padding: 0 5px;
+  border-radius: 4px;
+}
+
+/* 计分证据标注有独立字号规则，图检索弹窗内仍采用紧凑标签。 */
+.ag-delivery-dialog.graph-retrieval-dialog .diag .eval-evidence-annotation .tag,
+.ag-delivery-dialog.graph-retrieval-dialog
+  .diag
+  .eval-evidence-annotation
+  .tag
+  * {
+  font-size: 10px;
+}
+
+/* 图检索筛选工具栏：条件同排、搜索居右，分类值另起一行。 */
+.graph-retrieval-dialog .grt-filters {
+  gap: 6px;
+  margin: 0 0 8px;
+}
+.graph-retrieval-dialog .grt-filter-top {
+  justify-content: flex-start;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.graph-retrieval-dialog .grt-filter-top > * {
+  flex-shrink: 0;
+}
+.graph-retrieval-dialog .grt-filter-top .grt-chips,
+.graph-retrieval-dialog .grt-filter-top .eval-evidence-filter {
+  flex-wrap: nowrap;
+  gap: 4px;
+  margin: 0;
+}
+.graph-retrieval-dialog .grt-filter-group,
+.graph-retrieval-dialog .grt-dropped-toggle {
+  border-left: 1px solid var(--diag-line);
+  padding-left: 8px;
+}
+.graph-retrieval-dialog .grt-category-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.graph-retrieval-dialog .grt-category-values {
+  flex: 1;
+  min-width: 0;
+  gap: 4px;
+  max-height: 56px;
+  overflow: hidden;
+}
+.graph-retrieval-dialog .grt-category-values.is-expanded {
+  max-height: none;
+}
+.graph-retrieval-dialog .grt-category-row > button {
+  flex-shrink: 0;
+}
+.ag-delivery-dialog.graph-retrieval-dialog .diag .grt-hint {
+  margin: 4px 0 8px;
+  font-size: 11px;
+}
+.graph-retrieval-dialog .ag-delivery-dialog-head {
+  margin-bottom: 8px;
+}
+
+/* 分类值只靠底色和文字表示选择，保留透明边框避免切换时跳动。 */
+.graph-retrieval-dialog .grt-category-values .grt-chip,
+.graph-retrieval-dialog .grt-category-values .grt-chip:hover,
+.graph-retrieval-dialog .grt-category-values .grt-chip.is-active {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.grt-source-filter {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 4px;
+  border-right: 1px solid var(--diag-line);
+  padding-right: 8px;
+}
+.grt-source-filter button[aria-pressed="true"] {
+  background: #e6f4ff;
+  color: #1677ff;
+  border-color: #1677ff;
+}
+
+.grt-stage-with-note {
+  position: relative;
+}
+.grt-stage-note {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  white-space: nowrap;
+  color: var(--diag-muted, #6f8ba4);
+  font-size: 11px;
+}
+.grt-stages:has(.grt-stage-note) {
+  margin-bottom: 32px;
+}
+
+/* 候选筛选步骤采用公共紧凑按钮，节点与间距同步收紧。 */
+.grt-stages {
+  gap: 6px;
+}
+.grt-stages li,
+.grt-stages button {
+  gap: 6px;
+}
+.grt-stages .grt-stage-number {
+  width: 16px;
+  height: 16px;
+  font-size: 10px;
+}

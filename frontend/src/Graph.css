@@ -1,0 +1,1608 @@
+/* 知识图谱：图（GraphView）、文档「实体关系」页签、全局「知识图谱」页面、建图对话框、分片卡片里的抽取结果。 */
+.graph-view {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.graph-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--t-475569);
+}
+.graph-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.graph-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid;
+  display: inline-block;
+}
+.graph-zoom {
+  display: flex;
+  gap: 4px;
+}
+.graph-zoom button {
+  border: 1px solid #d5dce6;
+  background: #fff;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.graph-zoom .graph-center-button {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+}
+.graph-zoom .graph-center-button:hover {
+  border-color: #1d4ed8;
+  background: #1d4ed8;
+}
+.graph-zoom button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+.graph-canvas-wrap {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 10px;
+}
+.graph-selection-halo {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  visibility: hidden;
+  pointer-events: none;
+  border-radius: 50%;
+}
+.graph-selection-halo i {
+  position: absolute;
+  inset: -5px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  box-shadow:
+    0 0 12px currentColor,
+    inset 0 0 8px currentColor;
+  opacity: 0;
+  animation: graph-selection-wave 2.4s cubic-bezier(0.25, 0.46, 0.45, 0.94)
+    infinite;
+}
+.graph-selection-halo i:nth-child(2) {
+  animation-delay: -1.2s;
+}
+@keyframes graph-selection-wave {
+  0% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(1.85);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .graph-selection-halo i {
+    animation: none;
+    transform: scale(1.1);
+    opacity: 0.25;
+  }
+  .graph-selection-halo i:nth-child(2) {
+    display: none;
+  }
+}
+.graph-interaction-hint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin: 6px 0 10px;
+  color: #7b8798;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.graph-interaction-hint strong {
+  color: inherit;
+  font-weight: 400;
+}
+.graph-canvas {
+  width: 100%;
+  height: 780px;
+  border: 1px solid #e3e8ef;
+  border-radius: 10px;
+  background: #fbfcfe;
+}
+.graph-hint,
+.graph-note {
+  color: #7a8799;
+  font-size: 12px;
+}
+.graph-empty {
+  padding: 48px 16px;
+  text-align: center;
+  color: #7a8799;
+  border: 1px dashed #d5dce6;
+  border-radius: 10px;
+}
+
+/* 文档「实体关系」页签 */
+.graph-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px 0 24px;
+}
+.graph-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px 24px;
+  padding: 18px 20px;
+  border: 1px solid #e3e8ef;
+  border-radius: 10px;
+  background: #fff;
+}
+.graph-summary-main {
+  flex: 1 1 480px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.graph-summary-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  line-height: 1.7;
+}
+.graph-summary-heading .graph-note {
+  overflow-wrap: anywhere;
+}
+.graph-summary-main p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--t-475569);
+}
+.graph-summary-stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 13px;
+}
+.graph-summary-stats > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 24px;
+  line-height: 1.5;
+}
+.graph-summary-stats strong {
+  font-size: 16px;
+  line-height: 1;
+}
+.graph-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.graph-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: #e8edf3;
+  overflow: hidden;
+  width: min(100%, 480px);
+}
+.graph-progress span {
+  display: block;
+  height: 100%;
+  background: var(--t-1d4ed8);
+}
+.graph-explorer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+}
+.graph-explorer > .graph-filters,
+.graph-explorer > .graph-note {
+  flex-basis: 100%;
+  min-width: 0;
+}
+.graph-explorer-row {
+  box-sizing: border-box;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 5px 9px;
+  border: 1px solid #dce5ef;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12px;
+}
+.graph-explorer-row .graph-note {
+  color: #475569;
+  margin-right: auto;
+  overflow-wrap: anywhere;
+}
+.graph-explorer .link-button,
+.graph-explorer .secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 2px 7px;
+  border: 1px solid #cbd9eb;
+  border-radius: 6px;
+  background: #fff;
+  color: #426386;
+  font-size: 12px;
+  line-height: 1.5;
+  text-decoration: none;
+  cursor: pointer;
+}
+.graph-explorer button:hover:not(:disabled) {
+  background: #edf3ff;
+  border-color: #93b4f4;
+  color: #1d4ed8;
+}
+.graph-explorer button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.graph-explorer button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+.graph-explorer .graph-filters input {
+  width: 280px;
+  max-width: 100%;
+  min-width: 0;
+}
+.graph-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  padding: 0;
+}
+.graph-filters .chunk-source-filter {
+  margin-left: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.graph-panel .graph-view + .graph-note,
+.graph-panel .graph-empty + .graph-note {
+  margin: 12px 0 0;
+  line-height: 1.7;
+}
+.graph-filters select,
+.graph-filters input {
+  color: var(--t-475569);
+}
+.graph-filters input {
+  min-width: 180px;
+}
+.graph-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 14px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .graph-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.graph-side {
+  border: 1px solid #e3e8ef;
+  border-radius: 10px;
+  background: #fff;
+  padding: 12px 14px;
+  max-height: 600px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  font-size: 13px;
+}
+.graph-side h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+.graph-side h4 {
+  margin: 14px 0 6px;
+  font-size: 13px;
+  color: var(--t-475569);
+}
+.graph-side ul {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.graph-relations-header {
+  position: sticky;
+  top: -12px;
+  z-index: 2;
+  margin: 8px -14px 4px;
+  padding: 8px 14px;
+  border-bottom: 1px solid #e3e8ef;
+  background: #fff;
+}
+.graph-side .graph-relations-header h4 {
+  margin: 0 0 8px;
+}
+.graph-relation-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.graph-relation-categories button {
+  border: 1px solid #d5dce6;
+  border-radius: 999px;
+  background: #fff;
+  color: #475569;
+  padding: 0 7px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.6;
+  cursor: pointer;
+  min-height: 0;
+  white-space: nowrap;
+}
+.graph-relation-categories button[aria-pressed="true"] {
+  background: #e2e8f0;
+  border-color: #64748b;
+  color: #334155;
+}
+.graph-relation-categories button.is-hue {
+  background: var(--tag-bg);
+  border-color: var(--tag-border);
+  color: var(--tag-text);
+}
+.graph-relation-categories button.is-hue[aria-pressed="true"] {
+  background: hsl(var(--tag-h) 80% 90%);
+  border-color: hsl(var(--tag-h) 55% 45%);
+  box-shadow: inset 0 0 0 1px hsl(var(--tag-h) 55% 45%);
+}
+.graph-relation-categories button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+.graph-side li small {
+  display: block;
+  color: #7a8799;
+}
+.graph-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  background: #fff;
+}
+.graph-table th,
+.graph-table td {
+  text-align: left;
+  padding: 7px 8px;
+  border-bottom: 1px solid #eef1f5;
+  vertical-align: top;
+}
+.graph-table th {
+  color: #7a8799;
+  font-weight: 600;
+  font-size: 12px;
+  background: #f7f9fc;
+}
+.graph-table td small {
+  display: block;
+  color: #7a8799;
+}
+.graph-table tr.is-clickable {
+  cursor: pointer;
+}
+.graph-table tr.is-clickable:hover td {
+  background: #f7f9fc;
+}
+.graph-pager {
+  margin-top: 16px;
+  padding-bottom: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #7a8799;
+}
+.graph-history {
+  font-size: 12px;
+}
+.graph-history summary {
+  cursor: pointer;
+  color: var(--t-475569);
+}
+
+/* 建图对话框：每项一行，左边名字、右边控件；清单内容和「如何匹配」在抽屉弹窗里看 */
+.upload-modal.graph-dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 22px 24px;
+}
+.graph-dialog .upload-modal-heading {
+  margin-bottom: 14px;
+}
+.graph-dialog .upload-modal-heading h2 {
+  font-size: 18px;
+}
+.graph-dialog .upload-modal-heading p {
+  margin: 4px 0 0;
+}
+.graph-dialog .upload-modal-actions {
+  margin-top: 16px;
+}
+.graph-options {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px 12px;
+  font-size: 13px;
+}
+.graph-options-label {
+  color: var(--t-475569);
+  font-weight: 600;
+}
+.graph-options-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.graph-options-control select {
+  flex: 1;
+  min-width: 0;
+}
+.graph-options-links {
+  display: flex;
+  gap: 10px;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.graph-options-full {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.graph-dialog-estimate {
+  margin-top: 12px;
+}
+.graph-dialog-estimate p {
+  margin: 0;
+}
+.graph-drawer-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.graph-drawer-title small {
+  margin-left: 8px;
+  font-weight: 400;
+  color: #7a8799;
+  font-size: 12px;
+}
+.graph-drawer-list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.graph-prompt {
+  white-space: pre-wrap;
+  font-size: 12px;
+  background: #f7f9fc;
+  border: 1px solid #eef1f5;
+  border-radius: 8px;
+  padding: 8px 10px;
+  max-height: 260px;
+  overflow: auto;
+  margin: 4px 0 0;
+}
+.graph-estimate {
+  font-size: 12px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: #f1f6ff;
+  color: var(--t-1e4f8f);
+}
+.graph-estimate.is-warn {
+  background: #fff7e8;
+  color: #8a5a00;
+}
+
+/* 分片卡片里的抽取结果 */
+.chunk-graph-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.chunk-graph-list li small {
+  color: #7a8799;
+  margin-left: 6px;
+}
+.chunk-graph-arrow {
+  color: #94a3b8;
+  margin: 0 4px;
+}
+.chunk-graph-mark {
+  background: #fff2b8;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+.chunk-graph-mark.is-clickable {
+  cursor: pointer;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+}
+.chunk-graph-mark.is-clickable:hover {
+  background: #ffe58a;
+}
+.chunk-graph-mark.is-clickable:focus-visible {
+  outline: 2px solid #1d4ed8;
+  outline-offset: 2px;
+}
+.chunk-graph-raw {
+  margin-top: 6px;
+  font-size: 12px;
+}
+.chunk-graph-raw summary {
+  cursor: pointer;
+  color: var(--t-475569);
+}
+
+/* 全局「知识图谱」页面 */
+.knowledge-graph-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 24px;
+}
+.knowledge-graph-page .topbar h1 {
+  margin: 0;
+}
+.graph-tasks-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.graph-side-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.graph-side-heading h3 {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.graph-side-heading > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.graph-side .link-button {
+  margin-right: 6px;
+}
+
+/* 上传弹窗里的图检索选项 */
+.upload-graph-field {
+  margin: 18px 0 0;
+  padding: 10px 12px;
+  border: 1px solid #e3e8ef;
+  border-radius: 8px;
+  background: #fafbfd;
+  font-size: 13px;
+}
+.upload-graph-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.upload-graph-toggle input {
+  margin: 0;
+  width: auto;
+}
+.upload-graph-field .graph-options {
+  margin-top: 10px;
+}
+.graph-table .link-button,
+.graph-side small .link-button {
+  margin-right: 6px;
+}
+/* 表格里的实体名是按钮，按钮默认居中，换行后会居中显示；表格内容统一左对齐。 */
+.graph-table .link-button {
+  text-align: left;
+}
+.ag-delivery-dialog .graph-prompt {
+  max-height: none;
+}
+
+.graph-evidence {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 8px;
+  background: #f7f9fc;
+  border-radius: 6px;
+  max-height: 260px;
+  overflow: auto;
+}
+.graph-evidence mark {
+  background: #fff2b8;
+  color: inherit;
+}
+
+@media (max-width: 640px) {
+  .graph-panel {
+    padding: 16px 0;
+    gap: 16px;
+  }
+  .graph-summary {
+    padding: 16px;
+  }
+  .graph-summary-main {
+    flex-basis: 100%;
+  }
+  .graph-filters .chunk-source-filter {
+    flex-basis: 100%;
+  }
+}
+
+.graph-chunk-dialog {
+  width: min(800px, calc(100vw - 32px));
+}
+.graph-chunk-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 18px 0;
+}
+.graph-chunk-filters button {
+  padding: 6px 12px;
+  border: 1px solid #d5dce6;
+  border-radius: 16px;
+  background: #fff;
+  color: var(--t-475569);
+  cursor: pointer;
+}
+.graph-chunk-filters button.active {
+  color: var(--t-1d4ed8);
+  border-color: #93b4ff;
+  background: #edf3ff;
+}
+.graph-chunk-results {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 16px 0;
+}
+.graph-chunk-result {
+  border: 1px solid #e3e8ef;
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 13px;
+}
+.graph-chunk-result > summary {
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.graph-chunk-result > summary > span:last-child {
+  flex: 1 1 220px;
+  overflow-wrap: anywhere;
+  color: var(--t-475569);
+}
+.graph-chunk-result-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 16px;
+}
+.graph-chunk-result-body h4,
+.graph-chunk-result-body p,
+.graph-chunk-result-body ul {
+  margin: 0;
+}
+.graph-chunk-result-body ul {
+  padding-left: 20px;
+}
+.graph-chunk-result-body li + li {
+  margin-top: 10px;
+}
+.graph-chunk-result-body li small {
+  display: block;
+  color: var(--t-475569);
+  margin-top: 4px;
+  line-height: 1.7;
+}
+.graph-chunk-result-body > details > summary {
+  cursor: pointer;
+  color: var(--t-475569);
+}
+.graph-chunk-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+  padding-top: 10px;
+}
+
+.graph-chunk-result > summary::after {
+  content: "展开";
+  color: var(--t-475569);
+  font-size: 12px;
+}
+.graph-chunk-result[open] > summary::after {
+  content: "收起";
+}
+
+.graph-chunk-source-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+.graph-chunk-source-actions .link-button {
+  text-align: left;
+}
+
+.graph-build-timer {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+.graph-build-timer strong {
+  color: var(--t-475569);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.graph-extraction-tabs {
+  display: flex;
+  gap: 20px;
+  border-bottom: 1px solid #e3e8ef;
+}
+.graph-extraction-tabs button {
+  padding: 8px 2px 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--t-475569);
+  font: inherit;
+  cursor: pointer;
+}
+.graph-extraction-tabs button[aria-selected="true"] {
+  color: var(--t-1d4ed8);
+  border-bottom-color: currentColor;
+  font-weight: 600;
+}
+.graph-chunk-table-scroll {
+  overflow-x: auto;
+  border: 1px solid #e3e8ef;
+  border-radius: 8px;
+}
+.graph-chunk-table-scroll .graph-table {
+  table-layout: fixed;
+  min-width: 540px;
+}
+.graph-chunk-table-scroll .graph-chunk-relation-table {
+  min-width: 720px;
+}
+.graph-chunk-table-scroll th,
+.graph-chunk-table-scroll td {
+  padding: 10px 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.graph-chunk-entity-table th:nth-child(4) {
+  width: 80px;
+}
+.graph-chunk-entity-table th:last-child {
+  width: 42%;
+}
+.graph-chunk-relation-table th:nth-child(n + 2):nth-child(-n + 4) {
+  width: 90px;
+}
+
+.graph-chunk-relation-table th:last-child {
+  width: 96px;
+}
+.graph-chunk-relation-table td:last-child .link-button {
+  white-space: nowrap;
+}
+
+.graph-item-number {
+  display: inline-block;
+  min-width: 2ch;
+  color: #7a8799;
+  font-size: 12px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.graph-table .graph-row-number {
+  width: 48px;
+  white-space: nowrap;
+  color: #7a8799;
+  font-variant-numeric: tabular-nums;
+}
+
+.graph-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+/* Main graph controls share one size; compact entity cards keep their smaller buttons. */
+.graph-workspace .graph-filters > select,
+.graph-workspace .graph-filters > input,
+.graph-workspace .graph-filters > button,
+.graph-workspace .graph-filters .chunk-source-filter > button {
+  box-sizing: border-box;
+}
+.graph-workspace > .graph-filters,
+.graph-explorer > .graph-filters {
+  gap: 6px 10px;
+}
+.graph-workspace.is-focused {
+  position: fixed;
+  inset: 12px;
+  z-index: 80;
+  box-sizing: border-box;
+  padding: 12px;
+  border: 1px solid #dce5ef;
+  border-radius: 12px;
+  background: #f7faff;
+  box-shadow: 0 8px 40px #16362226;
+  overflow: hidden;
+  gap: 8px;
+}
+.graph-workspace.is-focused > .graph-filters {
+  flex-shrink: 0;
+}
+.graph-workspace.is-focused .graph-explorer {
+  min-height: 0;
+  max-height: 26dvh;
+  flex-shrink: 1;
+  overflow: auto;
+}
+.graph-workspace.is-focused .graph-workspace-body {
+  display: grid;
+  align-items: stretch;
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  flex: 1 1 0;
+  min-height: 0;
+  gap: 12px;
+  position: relative;
+}
+.graph-workspace.is-focused .graph-workspace-body.graph-body {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+}
+.graph-workspace.is-focused .graph-workspace-body > div:first-child {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.graph-workspace.is-focused .graph-view {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.graph-workspace.is-focused .graph-toolbar,
+.graph-workspace.is-focused .graph-hint {
+  flex-shrink: 0;
+}
+.graph-workspace.is-focused .graph-canvas-wrap {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.graph-workspace.is-focused .graph-canvas {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  box-sizing: border-box;
+}
+.graph-workspace.is-focused .graph-side {
+  height: 100%;
+  max-height: none;
+  min-height: 0;
+  box-sizing: border-box;
+}
+.graph-workspace.is-focused .graph-workspace-body > div > .graph-note {
+  margin-top: 6px;
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+@media (max-width: 700px) {
+  .graph-workspace.is-focused {
+    inset: 0;
+    border-radius: 0;
+    padding: 8px;
+  }
+  .graph-workspace.is-focused .graph-workspace-body.graph-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .graph-workspace.is-focused .graph-workspace-body > .graph-side {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: min(320px, 80%);
+    z-index: 3;
+    box-shadow: -4px 0 20px #16362226;
+  }
+}
+
+.graph-table .graph-nowrap,
+.graph-table .graph-nowrap .link-button {
+  white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.graph-relation-scope {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.graph-relation-scope button {
+  border: 1px solid #d5dce6;
+  border-radius: 6px;
+  background: #fff;
+  color: #475569;
+  padding: 0 7px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  line-height: 1.6;
+  min-height: 0;
+  white-space: nowrap;
+}
+.graph-relation-scope button[aria-pressed="true"] {
+  background: #edf3ff;
+  border-color: #2563eb;
+  color: #1d4ed8;
+}
+.graph-relation-highlight-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.graph-relation-highlight-button:hover,
+.graph-relation-highlight-button[aria-pressed="true"] {
+  color: #2563eb;
+}
+.graph-relation-is-highlighted {
+  border-radius: 6px;
+  background: #edf3ff;
+  outline: 1px solid #bfd3ff;
+}
+.graph-relation-scope button:focus-visible,
+.graph-relation-highlight-button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.graph-side .graph-original-button {
+  margin-top: 6px;
+  min-height: 26px;
+  padding: 3px 9px;
+  font-size: 12px;
+}
+.graph-original-content {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+}
+.graph-original-content mark {
+  background: #fff2b8;
+  color: inherit;
+}
+
+.graph-entity-panel {
+  padding-top: 0;
+}
+.graph-entity-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: 0 -14px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #e3e8ef;
+  background: #fff;
+}
+.graph-entity-panel .graph-relations-header {
+  top: var(--entity-header-height, 0px);
+}
+
+/* 实体详情弹窗：图谱里的实体面板整个放进弹窗，去掉卡片外框和自身的高度限制，滚动交给弹窗。 */
+.ag-delivery-dialog .graph-side {
+  max-height: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+.ag-delivery-dialog .graph-entity-header {
+  position: static;
+  margin: 0;
+  padding: 0 0 10px;
+}
+
+.graph-chunk-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: graph-chunk-spin 0.8s linear infinite;
+}
+@keyframes graph-chunk-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .graph-chunk-spinner {
+    animation: none;
+  }
+}
+
+/* Keep table context visible while the main page scrolls. */
+.graph-workspace:not(.is-focused) .graph-table > thead > tr > th {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  box-shadow: 0 1px 0 #dce5ef;
+}
+.graph-workspace:not(.is-focused)
+  .graph-workspace-body.graph-body
+  > .graph-side {
+  position: sticky;
+  top: 12px;
+  height: calc(100dvh - 24px);
+  max-height: none;
+  box-sizing: border-box;
+}
+
+.graph-merge-table {
+  table-layout: fixed;
+}
+.graph-merge-scope-column {
+  width: 112px;
+}
+.graph-merge-method-column {
+  width: 176px;
+}
+/* 方法列：标签和「撤销」上下排，长标签自动换行，不压到「出现在」那一列。 */
+.graph-merge-method {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.graph-merge-method .tag {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+}
+.graph-merge-source-column {
+  width: 120px;
+}
+.graph-merge-table td {
+  overflow-wrap: anywhere;
+}
+.graph-merge-table td:last-child .link-button {
+  white-space: nowrap;
+}
+
+.graph-history-controls {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  pointer-events: none;
+}
+.graph-history-controls button {
+  pointer-events: auto;
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.graph-entity-search {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+.graph-entity-search label {
+  display: block;
+  margin: 0;
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: normal;
+  color: #64748b;
+}
+.graph-entity-search-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.graph-entity-search-row input {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  color: #24435c;
+  box-sizing: border-box;
+}
+.graph-entity-search-row button {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 3px 10px;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.graph-entity-search small {
+  margin: 0;
+}
+
+/* Keep the complete graph and detail panes in the viewport, with detail scrolling inside. */
+@media (min-width: 1101px) {
+  .graph-workspace:not(.is-focused) .graph-workspace-body:has(.graph-view) {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    position: sticky;
+    top: 12px;
+    height: calc(100dvh - 24px);
+    align-items: stretch;
+  }
+  .graph-workspace:not(.is-focused)
+    .graph-workspace-body:has(.graph-view)
+    > div:first-child {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+  }
+  .graph-workspace:not(.is-focused) .graph-workspace-body .graph-view {
+    flex: 1 1 0;
+    min-height: 0;
+  }
+  .graph-workspace:not(.is-focused) .graph-workspace-body .graph-canvas-wrap {
+    flex: 1 1 0;
+    min-height: 0;
+  }
+  .graph-workspace:not(.is-focused) .graph-workspace-body .graph-canvas {
+    position: absolute;
+    inset: 0;
+    height: 100%;
+    box-sizing: border-box;
+  }
+  .graph-workspace:not(.is-focused)
+    .graph-workspace-body:has(.graph-view)
+    > .graph-side {
+    position: static;
+    height: 100%;
+    min-height: 0;
+  }
+}
+
+.graph-review-panel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 8px 0;
+  border-bottom: 1px solid #d7e2ed;
+  font-size: 13px;
+}
+.graph-review-panel .field-error {
+  margin: 0;
+}
+.graph-review-details details {
+  margin: 8px 0;
+  border: 1px solid #e3e8ef;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.graph-review-details summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.graph-review-details p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 8px 0;
+}
+.graph-review-details small {
+  display: block;
+  color: #64748b;
+}
+.graph-review-details .link-button {
+  margin-right: 12px;
+}
+.graph-review-proposal {
+  margin: 10px 0;
+  padding: 10px;
+  background: #f6f9fc;
+  border-radius: 6px;
+}
+.graph-review-proposal label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  font: inherit;
+  letter-spacing: normal;
+}
+.graph-review-proposal input {
+  width: auto;
+}
+/* 合并记录里标记撤销：攒起来到二次检查第 4 步一起确认、写入。 */
+.graph-undo-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--tone-warning-border);
+  border-radius: 6px;
+  background: var(--tone-warning-bg);
+  color: var(--tone-warning-text);
+  font-size: 13px;
+}
+.graph-undo-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.graph-undo-link {
+  font-size: 12px;
+}
+/* 切换页签 / 翻页 / 搜索时的占位骨架。 */
+.graph-switch-skeleton {
+  padding: 8px 0;
+}
+.graph-switch-skeleton-canvas {
+  display: block;
+  height: 420px;
+  border-radius: 8px;
+}
+.graph-switch-skeleton-row {
+  display: block;
+  height: 44px;
+  border-radius: 6px;
+}
+
+/* 图谱版本条：切换查看的版本、设为生效、备注。查看未生效的版本时整条用警告色提示。 */
+.graph-version-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  font-size: 13px;
+}
+.graph-version-bar.is-inactive {
+  border-color: var(--tone-warning-border);
+  background: var(--tone-warning-bg);
+}
+.graph-version-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font: inherit;
+  letter-spacing: normal;
+}
+.graph-version-select select {
+  width: auto;
+  max-width: min(520px, 100%);
+}
+.graph-version-note {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.graph-version-note input {
+  width: 280px;
+  max-width: 100%;
+}
+
+/* 最近一次建图失败（下面显示的是生效中的另一次建图）时的提示。 */
+.graph-latest-failed {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #f1b8bd;
+  border-radius: 8px;
+  background: #fff5f5;
+  color: #7f1d1d;
+  font-size: 13px;
+}
+.graph-latest-failed strong {
+  color: #b42318;
+}
+.graph-latest-failed summary {
+  cursor: pointer;
+  color: #9f1239;
+  word-break: break-all;
+}
+.graph-latest-failed pre {
+  max-height: 200px;
+  margin: 6px 0 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 12px;
+}
+
+/* 建图任务 · 图检索向量的进度抽屉：阶段 + 进度条 + 明细。 */
+.gv-progress {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 20px;
+  font-size: 13px;
+}
+.gv-progress-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.gv-progress-head strong {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.gv-progress-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+.gv-progress-bar span {
+  display: block;
+  height: 100%;
+  background: #1d6ff2;
+  transition: width 0.3s;
+}
+.gv-progress.is-stopped .gv-progress-bar span {
+  background: #94a3b8;
+}
+.gv-progress.is-done .gv-progress-bar span {
+  background: #16a34a;
+}
+.gv-error {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.gv-facts {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+}
+.gv-facts div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 12px;
+}
+.gv-facts dt {
+  color: #7a8799;
+}
+.gv-facts dd {
+  margin: 0;
+  color: #1f2937;
+  word-break: break-all;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 进度步骤条（ProgressSteps）：圆圈 + 标题 + 副标题 + 连线，下面一行说明；横排或竖排。 */
+.hsteps {
+  display: flex;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.hstep {
+  display: flex;
+  flex: 1 1 0;
+  gap: 10px;
+  min-width: 0;
+}
+.hstep:last-child {
+  flex: 0 0 auto;
+}
+.hstep-icon {
+  display: grid;
+  flex: 0 0 28px;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #c4cbd6;
+  border-radius: 50%;
+  background: #fff;
+  color: #9aa5b5;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.hstep-content {
+  display: grid;
+  flex: 1;
+  align-content: start;
+  gap: 2px;
+  min-width: 0;
+}
+.hstep-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  min-width: 0;
+}
+.hstep-head strong {
+  flex: none;
+  color: #9aa5b5;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.hstep-subtitle {
+  color: #9aa5b5;
+  font-size: 12px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.hstep-line {
+  flex: 1;
+  min-width: 16px;
+  height: 1px;
+  background: #d5dbe4;
+}
+.hstep small {
+  color: #9aa5b5;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.hstep.is-finish .hstep-icon {
+  border-color: #1d6ff2;
+  color: #1d6ff2;
+}
+.hstep.is-finish .hstep-head strong {
+  color: #1f2937;
+}
+.hstep.is-finish .hstep-line {
+  background: #1d6ff2;
+}
+.hstep.is-process .hstep-icon {
+  border-color: #1d6ff2;
+  background: #e8f1ff;
+  color: #1d6ff2;
+}
+.hstep.is-process .hstep-head strong,
+.hstep.is-process small {
+  color: #1f2937;
+}
+.hstep.is-error .hstep-icon {
+  border-color: #d45160;
+  color: #d45160;
+}
+.hstep.is-error .hstep-head strong,
+.hstep.is-error .hstep-subtitle,
+.hstep.is-error small {
+  color: #b42335;
+}
+/* 竖排：一步一行，连线从圆圈下面接到下一步的圆圈。 */
+.hsteps.is-vertical {
+  flex-direction: column;
+  gap: 0;
+}
+.hsteps.is-vertical .hstep {
+  position: relative;
+  flex: none;
+  padding-bottom: 18px;
+}
+.hsteps.is-vertical .hstep:last-child {
+  padding-bottom: 0;
+}
+.hsteps.is-vertical .hstep-line {
+  display: none;
+}
+.hsteps.is-vertical .hstep:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 32px;
+  bottom: 4px;
+  left: 14px;
+  width: 1px;
+  background: #d5dbe4;
+}
+.hsteps.is-vertical .hstep.is-finish:not(:last-child)::after {
+  background: #1d6ff2;
+}
+.hsteps.is-vertical .hstep-head {
+  flex-wrap: wrap;
+}
+/* 横排在窄处也改成竖排的样子，连线去掉。 */
+@media (max-width: 640px) {
+  .hsteps.is-horizontal {
+    flex-direction: column;
+  }
+  .hsteps.is-horizontal .hstep-line {
+    display: none;
+  }
+}
+/* 建图任务表每行右边的操作：算向量、建图。 */
+.graph-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  white-space: nowrap;
+}

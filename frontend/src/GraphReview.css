@@ -1,0 +1,1168 @@
+/* 二次检查合并：过程和结果、逐组确认。 */
+.ag-delivery-dialog.gr-dialog {
+  width: min(880px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 0;
+}
+.ag-delivery-dialog.gr-dialog > .gr-body {
+  flex: 1;
+}
+.gr-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+}
+.gr-hint {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--tone-info-bg);
+  color: var(--tone-info-text);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.gr {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.gr-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+.gr-steps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #e3e8ef;
+  border-radius: 8px;
+  background: #fafcfe;
+  min-width: 0;
+}
+.gr-steps li > span:last-child {
+  display: grid;
+  min-width: 0;
+}
+.gr-steps strong {
+  font-size: 13px;
+}
+.gr-steps small {
+  color: #64748b;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gr-step-dot {
+  flex: 0 0 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid #cbd5e1;
+  color: #64748b;
+  background: #fff;
+}
+.gr-steps .is-done .gr-step-dot {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #fff;
+}
+.gr-steps .is-active {
+  border-color: var(--tone-warning-border);
+  background: var(--tone-warning-bg);
+}
+.gr-steps .is-active .gr-step-dot {
+  background: #f59e0b;
+  border-color: #f59e0b;
+  color: #fff;
+}
+.gr-steps .is-failed .gr-step-dot {
+  background: #d45160;
+  border-color: #d45160;
+  color: #fff;
+}
+.gr-meta {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.gr-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #e3e8ef;
+}
+.gr-tabs button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  padding: 6px 10px;
+  font: inherit;
+  color: #64748b;
+  cursor: pointer;
+}
+.gr-tabs button[aria-selected="true"] {
+  color: #0f172a;
+  font-weight: 600;
+  border-bottom-color: #2563eb;
+}
+
+.gr-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.gr-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.gr-filters button {
+  border: 1px solid #dbe3ec;
+  background: #fff;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: #334155;
+  cursor: pointer;
+}
+.gr-filters button span {
+  color: #94a3b8;
+  margin-left: 2px;
+}
+.gr-filters button[aria-pressed="true"] {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: #fff;
+}
+.gr-filters button[aria-pressed="true"] span {
+  color: #cbd5e1;
+}
+.gr-search {
+  width: 180px;
+}
+
+.gr-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.gr-card {
+  border: 1px solid #e3e8ef;
+  border-left-width: 3px;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gr-card.is-merge {
+  border-left-color: var(--tone-info-text);
+}
+.gr-card.is-failed {
+  border-left-color: #d45160;
+}
+.gr-card.is-running {
+  border-left-color: #f59e0b;
+}
+.gr-card p {
+  margin: 0;
+}
+.gr-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gr-card-head > strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+}
+.gr-card-id {
+  font-family: "DM Mono", monospace;
+  font-size: 12px;
+  color: #64748b;
+}
+.gr-card-reason {
+  color: #94a3b8;
+  font-size: 12px;
+  margin-right: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gr-entities {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 6px;
+}
+.gr-entities li {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f6f9fc;
+  min-width: 0;
+}
+.gr-entity-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.gr-entity-name strong {
+  overflow-wrap: anywhere;
+}
+.gr-desc {
+  margin-top: 4px !important;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.gr-proposal-line {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.gr-arrow {
+  color: #94a3b8;
+}
+.gr-reason {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.gr-merge-from {
+  color: #334155;
+}
+.gr-small {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.gr-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #94a3b8;
+  font-size: 12px;
+  border-top: 1px solid #f1f5f9;
+  padding-top: 6px;
+}
+.gr-card-foot span {
+  margin-right: auto;
+}
+.gr-pager {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  color: #64748b;
+  font-size: 12px;
+}
+.gr-pager-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.gr-pager button {
+  padding: 4px 10px;
+  border: 1px solid #dbe3ec;
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+.gr-pager button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.gr-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gr-evidence section {
+  margin-top: 12px !important;
+}
+
+/* 处理过程里「等待人工确认」用提醒色，不用表示出错的红色。 */
+.document-step.awaiting {
+  margin: 4px -10px;
+  border: 1px solid var(--tone-warning-border);
+  border-radius: 6px;
+  background: var(--tone-warning-bg);
+  padding: 10px;
+}
+.document-step.awaiting .document-step-icon {
+  border-color: #f59e0b;
+  background: #f59e0b;
+  color: #fff;
+  font-weight: 700;
+}
+.document-step.awaiting .document-step-copy strong,
+.document-step.awaiting .document-step-copy small {
+  color: var(--tone-warning-text);
+}
+.document-step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+@media (max-width: 640px) {
+  .gr-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .gr-search {
+    width: 100%;
+  }
+}
+.gr-body > :last-child {
+  margin-bottom: 24px;
+}
+.gr-by {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #eef2f6;
+  color: #64748b;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 500;
+}
+.document-step-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.gr-grow {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.gr-method {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e3e8ef;
+}
+.gr-method p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #334155;
+}
+.gr-warn {
+  color: var(--tone-warning-text) !important;
+  background: var(--tone-warning-bg);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.gr-warn-inline {
+  color: var(--tone-warning-text);
+}
+
+.gr-kind {
+  border: 1px solid var(--tone-accent-border);
+  background: var(--tone-accent-bg);
+  color: var(--tone-accent-text);
+  border-radius: 4px;
+  padding: 1px 8px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.gr-kind.is-static {
+  cursor: default;
+  border-color: #d1fae5;
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.gr-layer {
+  display: grid;
+  gap: 6px;
+}
+.gr-layer + .gr-layer {
+  border-top: 1px dashed #e3e8ef;
+  padding-top: 8px;
+}
+.gr-layer-label {
+  font-size: 11px;
+  color: #94a3b8;
+  letter-spacing: 0.02em;
+}
+.gr-proposal {
+  display: grid;
+  justify-items: start;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f8fbff;
+  border: 1px solid #dbe7fb;
+}
+
+.gr-decision {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #fafafa;
+}
+.gr-decision.is-approved {
+  background: #f0fdf4;
+}
+.gr-decision.is-rejected {
+  background: #f8fafc;
+}
+
+.gr-similarity p {
+  margin: 8px 0;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.gr-similarity section {
+  margin-top: 12px !important;
+}
+
+.gr-plan {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+}
+.gr-plan li > span {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.gr-plan small {
+  display: block;
+  color: #94a3b8;
+}
+.gr-choose {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.gr-choose label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font: inherit;
+  letter-spacing: normal;
+}
+.gr-choose input {
+  width: auto;
+  margin: 0;
+}
+.gr-dropped {
+  color: #94a3b8;
+}
+/* 已写入且没有变化的合并：默认收起，展开后还能「加入新实体」「移除」。 */
+.gr-kept {
+  margin-top: 10px;
+  font-size: 13px;
+}
+.gr-kept summary {
+  cursor: pointer;
+  color: #64748b;
+}
+.gr-kept .gr-plan {
+  margin-top: 8px;
+}
+.gr-pairs {
+  border-collapse: collapse;
+  font-size: 13px;
+  margin: 8px 0;
+}
+.gr-pairs td {
+  padding: 4px 8px;
+  border-bottom: 1px solid #eef2f6;
+}
+.gr-pairs td:last-child {
+  font-family: "DM Mono", monospace;
+  text-align: right;
+}
+.gr-steps li.is-link {
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.gr-steps li.is-link:hover {
+  border-color: #93b4f5;
+  box-shadow: 0 1px 4px #2563eb1f;
+}
+.gr-steps li.is-link:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+.gr-steps li.is-selected {
+  border-color: #2563eb;
+  box-shadow: inset 0 0 0 1px #2563eb;
+}
+.gr-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+.gr-confirm {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #e3e8ef;
+  border-radius: 8px;
+}
+.gr-remove {
+  margin-left: 4px;
+  color: #94a3b8;
+}
+.gr-remove:hover:not(:disabled) {
+  color: #c44e5e;
+}
+.gr-code {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: #e2e8f0;
+  color: #334155;
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+/* 人工合并：「查看组内实体」/「新建人工合并」浮窗 */
+.gr-entity-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.gr-view {
+  margin-left: 4px;
+}
+.gr-actions-start {
+  margin-right: auto;
+}
+.gr-section-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+.gr-card.is-manual {
+  border-left: 3px solid #93b4f5;
+}
+.gr-picker {
+  display: grid;
+  gap: 10px;
+}
+.gr-picker .gr-entities {
+  grid-template-columns: 1fr;
+}
+.gr-picker .gr-desc {
+  -webkit-line-clamp: 4;
+}
+.gr-picker .gr-evidence {
+  margin-top: 8px;
+}
+.gr-picker-search {
+  display: flex;
+  gap: 8px;
+}
+.gr-picker-search input {
+  flex: 1;
+  min-width: 0;
+}
+.gr-picker-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #eef2f6;
+}
+.gr-picker-form label {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  font-size: 12px;
+  color: #475569;
+}
+.gr-picker-form input,
+.gr-picker-form select {
+  box-sizing: border-box;
+}
+.gr-picker-form input {
+  width: 220px;
+}
+.gr-picker-form select {
+  min-width: 140px;
+}
+.gr-owner {
+  margin-top: 2px !important;
+  color: #b45309;
+}
+.gr-picker .loading-skeleton {
+  display: grid;
+  gap: 6px;
+}
+.gr-picker-results {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #eef2f6;
+}
+.gr-picker-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #eef2f6;
+}
+.gr-picker-search input {
+  box-sizing: border-box;
+}
+/* 置灰的实体卡片（已在组内、已选）：内容变淡，「原文」仍可点。 */
+.gr-entities li.is-muted {
+  background: #f8fafc;
+}
+.gr-entities li.is-muted strong,
+.gr-entities li.is-muted .gr-desc,
+.gr-entities li.is-muted .gr-entity-name > .tag {
+  opacity: 0.5;
+}
+/* 「原文」气泡里的分片：去掉浮窗里 section 的间距和分隔线。 */
+.info-popover .gr-evidence {
+  gap: 12px;
+}
+.info-popover .gr-evidence section {
+  margin: 0 !important;
+  padding: 0;
+  border: 0;
+}
+.info-popover .graph-chunk-text {
+  margin: 6px 0 0;
+  padding-top: 0;
+}
+
+/* 图谱检查的箭头步骤条：每步一个色块，右边是箭头尖角，嵌进下一步左边的缺口。
+   5 步始终排成一行、平分宽度，不横向滚动；放不下的文字省略号截断，悬停看完整说明。 */
+.gc-steps {
+  margin-bottom: 14px;
+}
+.gc-steps-scroll {
+  display: flex;
+}
+.gc-step {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-height: 48px;
+  margin: 0 0 0 -8px;
+  padding: 6px 16px 6px 22px;
+  border: 0;
+  border-radius: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  clip-path: polygon(
+    0 0,
+    calc(100% - 12px) 0,
+    100% 50%,
+    calc(100% - 12px) 100%,
+    0 100%,
+    12px 50%
+  );
+}
+.gc-step:first-child {
+  margin-left: 0;
+  padding-left: 12px;
+  border-radius: 6px 0 0 6px;
+  clip-path: polygon(
+    0 0,
+    calc(100% - 12px) 0,
+    100% 50%,
+    calc(100% - 12px) 100%,
+    0 100%
+  );
+}
+.gc-step:last-child {
+  padding-right: 10px;
+  border-radius: 0 6px 6px 0;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 12px 50%);
+}
+.gc-step strong {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.gc-step strong em {
+  margin-left: 6px;
+  font-style: normal;
+  font-weight: 500;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.gc-step small {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.gc-step.is-current {
+  background: #1d6ff2;
+  color: #fff;
+}
+/* 已完成：绿色。 */
+.gc-step.is-done {
+  background: #e7f6ec;
+  color: #15803d;
+}
+.gc-step.is-recheck {
+  background: #fff4e5;
+  color: #c2410c;
+}
+.gc-step.is-failed {
+  background: #fff1f0;
+  color: #dc2626;
+}
+.gc-step.is-skipped,
+.gc-step.is-waiting,
+.gc-step.is-locked {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+.gc-step.is-locked {
+  cursor: not-allowed;
+}
+/* 正在查看的那一步（不一定是当前步骤）：加一道下划线。 */
+.gc-step.is-selected:not(.is-current) {
+  box-shadow: inset 0 -3px 0 currentColor;
+}
+.gc-step:focus-visible {
+  outline: 2px solid #1d6ff2;
+  outline-offset: -4px;
+}
+.gc-placeholder {
+  padding: 24px;
+  border: 1px dashed #d8dee8;
+  border-radius: 10px;
+  color: #64748b;
+}
+
+/* 检查进度：找可疑项 → 模型判断。 */
+.gc-progress {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid #e3e8ef;
+  border-radius: 10px;
+  background: #f8fafc;
+  font-size: 13px;
+}
+.gc-progress-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.gc-progress-phases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  color: #64748b;
+}
+.gc-progress-phases .is-active {
+  color: #1d6ff2;
+  font-weight: 600;
+}
+.gc-progress-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+.gc-progress-bar span {
+  display: block;
+  height: 100%;
+  background: #1d6ff2;
+  transition: width 0.3s;
+}
+.gc-progress.is-stopped .gc-progress-bar span {
+  background: #94a3b8;
+}
+.gc-progress-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  color: #475569;
+  font-variant-numeric: tabular-nums;
+}
+/* 合并这一步里面：左边竖直步骤条，右边是这一小步的内容；窄屏时步骤条放到上面。 */
+.gr-split {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.gr-split-main {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  /* 列表、翻页到底部时留出间距，不贴着弹窗边缘。 */
+  padding-bottom: 20px;
+}
+@media (max-width: 760px) {
+  .gr-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.gv-steps {
+  position: sticky;
+  top: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.gv-step {
+  position: relative;
+  padding-bottom: 18px;
+}
+.gv-step:last-child {
+  padding-bottom: 0;
+}
+/* 圆圈下面的连线：上一步完成了就是蓝色。 */
+.gv-step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 15px;
+  top: 38px;
+  bottom: 4px;
+  width: 2px;
+  background: #e5e7eb;
+}
+.gv-step.is-done:not(:last-child)::after {
+  background: #22a35a;
+}
+.gv-step > button {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.gv-step > button:disabled {
+  cursor: not-allowed;
+}
+.gv-dot {
+  flex: 0 0 32px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #f3f4f6;
+  color: #6b7280;
+  font-size: 14px;
+}
+.gv-step.is-done .gv-dot {
+  background: #e7f6ec;
+  color: #15803d;
+}
+.gv-step.is-current .gv-dot {
+  background: #1d6ff2;
+  color: #fff;
+}
+.gv-step.is-failed .gv-dot {
+  background: #fff1f0;
+  color: #dc2626;
+}
+.gv-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding-top: 5px;
+}
+.gv-text strong {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #1f2937;
+}
+.gv-text strong em {
+  font-style: normal;
+  font-size: 12px;
+  color: #1d6ff2;
+  font-variant-numeric: tabular-nums;
+}
+.gv-text small {
+  font-size: 12px;
+  color: #6b7280;
+  overflow-wrap: anywhere;
+}
+.gv-step.is-current .gv-text small {
+  color: #1f2937;
+}
+.gv-step.is-waiting .gv-text strong,
+.gv-step.is-locked .gv-text strong {
+  color: #6b7280;
+}
+/* 已完成的小步骤：标题和说明都是绿色。 */
+.gv-step.is-done .gv-text strong,
+.gv-step.is-done .gv-text small {
+  color: #15803d;
+}
+/* 正在查看的那一小步：标题加粗；没完成的用蓝色，已完成的保持绿色。 */
+.gv-step.is-selected .gv-text strong {
+  font-weight: 600;
+}
+.gv-step.is-selected:not(.is-done) .gv-text strong {
+  color: #1d6ff2;
+}
+
+/* 图谱检查前 4 步的页面（GraphCheckStep）。 */
+.gc-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.gc-options label,
+.gc-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 0 8px;
+  font: inherit;
+  letter-spacing: normal;
+}
+.gc-options input {
+  width: auto;
+  margin: 0;
+}
+.gc-options select,
+.gc-inline select {
+  width: auto;
+}
+.gc-filter {
+  justify-content: flex-start;
+}
+.gc-judgment {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+.gc-judgment p {
+  margin: 0 0 4px;
+}
+.gc-decide {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.gc-quote {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+}
+.gc-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.gc-types,
+.gc-groups {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+.gc-groups input {
+  width: 220px;
+  max-width: 100%;
+  margin-right: 6px;
+}
+/* 检查卡片：紧凑一些，一页能看更多项。 */
+.gc-card {
+  padding: 8px 12px;
+  gap: 4px;
+  font-size: 13px;
+}
+.gc-card .gr-card-head strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+.gc-card p {
+  margin: 0;
+}
+.gc-original {
+  margin-left: 8px;
+  font-size: 12px;
+}
+.gc-mentions summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #64748b;
+}
+/* 每一步说明下面的例子。 */
+.gc-example {
+  margin: 4px 0 0;
+  padding: 6px 10px;
+  border-left: 3px solid #c3d5fb;
+  background: #f5f9ff;
+  color: #475569;
+  font-size: 13px;
+}
+/* 补抽结果：补实体、补关系各一行，标签在左，内容在右；关系逐条列出。 */
+.gc-glean {
+  display: grid;
+  gap: 8px;
+}
+.gc-glean-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+.gc-label {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 22px;
+}
+.gc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+.gc-relations {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+  color: #1f2937;
+  font-size: 13px;
+}
+.gc-relations strong {
+  font-weight: 600;
+}
+
+/* 补抽卡片上的「程序过滤」说明：引用样式，写明查了什么、去掉了什么。 */
+.gc-filter-note {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 10px 0 0;
+  padding: 6px 10px;
+  border-left: 3px solid #cbd5e1;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.gc-filter-note strong {
+  color: #475569;
+  font-weight: 600;
+}
+.gc-filter-note ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.gc-chip {
+  display: inline-flex;
+  align-items: center;
+}
+.gc-same {
+  margin-left: 4px;
+  color: #b45309;
+  font-size: 12px;
+  font-style: normal;
+}
+
+/* 确认写入页：已经写入、采纳也没变时的说明。 */
+.gc-written {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-left: 3px solid #86c79a;
+  background: #eef8f1;
+  color: #15803d;
+  font-size: 13px;
+}
+.gc-written .gr-plan {
+  align-self: stretch;
+  margin-top: 4px;
+  color: #334155;
+}

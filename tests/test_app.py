@@ -297,6 +297,58 @@ def test_saved_history_is_available_after_session_reload(setup):
     assert client.get("/history", headers=headers("bob")).json()["messages"] == []
 
 
+def test_session_messages_are_paged_and_sessions_are_listed(setup):
+    client, store = setup
+    first = session(client)
+    second = session(client)
+    # 直接写 runs：12 条在第一个会话，1 条在第二个会话；第二个会话最后提问，排在列表最前。
+    with store.engine.begin() as connection:
+        for index in range(12):
+            connection.execute(
+                runs.insert().values(
+                    id=f"run-{index:02d}",
+                    session_id=first,
+                    owner="alice",
+                    question=f"问题 {index}",
+                    response={"route": "knowledge", "answer": str(index)},
+                    created=f"2026-01-01T00:00:{index:02d}+00:00",
+                )
+            )
+        connection.execute(
+            runs.insert().values(
+                id="run-other",
+                session_id=second,
+                owner="alice",
+                question="另一个会话",
+                response={"route": "order", "answer": "x"},
+                created="2026-01-02T00:00:00+00:00",
+            )
+        )
+    page = client.get(f"/sessions/{first}", headers=headers()).json()
+    assert [item["id"] for item in page["messages"]] == [
+        f"run-{index:02d}" for index in range(2, 12)
+    ]
+    assert page["has_more"] is True and page["total"] == 12
+    older = client.get(
+        f"/sessions/{first}", params={"before": "run-02"}, headers=headers()
+    ).json()
+    assert [item["id"] for item in older["messages"]] == ["run-00", "run-01"]
+    assert older["has_more"] is False
+    assert (
+        client.get(
+            f"/sessions/{first}", params={"before": "run-other"}, headers=headers()
+        ).status_code
+        == 404
+    )
+    listed = client.get("/sessions", headers=headers()).json()["sessions"]
+    assert [item["session_id"] for item in listed] == [second, first]
+    assert listed[1]["title"] == "问题 0"
+    assert listed[1]["count"] == 12
+    assert listed[1]["route"] == "knowledge"
+    assert listed[0]["route"] == "order"
+    assert client.get("/sessions", headers=headers("bob")).json()["sessions"] == []
+
+
 def test_chat_returns_explainable_execution_trace(setup):
     client, _ = setup
     response = client.post(
@@ -562,7 +614,7 @@ def test_document_list_includes_ingestion_steps(setup):
     with store.engine.begin() as connection:
         connection.execute(
             documents.insert().values(
-                id="doc-trace",
+                id="00000000-0000-4000-8000-000000000001",
                 owner="alice",
                 title="带流程文档",
                 filename="trace.txt",
@@ -575,7 +627,7 @@ def test_document_list_includes_ingestion_steps(setup):
         )
         connection.execute(
             document_steps.insert().values(
-                document_id="doc-trace",
+                document_id="00000000-0000-4000-8000-000000000001",
                 step_id="embedding",
                 step_order=4,
                 stage="embedding",
@@ -587,10 +639,20 @@ def test_document_list_includes_ingestion_steps(setup):
                 updated="2026-01-01",
             )
         )
+    # 列表只带每一步的标题和状态，详细结果打开详情时再读。
     listed = client.get("/documents", headers=headers()).json()["documents"]
-    item = next(item for item in listed if item["document_id"] == "doc-trace")
+    item = next(
+        item
+        for item in listed
+        if item["document_id"] == "00000000-0000-4000-8000-000000000001"
+    )
     assert item["steps"][0]["step_id"] == "embedding"
-    assert item["steps"][0]["result"]["input_count"] == 2
+    assert item["steps"][0]["status"] == "running"
+    assert item["steps"][0]["result"] is None
+    detail = client.get(
+        "/documents/00000000-0000-4000-8000-000000000001", headers=headers()
+    ).json()
+    assert detail["steps"][0]["result"]["input_count"] == 2
 
 
 def test_document_upload_persists_file_metadata(setup, tmp_path, monkeypatch):
@@ -1923,6 +1985,76 @@ def test_parent_context_can_be_disabled(setup, monkeypatch, runtime):
     assert result["stats"]["parent_context"] == "off"
 
 
+# 并入父块的分片不占返回名额：返回条数按实际产出的来源数算，合并的分片在诊断里标出「已并入」。
+def test_merged_chunks_do_not_consume_return_limit(runtime):
+    from app.tools.search import DocumentSearchTool
+
+    class Store:
+        # 同一小节的 5 个分片。命中第 0 片时父块把它和第 1 片拼在一起，第 1 片因此并入父块。
+        def __init__(self):
+            self.rows = [
+                {
+                    "id": f"c{index}",
+                    "title": "投资笔记",
+                    "text": f"第{index}片讲的是长期持有好公司的理由。",
+                    "score": 0.9 - index * 0.01,
+                    "document_id": "d1",
+                    "position": index,
+                    "chunk_metadata": {"heading_path": ["投资原则"]},
+                }
+                for index in range(5)
+            ]
+
+        def search(self, owner, query, models, limit):
+            return self.rows
+
+        def search_keyword(self, owner, query, limit):
+            return []
+
+        def neighbor_chunks(self, document_id, position, radius):
+            return [
+                {
+                    "id": row["id"],
+                    "text": row["text"],
+                    "content": row["text"],
+                    "position": row["position"],
+                    "chunk_metadata": row["chunk_metadata"],
+                }
+                for row in self.rows
+                if position - radius <= row["position"] <= position + radius
+            ]
+
+    class Reranker:
+        def rerank(self, query, documents):
+            return [0.9] * len(documents)
+
+    runtime(return_limit=2, parent_radius=1, parent_max_chars=2400)
+    result = DocumentSearchTool().execute(
+        Store(), Reranker(), "alice", ["长期持有"], "长期持有", methods=("dense",)
+    )
+    # 上限 2 就给 2 条来源：并入父块的分片不算一条来源，也不占名额。
+    assert len(result["sources"]) == 2
+    assert result["stats"]["returned"] == 2
+    rows = {row["chunk_id"]: row for row in result["diagnostics"]["candidates"]}
+    # 两条来源本身。
+    assert rows["c0"]["source_id"] == "S1" and not rows["c0"]["merged"]
+    assert rows["c2"]["source_id"] == "S2" and not rows["c2"]["merged"]
+    # 并入的分片来源编号指向它并入的那条，并标出「已并入」。
+    assert rows["c1"]["status"] == "returned"
+    assert rows["c1"]["source_id"] == "S1" and rows["c1"]["merged"]
+    assert rows["c3"]["source_id"] == "S2" and rows["c3"]["merged"]
+    # 名额用完之后的分片按超过上限处理。
+    assert rows["c4"]["status"] == "beyond_limit"
+    # 返回的分片比来源多，差的就是并入父块的那些：统计条数按来源算，不能按返回的分片算。
+    returned = [
+        row
+        for row in result["diagnostics"]["candidates"]
+        if row["status"] == "returned"
+    ]
+    assert len(returned) == 4
+    assert len({row["source_id"] for row in returned}) == 2
+
+
 # 打开 Contextual Retrieval，并用固定规则代替模型为分片写上下文说明，记录每次请求收到的分片。
 def enable_contextual(client, monkeypatch, fail_on=None):
     models = client.app.state.models
@@ -2164,7 +2296,7 @@ class ScriptedSearch:
         self.results = results
         self.calls = []
 
-    def execute(self, store, models, owner, queries, rerank_query):
+    def execute(self, store, models, owner, queries, rerank_query, **options):
         self.calls.append(list(queries))
         return {
             "sources": self.results[len(self.calls) - 1],
@@ -2181,7 +2313,7 @@ def judging_models(verdicts):
         def __init__(self):
             self.questions = []
 
-        def judge_sufficiency(self, question, sources):
+        def judge_sufficiency(self, question, sources, relations=()):
             self.questions.append(question)
             return verdicts[len(self.questions) - 1]
 

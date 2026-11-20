@@ -153,19 +153,9 @@
 
 .settings-form input {
   width: 100%;
-  border: 1px solid var(--t-bcd0e3);
-  border-radius: 4px;
-  padding: 10px 12px;
-  background: #ffffff;
   color: var(--t-173b5b);
   font-weight: 400;
 }
-
-.settings-form input:focus {
-  outline: none;
-  border-color: var(--t-2563eb);
-}
-
 .key-input {
   display: flex;
   gap: 8px;
@@ -406,7 +396,6 @@
 
 .settings-form .user-checks input {
   width: auto;
-  padding: 0;
 }
 
 .settings-modal-header {

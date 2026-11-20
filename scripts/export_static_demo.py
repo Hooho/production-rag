@@ -124,13 +124,17 @@ def document_view(connection, row, current_id, group_ids):
         "version_note": row["version_note"],
         "is_current": row["id"] == current_id,
         "document_metadata": row["document_metadata"] or {},
+        # 排序放在 Python 里：步骤的 result（JSON）可能很大，MySQL 排序会报 1038 Out of sort memory。
         "steps": [
             plain(step)
-            for step in connection.execute(
-                select(document_steps)
-                .where(document_steps.c.document_id == row["id"])
-                .order_by(document_steps.c.step_order)
-            ).mappings()
+            for step in sorted(
+                connection.execute(
+                    select(document_steps).where(
+                        document_steps.c.document_id == row["id"]
+                    )
+                ).mappings(),
+                key=lambda step: step["step_order"],
+            )
         ],
     }
     permission = connection.execute(

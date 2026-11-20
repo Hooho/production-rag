@@ -1,3 +1,5 @@
+from ..evaluation import configuration as eval_configuration
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import hashlib
@@ -27,7 +29,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import delete, select
+from sqlalchemy import and_, case, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 
 from ..agent.service import Agent
@@ -39,6 +41,7 @@ from ..agentic.records import (
 )
 from ..agentic.service import AgentFailed, AgentMode
 from ..memory import outbox as memory_outbox
+from ..mysql import step_judgments
 from . import live as live_state
 from .live import LiveLog
 from ..business.sample_data import MAX_COUNT, generate_preview
@@ -79,10 +82,9 @@ from ..evaluation.dataset import (
     generate_items,
     load_dataset,
     mark_reviewed,
+    update_prelude,
     next_item_id,
     next_pair_id,
-    seed_eval_data,
-    seed_late_suites,
     select_split,
     validate_dataset,
 )
@@ -106,6 +108,8 @@ from ..evaluation.retrieval import EVAL_OWNER
 from ..tools.search import limit_titles
 from ..evaluation.evidence import locate_evidence, load_chunk
 from .. import prompts, runtime_config
+from . import graph_routes
+from ..graph import query as graph_query
 from ..ingestion.parser import ALLOWED_EXTENSIONS, UNSUPPORTED_MESSAGE
 from ..inspection.diagnosis import CATEGORIES as DIAGNOSIS_CATEGORIES
 from ..inspection.schedule import load_schedule, save_schedule, schedule_view
@@ -176,6 +180,11 @@ class ChatInput(BaseModel):
 # 界面发起评测的参数：评测类型、题目范围和检索实验组（消融、参数对比）。
 class EvalRunInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    version: Literal[1, 2] = 1
+    mode: Literal["fixed", "agent"] = "fixed"
+    methods: list[Literal["dense", "keyword", "graph"]] = Field(
+        default_factory=lambda: ["dense", "keyword"], min_length=1, max_length=3
+    )
     # retrieval / generation 是调参评测（按 split 选开发集或留出集）；special 是专项评测（按 suite_ids 选专项）。
     kind: str = Field("retrieval", pattern="^(retrieval|generation|special)$")
     split: str = Field("dev", pattern="^(dev|holdout|all)$")
@@ -197,6 +206,12 @@ class EvalRunInput(BaseModel):
 
 
 # 一次评测跑多组配置：每组就是一份完整的发起表单，按顺序各跑一遍，放进同一份批次报告（app/evaluation/batch.py）。
+class EvalConfigTemplateInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=80)
+    config: EvalRunInput
+
+
 class EvalBatchInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field("", max_length=60)
@@ -211,22 +226,54 @@ class EvalTargetInput(BaseModel):
     quote: str = ""
 
 
+class EvalRelationTargetInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    relation_id: str
+    build_id: str
+    source: str
+    target: str
+    category: str
+    description: str = ""
+    evidence: str = ""
+
+
 class EvalScoringGroupInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     label: str = Field(..., min_length=1, max_length=100)
     targets: list[EvalTargetInput] = Field(..., min_length=1, max_length=100)
+    relations: list[EvalRelationTargetInput] = Field(
+        default_factory=list, max_length=500
+    )
 
 
 # 手动录入一道评测题；编号、来源和审核状态由服务端统一生成，避免客户端伪造元数据。
+class EvalPreludeTurn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    question: str = Field(min_length=1, max_length=1000)
+    answer: str = Field(min_length=1, max_length=6000)
+    confirmed: Literal[True]
+
+
+class EvalPreludeAnswerInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    question: str = Field(min_length=1, max_length=1000)
+    prelude: list[EvalPreludeTurn] = Field(default_factory=list, max_length=20)
+    corpus_ids: list[str] = Field(default_factory=list, max_length=200)
+
+
+class EvalDatasetPreludeInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    prelude: list[EvalPreludeTurn] = Field(default_factory=list, max_length=20)
+
+
 class EvalDatasetItemInput(BaseModel):
+    prelude: list[EvalPreludeTurn] = Field(default_factory=list, max_length=20)
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     question: str = Field(min_length=1, max_length=1000)
     type: str = Field(min_length=1, max_length=20)
     answerable: bool
-    evidence: list[str] = Field(default_factory=list, max_length=10)
-    evidence_groups: list[EvalScoringGroupInput] | None = Field(
-        None, min_length=1, max_length=10
-    )
+    evidence: list[str] = Field(default_factory=list)
+    evidence_groups: list[EvalScoringGroupInput] | None = Field(None, min_length=1)
     reference_answer: str = Field(min_length=1, max_length=2000)
     split: str = Field("dev", pattern="^(dev|holdout)$")
     history: list[str] = Field(default_factory=list, max_length=5)
@@ -238,10 +285,8 @@ class EvalDatasetPairInput(BaseModel):
     original_question: str = Field(min_length=1, max_length=1000)
     paraphrase_question: str = Field(min_length=1, max_length=1000)
     answerable: bool
-    evidence: list[str] = Field(default_factory=list, max_length=10)
-    evidence_groups: list[EvalScoringGroupInput] | None = Field(
-        None, min_length=1, max_length=10
-    )
+    evidence: list[str] = Field(default_factory=list)
+    evidence_groups: list[EvalScoringGroupInput] | None = Field(None, min_length=1)
     reference_answer: str = Field(min_length=1, max_length=2000)
     split: str = Field("dev", pattern="^(dev|holdout)$")
 
@@ -305,18 +350,23 @@ class EvalSuiteInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(..., max_length=64)
     description: str | None = Field(None, max_length=500)
-    method: str = Field(..., pattern="^(retrieval|answer|dialogue)$")
+    method: str = Field("retrieval", pattern="^(retrieval|answer|dialogue)$")
     search_mode: str = Field("hybrid", pattern="^(hybrid|dense|keyword)$")
 
 
 # 专项的一道题，字段随评测方式不同：检索要问题和证据，回答再加参考答案，多轮对话是前面几轮提问 + 最后一问 + 参考答案。
+class EvalSuiteItemEnabledInput(BaseModel):
+    enabled: bool
+
+
 class EvalSuiteItemInput(BaseModel):
+    version: Literal[1, 2] = 1
+    answerable: bool = True
+    prelude: list[EvalPreludeTurn] = Field(default_factory=list, max_length=20)
     model_config = ConfigDict(extra="forbid")
     question: str = Field(..., max_length=500)
-    evidence: list[str] = Field(default_factory=list, max_length=10)
-    evidence_groups: list[EvalScoringGroupInput] | None = Field(
-        None, min_length=1, max_length=10
-    )
+    evidence: list[str] = Field(default_factory=list)
+    evidence_groups: list[EvalScoringGroupInput] | None = Field(None, min_length=1)
     reference_answer: str | None = Field(None, max_length=2000)
     turns: list[str] = Field(default_factory=list, max_length=20)
     # 题目类型（可选，自己起名，例如多跳、比较）：结果按类型统计通过数。
@@ -607,18 +657,43 @@ def check_session(store, session_id, owner):
 
 
 # 查询一个文档的处理阶段，所有结果都来自后端持久化状态。
-def read_document_steps(store, document_id):
+# 排序放在 Python 里：步骤的 result（JSON）可能很大，MySQL 排序时整行进 sort buffer 会报 1038。
+# results=False 给文档列表用：列表只要每一步的标题和状态（显示「解析中 · 生成向量」这类进度），
+# 以及「切分文本」这一步的分片数，不读其他步骤的 result。详细结果（例如图谱二次检查的报告）打开详情时再读。
+def read_document_steps(store, document_id, results=True):
+    if results:
+        query = select(document_steps)
+    else:
+        columns = [column for column in document_steps.c if column.name != "result"]
+        query = select(
+            *columns,
+            case(
+                (document_steps.c.stage == "chunking", document_steps.c.result),
+                else_=None,
+            ).label("result"),
+        )
     with store.engine.connect() as connection:
         rows = (
-            connection.execute(
-                select(document_steps)
-                .where(document_steps.c.document_id == document_id)
-                .order_by(document_steps.c.step_order)
-            )
+            connection.execute(query.where(document_steps.c.document_id == document_id))
             .mappings()
             .all()
         )
-    return [dict(row) for row in rows]
+        # 图谱检查的 AI 判断单独存表，拼回报告；处理流程只用来算进度和待处理数，不带 prompt 和模型原始输出。
+        if results:
+            rows = [
+                {
+                    **row,
+                    "result": step_judgments.attach(
+                        connection,
+                        document_id,
+                        row["step_id"],
+                        row["result"],
+                        trace=False,
+                    ),
+                }
+                for row in rows
+            ]
+    return sorted((dict(row) for row in rows), key=lambda row: row["step_order"])
 
 
 # 版本号来自旧数据时可能为空，统一视为第 1 版。
@@ -627,7 +702,8 @@ def version_of(row):
 
 
 # 把一个版本记录转换为接口返回结构，is_current 表示它是否是检索使用的当前版本。
-def version_view(store, row, current_id):
+# step_results=False 时步骤不带详细结果（文档列表用），见 read_document_steps。
+def version_view(store, row, current_id, step_results=True):
     return {
         "document_id": row["id"],
         "doc_key": row["doc_key"] or row["id"],
@@ -642,7 +718,7 @@ def version_view(store, row, current_id):
         "version_note": row["version_note"],
         "is_current": row["id"] == current_id,
         "document_metadata": row["document_metadata"] or {},
-        "steps": read_document_steps(store, row["id"]),
+        "steps": read_document_steps(store, row["id"], step_results),
     }
 
 
@@ -659,10 +735,6 @@ def create_app(store=None, models=None, jwt_secret=None):
         # 测试传入的存储不经过 Storage.__init__，这里再绑定一次系统参数的数据库。
         runtime_config.bind(app.state.store.engine)
         seed_users(app.state.store.engine)
-        # 评测题目存数据库：第一次启动时从 eval/seed 导入初始的调参题和专项。
-        seed_eval_data(app.state.store.engine)
-        # 已经初始化过的库：补加后来新增的初始专项（例如「Agent 区分题」），每个只加一次。
-        seed_late_suites(app.state.store.engine)
         # 评测结果也存数据库：第一次启动时把 eval/results 下的旧结果文件导入。
         import_result_files(app.state.store.engine)
         # 设置页保存过模型配置时优先使用它，必须在创建 Agent 之前应用，回答 Agent 才会绑定到这个模型。
@@ -684,8 +756,13 @@ def create_app(store=None, models=None, jwt_secret=None):
         # Agent 模式（app/agentic）：借用固定流程 Agent 的输入检查、读取记忆和步骤记录，中间换成 Agent 循环。
         app.state.agent_mode = AgentMode(app.state.agent)
         app.state.memory = Memory()
-        # 同一时间只允许一次界面发起的评测：评测会连续调用重排模型，并发跑多次既慢又会互相拖慢耗时统计。
+        # 同一时间只执行一次评测；新提交的任务进入串行队列，避免重排模型并发拖慢耗时统计。
         app.state.eval_lock = Lock()
+        app.state.eval_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="evaluation"
+        )
+        app.state.eval_pending = set()
+        app.state.eval_pending_lock = Lock()
         # 题目写入和 AI 起草必须串行，避免两个请求同时读取旧编号后生成重复 ID。
         app.state.eval_dataset_lock = Lock()
         app.state.eval_running = None
@@ -705,6 +782,7 @@ def create_app(store=None, models=None, jwt_secret=None):
         try:
             yield
         finally:
+            app.state.eval_executor.shutdown(wait=False, cancel_futures=True)
             app.state.agent.close()
             if store is None:
                 app.state.store.close()
@@ -1144,6 +1222,83 @@ def create_app(store=None, models=None, jwt_secret=None):
             raise HTTPException(422, str(error))
         return load_user(app.state.store.engine, username)
 
+    # 知识问答左侧的历史对话列表：按最后一次提问时间倒序，每个会话给标题（第一个问题）、消息条数、最后一条的路由。
+    # 以前前端从 /history 的最近 50 条问答里自己分组，老会话会整个从列表里消失。
+    @app.get("/sessions")
+    def list_sessions(limit: int = Query(100, ge=1, le=200), owner=Depends(identity)):
+        with app.state.store.engine.connect() as connection:
+            groups = (
+                connection.execute(
+                    select(
+                        runs.c.session_id,
+                        func.count().label("count"),
+                        func.max(runs.c.created).label("updated"),
+                    )
+                    .where(runs.c.owner == owner)
+                    .group_by(runs.c.session_id)
+                    .order_by(func.max(runs.c.created).desc())
+                    .limit(limit)
+                )
+                .mappings()
+                .all()
+            )
+            ids = [row["session_id"] for row in groups]
+            # 只取小列，不带 response JSON；标题取每个会话最早的问题，路由取最新一条。
+            rows = (
+                connection.execute(
+                    select(
+                        runs.c.id,
+                        runs.c.session_id,
+                        runs.c.question,
+                        runs.c.created,
+                        runs.c.route,
+                    ).where(runs.c.owner == owner, runs.c.session_id.in_(ids))
+                )
+                .mappings()
+                .all()
+                if ids
+                else []
+            )
+            first, last = {}, {}
+            for row in rows:
+                key = row["session_id"]
+                if key not in first or (row["created"], row["id"]) < (
+                    first[key]["created"],
+                    first[key]["id"],
+                ):
+                    first[key] = row
+                if key not in last or (row["created"], row["id"]) > (
+                    last[key]["created"],
+                    last[key]["id"],
+                ):
+                    last[key] = row
+            # 早期记录没有 route 列，回到 response 里读。
+            missing = [row["id"] for row in last.values() if row["route"] is None]
+            fallback = {}
+            if missing:
+                for row in connection.execute(
+                    select(runs.c.id, runs.c.response).where(runs.c.id.in_(missing))
+                ).mappings():
+                    fallback[row["id"]] = (row["response"] or {}).get("route")
+        sessions = []
+        for group in groups:
+            key = group["session_id"]
+            latest = last.get(key)
+            sessions.append(
+                {
+                    "session_id": key,
+                    "title": first[key]["question"] if key in first else "",
+                    "count": group["count"],
+                    "updated": group["updated"],
+                    "route": (
+                        latest["route"] or fallback.get(latest["id"])
+                        if latest
+                        else None
+                    ),
+                }
+            )
+        return {"sessions": sessions}
+
     # 创建服务器生成的会话 ID。
     @app.post("/sessions", status_code=201)
     def create_session(owner=Depends(identity)):
@@ -1152,12 +1307,54 @@ def create_app(store=None, models=None, jwt_secret=None):
             connection.execute(sessions.insert().values(id=session_id, owner=owner))
         return {"session_id": session_id}
 
-    # 返回当前用户会话的最近六轮问答。
+    # 分页读取一个会话的问答记录：默认最近 10 条，before 传当前已显示的最早一条的 id，取它之前的 10 条。
+    # 返回按时间正序；has_more 表示更早的还有没有，total 是这个会话一共多少条（前端用来给消息编号）。
     @app.get("/sessions/{session_id}")
-    def get_history(session_id: UUID, owner=Depends(identity)):
+    def get_history(
+        session_id: UUID,
+        limit: int = Query(10, ge=1, le=50),
+        before: str | None = Query(None, max_length=36),
+        owner=Depends(identity),
+    ):
         value = str(session_id)
-        check_session(app.state.store, value, owner)
-        return {"messages": app.state.memory.history(app.state.store, value, owner)}
+        store = app.state.store
+        check_session(store, value, owner)
+        scope = and_(runs.c.session_id == value, runs.c.owner == owner)
+        with store.engine.connect() as connection:
+            query = select(runs).where(scope)
+            if before:
+                anchor = connection.execute(
+                    select(runs.c.created).where(scope, runs.c.id == before)
+                ).scalar_one_or_none()
+                if anchor is None:
+                    raise HTTPException(404, "找不到这条问答记录")
+                query = query.where(
+                    or_(
+                        runs.c.created < anchor,
+                        and_(runs.c.created == anchor, runs.c.id < before),
+                    )
+                )
+            rows = (
+                connection.execute(
+                    query.order_by(runs.c.created.desc(), runs.c.id.desc()).limit(
+                        limit + 1
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            total = connection.execute(
+                select(func.count()).select_from(runs).where(scope)
+            ).scalar_one()
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        ratings = read_feedback(owner, [row["id"] for row in rows])
+        messages = []
+        for row in reversed(rows):
+            item = dict(row)
+            item["feedback"] = ratings.get(row["id"])
+            messages.append(item)
+        return {"messages": messages, "has_more": has_more, "total": total}
 
     # 删除自己的一个会话：问答记录（runs）、失败记录、反馈、Agent 执行记录、会话记忆外箱，以及 PostgreSQL 里的
     # Checkpointer 线程（会话记忆）全部删掉，不做软删除——对话内容是个人数据，用户删了就不该再留着。
@@ -1582,7 +1779,8 @@ def create_app(store=None, models=None, jwt_secret=None):
             for row in versions:
                 if row["id"] == current_id:
                     display = row
-            item = version_view(app.state.store, display, current_id)
+            # 列表不带各步骤的详细结果，打开详情（GET /documents/{id}）时再读。
+            item = version_view(app.state.store, display, current_id, False)
             item["version_count"] = len(versions)
             item.update(store.document_permission(doc_key))
             item["can_edit"] = display["owner"] == owner
@@ -1623,6 +1821,11 @@ def create_app(store=None, models=None, jwt_secret=None):
         version_note: str | None = Form(None),
         visibility: Literal["private", "shared", "public"] = Form("private"),
         groups: str = Form("", max_length=700),
+        # 图检索：on 开启（处理完自动建图），off 关闭；新版本不传时沿用上一版的设置。
+        graph: Literal["on", "off"] | None = Form(None),
+        graph_schema_id: str | None = Form(None, max_length=36),
+        graph_provider: str | None = Form(None, max_length=32),
+        graph_model: str | None = Form(None, max_length=128),
         owner=Depends(identity),
     ):
         filename = Path(file.filename or "document").name
@@ -1656,6 +1859,16 @@ def create_app(store=None, models=None, jwt_secret=None):
                 "status": "duplicate",
                 "filename": filename,
             }
+        # 先检查图检索的清单和模型，不对就直接拒绝，不写文件。
+        graph_settings = graph_routes.upload_settings(
+            app.state.store,
+            app.state.models,
+            graph,
+            graph_schema_id,
+            graph_provider,
+            graph_model,
+            doc_key,
+        )
         document_id = str(uuid4())
         upload_dir = Path(os.getenv("UPLOAD_DIR", "./uploads"))
         upload_dir.mkdir(parents=True, exist_ok=True)
@@ -1669,6 +1882,8 @@ def create_app(store=None, models=None, jwt_secret=None):
             "file_size_bytes": len(content),
             "sha256": content_sha256,
         }
+        if graph_settings:
+            document_metadata["graph"] = graph_settings
         try:
             create_version(
                 document_id,
@@ -1722,18 +1937,59 @@ def create_app(store=None, models=None, jwt_secret=None):
         page: int = Query(1, ge=1),
         page_size: int = Query(10, ge=1, le=100),
         source: str | None = Query(None, pattern="^(reused|computed)$"),
+        # 知识图谱：按抽取状态筛选，extracted 新抽取、reused 复用、failed 失败、empty 没抽出实体。
+        graph_status: str | None = Query(
+            None, pattern="^(extracted|reused|failed|empty|pending)$"
+        ),
         owner=Depends(identity),
     ):
         # 先按读权限找到文档，再以上传者身份读取分块：共享给自己的文档也能查看分块。
         row = app.state.store.readable_document(owner, str(document_id))
         if row is None:
             raise HTTPException(404, "文档不存在")
+        engine = app.state.store.engine
+        chunk_ids, graph_counts = graph_query.chunk_status_filter(
+            engine, str(document_id), graph_status
+        )
         result = app.state.store.list_document_chunks(
-            row["owner"], str(document_id), page, page_size, source
+            row["owner"],
+            str(document_id),
+            page,
+            page_size,
+            source,
+            chunk_ids=(chunk_ids or set()) if graph_status else None,
         )
         if result is None:
             raise HTTPException(404, "文档不存在")
+        # 每个分片的抽取情况（这个版本最近一次建图）；没建过图时为空。
+        graph_build_info, per_chunk = graph_query.chunk_graph(
+            engine, str(document_id), [chunk["chunk_id"] for chunk in result["chunks"]]
+        )
+        result["graph"] = graph_build_info
+        result["graph_counts"] = graph_counts
+        result["graph_status"] = graph_status
+        for chunk in result["chunks"]:
+            chunk["graph"] = per_chunk.get(chunk["chunk_id"])
         return result
+
+    # 分片原文：检索诊断里点「更多」时读这一片的正文。只给当前用户读得到的文档里的分片。
+    @app.get("/chunks/{chunk_id}")
+    def chunk_original(chunk_id: str, owner=Depends(identity)):
+        result = app.state.store.readable_chunk(owner, chunk_id)
+        if result is None:
+            raise HTTPException(404, "分片不存在或没有权限查看")
+        return result
+
+    # 一次读多片原文：来源列要显示当前这一页分片的原文预览，不用一片一个请求。
+    @app.get("/chunks")
+    def chunks_original(
+        ids: str = Query("", description="分片 id，多个用逗号分隔"),
+        owner=Depends(identity),
+    ):
+        chunk_ids = [item for item in (part.strip() for part in ids.split(",")) if item]
+        if not chunk_ids:
+            raise HTTPException(400, "没有指定分片")
+        return {"items": app.state.store.readable_chunks(owner, chunk_ids)}
 
     # 返回当前用户可读的文档版本状态，并附带同一文档的全部版本历史和可见范围。
     @app.get("/documents/{document_id}")
@@ -2256,12 +2512,14 @@ def create_app(store=None, models=None, jwt_secret=None):
         if count > 30:
             raise HTTPException(429, "每分钟最多 30 次问答")
         lock = store.cache.lock(
-            f"chat:{owner}:{session_id}", timeout=180, blocking_timeout=0
+            f"chat:{owner}:{session_id}", timeout=300, blocking_timeout=0
         )
 
         if not lock.acquire(blocking=False):
             raise HTTPException(409, "该会话正在回答，请稍后重试")
 
+        lock_started = time.monotonic()
+        preflight = {}
         try:
             # 获取锁后再次检查，避免并发重试重复生成。
             with store.engine.connect() as connection:
@@ -2279,12 +2537,34 @@ def create_app(store=None, models=None, jwt_secret=None):
                     raise HTTPException(409, "request_id 已用于其他请求")
                 return existing["response"]
             # 拿到会话锁、确认不是重放之后才开始记录进度（见 app/api/live.py）。
+            phase_started = time.monotonic()
             if on_start is not None:
                 on_start()
+            preflight["live_start_ms"] = round(
+                (time.monotonic() - phase_started) * 1000
+            )
+            phase_started = time.monotonic()
             # 先补写这个会话之前没写进会话记忆的问答（外箱里 pending 的任务），再读取记忆，两种模式都一样。
             catch_up_memory(owner, session_id, request)
+            preflight["memory_catch_up_ms"] = round(
+                (time.monotonic() - phase_started) * 1000
+            )
+            phase_started = time.monotonic()
             previous = app.state.memory.history(store, session_id, owner)
+            preflight["history_ms"] = round((time.monotonic() - phase_started) * 1000)
+            phase_started = time.monotonic()
             last_order = app.state.memory.last_order(store, owner, session_id, previous)
+            preflight["last_order_ms"] = round(
+                (time.monotonic() - phase_started) * 1000
+            )
+            phase_started = time.monotonic()
+            preflight["total_ms"] = round((time.monotonic() - lock_started) * 1000)
+            logger.info(
+                "chat_preflight trace_id=%s request_id=%s timings=%s",
+                request.state.trace_id,
+                request_id,
+                preflight,
+            )
             # 记下已完成的阶段，处理失败时据此判断失败发生在哪一步。
             completed_steps = []
             started = time.monotonic()
@@ -2355,9 +2635,29 @@ def create_app(store=None, models=None, jwt_secret=None):
             result.update(
                 {"request_id": request_id, "trace_id": request.state.trace_id}
             )
-            if not lock.owned():
-                # 会话锁已过期：结果不保存（runs、外箱、会话记忆都不写）。以前这里不留记录，现在记进 run_errors，方便排查。
-                error = HTTPException(409, "处理时间过长，请重试")
+            lock_owned = lock.owned()
+            # TTL 与归属为相邻采样，不记录锁令牌；诊断失败不影响保存判断。
+            try:
+                lock_ttl_ms = store.cache.pttl(lock.name)
+            except Exception:
+                lock_ttl_ms = None
+                logger.warning(
+                    "chat_lock_diagnostics_failed request_id=%s",
+                    request_id,
+                    exc_info=True,
+                )
+            logger.info(
+                "chat_lock_before_save trace_id=%s request_id=%s owned=%s ttl_ms=%s held_ms=%s workflow_ms=%s",
+                request.state.trace_id,
+                request_id,
+                lock_owned,
+                lock_ttl_ms,
+                round((time.monotonic() - lock_started) * 1000),
+                round((time.monotonic() - started) * 1000),
+            )
+            if not lock_owned:
+                # 会话锁已失效：结果不保存（runs、外箱、会话记忆都不写）。以前这里不留记录，现在记进 run_errors，方便排查。
+                error = HTTPException(409, "会话锁已失效，本次回答未保存，请重试")
                 record_run_error(
                     request,
                     owner,
@@ -2733,7 +3033,7 @@ def create_app(store=None, models=None, jwt_secret=None):
     def add_eval_dataset_item(body: EvalDatasetItemInput, owner=Depends(identity)):
         if body.type not in QUESTION_TYPES:
             raise HTTPException(422, f"未知题型：{body.type}")
-        if body.type == "多轮追问" and not body.history:
+        if body.type == "多轮追问" and not (body.history or body.prelude):
             raise HTTPException(422, "多轮追问题必须填写追问历史")
         with app.state.eval_dataset_lock:
             existing = load_dataset()
@@ -2750,6 +3050,23 @@ def create_app(store=None, models=None, jwt_secret=None):
             if problems:
                 raise HTTPException(422, problems)
             append_items([item])
+        return item
+
+    @app.put(
+        "/eval/dataset/items/{item_id}/prelude", dependencies=[Depends(require_admin)]
+    )
+    def edit_eval_dataset_prelude(item_id: str, body: EvalDatasetPreludeInput):
+        with app.state.eval_dataset_lock:
+            try:
+                item = update_prelude(
+                    item_id,
+                    [turn.model_dump() for turn in body.prelude],
+                    app.state.store.engine,
+                )
+            except ValueError as error:
+                raise HTTPException(422, str(error)) from error
+        if item is None:
+            raise HTTPException(404, "题目不存在")
         return item
 
     # 同义改写题在编辑器里一次填写两个问法，但落盘为两条独立题目，检索评测仍逐题执行。
@@ -2933,26 +3250,50 @@ def create_app(store=None, models=None, jwt_secret=None):
         return eval_params.options(app.state.store, app.state.models)
 
     # 界面上发起一次评测，在后台线程执行并立即返回编号，前端轮询进度。
+    def enqueue_evaluation(work, runs):
+        ids = {run["id"] for run in runs}
+        with app.state.eval_pending_lock:
+            app.state.eval_pending.update(ids)
+
+        def queued_work():
+            app.state.eval_lock.acquire()
+            try:
+                work()
+            finally:
+                with app.state.eval_pending_lock:
+                    app.state.eval_pending.difference_update(ids)
+
+        app.state.eval_executor.submit(queued_work)
+
     @app.post("/eval/runs", status_code=202, dependencies=[Depends(require_admin)])
     def create_eval_run(body: EvalRunInput, owner=Depends(identity)):
         launch = prepare_launch(body)
-        acquire_eval_lock()
+        freeze_error = None
         try:
-            run = create_launch_run(launch)
-        except Exception:
-            app.state.eval_lock.release()
-            raise
-        app.state.eval_running = run["id"]
+            freeze_launch_data([launch])
+        except Exception as error:
+            freeze_error = str(error)
+        run = create_launch_run(launch)
+        run["status"] = "queued"
+        save_run(run)
 
         def work():
             try:
+                app.state.eval_running = run["id"]
+                run["status"] = "running"
+                save_run(run)
+                if freeze_error:
+                    raise ValueError(freeze_error)
                 execute_launch(launch, run)
+            except Exception as error:
+                run.update(status="failed", error=f"冻结评测数据失败：{error}")
+                save_run(run)
             finally:
                 app.state.eval_running = None
                 app.state.eval_lock.release()
 
-        Thread(target=work, daemon=True).start()
-        return {"id": run["id"], "status": "running"}
+        enqueue_evaluation(work, [run])
+        return {"id": run["id"], "status": "queued"}
 
     # 按某条记录的配置重新跑一次（历史列表「选项」里的重跑），生成一条新记录，原记录不动。
     @app.post(
@@ -2982,6 +3323,15 @@ def create_app(store=None, models=None, jwt_secret=None):
     # 某一组失败不影响后面的组。
     @app.post("/eval/batches", status_code=202, dependencies=[Depends(require_admin)])
     def create_eval_batch(body: EvalBatchInput, owner=Depends(identity)):
+        if any(config.version == 2 for config in body.configs):
+            if not all(config.version == 2 for config in body.configs):
+                raise HTTPException(422, "不能混用新旧配置")
+            first = body.configs[0]
+            for config in body.configs[1:]:
+                config.split = first.split
+                config.suite_ids = list(first.suite_ids)
+                config.corpus_ids = list(first.corpus_ids)
+
         launches = []
         for index, config in enumerate(body.configs):
             try:
@@ -2989,44 +3339,167 @@ def create_app(store=None, models=None, jwt_secret=None):
             except HTTPException as error:
                 label = eval_batch.arm_label(config.label, index)
                 raise HTTPException(error.status_code, f"{label}：{error.detail}")
-        acquire_eval_lock()
         batch_id = eval_batch.new_batch_id()
         runs = []
-        try:
-            for index, launch in enumerate(launches):
-                runs.append(
-                    create_launch_run(
-                        launch,
-                        {
-                            "id": batch_id,
-                            "name": body.name.strip(),
-                            "index": index,
-                            "size": len(launches),
-                            "label": eval_batch.arm_label(
-                                body.configs[index].label, index
-                            ),
-                        },
-                    )
+        for index, launch in enumerate(launches):
+            runs.append(
+                create_launch_run(
+                    launch,
+                    {
+                        "id": batch_id,
+                        "name": body.name.strip(),
+                        "index": index,
+                        "size": len(launches),
+                        "label": eval_batch.arm_label(body.configs[index].label, index),
+                    },
                 )
-        except Exception:
-            app.state.eval_lock.release()
-            raise
-        app.state.eval_batch = batch_id
+            )
+        freeze_error = None
+        try:
+            freeze_launch_data(launches)
+        except Exception as error:
+            freeze_error = str(error)
 
         def work():
             try:
+                if freeze_error:
+                    raise ValueError(freeze_error)
+                app.state.eval_batch = batch_id
                 for launch, run in zip(launches, runs):
                     app.state.eval_running = run["id"]
                     run["status"] = "running"
                     save_run(run)
                     execute_launch(launch, run)
+            except Exception as error:
+                for run in runs:
+                    if run["status"] == "queued":
+                        run.update(status="failed", error=f"冻结评测数据失败：{error}")
+                        save_run(run)
             finally:
                 app.state.eval_running = None
                 app.state.eval_batch = None
                 app.state.eval_lock.release()
 
-        Thread(target=work, daemon=True).start()
+        enqueue_evaluation(work, runs)
         return {"id": batch_id, "runs": [run["id"] for run in runs]}
+
+    # 按某个批次报告的配置整批重跑一次（历史列表批次行的「重跑」）：照原来每组配置重新发起一份新报告，
+    # 原报告不动。新报告沿用原来的批次名和每组的名字，方便两份报告对照。
+    @app.post(
+        "/eval/batches/{batch_id}/rerun",
+        status_code=202,
+        dependencies=[Depends(require_admin)],
+    )
+    def rerun_eval_batch(batch_id: str, owner=Depends(identity)):
+        try:
+            eval_batch.check_batch_id(batch_id)
+        except ValueError:
+            raise HTTPException(404, "批次不存在")
+        briefs = [
+            run for run in list_runs() if (run.get("batch") or {}).get("id") == batch_id
+        ]
+        if not briefs:
+            raise HTTPException(404, "批次不存在")
+        briefs.sort(key=lambda run: (run.get("batch") or {}).get("index", 0))
+        entries = eval_corpus.list_entries(app.state.store.engine)
+        configs = []
+        for brief in briefs:
+            source = load_run(brief["id"]) or brief
+            try:
+                body = EvalRunInput(**eval_batch.rerun_body(source, entries))
+            except ValueError as error:
+                raise HTTPException(422, str(error))
+            # 组名沿用原来那份（没起名的还是「配置 A、B…」）。
+            body.label = (source.get("batch") or {}).get("label")
+            configs.append(body)
+        name = (briefs[0].get("batch") or {}).get("name") or ""
+        return create_eval_batch(EvalBatchInput(name=name, configs=configs), owner)
+
+    @app.post(
+        "/eval/batches/{batch_id}/arms/{run_id}/retry",
+        status_code=202,
+        dependencies=[Depends(require_admin)],
+    )
+    def retry_eval_arm(batch_id: str, run_id: str):
+        import copy
+
+        try:
+            source = load_run(run_id)
+        except ValueError:
+            raise HTTPException(404, "评测不存在")
+        if not source or (source.get("batch") or {}).get("id") != batch_id:
+            raise HTTPException(404, "配置不属于这份报告")
+        if current_status(source) not in ("failed", "interrupted"):
+            raise HTTPException(409, "只能重试失败或中断的配置")
+        try:
+            body = EvalRunInput(
+                **eval_batch.rerun_body(
+                    source, eval_corpus.list_entries(app.state.store.engine)
+                )
+            )
+            effective = source.get("effective") or {}
+            if source.get("config", {}).get("version") == 2:
+                body.params = {
+                    **body.params,
+                    **{
+                        key: {
+                            field: value
+                            for field, value in effective[key].items()
+                            if field in ("provider", "model")
+                        }
+                        for key in ("llm", "judge")
+                        if effective.get(key) and app.state.models.mode == "openai"
+                    },
+                }
+            launch = prepare_launch(body, source.get("question_snapshot"))
+            old_corpus = {
+                item.get("title"): item.get("sha256")
+                for item in source.get("config", {}).get("corpus") or []
+            }
+            if any(
+                old_corpus.get(item["title"])
+                and old_corpus[item["title"]] != item.get("sha256")
+                for item in launch["corpus"]
+            ):
+                raise ValueError("语料内容已改变，请创建新的评测报告")
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        if source.get("question_snapshot") is not None:
+            launch["questions"] = copy.deepcopy(source["question_snapshot"])
+        if source.get("frozen"):
+            launch["prepared"].update(copy.deepcopy(source["frozen"]))
+        attempt = {key: value for key, value in source.items() if key != "attempts"}
+        source["attempts"] = [*(source.get("attempts") or []), attempt]
+        source.update(
+            status="queued",
+            error=None,
+            finished=None,
+            summary=None,
+            questions=[],
+            by_type={},
+            progress={"done": 0, "total": 0},
+        )
+        save_run(source)
+
+        def work():
+            try:
+                app.state.eval_running = run_id
+                app.state.eval_batch = batch_id
+                source["status"] = "running"
+                save_run(source)
+                if body.version == 2 and launch["prepared"].get("data_scope") is None:
+                    freeze_launch_data([launch])
+                execute_launch(launch, source)
+            except Exception as error:
+                source.update(status="failed", error=f"冻结评测数据失败：{error}")
+                save_run(source)
+            finally:
+                app.state.eval_running = None
+                app.state.eval_batch = None
+                app.state.eval_lock.release()
+
+        enqueue_evaluation(work, [source])
+        return {"id": batch_id, "run_id": run_id}
 
     # 批次报告：各组的状态、配置差异和完整结果，前端用单次评测同一套报告组件一列一列并排。
     @app.get("/eval/batches/{batch_id}", dependencies=[Depends(require_admin)])
@@ -3050,11 +3523,92 @@ def create_app(store=None, models=None, jwt_secret=None):
             runs.append(normalize_report(run) if run["status"] == "completed" else run)
         return eval_batch.report(batch_id, runs)
 
+    @app.post("/eval/prelude/answer", dependencies=[Depends(require_admin)])
+    def generate_eval_prelude(body: EvalPreludeAnswerInput):
+        from uuid import uuid4
+        from ..evaluation.flow import rewrite_item
+        from ..evaluation.generation import answer_question
+        from ..evaluation.retrieval import import_corpus
+        from ..tools.search import DocumentSearchTool
+
+        corpus = pick_corpus(body.corpus_ids)
+        item = {
+            "id": str(uuid4()),
+            "question": body.question,
+            "prelude": [turn.model_dump() for turn in body.prelude],
+        }
+        acquire_eval_lock()
+        responder = None
+        try:
+            responder = ResponseAgent(app.state.models, use_postgres=False)
+            with limit_titles(EVAL_OWNER, [entry["title"] for entry in corpus]):
+                import_corpus(app.state.store, app.state.models)
+                rewrite = rewrite_item(app.state.store, app.state.models, item)
+                tool = DocumentSearchTool()
+                retrieved = tool.execute(
+                    app.state.store,
+                    app.state.models,
+                    EVAL_OWNER,
+                    rewrite["queries"],
+                    rewrite["standalone_query"],
+                )
+                checked = tool.check_sufficiency(
+                    app.state.store,
+                    app.state.models,
+                    EVAL_OWNER,
+                    rewrite["queries"],
+                    rewrite["standalone_query"],
+                    retrieved,
+                )
+                sources = checked["sources"]
+                relations = checked.get("relations") or []
+                answer = answer_question(
+                    app.state.models,
+                    responder,
+                    "prelude-" + item["id"],
+                    item,
+                    rewrite["standalone_query"],
+                    sources,
+                    {"verdict": checked["verdict"], "missing": checked["missing"]},
+                    relations,
+                )
+                return {"answer": answer, "sources": sources, "relations": relations}
+        finally:
+            if responder is not None:
+                responder.close()
+            app.state.eval_lock.release()
+
     # 发起前的全部检查：题目、模式、模型、语料、参数都不对时直接拒绝，不留下失败的记录。返回开跑需要的全部内容。
-    def prepare_launch(body):
+    def prepare_launch(body, question_snapshot=None):
+        if body.version == 2:
+            if body.kind not in ("retrieval", "generation"):
+                raise HTTPException(422, "统一配置只支持检索评测和生成评测")
+            if body.kind == "generation" and body.mode == "agent":
+                raise HTTPException(422, "生成评测不支持 Agent")
+            if body.suites or body.compare_memory:
+                raise HTTPException(422, "请将不同方案保存为独立配置")
+            if len(set(body.methods)) != len(body.methods):
+                raise HTTPException(422, "检索方式不能重复")
+            body.modes = [body.mode]
+
         for suite in body.suites:
             if suite not in SUITES:
                 raise HTTPException(422, f"未知实验组：{suite}")
+        if body.version == 2 and question_snapshot is None:
+            try:
+                sources = (
+                    special_suites.load_for_run(app.state.store.engine, body.suite_ids)
+                    if body.suite_ids
+                    else []
+                )
+                question_snapshot = eval_configuration.validate_questions(
+                    eval_configuration.questions(load_dataset(), body.split, sources),
+                    body.kind,
+                )
+                if sources:
+                    body.split = "all"
+            except ValueError as error:
+                raise HTTPException(422, str(error)) from error
         special = None
         if body.kind == "special":
             # 专项评测：每个专项按自己的评测方式跑；回答和多轮对话要生成和评审，需要真实大模型。
@@ -3117,9 +3671,24 @@ def create_app(store=None, models=None, jwt_secret=None):
                     422, "生成评测只运行基线，消融实验和参数对比请切换为检索评测"
                 )
             # 启动前检查审核后的题目，避免所有题目都在待审核时创建一个必然失败的空评测。
-            if not select_split(load_dataset(), body.split):
+            if question_snapshot is None and not select_split(
+                load_dataset(), body.split
+            ):
                 raise HTTPException(422, "当前题目范围没有已审核题目，请先审核评测题")
         corpus = pick_corpus(body.corpus_ids)
+        if body.version == 2 and "graph" in body.methods:
+            selected_ids = {entry["id"] for entry in corpus}
+            missing_graph = [
+                entry["title"]
+                for entry in eval_corpus.list_entries(app.state.store.engine)
+                if entry["id"] in selected_ids and not entry.get("graph_ready")
+            ]
+            if missing_graph:
+                raise HTTPException(
+                    422,
+                    f"以下文档没有生效图谱，请先建图或取消图检索：{'、'.join(missing_graph)}",
+                )
+
         # 只对这次评测生效的参数，启动前先校验：参数范围、模型配置、提示词版本不对时直接拒绝，不留下失败的记录。
         try:
             run_params, prepared = eval_params.prepare(
@@ -3127,8 +3696,12 @@ def create_app(store=None, models=None, jwt_secret=None):
             )
         except ValueError as error:
             raise HTTPException(422, str(error))
+        if body.version == 2:
+            prepared = eval_params.freeze(app.state.store, app.state.models, prepared)
+            prepared["methods"] = body.methods
         return {
             "body": body,
+            "questions": question_snapshot,
             "special": special,
             "needs_responder": needs_responder,
             "corpus": corpus,
@@ -3143,6 +3716,43 @@ def create_app(store=None, models=None, jwt_secret=None):
             raise HTTPException(409, "已有评测正在运行，请等待完成")
 
     # 建评测记录：单独发起的直接是运行中；批次里的先是排队中，轮到它时才改成运行中。
+    def freeze_launch_data(launches):
+        from ..evaluation.retrieval import import_corpus
+        from ..graph.retrieve import scope_versions
+        import copy
+
+        first = launches[0]
+        if first["body"].version != 2:
+            return
+        from ..evaluation import document_refs
+
+        chosen = {item["id"] for item in first["corpus"]}
+        documents = [
+            item
+            for item in document_refs.entries(app.state.store.engine)
+            if item["id"] in chosen
+        ]
+        if not documents or any(item["missing"] for item in documents):
+            raise ValueError("所选知识库文档已删除或尚未处理完成，请重新选择")
+        scope = {
+            "documents": documents,
+            "versions": {item["document_id"]: item["version"] for item in documents},
+        }
+        versions = [
+            item["version_id"] for item in scope_versions(app.state.store.engine, scope)
+        ]
+        if any("graph" in launch["body"].methods for launch in launches):
+            missing = [item["title"] for item in documents if not item["graph_ready"]]
+            if missing:
+                raise ValueError(
+                    f"以下文档没有生效图谱，请先建图或取消图检索：{'、'.join(missing)}"
+                )
+        for launch in launches:
+            launch["prepared"].update(
+                data_scope=copy.deepcopy(scope), graph_versions=list(versions)
+            )
+            launch["questions"] = copy.deepcopy(first["questions"])
+
     def create_launch_run(launch, batch=None):
         body = launch["body"]
         run = start_run(
@@ -3154,6 +3764,42 @@ def create_app(store=None, models=None, jwt_secret=None):
             launch["corpus"],
             launch["params"],
         )
+        if body.version == 2:
+            run["config"].update(
+                version=2,
+                methods=body.methods,
+                modes=[body.mode],
+                suite_ids=body.suite_ids,
+                # 题集名字跟着记录存下来：历史记录的「范围」显示它，题集以后改名或删掉也还是当时的名字。
+                suite_names=list(
+                    dict.fromkeys(
+                        item["source_suite_name"]
+                        for item in launch["questions"] or []
+                        if item.get("source_suite_name")
+                    )
+                ),
+            )
+            run["question_snapshot"] = launch["questions"]
+            with eval_params.applied(app.state.models, launch["prepared"]) as (
+                run_models,
+                judge_models,
+            ):
+                run["effective"] = eval_params.effective(run_models, judge_models)
+                if body.version == 2:
+                    run["frozen"] = {
+                        key: value
+                        for key, value in launch["prepared"].items()
+                        if key
+                        in (
+                            "settings",
+                            "prompts",
+                            "methods",
+                            "data_scope",
+                            "graph_versions",
+                        )
+                    }
+                    run["question_snapshot"] = launch["questions"]
+            save_run(run)
         if batch is not None:
             run["batch"] = batch
             run["status"] = "queued"
@@ -3172,6 +3818,20 @@ def create_app(store=None, models=None, jwt_secret=None):
                 judge_models,
             ):
                 run["effective"] = eval_params.effective(run_models, judge_models)
+                if body.version == 2:
+                    run["frozen"] = {
+                        key: value
+                        for key, value in launch["prepared"].items()
+                        if key
+                        in (
+                            "settings",
+                            "prompts",
+                            "methods",
+                            "data_scope",
+                            "graph_versions",
+                        )
+                    }
+                    run["question_snapshot"] = launch["questions"]
                 if launch["needs_responder"]:
                     # 生成评测只验证回答质量，不应把评测题写进线上会话的持久化记忆，回答 Agent 用进程内记忆。
                     responder = ResponseAgent(run_models, use_postgres=False)
@@ -3180,7 +3840,9 @@ def create_app(store=None, models=None, jwt_secret=None):
                     execute_run(
                         app.state.store,
                         run_models,
-                        [] if launch["special"] else load_dataset(),
+                        launch["questions"]
+                        if launch.get("questions") is not None
+                        else ([] if launch["special"] else load_dataset()),
                         run,
                         generate=body.kind == "generation",
                         responder=responder,
@@ -3201,10 +3863,7 @@ def create_app(store=None, models=None, jwt_secret=None):
     def current_status(run):
         if run.get("status") == "running" and run["id"] != app.state.eval_running:
             return "interrupted"
-        if (
-            run.get("status") == "queued"
-            and (run.get("batch") or {}).get("id") != app.state.eval_batch
-        ):
+        if run.get("status") == "queued" and run["id"] not in app.state.eval_pending:
             return "interrupted"
         return run.get("status")
 
@@ -3219,7 +3878,7 @@ def create_app(store=None, models=None, jwt_secret=None):
             entries = [by_id[entry_id] for entry_id in dict.fromkeys(corpus_ids)]
         if not entries:
             raise HTTPException(
-                422, "评测语料库是空的：请先在「评测语料库」页签上传语料"
+                422, "评测语料库是空的：请先在「评测语料库」选择知识库文档"
             )
         missing = [entry["title"] for entry in entries if entry["missing"]]
         if missing:
@@ -3231,50 +3890,160 @@ def create_app(store=None, models=None, jwt_secret=None):
 
     # 评测语料库：评测检索的文档。上传 Markdown / 文本，评测开跑时勾选用哪几份（见 app/evaluation/corpus.py）。
     # 每份带上在评测账号里的导入情况：已导入几个分片、内容改过还没重新导入、还没导入（下次评测开跑时导入）。
+    @app.get("/eval/config-templates", dependencies=[Depends(require_admin)])
+    def list_eval_config_templates():
+        from ..mysql.store import eval_config_templates, eval_suites
+
+        with app.state.store.engine.connect() as connection:
+            rows = [
+                dict(row)
+                for row in connection.execute(
+                    select(eval_config_templates).order_by(
+                        eval_config_templates.c.updated.desc()
+                    )
+                ).mappings()
+            ]
+            suites = dict(
+                connection.execute(select(eval_suites.c.id, eval_suites.c.name)).all()
+            )
+        corpus = {
+            entry["id"]: entry
+            for entry in eval_corpus.list_entries(app.state.store.engine)
+        }
+        for row in rows:
+            config = row["config"]
+            row["suite_names"] = [
+                suites.get(key, "已删除的题集") for key in config.get("suite_ids", [])
+            ]
+            row["corpus_names"] = [
+                corpus.get(key, {}).get("title", "已移除的语料")
+                for key in config.get("corpus_ids", [])
+            ]
+            issues = []
+            if any(key not in suites for key in config.get("suite_ids", [])):
+                issues.append("题集已删除")
+            if any(
+                key not in corpus or corpus[key].get("missing")
+                for key in config.get("corpus_ids", [])
+            ):
+                issues.append("语料已移除或不可用")
+            try:
+                eval_params.prepare(
+                    app.state.store, app.state.models, config.get("params")
+                )
+            except ValueError as error:
+                issues.append(str(error))
+            row["issues"] = issues
+        return {"items": rows}
+
+    def persist_eval_template(body, admin, template_id=None):
+        from ..mysql.store import eval_config_templates
+
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(422, "请输入配置模板名称")
+        if body.config.kind == "special" or (
+            body.config.kind == "generation" and body.config.mode == "agent"
+        ):
+            raise HTTPException(422, "不支持此评测配置组合")
+        try:
+            cleaned, _ = eval_params.prepare(
+                app.state.store, app.state.models, body.config.params
+            )
+        except ValueError as error:
+            raise HTTPException(422, str(error))
+        now = datetime.now(timezone.utc).isoformat()
+        config = body.config.model_dump()
+        config["params"] = cleaned
+        config["version"] = 2
+        if len(set(body.config.methods)) != len(body.config.methods):
+            raise HTTPException(422, "检索方式不能重复")
+        values = {"name": name, "config": config, "updated": now}
+        with app.state.store.engine.begin() as connection:
+            if template_id:
+                if not connection.execute(
+                    select(eval_config_templates.c.id).where(
+                        eval_config_templates.c.id == template_id
+                    )
+                ).first():
+                    raise HTTPException(404, "配置模板不存在")
+                connection.execute(
+                    eval_config_templates.update()
+                    .where(eval_config_templates.c.id == template_id)
+                    .values(**values)
+                )
+            else:
+                template_id = str(uuid4())
+                connection.execute(
+                    eval_config_templates.insert().values(
+                        id=template_id,
+                        created_by=admin["username"],
+                        created=now,
+                        **values,
+                    )
+                )
+        return {"id": template_id}
+
+    @app.post("/eval/config-templates", status_code=201)
+    def create_eval_config_template(
+        body: EvalConfigTemplateInput, admin=Depends(require_admin)
+    ):
+        return persist_eval_template(body, admin)
+
+    @app.put("/eval/config-templates/{template_id}")
+    def update_eval_config_template(
+        template_id: str, body: EvalConfigTemplateInput, admin=Depends(require_admin)
+    ):
+        return persist_eval_template(body, admin, template_id)
+
+    @app.delete(
+        "/eval/config-templates/{template_id}", dependencies=[Depends(require_admin)]
+    )
+    def remove_eval_config_template(template_id: str):
+        from ..mysql.store import eval_config_templates
+
+        with app.state.store.engine.begin() as connection:
+            count = connection.execute(
+                eval_config_templates.delete().where(
+                    eval_config_templates.c.id == template_id
+                )
+            ).rowcount
+            if not count:
+                raise HTTPException(404, "配置模板不存在")
+        return {"deleted": True}
+
     @app.get("/eval/corpus", dependencies=[Depends(require_admin)])
     def eval_corpus_list():
-        engine = app.state.store.engine
-        imported = eval_corpus.imported_versions(engine)
-        items = []
-        for entry in eval_corpus.list_entries(engine):
-            state = imported.get(entry["title"])
-            chunks_count = None
-            if state is None:
-                status = "not_imported"
-            elif state["sha256"] != entry["sha256"]:
-                status = "stale"
-            elif str(state["status"] or "").startswith("ready:"):
-                status = "imported"
-                chunks_count = int(str(state["status"]).split(":", 1)[1] or 0)
-            else:
-                status = "not_imported"
-            if app.state.corpus_importing == entry["id"]:
-                status = "importing"
-            items.append(
-                {
-                    key: entry[key]
-                    for key in (
-                        "id",
-                        "title",
-                        "filename",
-                        "sha256",
-                        "char_count",
-                        "created_by",
-                        "created",
-                        "missing",
-                    )
-                }
-                | {
-                    "status": status,
-                    "chunks": chunks_count,
-                    "import_error": app.state.corpus_import_errors.get(entry["id"]),
-                }
-            )
+        from ..evaluation import document_refs
+
         return {
-            "items": items,
-            "suffixes": sorted(eval_corpus.SUFFIXES),
-            "max_bytes": eval_corpus.MAX_BYTES,
+            "items": document_refs.entries(app.state.store.engine),
+            "suffixes": [],
+            "max_bytes": 0,
         }
+
+    @app.get("/eval/document-candidates", dependencies=[Depends(require_admin)])
+    def eval_document_candidates():
+        from ..evaluation import document_refs
+
+        return {"items": document_refs.candidates(app.state.store.engine)}
+
+    @app.put("/eval/document-references", dependencies=[Depends(require_admin)])
+    def eval_document_references(body: dict):
+        if app.state.eval_running or app.state.eval_batch:
+            raise HTTPException(409, "有评测正在运行，完成后再调整语料列表")
+        from ..evaluation import document_refs
+
+        ids = body.get("document_ids")
+        if not isinstance(ids, list) or not all(isinstance(key, str) for key in ids):
+            raise HTTPException(422, "请选择文档")
+        available = {
+            item["id"] for item in document_refs.candidates(app.state.store.engine)
+        }
+        if any(key not in available for key in ids):
+            raise HTTPException(422, "文档不存在，请刷新后重新选择")
+        document_refs.save(app.state.store.engine, ids)
+        return {"saved": True}
 
     @app.get("/eval/corpus/{entry_id}", dependencies=[Depends(require_admin)])
     def eval_corpus_get(entry_id: str):
@@ -3303,17 +4072,14 @@ def create_app(store=None, models=None, jwt_secret=None):
         entry = eval_corpus.get_entry(engine, entry_id)
         if entry is None:
             raise HTTPException(404, "语料不存在")
-        imported = eval_corpus.imported_versions(engine).get(entry["title"])
-        result = (
-            None
-            if imported is None
-            else app.state.store.list_document_chunks(
-                EVAL_OWNER, imported["document_id"], page, page_size
-            )
+        if entry.get("missing"):
+            raise HTTPException(404, "文档不可用")
+        result = app.state.store.list_document_chunks(
+            entry["owner"], entry["document_id"], page, page_size
         )
         if result is None:
-            raise HTTPException(404, "还没导入：点「导入」，或者跑一次评测时会自动导入")
-        result["stale"] = imported["sha256"] != entry["sha256"]
+            raise HTTPException(404, "文档分片不存在")
+        result["stale"] = False
         return result
 
     # 现在就把这份语料导入评测账号（切分、算向量、生成上下文说明），不用等下次评测。后台跑，和评测共用 eval_lock。
@@ -3323,88 +4089,31 @@ def create_app(store=None, models=None, jwt_secret=None):
         dependencies=[Depends(require_admin)],
     )
     def eval_corpus_import(entry_id: str):
-        entry = eval_corpus.get_entry(app.state.store.engine, entry_id)
-        if entry is None:
-            raise HTTPException(404, "语料不存在")
-        if entry["missing"]:
-            raise HTTPException(422, f"语料《{entry['title']}》的文件不存在")
-        if not app.state.eval_lock.acquire(blocking=False):
-            raise HTTPException(409, "有评测或导入正在进行，请等它完成")
-        app.state.corpus_importing = entry_id
-        app.state.corpus_import_errors.pop(entry_id, None)
+        raise HTTPException(410, "评测语料已改为引用知识库文档，请在评测语料页选择文档")
 
-        def work():
-            try:
-                with limit_titles(EVAL_OWNER, [entry["title"]]):
-                    import_corpus(app.state.store, app.state.models)
-            except Exception as error:
-                logger.exception("eval_corpus_import_failed entry_id=%s", entry_id)
-                app.state.corpus_import_errors[entry_id] = (
-                    f"{type(error).__name__}: {error}"[:300]
-                )
-            finally:
-                app.state.corpus_importing = None
-                app.state.eval_lock.release()
-
-        Thread(target=work, daemon=True).start()
-        return {"id": entry_id, "status": "importing"}
-
-    # 一次可以上传几份；每份单独检查，收下的和没收的（原因）分别返回。
     @app.post("/eval/corpus", status_code=201)
     def eval_corpus_upload(
         files: list[UploadFile] = File(...), admin=Depends(require_admin)
     ):
-        if len(files) > 20:
-            raise HTTPException(422, "一次最多上传 20 个文件")
-        added = []
-        rejected = []
-        for file in files:
-            data = file.file.read(eval_corpus.MAX_BYTES + 1)
-            try:
-                entry = eval_corpus.add_entry(
-                    app.state.store.engine, file.filename, data, admin["username"]
-                )
-            except eval_corpus.CorpusError as error:
-                rejected.append(
-                    {"filename": Path(file.filename or "").name, "reason": str(error)}
-                )
-                continue
-            added.append(
-                {key: entry[key] for key in ("id", "title", "filename", "char_count")}
-            )
-        return {"added": added, "rejected": rejected}
+        raise HTTPException(410, "评测语料已改为引用知识库文档，请在评测语料页选择文档")
 
     @app.put("/eval/corpus/{entry_id}", dependencies=[Depends(require_admin)])
     def eval_corpus_replace(entry_id: str, files: list[UploadFile] = File(...)):
-        if len(files) != 1:
-            raise HTTPException(422, "每次只能更新一份语料")
-        if not app.state.eval_lock.acquire(blocking=False):
-            raise HTTPException(409, "有评测或导入正在进行，请等它完成")
-        try:
-            entry = eval_corpus.replace_entry(
-                app.state.store.engine,
-                entry_id,
-                files[0].file.read(eval_corpus.MAX_BYTES + 1),
-            )
-            if entry is None:
-                raise HTTPException(404, "语料不存在")
-            return {
-                key: entry[key]
-                for key in ("id", "title", "filename", "sha256", "char_count")
-            }
-        except eval_corpus.CorpusError as error:
-            raise HTTPException(422, str(error))
-        finally:
-            app.state.eval_lock.release()
+        raise HTTPException(410, "评测语料已改为引用知识库文档，请在评测语料页选择文档")
 
     # 删除语料：评测正在跑时不能删（它可能正在检索这份）。评测账号里导入过的这份文档一起删掉。
     @app.delete("/eval/corpus/{entry_id}", dependencies=[Depends(require_admin)])
     def eval_corpus_delete(entry_id: str):
         if app.state.eval_running or app.state.corpus_importing:
             raise HTTPException(409, "有评测正在运行，等它跑完再删除语料")
-        entry = eval_corpus.delete_entry(app.state.store, entry_id)
-        if entry is None:
+        from ..evaluation import document_refs
+
+        ids = document_refs.saved(app.state.store.engine)
+        if entry_id not in ids:
             raise HTTPException(404, "语料不存在")
+        document_refs.save(
+            app.state.store.engine, [key for key in ids if key != entry_id]
+        )
         return {"id": entry_id, "deleted": True}
 
     # 专项评测集：管理员自建，每个专项针对一个方向，题目在评测语料上跑，不计入调参分数。
@@ -3483,6 +4192,20 @@ def create_app(store=None, models=None, jwt_secret=None):
             )
         except ValueError as error:
             raise HTTPException(422, str(error))
+        if result is None:
+            raise HTTPException(404, "题目不存在")
+        return result
+
+    @app.patch(
+        "/eval/suites/{suite_id}/items/{item_id}/enabled",
+        dependencies=[Depends(require_admin)],
+    )
+    def eval_suite_item_enabled(
+        suite_id: str, item_id: str, body: EvalSuiteItemEnabledInput
+    ):
+        result = special_suites.set_item_enabled(
+            app.state.store.engine, suite_id, item_id, body.enabled
+        )
         if result is None:
             raise HTTPException(404, "题目不存在")
         return result
@@ -4029,6 +4752,9 @@ def create_app(store=None, models=None, jwt_secret=None):
         app.state.inspection_thread = thread
         thread.start()
         return {"id": run_id, "status": "running"}
+
+    # 知识图谱的接口（app/api/graph_routes.py）。
+    app.include_router(graph_routes.build_router(current_user, identity, require_admin))
 
     return app
 

@@ -1,0 +1,43 @@
+.relation-evidence-cards {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0;
+}
+.relation-evidence-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dbe3ed;
+  border-radius: 4px;
+}
+label.relation-evidence-card {
+  cursor: pointer;
+}
+.relation-evidence-card.is-selected {
+  border-color: #1677ff;
+  background: #f0f7ff;
+}
+.relation-evidence-card strong {
+  color: #245a9b;
+  font-weight: 500;
+}
+.relation-evidence-description,
+.relation-evidence-quote {
+  display: block;
+  margin-top: 6px;
+  white-space: pre-wrap;
+}
+.relation-evidence-quote {
+  color: #8a6914;
+}
+
+.relation-evidence-list {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+.sp-chunk-filters button[aria-pressed="true"] {
+  color: #1677ff;
+  border-color: #1677ff;
+  background: #e6f4ff;
+}

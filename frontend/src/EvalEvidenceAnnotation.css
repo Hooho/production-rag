@@ -1,0 +1,50 @@
+.eval-evidence-annotation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px dashed var(--ev-border, #d8e2ec);
+  font-size: 12px;
+}
+
+.eval-evidence-annotation .tag {
+  font-size: 12px;
+  white-space: normal;
+  text-align: left;
+}
+
+/* 明细弹窗的 14px 正文规则不能放大证据标注及其内部文字。 */
+.ag-delivery-dialog.grt-dialog .diag .eval-evidence-annotation,
+.ag-delivery-dialog.grt-dialog .diag .eval-evidence-annotation :not(button) {
+  font-size: 12px;
+}
+
+.eval-evidence-unmatched {
+  color: var(--ev-muted, #71849a);
+}
+
+.eval-evidence-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.eval-evidence-filter > button[aria-pressed="true"] {
+  color: #1677ff;
+  border-color: #1677ff;
+  background: #e6f4ff;
+}
+
+/* 非证据标记与计分证据标签采用相同紧凑形式。 */
+.ag-delivery-dialog.grt-dialog
+  .diag
+  .eval-evidence-annotation
+  .tag.eval-evidence-unmatched,
+.eval-evidence-annotation .tag.eval-evidence-unmatched {
+  font-size: 10px;
+  border-radius: 4px;
+  padding: 0 5px;
+}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ConfirmPopover } from "./ConfirmPopover";
 import { Tag } from "./Tag";
 import {
   createGroup,
@@ -1096,12 +1097,6 @@ function GroupSettings({ onToast }: { onToast: ShowToast }) {
 
   // 删除前明确告知关联数据会被清理，避免管理员误删仍在使用的部门。
   async function removeGroup(group: Group) {
-    if (
-      !window.confirm(
-        `确定删除部门“${group.name}”吗？删除后会清理用户归属、文档共享和数据权限中的关联。`,
-      )
-    )
-      return;
     setBusy(true);
     try {
       await deleteGroup(group.id);
@@ -1159,14 +1154,20 @@ function GroupSettings({ onToast }: { onToast: ShowToast }) {
                   >
                     编辑
                   </button>
-                  <button
-                    type="button"
-                    className="settings-text-button danger"
-                    disabled={busy}
-                    onClick={() => void removeGroup(group)}
+                  <ConfirmPopover
+                    danger
+                    message={`删除部门“${group.name}”？删除后会清理用户归属、文档共享和数据权限中的关联。`}
+                    confirmText="删除"
+                    onConfirm={() => removeGroup(group)}
                   >
-                    删除
-                  </button>
+                    <button
+                      type="button"
+                      className="settings-text-button danger"
+                      disabled={busy}
+                    >
+                      删除
+                    </button>
+                  </ConfirmPopover>
                 </div>
               </div>
             ))

@@ -30,10 +30,13 @@ from .mysql.store import (
     users,
 )
 from .redis.store import RedisStore
+from .graph.build import remove_documents as remove_document_graph
+from .graph import vectors as graph_vectors
 from . import prompts
 from .ingestion.chunking import chunk_document_records, chunk_settings
 from .ingestion.parser import OCR_LANGUAGES
 from .ingestion.spreadsheet import TABLE_CHUNKING
+from .textnorm import TEXT_FOLD
 
 
 logger = logging.getLogger("production-rag")
@@ -54,6 +57,22 @@ def row_range(chunk_metadata):
     if start is None:
         return ""
     return f"第 {start} 行" if start == end else f"第 {start}–{end} 行"
+
+
+# 分片正文：content 就是这一片自己的原文。老数据没有这一列时，从送去检索的文字里去掉
+# 上下文说明和标题路径，剩下的也是原文——送去检索的文字是「说明 + 标题路径 + 正文」拼起来的。
+def chunk_body(content, text, chunk_metadata):
+    if content is not None:
+        return content
+    body = text or ""
+    context = (chunk_metadata or {}).get("context")
+    if context and body.startswith(context + "\n"):
+        body = body[len(context) + 1 :]
+    if body.startswith("标题路径："):
+        _, separator, rest = body.partition("\n")
+        if separator:
+            body = rest
+    return body
 
 
 class Storage:
@@ -714,6 +733,11 @@ class Storage:
                 metadata.get("parser") != "spreadsheet"
                 or metadata.get("table_chunking") == TABLE_CHUNKING
             )
+            # PDF 在部首字换回汉字之前解析的（没有 text_fold）：重新上传同一个文件要按新规则重新切分。
+            and (
+                metadata.get("parse_strategy") != "hi_res"
+                or metadata.get("text_fold") == TEXT_FOLD
+            )
         )
 
     # 上传前查内容是否已经存在（上传弹窗里提示用）。按文件内容的 sha256 找：
@@ -1017,6 +1041,8 @@ class Storage:
     # Milvus 按 document_id 过滤删除，写了一半的失败版本也能清理干净。
     def remove_version_data(self, document_id):
         self.milvus.delete_document(document_id)
+        # 图检索的名字、关系向量也按文档版本删；检索只看生效版本，删失败不影响正确性。
+        graph_vectors.remove_document(self, document_id)
         with self.engine.begin() as connection:
             chunk_ids = (
                 connection.execute(
@@ -1101,6 +1127,59 @@ class Storage:
                 .mappings()
                 .first()
             )
+
+    # 读多个分片的原文：先找到它们分别属于哪份文档，再按文档的可见范围判断当前用户能不能读。
+    # 检索诊断的来源列要显示原文预览，一次把当前这一页的分片取回来；读不到的直接不返回。
+    def readable_chunks(self, username, chunk_ids):
+        if not chunk_ids:
+            return []
+        with self.engine.connect() as connection:
+            rows = (
+                connection.execute(
+                    select(
+                        chunks.c.id,
+                        chunks.c.title,
+                        chunks.c.text,
+                        chunks.c.content,
+                        document_chunks.c.document_id,
+                        document_chunks.c.chunk_metadata,
+                    )
+                    .select_from(
+                        document_chunks.join(
+                            chunks, chunks.c.id == document_chunks.c.chunk_id
+                        )
+                    )
+                    .where(chunks.c.id.in_(list(chunk_ids)))
+                )
+                .mappings()
+                .all()
+            )
+        # 同一页的分片多半来自同一份文档，权限按文档查一次就够。
+        allowed = {}
+        result = []
+        for row in rows:
+            document_id = row["document_id"]
+            if document_id not in allowed:
+                allowed[document_id] = (
+                    self.readable_document(username, document_id) is not None
+                )
+            if not allowed[document_id]:
+                continue
+            metadata = row["chunk_metadata"] or {}
+            result.append(
+                {
+                    "chunk_id": row["id"],
+                    "title": row["title"],
+                    "heading": " / ".join(metadata.get("heading_path") or []) or None,
+                    "content": chunk_body(row["content"], row["text"], metadata),
+                }
+            )
+        return result
+
+    # 读一个分片的原文：检索诊断里点「更多」时用，权限和检索范围保持一致。
+    def readable_chunk(self, username, chunk_id):
+        items = self.readable_chunks(username, [chunk_id])
+        return items[0] if items else None
 
     # 读取一份文档的可见范围和共享部门；没有记录的文档按 private 处理。
     def document_permission(self, doc_key):
@@ -1237,7 +1316,10 @@ class Storage:
 
     # 返回当前用户某个文档的分块页面，解析标题路径和作者等可展示字段。
     # source 为 reused / computed 时只列出复用或新计算向量的分片；counts 返回两类各有多少，供筛选按钮显示。
-    def list_document_chunks(self, owner, document_id, page, page_size, source=None):
+    # chunk_ids 不为 None 时只列出这些分片（知识图谱按抽取状态筛选时用）。
+    def list_document_chunks(
+        self, owner, document_id, page, page_size, source=None, chunk_ids=None
+    ):
         joined = document_chunks.join(
             chunks, document_chunks.c.chunk_id == chunks.c.id
         ).join(documents, document_chunks.c.document_id == documents.c.id)
@@ -1250,6 +1332,8 @@ class Storage:
             if source in ("reused", "computed")
             else base
         )
+        if chunk_ids is not None:
+            condition = and_(condition, chunks.c.id.in_(list(chunk_ids)))
         with self.engine.connect() as connection:
             document = (
                 connection.execute(
@@ -1429,6 +1513,10 @@ class Storage:
             )
             connection.execute(
                 delete(document_reviews).where(document_reviews.c.doc_key == doc_key)
+            )
+            # 知识图谱：这份文档所有版本的建图记录、抽取结果、名字和关系一起删掉，没人用的实体也清理掉。
+            remove_document_graph(
+                connection, [version_id for version_id, _ in versions]
             )
             for version_id, _ in versions:
                 connection.execute(

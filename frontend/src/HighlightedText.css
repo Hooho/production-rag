@@ -1,0 +1,26 @@
+/* 原文高亮（HighlightedText）：实体名、对比用的实体名、原文引用。 */
+mark.hl-entity,
+mark.hl-entity-weak,
+mark.hl-evidence {
+  color: inherit;
+  background: none;
+  border-radius: 2px;
+}
+mark.hl-entity-weak {
+  background: #f1f5f9;
+  border-bottom: 1px dashed #94a3b8;
+}
+mark.hl-entity {
+  background: #dbe8ff;
+  border-bottom: 2px solid #3b6fd8;
+}
+mark.hl-evidence {
+  background: #fff1a8;
+}
+mark.hl-evidence.hl-entity,
+mark.hl-evidence.hl-entity-weak {
+  background: #fde68a;
+}
+.hl-missing {
+  margin-bottom: 8px;
+}

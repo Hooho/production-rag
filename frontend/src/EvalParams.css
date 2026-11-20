@@ -1,7 +1,8 @@
 /* 发起评测页的「参数配置」（EvalParamsPanel.tsx）：三组参数默认收起，标题行显示改了哪几项。 */
+/* 各组并排放，窄了再自动叠成一列。 */
 .evp-groups {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 6px;
 }
 
@@ -57,6 +58,30 @@
   padding: 4px 10px 8px 28px;
 }
 
+/* 参数组点开后弹在标题行旁边的气泡：可编辑，滚不动就内部滚。
+   选择器带上 .anchored-popover，用来盖过通用气泡 320px 的宽度限制。 */
+.anchored-popover.evp-popover {
+  width: min(560px, calc(100vw - 16px));
+  max-width: min(560px, calc(100vw - 16px));
+  padding: 10px 14px 12px;
+}
+
+.evp-popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.evp-popover-body {
+  display: flex;
+  flex-direction: column;
+  max-height: min(60vh, 520px);
+  overflow: auto;
+}
+
 .evp-row {
   display: grid;
   grid-template-columns: minmax(120px, 220px) minmax(0, 1fr);
@@ -92,17 +117,21 @@
   gap: 8px;
 }
 
+/* 分段开关和紧凑输入框一样高（26px），行高不因「自定义」多出来的输入框而变。 */
 .evp-switch {
   display: inline-flex;
+  height: 26px;
   border: 1px solid var(--ev-line);
 }
 
 .evp-switch button {
+  height: 24px;
+  padding: 0 10px;
   border: 0;
   background: transparent;
-  padding: 4px 10px;
   color: var(--t-536d86);
   font-size: 12px;
+  line-height: 24px;
 }
 
 .evp-switch button + button {
@@ -128,16 +157,12 @@
 }
 
 /* 全局 input 是 width: 100%、padding 12px，这里改成紧凑的行内输入框。 */
-.evp-input input,
+.evp-input input:not([type="radio"]),
 .evp-input select {
   width: auto;
   min-width: 96px;
   max-width: 220px;
-  border: 1px solid var(--t-abc4dc);
-  background: var(--t-eef5fb);
-  padding: 4px 8px;
   color: var(--ev-ink);
-  font-size: 12px;
 }
 
 .evp-input small {
@@ -161,4 +186,44 @@
   flex-direction: column;
   align-items: stretch;
   gap: 6px;
+}
+
+.evp-radio-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+.evp-radio-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.evp-system-mark {
+  color: #718398;
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 400;
+}
+.evp-system-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #718398;
+}
+.evp-modified {
+  color: #3774bc;
+}
+.evp-control {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.evp-radio-options .evp-system-mark {
+  font-size: 10px;
+  line-height: 1;
+}
+.evp-system-value {
+  white-space: nowrap;
 }

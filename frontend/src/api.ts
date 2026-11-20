@@ -36,11 +36,15 @@ export type RetrievalListHit = {
   title: string;
   raw_score: number;
   rrf: number;
+  // 图检索的排名表：这一片是通过哪几条关系找到的。
+  relation_ids?: string[];
 };
 export type RetrievalList = {
   query: string;
   method: string;
   hits: RetrievalListHit[];
+  // 新记录只有 unified；历史记录保留 entity / relation 两张表。
+  table?: "entity" | "relation" | "unified";
 };
 export type RetrievalCandidate = {
   chunk_id: string;
@@ -53,10 +57,15 @@ export type RetrievalCandidate = {
   status:
     | "returned"
     | "beyond_limit"
+    | "beyond_budget"
     | "filtered_low_score"
     | "in_pool"
     | "not_in_pool";
   source_id: string | null;
+  source_tokens?: number | null;
+  graph_budget_guaranteed?: boolean;
+  // 并入了前面某个父块：内容已经在那条来源里，不单独成源，也不占返回名额。旧记录没有。
+  merged?: boolean;
   retrieval_methods: string[];
   contributions: RetrievalContribution[];
   rrf_score: number;
@@ -64,11 +73,43 @@ export type RetrievalCandidate = {
   rerank_logit: number | null;
   rerank_probability: number | null;
   rerank_rank: number | null;
+  graph_relation_ids?: string[];
+  // 旧记录：靠图检索名额（不是 RRF 名次）进入重排的。
+  graph_quota?: boolean;
+  // 怎么进的重排：rrf = 按 RRF 名次；graph = 只被图找到，按图检索的名次（graph_only_rank）进的。旧记录没有。
+  pool_via?: "rrf" | "graph" | null;
+  graph_only_rank?: number | null;
 };
 export type RetrievalDiagnosticsData = {
   config: {
+    methods?: string[];
     rrf_k: number;
+    // 融合方式：sum = 各路贡献全累加；best = 同一路只取名次最好的那次。旧记录没有。
+    fusion?: string;
     rerank_candidates: number;
+    // 旧记录：图检索名额。
+    graph_rerank_quota?: number;
+    // 只被图找到的分片进重排的上限和实际进了几个；旧记录没有。
+    graph_pool_size?: number;
+    graph_pool_count?: number;
+    source_allocation_policy?: "relations_first_v1";
+    source_direct_tokens?: number | null;
+    source_expansion_tokens?: number | null;
+    source_graph_budget_ratio?: number;
+    source_graph_budget_reserved?: number;
+    source_graph_budget_used?: number;
+    source_graph_budget_count?: number;
+    // 图保底里放进上下文的图谱关系：条数、token、额度不够没放的条数；旧记录没有。
+    source_graph_relation_count?: number;
+    source_graph_relation_tokens?: number;
+    source_graph_relation_skipped?: number;
+    source_selection_mode?: "count" | "tokens";
+    source_token_budget?: number | null;
+    source_tokens_used?: number | null;
+    source_child_tokens?: number | null;
+    source_tokens_estimated?: boolean;
+    source_budget_skipped?: number;
+    source_expansion_skipped?: number;
     return_limit: number;
     reranked: boolean;
     min_score: number | null;
@@ -80,6 +121,184 @@ export type RetrievalDiagnosticsData = {
   candidates: RetrievalCandidate[];
   // 这次检索的权限范围：可检索的文档（当前版本）按自己上传 / 共享给我 / 公开计数；旧记录没有。
   scope?: RetrievalScope;
+  // 图检索每一步的明细；没打开图检索、旧记录没有。
+  graph?: GraphRetrievalTrace;
+  // 图检索留下的关系和去向（放进上下文 / 额度不够没放）；reason 是一条都没放时的原因。没打开图检索、旧记录没有。
+  context_relations?: { reason: string | null; items: ContextRelation[] };
+  // 每一步、每一路的耗时（毫秒）；旧记录没有。
+  timings?: {
+    scope_ms?: number;
+    dense_ms?: number;
+    keyword_ms?: number;
+    graph_ms?: number | null;
+    recall_ms?: number;
+    rerank_ms?: number;
+  };
+};
+// 图检索范围里的一个图谱版本：文档（当前版本）和它生效的图谱版本。
+export type GraphScopeVersion = {
+  version_id: string;
+  document_id: string;
+  number: number;
+  title: string;
+  document_version?: number | null;
+};
+// 图检索找到的一条关系（起点、终点用抽取时的原名，*_entity 是归到的实体）。
+export type GraphRetrievalRelation = {
+  vector_rank?: number;
+  keyword_rank?: number;
+  vector_score?: number;
+  keyword_score?: number;
+  recall_fusion_score?: number;
+  recall_fusion_rank?: number;
+  fusion_rank?: number;
+  fusion_score?: number;
+  sort_score?: number;
+  in_pool?: boolean;
+  selection?: string;
+  origins?: string[];
+  guaranteed_by?: string[];
+  rerank_rank?: number | null;
+  group_key?: string[];
+  group_round?: number;
+  selection_rank?: number;
+  rerank_score?: number;
+  relation_id: string;
+  source: string;
+  source_entity_id: string;
+  source_entity: string | null;
+  source_type: string | null;
+  target: string;
+  target_entity_id: string;
+  target_entity: string | null;
+  target_type: string | null;
+  category: string;
+  description: string | null;
+  evidence: string | null;
+  chunk_id: string;
+  document_id: string;
+  title: string | null;
+  version_id: string;
+  version_number: number | null;
+  score: number | null;
+  kept: boolean;
+  reason: string | null;
+};
+export type GraphRetrievalTable = {
+  delivery_status?: "returned" | "filtered";
+  delivery_reason?: string | null;
+  chunk_id: string;
+  score: number;
+  relation_ids: string[];
+  rank: number;
+  kept?: boolean;
+  reason?: string | null;
+  title?: string;
+  text?: string;
+  version?: number | null;
+  heading?: string | null;
+};
+export type GraphRetrievalTrace = {
+  relation_grouping?: {
+    enabled: boolean;
+    applied: boolean;
+    groups: number;
+    eligible: number;
+    selected_groups: number;
+    selected: number;
+  };
+  pipeline?: string;
+  relation_candidates?: GraphRetrievalRelation[];
+  candidate_chunks?: Pick<
+    GraphRetrievalTable,
+    "chunk_id" | "title" | "text" | "heading" | "version"
+  >[];
+  relation_candidate_counts?: { total: number; in_pool: number; kept: number };
+  relation_rerank_error?: string | null;
+  status: "ok" | "skipped" | "failed";
+  reason: string | null;
+  scope: GraphScopeVersion[];
+  keywords: {
+    source: "agent" | "model" | "fallback";
+    entities: string[];
+    themes: string[];
+    reason?: string;
+    error?: string;
+    fallback?: boolean;
+    prompt?: { role: string; content: string }[];
+    raw_output?: string;
+    // 这次图检索用的问题：实体的关系按它打分（关系相似度 = 问题 × 关系），页面要显示出来。
+    // 关键词是 Agent 直接给的、没有模型提的时候，这个问题同样要记。
+    question?: string;
+    question_source?: string | null;
+    input_tokens?: number | null;
+    output_tokens?: number | null;
+    prompt_tag?: string;
+    model?: string | null;
+    duration_ms?: number;
+  } | null;
+  name_score_query?: string;
+  name_matches: {
+    keyword: string;
+    name: string;
+    entity_id: string;
+    entity_name: string | null;
+    entity_type: string | null;
+    version_id: string;
+    document_id: string;
+    title: string | null;
+    version_number: number | null;
+    score: number;
+    baseline?: boolean;
+    gap?: number | null;
+    keyword_score?: number | null;
+    // exact 字面相同 / contains 互相包含 / vector 名字向量（旧记录没有这一项，当作 vector）
+    match?: "exact" | "contains" | "vector";
+    // 算名字向量用的那段文字：名字（类型）：描述1；描述2
+    vector_text?: string | null;
+    kept: boolean;
+    reason: string | null;
+  }[];
+  entities: {
+    entity_id: string;
+    name: string | null;
+    type: string | null;
+    names: string[];
+    score: number;
+  }[];
+  entity_relations: (GraphRetrievalRelation & {
+    entity_id: string;
+    entity_name: string | null;
+  })[];
+  relation_matches: (GraphRetrievalRelation & {
+    keyword: string;
+    also_entity: boolean;
+  })[];
+  tables: {
+    entity: GraphRetrievalTable[];
+    relation: GraphRetrievalTable[];
+    unified?: GraphRetrievalTable[];
+  };
+  dropped_more: Record<string, number>;
+  counts?: { entity_chunks: number; relation_chunks: number; chunks: number };
+  settings?: Partial<
+    Record<
+      | "graph_entity_min_score"
+      | "graph_entity_relation_limit"
+      | "graph_entity_relation_quota"
+      | "graph_entity_score_gap"
+      | "graph_entity_top_k"
+      | "graph_global_relation_quota"
+      | "graph_name_top_k"
+      | "graph_relation_min_score"
+      | "graph_relation_rerank_candidates"
+      | "graph_relation_rerank_min_score"
+      | "graph_relation_return_limit"
+      | "graph_relation_top_k",
+      number
+    >
+  > & { graph_relation_grouping?: boolean };
+  timings: Record<string, number>;
 };
 export type RetrievalScope = {
   total: number;
@@ -95,11 +314,37 @@ export type RetrievalScope = {
     owner: string;
     groups: string[];
   }>;
+  // 图检索范围：可检索文档里有生效图谱的版本；没打开图检索时没有。
+  graph_versions?: GraphScopeVersion[];
+};
+// 放进回答上下文的图谱关系（G 编号），后端 app/tools/search.py 的 select_relations。
+// 检索诊断里的 context_relations.items 也是这个结构，多了 status（放入 / 额度不够 / 没放）和 context_id。
+export type ContextRelation = {
+  id?: string | null;
+  context_id?: string | null;
+  status?: "context" | "beyond_budget" | "off";
+  relation_id: string;
+  text: string;
+  source: string;
+  target: string;
+  category: string;
+  description?: string | null;
+  evidence?: string | null;
+  chunk_id?: string | null;
+  document_id?: string | null;
+  title?: string | null;
+  version?: number | null;
+  rerank_score?: number | null;
+  rerank_rank?: number | null;
+  tokens?: number | null;
+  injection?: unknown[];
 };
 export type ChatResult = {
   answer: string;
   route: string;
   sources: Source[];
+  // 放进上下文的图谱关系，回答里的 [G1] 据此点开；旧记录没有。
+  relations?: ContextRelation[];
   steps: TraceStep[];
   trace_id: string;
   request_id: string;
@@ -322,6 +567,8 @@ export type DocumentMetadata = {
   overlap?: number | null;
   embedding_model?: string | null;
   embedding_dimension?: number | null;
+  // 上传时的图检索设置：开启时处理完自动建图。
+  graph?: UploadGraphOption | null;
 };
 export type DocumentStep = {
   step_id: string;
@@ -329,7 +576,13 @@ export type DocumentStep = {
   stage: string;
   title: string;
   // warning：步骤跑完了但结果有问题（安全扫描发现疑似注入）。
-  status: "running" | "completed" | "failed" | "warning";
+  status:
+    | "pending"
+    | "running"
+    | "completed"
+    | "failed"
+    | "warning"
+    | "stopped";
   detail: string;
   result?: Record<string, unknown> | null;
   duration_ms?: number | null;
@@ -370,6 +623,8 @@ export type DocumentChunk = {
   parser: string | null;
   parser_version: string | null;
   parse_strategy: string | null;
+  // 知识图谱：这个版本最近一次建图里这一片的抽取情况；没建过图时为空。
+  graph?: ChunkGraph | null;
 };
 export type DocumentChunkPage = {
   document_id: string;
@@ -390,6 +645,10 @@ export type DocumentChunkPage = {
   source?: ChunkSource | null;
   source_counts?: { reused: number; computed: number };
   chunks: DocumentChunk[];
+  // 知识图谱：最近一次建图的配置、各抽取状态的分片数、当前的筛选。
+  graph?: ChunkGraphBuild | null;
+  graph_counts?: Record<ChunkGraphStatus, number> | null;
+  graph_status?: ChunkGraphStatus | null;
 };
 export type ChunkSource = "reused" | "computed";
 
@@ -469,6 +728,9 @@ async function authorizedFetch(
 ): Promise<Response> {
   function send() {
     const headers = new Headers(options.headers);
+    // 字符串请求体都是 JSON：没写 Content-Type 时补上，否则后端会把整个请求体当成一段文字，校验失败（422）。
+    if (typeof options.body === "string" && !headers.has("Content-Type"))
+      headers.set("Content-Type", "application/json");
     const token = readStorage(accessStorage);
     if (token) headers.set("Authorization", `Bearer ${token}`);
     return fetch(`${API_BASE}${path}`, { ...options, headers });
@@ -488,13 +750,28 @@ async function authorizedFetch(
   return response;
 }
 
+// FastAPI 校验失败（422）时 detail 是数组，拼成文字，避免页面显示 [object Object]。
+function detailText(detail: unknown): string {
+  if (!detail) return "";
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail))
+    return detail
+      .map((item) =>
+        item && typeof item === "object" && "msg" in item
+          ? `${((item as { loc?: unknown[] }).loc ?? []).join(".")}: ${(item as { msg: string }).msg}`
+          : JSON.stringify(item),
+      )
+      .join("；");
+  return JSON.stringify(detail);
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await authorizedFetch(path, options);
   if (!response.ok) {
     const body = await response
       .json()
       .catch(() => ({ detail: response.statusText }));
-    throw new Error(body.detail || `请求失败：${response.status}`);
+    throw new Error(detailText(body.detail) || `请求失败：${response.status}`);
   }
   return response.json() as Promise<T>;
 }
@@ -616,8 +893,25 @@ export function createSession(): Promise<{ session_id: string }> {
 }
 
 // 读取指定会话，确认浏览器保存的会话仍属于当前用户。
-export function getSessionHistory(sessionId: string) {
-  return request<{ messages: HistoryRun[] }>(`/sessions/${sessionId}`, {});
+// 分页读取一个会话的问答记录：不传 before 取最近 10 条；往上翻时传已显示的最早一条的 id，取它之前的 10 条。
+export function getSessionHistory(sessionId: string, before?: string) {
+  const query = before ? `?before=${encodeURIComponent(before)}` : "";
+  return request<{ messages: HistoryRun[]; has_more: boolean; total: number }>(
+    `/sessions/${sessionId}${query}`,
+    {},
+  );
+}
+
+// 历史对话列表：每个会话一行，按最后提问时间倒序。
+export type ChatSessionSummary = {
+  session_id: string;
+  title: string;
+  count: number;
+  updated: string;
+  route?: string | null;
+};
+export function listChatSessions() {
+  return request<{ sessions: ChatSessionSummary[] }>("/sessions");
 }
 
 // 删除自己的一个会话：问答记录、反馈、会话记忆一起删掉；正在回答的会话返回 409。
@@ -783,9 +1077,19 @@ export function uploadDocument(
   versionNote?: string,
   visibility: DocumentVisibility = "private",
   groups: string[] = [],
+  graph?: UploadGraphOption | null,
 ) {
   const form = new FormData();
   form.append("file", file);
+  // 图检索：on 时处理完自动建图；新版本不传时沿用上一版的设置。
+  if (graph) {
+    form.append("graph", graph.enabled ? "on" : "off");
+    if (graph.enabled) {
+      if (graph.schema_id) form.append("graph_schema_id", graph.schema_id);
+      if (graph.provider) form.append("graph_provider", graph.provider);
+      if (graph.model) form.append("graph_model", graph.model);
+    }
+  }
   form.append("visibility", visibility);
   if (groups.length > 0) form.append("groups", groups.join(","));
   if (title.trim()) form.append("title", title.trim());
@@ -848,15 +1152,36 @@ export function listDocumentChunks(
   page: number,
   pageSize = 10,
   source?: ChunkSource | null,
+  graphStatus?: ChunkGraphStatus | null,
 ) {
   return request<DocumentChunkPage>(
-    `/documents/${documentId}/chunks?page=${page}&page_size=${pageSize}${source ? `&source=${source}` : ""}`,
+    `/documents/${documentId}/chunks?page=${page}&page_size=${pageSize}${source ? `&source=${source}` : ""}${graphStatus ? `&graph_status=${graphStatus}` : ""}`,
     {},
+  );
+}
+
+// 分片原文：检索诊断里点「更多」时读这一片的正文。权限和检索范围一致，读不到就回 404。
+export type ChunkOriginal = {
+  chunk_id: string;
+  title: string;
+  heading: string | null;
+  content: string;
+};
+
+export function getChunkOriginal(chunkId: string) {
+  return request<ChunkOriginal>(`/chunks/${encodeURIComponent(chunkId)}`);
+}
+
+// 一次读多片原文：来源列要显示当前这一页分片的原文预览，不用一片一个请求。
+export function getChunkOriginals(chunkIds: string[]) {
+  return request<{ items: ChunkOriginal[] }>(
+    `/chunks?ids=${encodeURIComponent(chunkIds.join(","))}`,
   );
 }
 
 // 评测：题目、单次评测结果、历次评测列表与两次对比，字段与后端 app/evaluation 保持一致。
 export type EvalItem = {
+  prelude?: EvalPreludeTurn[];
   evidence_groups?: EvalScoringGroup[];
   id: string;
   question: string;
@@ -885,10 +1210,14 @@ export type EvalEvidenceTarget = {
   quote: string;
 };
 export type EvalEvidenceGroup = {
+  relations?: EvalRelationTarget[];
   label?: string;
   targets?: EvalEvidenceTarget[];
 };
 export type EvalEvidence = EvalEvidenceGroup & {
+  graph_paths?: ("entity" | "global")[];
+  relation_ids?: (string | null)[];
+  graph_filter_reason?: string;
   filter_candidates?: {
     status: string;
     vector_rank?: number | null;
@@ -908,7 +1237,7 @@ export type EvalEvidence = EvalEvidenceGroup & {
   given?: boolean;
   first_given?: boolean;
   // 怎么拿到的：direct 检索命中的那一片就含证据，extension 只在父块扩展拼进来的分片里（旧记录没有）。
-  via?: "direct" | "extension" | null;
+  via?: "direct" | "extension" | "relation" | null;
 };
 export type EvalJudgement = {
   refused: boolean;
@@ -952,6 +1281,9 @@ export type EvalRewrite = {
 };
 // 补充检索：返回几段、是否被采用、补充检索的资料命中率和来源。
 export type EvalRetry = {
+  relations?: ContextRelation[];
+  relation_hits?: number;
+  diagnostics?: RetrievalDiagnosticsData;
   queries?: string[];
   query_routes?: EvalQueryRoute[];
   evidence?: EvalEvidence[];
@@ -985,7 +1317,13 @@ export type EvalMaterial = {
   tokens: number;
   items?: { chunk_id: string | null; chars: number; tokens: number }[];
 };
+export type EvalGraphHits = {
+  entity_only: number;
+  global_only: number;
+  both: number;
+};
 export type EvalFlowFields = {
+  graph_hits?: EvalGraphHits | null;
   material?: EvalMaterial | null;
   query_routes?: EvalQueryRoute[] | null;
   given_hits?: number | null;
@@ -997,6 +1335,10 @@ export type EvalFlowFields = {
   flow_latency_ms?: number | null;
 };
 export type EvalQuestion = {
+  relations?: ContextRelation[];
+  relation_hits?: number;
+  prelude?: EvalPreludeTurn[];
+  reference_answer?: string | null;
   id: string;
   question: string;
   type: string;
@@ -1105,6 +1447,7 @@ export type EvalAgentRound = {
   duration_ms?: number | null;
 };
 export type EvalAgentQuestion = {
+  graph_hits?: EvalGraphHits | null;
   round_logs?: EvalAgentRound[];
   // 交给模型的资料：资料池里全部资料（旧记录没有）。
   material?: EvalMaterial;
@@ -1245,7 +1588,12 @@ export type EvalHistoryMetrics = {
 };
 export type EvalConfig = {
   split: string | null;
+  // 统一配置（版本 2）的记录才有：2 = 检索方式（methods）按这组配置自己定；旧记录没有这个字段。
+  version?: number;
   suites: string[];
+  // 自建题集：选了哪些题集（此时 split 固定是 all）和当时的名字；旧记录的名字由后端按当前题集补上。
+  suite_ids?: string[];
+  suite_names?: string[];
   special?: {
     suites: { id: string; name: string }[];
     compare_memory?: boolean;
@@ -1534,6 +1882,9 @@ export type EvalParamOptions = {
 
 // 一次评测跑多组配置（app/evaluation/batch.py）：每组就是一份完整的发起表单，按顺序各跑一遍，放进同一份批次报告。
 export type EvalLaunchBody = {
+  version?: 1 | 2;
+  mode?: EvalMode;
+  methods?: ("dense" | "keyword" | "graph")[];
   kind: "retrieval" | "generation" | "special";
   split?: string;
   suites?: string[];
@@ -1557,6 +1908,11 @@ export type EvalBatchReport = {
     progress: { done: number; total: number } | null;
     error: string | null;
     params: EvalParams;
+    kind?: EvalRunBrief["kind"];
+    modes?: EvalMode[];
+    methods?: string[];
+    effective?: EvalEffective;
+    attempts?: { status: string; error?: string; finished?: string }[];
   }[];
   config_diff: { key: string; values: (RuntimeSettingValue | null)[] }[];
   runs: (EvalRun | null)[];
@@ -1574,6 +1930,14 @@ export function startEvalBatch(name: string, configs: EvalLaunchBody[]) {
 export function rerunEvalRun(runId: string) {
   return request<{ id: string; status: string }>(
     `/eval/runs/${encodeURIComponent(runId)}/rerun`,
+    { method: "POST" },
+  );
+}
+
+// 按某个批次报告保存的配置整批重新跑一次，返回新批次的编号和其中的记录编号。
+export function rerunEvalBatch(batchId: string) {
+  return request<{ id: string; runs: string[] }>(
+    `/eval/batches/${encodeURIComponent(batchId)}/rerun`,
     { method: "POST" },
   );
 }
@@ -1618,6 +1982,7 @@ export type EvalCorpusStatus =
   | "not_imported"
   | "importing";
 export type EvalCorpusEntry = {
+  graph_ready?: boolean;
   id: string;
   title: string;
   filename: string;
@@ -1712,17 +2077,34 @@ export type EvalSuiteBrief = {
   item_count: number;
   latest: EvalSuiteRunEntry | null;
 };
+export type EvalRelationTarget = {
+  relation_id: string;
+  build_id: string;
+  source: string;
+  target: string;
+  category: string;
+  description: string;
+  evidence: string;
+};
 export type EvalScoringTarget = {
   title: string;
   position: number;
   fingerprint: string;
   quote: string;
+  relations?: EvalRelationTarget[];
 };
-export type EvalScoringGroup = { label: string; targets: EvalScoringTarget[] };
+export type EvalScoringGroup = {
+  label: string;
+  targets: EvalScoringTarget[];
+  relations?: EvalRelationTarget[];
+};
 export function listEvalTargetChunks() {
   return request<{ items: EvalScoringTarget[] }>("/eval/target-chunks");
 }
 export type EvalSuiteItem = {
+  enabled?: boolean;
+  answerable?: boolean;
+  prelude?: EvalPreludeTurn[];
   evidence_groups?: EvalScoringGroup[];
   id: string;
   question: string;
@@ -1739,6 +2121,9 @@ export type EvalSuiteFull = EvalSuiteBrief & {
   runs: EvalSuiteRunEntry[];
 };
 export type EvalSuiteItemInput = {
+  version?: 1 | 2;
+  answerable?: boolean;
+  prelude?: EvalPreludeTurn[];
   evidence_groups?: EvalScoringGroup[];
   question: string;
   evidence?: string[];
@@ -1789,7 +2174,7 @@ export type EvalSpecialQuestion = {
     status: string | null;
     given?: boolean;
     first_given?: boolean;
-    via?: "direct" | "extension" | null;
+    via?: "direct" | "extension" | "relation" | null;
     rrf_rank?: number | null;
     rerank_rank?: number | null;
     rerank_probability?: number | null;
@@ -1933,6 +2318,21 @@ export function updateEvalSuiteItem(
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function setEvalSuiteItemEnabled(
+  suiteId: string,
+  itemId: string,
+  enabled: boolean,
+) {
+  return request<EvalSuiteFull>(
+    `/eval/suites/${encodeURIComponent(suiteId)}/items/${encodeURIComponent(itemId)}/enabled`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
     },
   );
 }
@@ -2656,6 +3056,10 @@ export type RuntimeSettingItem = {
   min?: number;
   max?: number;
   choices?: string[];
+  // 生效条件（app/runtime_config.py 的 REQUIRES）：都满足才起作用，否则设置页整项置灰并写原因。
+  requires?: { key: string; equals: RuntimeSettingValue }[];
+  // 放在哪张卡片里（RuntimeSettingsView.cards 的键）。
+  card?: string;
 };
 export type RuntimeSettingChange = {
   key: string;
@@ -2666,6 +3070,8 @@ export type RuntimeSettingsView = {
   items: RuntimeSettingItem[];
   groups: Record<string, string>;
   pages?: Record<string, "rag" | "system">;
+  // 卡片：几项合在一起显示，keys 是卡片里的顺序。
+  cards?: Record<string, { title: string; keys: string[] }>;
   history: { at: string; by: string; changes: RuntimeSettingChange[] }[];
   cache_seconds: number;
   changed?: RuntimeSettingChange[];
@@ -3567,3 +3973,1050 @@ export function getEvalChunkOriginal(chunkId: string) {
     `/eval/chunks/${encodeURIComponent(chunkId)}`,
   );
 }
+
+// 知识图谱（第 1 期）：字段和后端 app/graph、app/api/graph_routes.py 保持一致。
+export type ChunkGraphStatus =
+  | "extracted"
+  | "reused"
+  | "failed"
+  | "empty"
+  | "pending";
+export type UploadGraphOption = {
+  enabled: boolean;
+  schema_id?: string | null;
+  provider?: string | null;
+  model?: string | null;
+};
+export type GraphBuildStatus =
+  | "awaiting_review"
+  | "stopped"
+  | "queued"
+  | "running"
+  | "completed"
+  | "partial"
+  | "failed";
+export type GraphBuild = {
+  id: string;
+  space: string;
+  document_id: string;
+  doc_key: string;
+  schema_id: string;
+  schema_name?: string;
+  provider: string;
+  model: string;
+  prompt_tag: string;
+  status: GraphBuildStatus;
+  active: boolean;
+  trigger: "upload" | "manual" | "batch" | "version";
+  total: number;
+  extracted: number;
+  reused: number;
+  failed: number;
+  entity_count: number;
+  relation_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  note: string | null;
+  error: string | null;
+  created_by: string;
+  created: string;
+  updated: string;
+  finished: string | null;
+};
+export type ChunkGraphBuild = {
+  build_id: string;
+  status: GraphBuildStatus;
+  schema_name: string;
+  provider: string;
+  model: string;
+  prompt_tag: string;
+};
+export type GraphMethod =
+  | "new"
+  | "exact"
+  | "normalized"
+  | "canonical"
+  | "alias";
+export type ChunkGraphMention = {
+  name: string;
+  canonical: string | null;
+  type: string;
+  type_fixed_from?: string | null;
+  description?: string | null;
+  entity_id?: string;
+  entity_name?: string;
+  resolve_method?: GraphMethod;
+  method_label?: string;
+};
+export type ChunkGraphRelation = {
+  source: string;
+  target: string;
+  category: string;
+  description: string;
+  evidence: string;
+  source_entity?: string | null;
+  target_entity?: string | null;
+};
+export type ChunkGraph = {
+  model?: string;
+  prompt_tag?: string;
+  parsed_result?: {
+    entities?: ChunkGraphMention[];
+    relations?: ChunkGraphRelation[];
+  } | null;
+  current_relations?: {
+    id: string;
+    source_entity: string;
+    target_entity: string;
+    category: string;
+    description: string;
+    evidence: string;
+  }[];
+  processing?: {
+    name: string;
+    entity_name: string;
+    method_label: string;
+    scope_label: string;
+    review?: unknown;
+  }[];
+  status: "extracted" | "reused" | "failed";
+  empty: boolean;
+  error: string | null;
+  reused_from: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  duration_ms: number | null;
+  prompt: { role: string; content: string }[] | null;
+  raw_output: string | null;
+  mentions: ChunkGraphMention[];
+  relations: ChunkGraphRelation[];
+  dropped: { kind: string; item: unknown; reason: string }[];
+};
+export type GraphNode = {
+  id: string;
+  name: string;
+  type: string;
+  relation_count: number;
+  mention_count: number;
+  focus: boolean;
+  hidden_neighbors: number;
+  hidden_neighbors_by_category?: Record<string, number>;
+};
+export type GraphEdge = {
+  id: string;
+  source: string;
+  target: string;
+  count: number;
+  categories: string[];
+  descriptions: string[];
+};
+export type GraphNetwork = {
+  center_id?: string | null;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  total_entities: number;
+  total_relations: number;
+  limit: number;
+};
+export type GraphEntityRow = {
+  id: string;
+  name: string;
+  type: string;
+  description: string | null;
+  mention_count: number;
+  name_count: number;
+  chunk_count: number;
+  document_count: number;
+  relation_count: number;
+};
+export type GraphRelationRow = {
+  id: string;
+  build_id: string;
+  document_id: string;
+  chunk_id: string;
+  category: string;
+  description: string | null;
+  evidence: string | null;
+  origin: string;
+  source_name: string;
+  target_name: string;
+  source_id: string;
+  source_entity: string;
+  source_type: string;
+  target_id: string;
+  target_entity: string;
+  target_type: string;
+  position: number;
+  direction?: "out" | "in";
+  document_title?: string | null;
+};
+export type GraphMergeRow = {
+  scope: "new" | "document" | "global" | "unknown";
+  scope_label: string;
+  name: string;
+  canonical: string;
+  type: string;
+  entity_id: string;
+  entity_name: string;
+  method: GraphMethod;
+  method_label: string;
+  // 二次检查合并的来源：人工确认（模型建议）/ 人工添加 / 两者都有；其他方法为空。
+  review_source?: "confirmed" | "manual" | "mixed" | null;
+  positions: number[];
+  chunk_ids: string[];
+  // 二次检查人工确认的合并：来自哪几条建议（可以在合并记录里标记撤销）。
+  review?: {
+    proposal_ids: string[];
+    name: string;
+    type: string;
+    reason: string;
+    approved_by?: string;
+    // 这个名字是哪几条建议带进来的（人工添加的编号 m 开头）；旧记录为空。
+    via?: string[] | null;
+  } | null;
+};
+export type GraphPage<T> = {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+export type GraphView = "network" | "entities" | "relations" | "merges";
+// 图谱版本：每次写入图谱存成一个版本，检索和全局图谱只用生效（active）的那个。
+export type GraphVersion = {
+  id: string;
+  build_id: string;
+  number: number;
+  active: boolean;
+  // build 建图写入；retry 补跑分片后写入；check 图谱检查确认写入
+  origin: "build" | "retry" | "check";
+  summary: {
+    entity_count?: number;
+    relation_count?: number;
+    mention_count?: number;
+    changes?: string;
+  };
+  note: string | null;
+  created_by: string;
+  created: string;
+};
+export type DocumentGraphData = {
+  matches?: { id: string; name: string; type: string }[];
+  build: GraphBuild | null;
+  history: GraphBuild[];
+  // 正在显示的版本（默认是生效版本），以及这份文档保留的全部版本（新的在前）。
+  version?: GraphVersion | null;
+  versions?: GraphVersion[];
+  can_build: boolean;
+  processed: boolean;
+  settings: UploadGraphOption | null;
+  stats?: {
+    entity_count: number;
+    relation_count: number;
+    type_counts: Record<string, number>;
+    category_counts: Record<string, number>;
+    status_counts: Record<
+      "extracted" | "reused" | "failed" | "empty" | "pending",
+      number
+    >;
+  };
+  network?: GraphNetwork;
+  entities?: GraphPage<GraphEntityRow>;
+  relations?: GraphPage<GraphRelationRow>;
+  merges?: GraphPage<GraphMergeRow>;
+};
+export type GraphSchema = {
+  id: string;
+  name: string;
+  source: "default" | "recommended" | "custom";
+  version: number;
+  entity_types: { name: string; description: string; examples?: string[] }[];
+  relation_categories: { name: string; description: string }[];
+  note: string;
+  created_by: string;
+  created: string;
+};
+export type GraphSchemas = {
+  schemas: GraphSchema[];
+  default_id: string;
+  matching: { normalize: string[]; merge: string[] };
+  prompt: { id: string; tag: string; system: string; example_user: string };
+  model_mode: string;
+};
+export type GraphEstimate = {
+  document_id: string;
+  schema_id: string;
+  provider: string;
+  model: string;
+  prompt_tag: string;
+  total: number;
+  reusable: number;
+  to_extract: number;
+};
+export type GraphEntityDetail = {
+  entity: {
+    id: string;
+    name: string;
+    type: string;
+    description: string | null;
+    origin: string;
+    created: string;
+  };
+  names: {
+    name: string;
+    method: GraphMethod;
+    method_label: string;
+    count: number;
+    positions: number[];
+    chunk_ids: string[];
+    descriptions: string[];
+  }[];
+  documents: {
+    document_id: string;
+    title: string | null;
+    mention_count: number;
+    relation_count: number;
+  }[];
+  relations: GraphRelationRow[];
+};
+export type GraphTaskState = "none" | "outdated" | GraphBuildStatus;
+export type GraphTask = {
+  doc_key: string;
+  document_id: string;
+  title: string;
+  owner: string;
+  version: number;
+  listed: boolean;
+  processed: boolean;
+  auto: boolean;
+  state: GraphTaskState;
+  build: GraphBuild | null;
+  // 生效图谱版本的图检索向量（名字、关系向量）状态；没有生效版本时为 null。
+  vectors: GraphTaskVectors | null;
+};
+// none 没算 / queued 排队中 / running 计算中 / done 已算 / failed 失败 /
+// stale 算在别的集合里（换过 embedding 模型）/ interrupted 很久没动静
+export type GraphVectorState =
+  | "none"
+  | "queued"
+  | "running"
+  | "done"
+  | "failed"
+  | "stale"
+  | "interrupted";
+export type GraphTaskVectors = {
+  state: GraphVectorState;
+  status?: string;
+  // names 算名字向量 / relations 算关系向量 / writing 写入 Milvus / done
+  phase?: string;
+  version_id: string;
+  version_number: number;
+  collection?: string;
+  model?: string | null;
+  names?: number;
+  relations?: number;
+  names_done?: number;
+  relations_done?: number;
+  queued_at?: string;
+  started?: string;
+  at?: string;
+  duration_ms?: number;
+  error?: string;
+};
+export type GraphOverview = {
+  documents: { document_id: string; title: string }[];
+  network: GraphNetwork;
+  type_counts: Record<string, number>;
+  category_counts: Record<string, number>;
+  matches: { id: string; name: string; type: string }[];
+};
+export type GraphBuildBody = {
+  schema_id?: string | null;
+  llm?: { provider: string; model?: string | null } | null;
+};
+
+function query(params: Record<string, string | number | null | undefined>) {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params))
+    if (value !== null && value !== undefined && value !== "")
+      search.set(key, String(value));
+  const text = search.toString();
+  return text ? `?${text}` : "";
+}
+
+export function getGraphSchemas() {
+  return request<GraphSchemas>("/graph/schemas");
+}
+
+export function estimateDocumentGraph(
+  documentId: string,
+  schemaId?: string | null,
+  provider?: string | null,
+  model?: string | null,
+) {
+  return request<GraphEstimate>(
+    `/documents/${documentId}/graph/estimate${query({ schema_id: schemaId, provider, model })}`,
+  );
+}
+
+export function buildDocumentGraph(documentId: string, body: GraphBuildBody) {
+  return request<GraphBuild>(`/documents/${documentId}/graph`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export function buildGraphBatch(documentIds: string[], body: GraphBuildBody) {
+  return request<{
+    started: GraphBuild[];
+    skipped: { document_id: string; title: string | null; reason: string }[];
+  }>("/graph/builds", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...body, document_ids: documentIds }),
+  });
+}
+
+export function stopDocumentGraph(documentId: string, buildId: string) {
+  return request<GraphBuild>(`/documents/${documentId}/graph/stop`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ build_id: buildId }),
+  });
+}
+
+// 重试指定那次建图（buildId）里失败的分片；chunkId 只重试这一片。
+export function retryDocumentGraph(
+  documentId: string,
+  buildId?: string | null,
+  chunkId?: string | null,
+) {
+  return request<GraphBuild>(`/documents/${documentId}/graph/retry`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      build_id: buildId ?? null,
+      chunk_id: chunkId ?? null,
+    }),
+  });
+}
+
+export function getDocumentGraph(
+  documentId: string,
+  params: {
+    view: GraphView;
+    page?: number;
+    q?: string;
+    type?: string | null;
+    category?: string | null;
+    focus?: string[];
+    center?: string | null;
+    limit?: number;
+    version?: string | null;
+  },
+) {
+  return request<DocumentGraphData>(
+    `/documents/${documentId}/graph${query({
+      view: params.view,
+      page: params.page,
+      q: params.q,
+      type: params.type,
+      category: params.category,
+      focus: params.focus?.join(","),
+      center: params.center,
+      limit: params.limit,
+      version: params.version,
+    })}`,
+  );
+}
+
+export function activateGraphVersion(documentId: string, versionId: string) {
+  return request<{ versions: GraphVersion[] }>(
+    `/documents/${documentId}/graph/versions/${versionId}/activate`,
+    { method: "POST" },
+  );
+}
+
+export function noteGraphVersion(
+  documentId: string,
+  versionId: string,
+  note: string,
+) {
+  return request<{ ok: boolean }>(
+    `/documents/${documentId}/graph/versions/${versionId}/note`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ note }),
+    },
+  );
+}
+
+export function getGraphEntity(
+  entityId: string,
+  documentId?: string | null,
+  version?: string | null,
+) {
+  return request<GraphEntityDetail>(
+    `/graph/entities/${entityId}${query({ document_id: documentId, version: documentId ? version : null })}`,
+  );
+}
+
+export type GraphRelationDetail = GraphRelationRow & { chunk_content: string };
+
+export function getGraphRelations(
+  sourceId: string,
+  targetId: string,
+  documentId?: string | null,
+  category?: string | null,
+  version?: string | null,
+) {
+  return request<{ items: GraphRelationDetail[] }>(
+    `/graph/relations${query({ source_id: sourceId, target_id: targetId, document_id: documentId, category, version: documentId ? version : null })}`,
+  );
+}
+
+export function getGraphOverview(params: {
+  document_id?: string | null;
+  type?: string | null;
+  category?: string | null;
+  q?: string;
+  focus?: string[];
+  center?: string | null;
+  limit?: number;
+}) {
+  return request<GraphOverview>(
+    `/graph/overview${query({ ...params, focus: params.focus?.join(",") })}`,
+  );
+}
+
+// 图检索向量：生效版本里多少已经算好、多少还缺。
+export type GraphVectorStatus = {
+  active: number;
+  indexed: number;
+  missing: number;
+  failed: number;
+  working: number;
+};
+export function getGraphVectors() {
+  return request<GraphVectorStatus>("/graph/vectors");
+}
+export function backfillGraphVectors() {
+  return request<GraphVectorStatus & { queued: number }>(
+    "/graph/vectors/backfill",
+    { method: "POST" },
+  );
+}
+// 单独给一个图谱版本算（或重算）向量。
+export function queueGraphVersionVectors(versionId: string) {
+  return request<GraphVectorStatus & { queued: number }>(
+    `/graph/versions/${encodeURIComponent(versionId)}/vectors`,
+    { method: "POST" },
+  );
+}
+export function getGraphTasks() {
+  return request<{ items: GraphTask[] }>("/graph/tasks");
+}
+
+export type GraphReviewReport = {
+  build_id: string;
+  // queued 排队 / running 模型判断中 / stopped 已停止（可以继续）/ ready 可以逐条决定 / rewriting 正在重写图谱 / failed / idle 未开始
+  status: string;
+  // 这次检查开始的时间（进度条算已用时间）。
+  started?: string;
+  // 前面的检查步骤写入了新结果，这一步需要重新检查。
+  stale?: boolean;
+  error?: string;
+  // 这次检查用的提示词版本（graph_review@v2）和全文；检查开始时定下，之后改提示词要「重新检查」才用新版本。
+  prompt_tag?: string;
+  system_prompt?: string;
+  // 上次「按确认结果重写图谱」应用到图谱上的合并结果；之后每次写入图谱都按它应用。
+  applied?: {
+    groups: (GraphReviewChoice & {
+      key: string;
+      ids: string[];
+      proposal_ids: string[];
+      reason: string;
+    })[];
+    approved_ids: string[];
+    by: string;
+    at: string;
+    records:
+      | {
+          id: string;
+          status: string;
+          name: string;
+          type: string;
+          from_names?: string[];
+          mention_count?: number;
+          relation_count?: number;
+          type_corrections?: number;
+          proposal_ids?: string[];
+          reason: string;
+        }[]
+      | null;
+  };
+  approved_by?: string;
+  approved_at?: string;
+  approved_ids?: string[];
+  resolutions?: Record<string, GraphReviewChoice>;
+  // 人工逐条（或批量）记录的决定，「完成确认」时统一执行；键是建议编号「组号:序号」。
+  decisions?: Record<
+    string,
+    { decision: "approved" | "rejected"; by: string; at: string }
+  >;
+  // 人工添加的合并（m1、m2……），添加即批准，提案编号是「m1:0」；manual_entities 是它们用到的实体卡片。
+  manual?: {
+    id: string;
+    ids: string[];
+    name: string;
+    type: string;
+    reason: string;
+    by: string;
+    at: string;
+  }[];
+  manual_entities?: Record<string, GraphReviewEntity>;
+  scan?: {
+    duration_ms?: number;
+    status: string;
+    entity_count: number;
+    candidate_count: number;
+    // 怎么找出候选：用哪个向量模型、拿什么文字算、门槛多少。旧报告没有。
+    method?: {
+      embedding: { mode: string; model: string; semantic: boolean } | null;
+      text_format: string;
+      metric: string;
+      grouping?: string;
+      top_k: number;
+      min_similarity: number;
+      max_group_size?: number;
+      max_groups?: number;
+      max_pairs?: number;
+      error?: string;
+    };
+    stats?: {
+      same_name: number;
+      similar: number;
+      total?: number;
+      similar_total?: number;
+    };
+    candidates: {
+      id: string;
+      kind?: "same_name" | "similar";
+      similarity?: number;
+      similarity_max?: number;
+      texts?: string[];
+      // 组里两两的相似度：[第几个实体, 第几个实体, 分数]
+      pairs?: [number, number, number][];
+      ranks?: number[];
+      reason: string;
+      entities: GraphReviewEntity[];
+    }[];
+  };
+  judgments: {
+    candidate_id: string;
+    status: string;
+    error?: string;
+    duration_ms?: number;
+    input_tokens?: number;
+    output_tokens?: number;
+    prompt?: { role: string; content: string }[];
+    raw_output?: string;
+    decision?: {
+      groups: { ids: string[]; name: string; type: string; reason: string }[];
+      separate_reason?: string;
+      // 模型单独列出（只有一个编号）的实体：视为不合并。
+      ignored?: string[];
+    };
+  }[];
+  // 旧流程的执行结果（新流程看 applied.records）。
+  execution?: {
+    status: string;
+    records: {
+      id: string;
+      status: string;
+      name: string;
+      type: string;
+      reason: string;
+      mention_count?: number;
+      from_names?: string[];
+      type_corrections?: number;
+      relation_count?: number;
+      entity_id?: string;
+      proposal_ids?: string[];
+    }[];
+  };
+};
+export type GraphReviewChoice = { name: string; type: string };
+// 二次检查里的一个实体：编号在重写图谱后保持不变。
+export type GraphReviewEntity = {
+  id: string;
+  names: string[];
+  types: string[];
+  descriptions: string[];
+  evidence: { chunk_id: string; text: string }[];
+};
+export function getGraphReview(documentId: string) {
+  return request<{
+    report: GraphReviewReport | null;
+    can_confirm: boolean;
+    build_status: string | null;
+  }>(`/documents/${documentId}/graph/review`);
+}
+export function decideGraphReview(
+  documentId: string,
+  buildId: string,
+  proposalIds: string[],
+  decision: "approved" | "rejected" | null,
+) {
+  return request<GraphReviewReport>(
+    `/documents/${documentId}/graph/review/decide`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        build_id: buildId,
+        proposal_ids: proposalIds,
+        decision,
+      }),
+    },
+  );
+}
+// 停止检查：已经判断完的保留；继续检查：只判断还没判断的。
+export function stopGraphReview(documentId: string) {
+  return request<GraphReviewReport>(
+    `/documents/${documentId}/graph/review/stop`,
+    { method: "POST" },
+  );
+}
+export function continueGraphReview(documentId: string) {
+  return request<GraphReviewReport>(
+    `/documents/${documentId}/graph/review/continue`,
+    { method: "POST" },
+  );
+}
+// 只重试判断失败的组，其他组的判断和人工决定保留。
+export function retryFailedGraphReview(documentId: string) {
+  return request<GraphReviewReport>(
+    `/documents/${documentId}/graph/review/retry-failed`,
+    { method: "POST" },
+  );
+}
+// 按当前所有已批准的建议重写图谱（不调用模型）。
+export function rewriteGraphReview(
+  documentId: string,
+  buildId: string,
+  resolutions: Record<string, GraphReviewChoice> = {},
+) {
+  return request<GraphBuild>(`/documents/${documentId}/graph/review/rewrite`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ build_id: buildId, resolutions }),
+  });
+}
+export function retryGraphReview(documentId: string) {
+  return request<GraphBuild>(`/documents/${documentId}/graph/review/retry`, {
+    method: "POST",
+  });
+}
+// 人工合并：搜这份文档的全部实体（按名字或描述），或按编号取。
+export function searchGraphReviewEntities(
+  documentId: string,
+  query: string,
+  ids: string[] = [],
+) {
+  const params = new URLSearchParams({ q: query, ids: ids.join(",") });
+  return request<{ items: GraphReviewEntity[] }>(
+    `/documents/${documentId}/graph/review/entities?${params}`,
+  );
+}
+// 人工添加一条合并（添加即批准），到第 4 步确认后写入图谱。
+// 往已有合并结果里加实体时，ids 带上结果里的一个实体，会按共享实体接到那个结果上。
+export function addGraphReviewManual(
+  documentId: string,
+  buildId: string,
+  ids: string[],
+  name: string,
+  type: string,
+  reason = "",
+) {
+  return request<GraphReviewReport>(
+    `/documents/${documentId}/graph/review/manual`,
+    {
+      method: "POST",
+      body: JSON.stringify({ build_id: buildId, ids, name, type, reason }),
+    },
+  );
+}
+
+// ---------- 图谱检查前 4 步（补抽、关系核对、类型核对、拆分） ----------
+export type CheckStepName = "glean" | "relation" | "type" | "split";
+// idle 未开始 / queued 排队 / running 进行中 / scanned 找完待确认判断 / stopped 已停止 /
+// ready 可以决定 / rewriting 正在写入 / skipped 已跳过 / failed 失败
+export type CheckSummary = {
+  status: string;
+  stale?: boolean;
+  count?: number;
+  judged?: number;
+  failed?: number;
+  pending?: number;
+  applied?: boolean;
+  // 采纳了几项；采纳的和上次写入的不一样（还没写入）
+  accepted?: number;
+  unwritten?: boolean;
+  started?: string | null;
+  error?: string | null;
+};
+export type CheckJudgment = {
+  item_id: string;
+  status: string;
+  error?: string;
+  duration_ms?: number;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  prompt?: { role: string; content: string }[];
+  raw_output?: string | null;
+  decision?: Record<string, unknown> & { suggest?: boolean; reason?: string };
+};
+export type CheckReport = {
+  build_id: string;
+  step: CheckStepName;
+  status: string;
+  phase?: string;
+  params?: Record<string, unknown>;
+  stale?: boolean;
+  started?: string;
+  error?: string;
+  prompt_tag?: string;
+  system_prompt?: string;
+  scan?: { count: number; duration_ms: number };
+  // 每一步的可疑项结构不同，页面按步骤渲染。
+  items?: (Record<string, unknown> & { id: string })[];
+  judgments?: Record<string, CheckJudgment>;
+  decisions?: Record<
+    string,
+    {
+      decision: "accept" | "reject";
+      by: string;
+      at: string;
+      edit?: Record<string, unknown>;
+    }
+  >;
+  applied?: {
+    items: unknown;
+    // 写入时采纳的是哪几项（老记录没有）
+    ids?: string[];
+    by: string;
+    at: string;
+  } | null;
+};
+
+export function getCheckSummary(documentId: string) {
+  return request<{
+    build_id: string | null;
+    can_confirm?: boolean;
+    steps: Partial<Record<CheckStepName, CheckSummary>>;
+  }>(`/documents/${documentId}/graph/check`);
+}
+
+export function getCheckDetail(documentId: string, step: CheckStepName) {
+  return request<{
+    report: CheckReport | null;
+    build_id: string | null;
+    can_confirm: boolean;
+  }>(`/documents/${documentId}/graph/check/${step}`);
+}
+
+export function startCheck(
+  documentId: string,
+  step: CheckStepName,
+  buildId: string,
+  params: Record<string, unknown> = {},
+) {
+  return request<CheckReport>(
+    `/documents/${documentId}/graph/check/${step}/start`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ build_id: buildId, params }),
+    },
+  );
+}
+
+export function checkAction(
+  documentId: string,
+  step: CheckStepName,
+  action: "judge" | "stop" | "write" | "skip" | "retry-failed" | "rejudge",
+  buildId: string,
+) {
+  return request<CheckReport>(
+    `/documents/${documentId}/graph/check/${step}/${action}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ build_id: buildId }),
+    },
+  );
+}
+
+export function decideCheck(
+  documentId: string,
+  step: CheckStepName,
+  buildId: string,
+  itemIds: string[],
+  decision: "accept" | "reject" | null,
+  edit?: Record<string, unknown> | null,
+) {
+  return request<CheckReport>(
+    `/documents/${documentId}/graph/check/${step}/decide`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        build_id: buildId,
+        item_ids: itemIds,
+        decision,
+        edit: edit ?? null,
+      }),
+    },
+  );
+}
+
+export type EvalPreludeTurn = {
+  question: string;
+  answer: string;
+  confirmed: boolean;
+};
+export function generateEvalPrelude(
+  question: string,
+  prelude: EvalPreludeTurn[],
+  corpusIds: string[],
+) {
+  return request<{ answer: string; sources: Source[] }>(
+    "/eval/prelude/answer",
+    {
+      method: "POST",
+      body: JSON.stringify({ question, prelude, corpus_ids: corpusIds }),
+    },
+  );
+}
+
+export function retryEvalArm(batchId: string, runId: string) {
+  return request<{ id: string; run_id: string }>(
+    `/eval/batches/${batchId}/arms/${runId}/retry`,
+    { method: "POST" },
+  );
+}
+
+export function saveEvalDatasetPrelude(
+  itemId: string,
+  prelude: EvalPreludeTurn[],
+) {
+  return request<EvalItem>(
+    `/eval/dataset/items/${encodeURIComponent(itemId)}/prelude`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prelude }),
+    },
+  );
+}
+
+export type EvalDocumentReference = EvalCorpusEntry & {
+  document_id?: string;
+  owner?: string;
+  version?: number;
+  graph_ready?: boolean;
+};
+export function listEvalDocumentCandidates() {
+  return request<{ items: EvalDocumentReference[] }>(
+    "/eval/document-candidates",
+  );
+}
+export function saveEvalDocumentReferences(documentIds: string[]) {
+  return request<{ saved: boolean }>("/eval/document-references", {
+    method: "PUT",
+    body: JSON.stringify({ document_ids: documentIds }),
+  });
+}
+
+export type EvalConfigTemplate = {
+  suite_names?: string[];
+  corpus_names?: string[];
+  issues?: string[];
+  id: string;
+  name: string;
+  config: EvalLaunchBody & {
+    mode: EvalMode;
+    methods: ("dense" | "keyword" | "graph")[];
+  };
+  created_by: string;
+  created: string;
+  updated: string;
+};
+export function listEvalConfigTemplates() {
+  return request<{ items: EvalConfigTemplate[] }>("/eval/config-templates");
+}
+export function saveEvalConfigTemplate(
+  name: string,
+  config: EvalLaunchBody,
+  id?: string,
+) {
+  return request<{ id: string }>(
+    `/eval/config-templates${id ? `/${encodeURIComponent(id)}` : ""}`,
+    { method: id ? "PUT" : "POST", body: JSON.stringify({ name, config }) },
+  );
+}
+export function deleteEvalConfigTemplate(id: string) {
+  return requestEmpty(`/eval/config-templates/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+export type GraphExperiment = {
+  id: string;
+  status: string;
+  created: string;
+  updated: string;
+  data: {
+    text: string;
+    llm: { provider: string; model: string };
+    prompt_version: number;
+    system_prompt: string;
+    schema: GraphSchema;
+    reference: { version?: { id: string; number: number } };
+    steps: {
+      name: string;
+      status: string;
+      duration_ms?: number;
+      error?: string;
+      input: unknown;
+      output: unknown;
+    }[];
+  };
+};
+export const listGraphExperiments = () =>
+  request<{ items: Omit<GraphExperiment, "data">[] }>("/graph/experiments");
+export const getGraphExperiment = (id: string) =>
+  request<GraphExperiment>(`/graph/experiments/${id}`);
+export const getGraphExperimentOptions = () =>
+  request<{ references: { id: string; title: string; number: number }[] }>(
+    "/graph/experiments/options",
+  );
+export const createGraphExperiment = (payload: {
+  text: string;
+  schema_id: string | null;
+  llm: { provider: string; model: string } | null;
+  prompt_version: number | null;
+  reference_id: string | null;
+}) =>
+  request<GraphExperiment>("/graph/experiments", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+export const retryGraphExperiment = (id: string) =>
+  request<GraphExperiment>(`/graph/experiments/${id}/retry`, {
+    method: "POST",
+  });

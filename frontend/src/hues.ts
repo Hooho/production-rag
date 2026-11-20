@@ -13,7 +13,9 @@ for (let index = 0; PRESET_HUES.length < 48; index += 1) {
 
 // 给一组名字分配色相：initial 是预先占好位置的名字（例如已有的 4 个工具），之后新出现的名字依次往后排。
 export function huePicker(initial: string[] = []) {
-  const order = new Map<string, number>(initial.map((name, index) => [name, index]));
+  const order = new Map<string, number>(
+    initial.map((name, index) => [name, index]),
+  );
   return (name: string) => {
     if (!order.has(name)) order.set(name, order.size);
     return PRESET_HUES[order.get(name)! % PRESET_HUES.length];
@@ -24,9 +26,16 @@ export function huePicker(initial: string[] = []) {
 export function hueMap(names: (string | null | undefined)[]) {
   const pick = huePicker();
   const result = new Map<string, number>();
-  for (const name of names) if (name && !result.has(name)) result.set(name, pick(name));
+  for (const name of names)
+    if (name && !result.has(name)) result.set(name, pick(name));
   return result;
 }
 
-// 固定的分类标签（评测类型、运行模式、调参评测集的五种题型）：先占好位置，颜色固定不变，新名字依次往后排。
-export const labelHue = huePicker(["检索", "生成", "专项", "多轮对话", "固定流程", "Agent", "回答", "事实", "同义改写", "关键词", "多轮追问", "无法回答"]);
+// 按名称计算固定分类色，不受首次出现顺序、文档或刷新影响。
+export function labelHue(name: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < name.length; index += 1) {
+    hash = Math.imul(hash ^ name.charCodeAt(index), 16777619);
+  }
+  return PRESET_HUES[(hash >>> 0) % PRESET_HUES.length];
+}

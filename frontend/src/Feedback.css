@@ -78,19 +78,8 @@
 .feedback-detail textarea {
    width: 100%;
    resize: vertical;
-   border: 1px solid var(--t-cedfec);
-   border-radius: 6px;
-   padding: 8px 10px;
-   font-size: 13px;
    color: var(--t-173b5b);
-   background: #fff;
 }
-
-.feedback-detail textarea:focus {
-   outline: 2px solid var(--t-93c5fd);
-   border-color: var(--t-2563eb);
-}
-
 .feedback-actions {
    display: flex;
    justify-content: flex-end;

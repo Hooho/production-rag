@@ -10,6 +10,7 @@
 每一轮都整理成一条记录（rounds），就是执行链上展示的内容：本轮新增的消息、原始响应、推理过程、
 工具调用和返回、引用检查、耗时。记录在每轮结束时通过 on_round 交给调用方，接口可以据此流式推送。
 """
+
 import copy
 import json
 import logging
@@ -33,14 +34,20 @@ EMPTY_ANSWER = "没能在限定的次数内整理出回答，请换一种问法�
 
 
 def force_prompt(reason):
-    return (f"{FORCE_REASONS[reason]}，不能再调用工具。请根据前面已经拿到的资料直接回答；"
-        "资料只能回答一部分时，回答能支持的部分并说明缺什么；完全没有资料时如实说明。")
+    return (
+        f"{FORCE_REASONS[reason]}，不能再调用工具。请根据前面已经拿到的资料直接回答；"
+        "资料只能回答一部分时，回答能支持的部分并说明缺什么；完全没有资料时如实说明。"
+    )
 
 
 # 同一次调用的判断：工具名相同、参数解析后完全相同（参数顺序和空格不同也算同一次）。
 def call_key(name, arguments):
     try:
-        normalized = json.dumps(retrieval_arguments(name, json.loads(arguments or "{}")), ensure_ascii=False, sort_keys=True)
+        normalized = json.dumps(
+            retrieval_arguments(name, json.loads(arguments or "{}")),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
     except (TypeError, ValueError):
         normalized = str(arguments)
     return name, normalized
@@ -78,11 +85,18 @@ class AgentLoop:
                     stop_reason = "timeout"
                 if stop_reason:
                     kind = "forced"
-                    messages.append({"role": "user", "content": force_prompt(stop_reason)})
+                    messages.append(
+                        {"role": "user", "content": force_prompt(stop_reason)}
+                    )
             round_tools = tools if kind == "normal" else None
             # 只记本轮新增的消息：前面的消息上一轮已经记过，执行链上用“同第几轮”引用，避免每轮重复存一份。
-            record = {"round": len(self.rounds) + 1, "kind": kind, "message_count": len(messages),
-                "new_messages": copy.deepcopy(messages[sent:]), "tools_sent": [tool["function"]["name"] for tool in round_tools or []]}
+            record = {
+                "round": len(self.rounds) + 1,
+                "kind": kind,
+                "message_count": len(messages),
+                "new_messages": copy.deepcopy(messages[sent:]),
+                "tools_sent": [tool["function"]["name"] for tool in round_tools or []],
+            }
             call_started = self.clock()
             try:
                 raw, response = self.llm(messages, round_tools)
@@ -91,20 +105,37 @@ class AgentLoop:
                 record["error"] = str(error)[:500]
                 record["duration_ms"] = elapsed_ms(call_started, self.clock)
                 self.finish_round(record)
-                return self.result("failed", None, "model_error", None, started, error=record["error"])
+                return self.result(
+                    "failed", None, "model_error", None, started, error=record["error"]
+                )
             sent = len(messages)
             parsed = parse_message(response)
             messages.append(parsed["message"])
-            record.update({"raw_response": raw, "reasoning": parsed["reasoning"], "content": parsed["content"],
-                "tool_calls": parsed["tool_calls"], "finish_reason": parsed["finish_reason"], "usage": parsed["usage"],
-                "cached_tokens": cached_tokens(parsed["usage"]), "model_ms": elapsed_ms(call_started, self.clock)})
+            record.update(
+                {
+                    "raw_response": raw,
+                    "reasoning": parsed["reasoning"],
+                    "content": parsed["content"],
+                    "tool_calls": parsed["tool_calls"],
+                    "finish_reason": parsed["finish_reason"],
+                    "usage": parsed["usage"],
+                    "cached_tokens": cached_tokens(parsed["usage"]),
+                    "model_ms": elapsed_ms(call_started, self.clock),
+                }
+            )
 
             if parsed["tool_calls"] and kind == "normal":
                 record["tool_results"] = []
                 for call in parsed["tool_calls"]:
                     outcome = self.run_call(call, record["round"])
                     record["tool_results"].append(outcome)
-                    messages.append({"role": "tool", "tool_call_id": call.get("id"), "content": outcome["content"]})
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.get("id"),
+                            "content": outcome["content"],
+                        }
+                    )
                 record["duration_ms"] = elapsed_ms(call_started, self.clock)
                 self.finish_round(record)
                 continue
@@ -139,7 +170,14 @@ class AgentLoop:
             record["answer"] = answer
             record["duration_ms"] = elapsed_ms(call_started, self.clock)
             self.finish_round(record)
-            return self.result("completed", answer, stop_reason, citation, started, citation_retried=retried)
+            return self.result(
+                "completed",
+                answer,
+                stop_reason,
+                citation,
+                started,
+                citation_retried=retried,
+            )
 
     def finish_round(self, record):
         self.rounds.append(record)
@@ -155,11 +193,20 @@ class AgentLoop:
         started = self.clock()
         record = {"id": call.get("id"), "name": name, "arguments": arguments}
         if key in self.seen:
-            record.update(status="duplicate", ok=False, content=(
-                f"这个调用和第 {self.seen[key]} 轮的调用完全相同，没有重复执行，结果见前面的返回。换一种问法或换一个工具。"))
+            record.update(
+                status="duplicate",
+                ok=False,
+                content=(
+                    f"这个调用和第 {self.seen[key]} 轮的调用完全相同，没有重复执行，结果见前面的返回。换一种问法或换一个工具。"
+                ),
+            )
             return record
         if self.used >= self.budget:
-            record.update(status="skipped", ok=False, content="工具调用次数已经用完，这次调用没有执行。")
+            record.update(
+                status="skipped",
+                ok=False,
+                content="工具调用次数已经用完，这次调用没有执行。",
+            )
             return record
         self.used += 1
         self.seen[key] = round_no
@@ -167,23 +214,45 @@ class AgentLoop:
             outcome = execute_tool(self.ctx, name, arguments)
         except Exception as error:  # noqa: BLE001  工具内部任何异常都不打断循环，交给模型决定怎么办
             logger.exception("agent_tool_failed tool=%s", name)
-            outcome = {"content": f"工具执行失败：{str(error)[:300]}", "ok": False, "trace": {"error": str(error)[:500]}}
+            outcome = {
+                "content": f"工具执行失败：{str(error)[:300]}",
+                "ok": False,
+                "trace": {"error": str(error)[:500]},
+            }
         left = self.budget - self.used
-        record.update(status="ok" if outcome["ok"] else "error", ok=outcome["ok"], trace=outcome["trace"],
-            content=f"{outcome['content']}\n\n剩余预算：还能调用 {left} 次工具。", budget_left=left,
-            duration_ms=elapsed_ms(started, self.clock))
+        record.update(
+            status="ok" if outcome["ok"] else "error",
+            ok=outcome["ok"],
+            trace=outcome["trace"],
+            content=f"{outcome['content']}\n\n剩余预算：还能调用 {left} 次工具。",
+            budget_left=left,
+            duration_ms=elapsed_ms(started, self.clock),
+        )
         return record
 
     def result(self, status, answer, stop_reason, citation, started, **extra):
         usage = {"prompt_tokens": 0, "completion_tokens": 0, "cached_tokens": 0}
         for record in self.rounds:
-            usage["prompt_tokens"] += (record.get("usage") or {}).get("prompt_tokens") or 0
-            usage["completion_tokens"] += (record.get("usage") or {}).get("completion_tokens") or 0
+            usage["prompt_tokens"] += (record.get("usage") or {}).get(
+                "prompt_tokens"
+            ) or 0
+            usage["completion_tokens"] += (record.get("usage") or {}).get(
+                "completion_tokens"
+            ) or 0
             usage["cached_tokens"] += record.get("cached_tokens") or 0
-        return {"status": status, "answer": answer, "stop_reason": stop_reason, "rounds": self.rounds,
-            "tool_calls_used": self.used, "tool_budget": self.budget, "citation": citation,
-            "sources": to_sources(self.ctx.evidence), "usage": usage,
-            "duration_ms": elapsed_ms(started, self.clock), **extra}
+        return {
+            "status": status,
+            "answer": answer,
+            "stop_reason": stop_reason,
+            "rounds": self.rounds,
+            "tool_calls_used": self.used,
+            "tool_budget": self.budget,
+            "citation": citation,
+            "sources": to_sources(self.ctx.evidence),
+            "usage": usage,
+            "duration_ms": elapsed_ms(started, self.clock),
+            **extra,
+        }
 
 
 def run_agent(ctx, messages, llm, config=None, clock=time.monotonic, on_round=None):
@@ -193,16 +262,50 @@ def run_agent(ctx, messages, llm, config=None, clock=time.monotonic, on_round=No
 def to_sources(evidence):
     """把资料池转换成现有来源面板的格式（id、title、text、version、page_start、heading），前端不用改。
 
-    订单和业务数据没有文档标题，分别写成“订单 A1001”“业务数据 · 物流单”。按 S、O、D 和编号排序。
+    订单和业务数据没有文档标题，分别写成“订单 A1001”“业务数据 · 物流单”；图谱关系写成“图谱关系 · 文档标题”。
+    按 S、O、D、G 和编号排序。
     """
     sources = []
     for evidence_id in sorted(evidence.items, key=sort_key):
         item = evidence.items[evidence_id]
         if item["type"] == "knowledge":
-            source = {key: item.get(key) for key in ("title", "text", "version", "page_start", "heading",
-                "chunk_id", "document_id", "score")}
+            source = {
+                key: item.get(key)
+                for key in (
+                    "title",
+                    "text",
+                    "version",
+                    "page_start",
+                    "heading",
+                    "chunk_id",
+                    "document_id",
+                    "score",
+                )
+            }
+        elif item["type"] == "relation":
+            source = {
+                key: item.get(key)
+                for key in (
+                    "text",
+                    "relation_id",
+                    "source",
+                    "target",
+                    "category",
+                    "description",
+                    "evidence",
+                    "chunk_id",
+                    "document_id",
+                    "version",
+                    "rerank_score",
+                )
+            }
+            source["title"] = f"图谱关系 · {item.get('title') or ''}".rstrip(" ·")
+            source["document_title"] = item.get("title")
         elif item["type"] == "order":
-            source = {"title": f"订单 {item.get('order_id')}", "text": item.get("answer")}
+            source = {
+                "title": f"订单 {item.get('order_id')}",
+                "text": item.get("answer"),
+            }
         else:
             label = DATA_TYPES.get(item.get("data_type"), {}).get("label", "数据")
             source = {"title": f"业务数据 · {label}", "text": item.get("answer")}

@@ -1,0 +1,147 @@
+.gx-page {
+  display: grid;
+  gap: 20px;
+}
+.gx-compose,
+.gx-history,
+.gx-run {
+  border: 1px solid var(--t-d2e2f0, #d2e2f0);
+  background: var(--t-ffffff, #fff);
+  border-radius: 8px;
+  padding: 20px;
+  min-width: 0;
+}
+.gx-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 12px;
+}
+.gx-heading h2,
+.gx-history h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+.gx-heading h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.gx-badge {
+  color: var(--t-1677ff, #1677ff);
+  background: var(--t-e6f4ff, #e6f4ff);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.gx-input,
+.gx-selects label {
+  display: grid;
+  gap: 8px;
+}
+.gx-input {
+  margin: 16px 0;
+}
+.gx-input textarea {
+  width: 100%;
+  min-height: 180px;
+}
+.gx-config {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+.gx-selects {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+.gx-selects select {
+  width: 100%;
+}
+.gx-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0;
+}
+.gx-actions > .graph-note {
+  margin-right: auto;
+}
+.gx-records {
+  display: flex;
+  gap: 10px;
+  overflow: auto;
+  max-height: 220px;
+  flex-wrap: wrap;
+}
+.gx-record {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--t-d2e2f0, #d2e2f0);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.gx-record.is-selected {
+  border-color: #1677ff;
+  background: var(--t-e6f4ff, #e6f4ff);
+}
+.gx-record small,
+.gx-table small {
+  display: block;
+  margin-top: 5px;
+  color: var(--t-5e7a95, #5e7a95);
+}
+.gx-results {
+  display: grid;
+  gap: 16px;
+  align-items: start;
+}
+.gx-results.is-comparing {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.gx-step {
+  padding: 18px 0;
+  border-top: 1px solid var(--t-d2e2f0, #d2e2f0);
+}
+.gx-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  max-height: 420px;
+  overflow: auto;
+  line-height: 1.7;
+}
+.gx-table {
+  overflow: auto;
+  margin: 16px 0;
+}
+.gx-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.gx-table th,
+.gx-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 10px;
+  border: 1px solid var(--t-d2e2f0, #d2e2f0);
+  overflow-wrap: anywhere;
+}
+.gx-table th {
+  background: var(--t-f2f7fc, #f2f7fc);
+}
+.gx-error {
+  color: #c53545;
+}
+@media (max-width: 900px) {
+  .gx-config,
+  .gx-results.is-comparing {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

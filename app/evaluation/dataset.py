@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-import json
 import os
 import re
 import unicodedata
@@ -8,17 +7,16 @@ from pathlib import Path
 from langchain_core.prompts import ChatPromptTemplate
 from sqlalchemy import func, select
 
-from ..mysql.store import eval_items, eval_suite_items, eval_suites, settings as settings_table
+from ..mysql.store import eval_items
 from ..runtime_config import bound_engine
+from ..textnorm import fold_radicals
 
 
-# 评测语料和结果放在仓库的 eval 目录；调参评测集和专项评测集的题目存数据库（eval_items、eval_suites），
-# 首次启动时从 eval/seed 导入。
+# 评测语料和结果放在仓库的 eval 目录；调参评测集和专项评测集的题目只存数据库（eval_items、eval_suites），
+# 只能在评测页（接口）里写入，仓库里没有初始题目。
 EVAL_DIR = Path(os.getenv("EVAL_DIR", "eval"))
 # 调参评测集的题目类型固定为五种，前端按这个顺序分组展示。针对某个方向的检查（例如分片截断）放在专项评测集里。
 QUESTION_TYPES = ["事实", "同义改写", "关键词", "多轮追问", "无法回答"]
-# 导入过初始题目后在 settings 表记一笔，之后把题目删光也不会再导入一次。
-SEED_KEY = "eval_seeded"
 # 同义改写保存为两个独立题目，但用同一个题对编号把它们关联起来。
 REWRITE_ROLES = {"original", "paraphrase"}
 # 评测集拆成开发集和留出集：平时调参只看 dev，holdout 只在确定参数后做最终验证，
@@ -29,7 +27,7 @@ SPLITS = ["dev", "holdout"]
 # 比较前统一去掉空白并做 NFKC 规范化（全角字母数字和标点转半角）。
 # 语料经过 OCR、分块和换行处理，空格和全角半角经常与标注时复制的原文不一致，不统一就会误判为未命中。
 def normalize(text):
-    folded = unicodedata.normalize("NFKC", text or "")
+    folded = fold_radicals(unicodedata.normalize("NFKC", text or ""))
     return re.sub(r"\s+", "", folded)
 
 
@@ -39,146 +37,37 @@ EVIDENCE_OR = "||"
 
 
 def evidence_variants(text):
-    return [part for part in (normalize(piece) for piece in (text or "").split(EVIDENCE_OR)) if part]
+    return [
+        part
+        for part in (normalize(piece) for piece in (text or "").split(EVIDENCE_OR))
+        if part
+    ]
 
 
 # 证据里没在语料中找到的那几处原文（逐处检查）；全都找到返回空列表。corpus 是规范化后的语料。
 def missing_variants(text, corpus):
-    return [piece.strip() for piece in (text or "").split(EVIDENCE_OR) if normalize(piece) and normalize(piece) not in corpus]
+    return [
+        piece.strip()
+        for piece in (text or "").split(EVIDENCE_OR)
+        if normalize(piece) and normalize(piece) not in corpus
+    ]
 
 
 def now_text():
     return datetime.now(timezone.utc).isoformat()
 
 
-# 读取 JSONL 文件，每行一道题；空行跳过。只用于 eval/seed 里的初始题目。
-def read_jsonl(path):
-    items = []
-    with Path(path).open(encoding="utf-8") as file:
-        for line in file:
-            if line.strip():
-                items.append(json.loads(line))
-    return items
-
-
-# 初始题目：调参评测集 eval/seed/dataset.jsonl，专项评测集 eval/seed/suites.json。
-def seed_items():
-    path = EVAL_DIR / "seed" / "dataset.jsonl"
-    return read_jsonl(path) if path.exists() else []
-
-
-def seed_suites():
-    path = EVAL_DIR / "seed" / "suites.json"
-    return json.loads(path.read_text(encoding="utf-8"))["suites"] if path.exists() else []
-
-
-# 首次启动时把初始题目导入数据库：只在从没导入过、而且表是空的时候做，已有的题目不会被覆盖。
-def seed_eval_data(engine):
-    with engine.begin() as connection:
-        if connection.execute(select(settings_table.c.key).where(settings_table.c.key == SEED_KEY)).first():
-            return False
-        now = now_text()
-        if not connection.execute(select(func.count()).select_from(eval_items)).scalar():
-            for position, item in enumerate(seed_items()):
-                connection.execute(eval_items.insert().values(id=item["id"], position=position, data=item,
-                    created=now, updated=now))
-        if not connection.execute(select(func.count()).select_from(eval_suites)).scalar():
-            from uuid import uuid4
-            for suite in seed_suites():
-                suite_id = str(uuid4())
-                connection.execute(eval_suites.insert().values(id=suite_id, name=suite["name"],
-                    description=suite.get("description"), method=suite["method"],
-                    search_mode=suite.get("search_mode", "hybrid"), created_by="system",
-                    created=now, updated=now))
-                for position, data in enumerate(suite["items"]):
-                    connection.execute(eval_suite_items.insert().values(id=str(uuid4()), suite_id=suite_id,
-                        position=position, data=data, created_by="system", created=now, updated=now))
-        connection.execute(settings_table.insert().values(key=SEED_KEY, value={"at": now}, updated=now))
-    return True
-
-
-# 后来新增的初始专项（suites.json 里标了 "late": true）：已经初始化过的库不会再走 seed_eval_data，
-# 所以每次启动检查一遍，没加过的补加一次；加过的记在 settings 里（key = eval_seeded_late_suites），
-# 之后用户删掉也不会再加回来。库里已有同名专项时只记录、不重复加。返回这次补加的专项名称。
-LATE_SEED_KEY = "eval_seeded_late_suites"
-
-
-def seed_late_suites(engine):
-    late = [suite for suite in seed_suites() if suite.get("late")]
-    if not late:
-        return []
-    from uuid import uuid4
-    added = []
-    with engine.begin() as connection:
-        row = connection.execute(select(settings_table.c.value).where(settings_table.c.key == LATE_SEED_KEY)).first()
-        done = list(((row[0] if row else None) or {}).get("names") or [])
-        revisions = dict(((row[0] if row else None) or {}).get("revisions") or {})
-        now = now_text()
-        changed = False
-        for suite in late:
-            if suite["name"] in done:
-                continue
-            exists = connection.execute(select(eval_suites.c.id).where(eval_suites.c.name == suite["name"])).first()
-            if not exists:
-                suite_id = str(uuid4())
-                connection.execute(eval_suites.insert().values(id=suite_id, name=suite["name"],
-                    description=suite.get("description"), method=suite["method"],
-                    search_mode=suite.get("search_mode", "hybrid"), created_by="system", created=now, updated=now))
-                for position, data in enumerate(suite["items"]):
-                    connection.execute(eval_suite_items.insert().values(id=str(uuid4()), suite_id=suite_id,
-                        position=position, data=data, created_by="system", created=now, updated=now))
-                added.append(suite["name"])
-            done.append(suite["name"])
-            changed = True
-        # 初始专项的题改过（suites.json 里 revision 加 1）：按位置把库里的题换成新版，新版少了的删掉、多了的补上，
-        # 每个版本只换一次。用户改过的题（updated 和 created 不同）保留不动；专项里有用户自己加的题时整个专项不动，
-        # 免得按位置对错题。专项说明也一并更新（用户改过专项就不动）。
-        for suite in late:
-            revision = suite.get("revision") or 1
-            if revisions.get(suite["name"], 1) >= revision:
-                continue
-            revisions[suite["name"]] = revision
-            changed = True
-            exists = connection.execute(select(eval_suites.c.id, eval_suites.c.created, eval_suites.c.updated).where(
-                eval_suites.c.name == suite["name"])).first()
-            if not exists:
-                continue
-            rows = connection.execute(select(eval_suite_items.c.id, eval_suite_items.c.data, eval_suite_items.c.created_by,
-                eval_suite_items.c.created, eval_suite_items.c.updated).where(eval_suite_items.c.suite_id == exists.id).order_by(
-                    eval_suite_items.c.position)).all()
-            if any(item.created_by != "system" for item in rows):
-                continue
-            if exists.updated == exists.created:
-                connection.execute(eval_suites.update().where(eval_suites.c.id == exists.id).values(
-                    description=suite.get("description")))
-            items = suite["items"]
-            for index in range(max(len(rows), len(items))):
-                item = rows[index] if index < len(rows) else None
-                data = items[index] if index < len(items) else None
-                if item is None:
-                    connection.execute(eval_suite_items.insert().values(id=str(uuid4()), suite_id=exists.id,
-                        position=index, data=data, created_by="system", created=now, updated=now))
-                elif item.updated != item.created:
-                    continue
-                elif data is None:
-                    connection.execute(eval_suite_items.delete().where(eval_suite_items.c.id == item.id))
-                elif item.data != data:
-                    connection.execute(eval_suite_items.update().where(eval_suite_items.c.id == item.id).values(data=data))
-        if changed:
-            value = {"names": done, "revisions": revisions, "at": now}
-            if row:
-                connection.execute(settings_table.update().where(settings_table.c.key == LATE_SEED_KEY).values(
-                    value=value, updated=now))
-            else:
-                connection.execute(settings_table.insert().values(key=LATE_SEED_KEY, value=value, updated=now))
-    return added
-
-
 # 读取调参评测集的全部题目，按加入顺序排列。engine 不传时用系统参数绑定的同一个库。
 def load_dataset(engine=None):
     target = engine or bound_engine()
     with target.connect() as connection:
-        rows = connection.execute(select(eval_items.c.data).order_by(eval_items.c.position)).scalars().all()
+        rows = (
+            connection.execute(
+                select(eval_items.c.data).order_by(eval_items.c.position)
+            )
+            .scalars()
+            .all()
+        )
     return [dict(row) for row in rows]
 
 
@@ -207,18 +96,24 @@ def select_split(items, split):
 def mark_reviewed(item_id, engine=None):
     target = engine or bound_engine()
     with target.begin() as connection:
-        data = connection.execute(select(eval_items.c.data).where(eval_items.c.id == item_id)).scalar()
+        data = connection.execute(
+            select(eval_items.c.data).where(eval_items.c.id == item_id)
+        ).scalar()
         if data is None:
             return None
         item = {**data, "reviewed": True}
-        connection.execute(eval_items.update().where(eval_items.c.id == item_id).values(data=item,
-            updated=now_text()))
+        connection.execute(
+            eval_items.update()
+            .where(eval_items.c.id == item_id)
+            .values(data=item, updated=now_text())
+        )
     return item
 
 
 # 拼接评测语料库（见 app/evaluation/corpus.py）的全部原文，手动录入和 AI 生成共用这份内容做证据校验。
 def corpus_text(engine=None):
     from .corpus import documents_for
+
     parts = []
     for item in documents_for(engine=engine):
         parts.append(item["content"])
@@ -267,8 +162,15 @@ def append_items(items, engine=None):
         position = -1 if position is None else position
         for item in items:
             position += 1
-            connection.execute(eval_items.insert().values(id=item["id"], position=position, data=item,
-                created=now, updated=now))
+            connection.execute(
+                eval_items.insert().values(
+                    id=item["id"],
+                    position=position,
+                    data=item,
+                    created=now,
+                    updated=now,
+                )
+            )
 
 
 # 统一模型返回的证据格式；模型有时会把单条证据返回为字符串，或用 text/quote 包一层。
@@ -295,20 +197,36 @@ def normalize_generated_evidence(value):
 
 # 调用真实大模型按语料起草题目，并在落盘前要求每条证据都能回到语料原文。
 def generate_items(models, existing, count, split, question_type=None):
-    prompt = ChatPromptTemplate.from_messages([("system", (
-        "你是 RAG 评测集编辑。只输出 JSON，不要输出 Markdown。"
-        # ChatPromptTemplate 会把大括号解释成变量，这里转义 JSON 示例，避免生成请求被模板解析拦截。
-        "JSON 必须是 {{\"items\":[...]}}，每个 item 必须包含 type、answerable、question、evidence、reference_answer。"
-        "type 只能是：事实、同义改写、关键词、多轮追问、无法回答。"
-        "evidence 必须是字符串数组；可回答题的每个 evidence 必须是语料中的逐字原文；无法回答题 evidence 必须为空数组。"
-        "如果题型是同义改写，question 是原问题，并额外返回 paraphrase_question 作为另一种问法；两者共享 evidence 和 reference_answer。"
-        "如果 type 是多轮追问，还必须返回 history 字符串数组。"
-        "不要编造语料中不存在的事实；问题应覆盖语料中的不同信息点。"
-    )), ("human", "请基于下面语料生成 {count} 道题。题型要求：{question_type}。\n语料：\n{corpus}")])
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                (
+                    "你是 RAG 评测集编辑。只输出 JSON，不要输出 Markdown。"
+                    # ChatPromptTemplate 会把大括号解释成变量，这里转义 JSON 示例，避免生成请求被模板解析拦截。
+                    'JSON 必须是 {{"items":[...]}}，每个 item 必须包含 type、answerable、question、evidence、reference_answer。'
+                    "type 只能是：事实、同义改写、关键词、多轮追问、无法回答。"
+                    "evidence 必须是字符串数组；可回答题的每个 evidence 必须是语料中的逐字原文；无法回答题 evidence 必须为空数组。"
+                    "如果题型是同义改写，question 是原问题，并额外返回 paraphrase_question 作为另一种问法；两者共享 evidence 和 reference_answer。"
+                    "如果 type 是多轮追问，还必须返回 history 字符串数组。"
+                    "不要编造语料中不存在的事实；问题应覆盖语料中的不同信息点。"
+                ),
+            ),
+            (
+                "human",
+                "请基于下面语料生成 {count} 道题。题型要求：{question_type}。\n语料：\n{corpus}",
+            ),
+        ]
+    )
     corpus = corpus_text()
-    content = models.chat_completion(prompt.format_messages(
-        count=count, question_type=question_type or "混合题型", corpus=corpus,
-    ), 2400)
+    content = models.chat_completion(
+        prompt.format_messages(
+            count=count,
+            question_type=question_type or "混合题型",
+            corpus=corpus,
+        ),
+        2400,
+    )
     parsed = models.parse_json(content)
     raw_items = parsed.get("items") if isinstance(parsed, dict) else None
     if not isinstance(raw_items, list) or len(raw_items) < count:
@@ -327,12 +245,16 @@ def generate_items(models, existing, count, split, question_type=None):
             raise ValueError("模型返回了未知题型或无效可回答标记")
         if not isinstance(question, str) or not question.strip():
             raise ValueError("模型返回了空问题")
-        if not isinstance(history, list) or not all(isinstance(text, str) and text.strip() for text in history):
+        if not isinstance(history, list) or not all(
+            isinstance(text, str) and text.strip() for text in history
+        ):
             raise ValueError("模型返回了无效追问历史")
         if item_type == "多轮追问" and not history:
             raise ValueError("多轮追问题缺少追问历史")
         paraphrase_question = raw.get("paraphrase_question")
-        if item_type == "同义改写" and (not isinstance(paraphrase_question, str) or not paraphrase_question.strip()):
+        if item_type == "同义改写" and (
+            not isinstance(paraphrase_question, str) or not paraphrase_question.strip()
+        ):
             raise ValueError("同义改写题缺少改写问题")
         if not isinstance(reference_answer, str) or not reference_answer.strip():
             raise ValueError("模型返回了空标准答案")
@@ -344,11 +266,15 @@ def generate_items(models, existing, count, split, question_type=None):
         for generated_question, pair_role in questions:
             item = {
                 "id": next_item_id(existing + generated, answerable),
-                "question": generated_question.strip(), "type": item_type, "answerable": answerable,
+                "question": generated_question.strip(),
+                "type": item_type,
+                "answerable": answerable,
                 "evidence": [text.strip() for text in evidence if text.strip()],
-                "reference_answer": reference_answer.strip(), "split": split,
+                "reference_answer": reference_answer.strip(),
+                "split": split,
                 "history": [text.strip() for text in history if text.strip()],
-                "origin": "ai", "reviewed": False,
+                "origin": "ai",
+                "reviewed": False,
             }
             if pair_id:
                 item["pair_id"] = pair_id
@@ -385,8 +311,13 @@ def validate_dataset(items, corpus_text):
         if groups:
             if not item.get("answerable"):
                 problems.append(f"{item_id}：无法回答的题不应该有计分项")
-            if len(groups) != len(evidence) or any(not group.get("label", "").strip() or not group.get("targets") for group in groups):
-                problems.append(f"{item_id}：计分项需要名称和目标分片，且数量应与计分依据一致")
+            if len(groups) != len(evidence) or any(
+                not group.get("label", "").strip() or not group.get("targets")
+                for group in groups
+            ):
+                problems.append(
+                    f"{item_id}：计分项需要名称和目标分片，且数量应与计分依据一致"
+                )
             continue
         for text in evidence:
             for piece in missing_variants(text, corpus):
@@ -404,15 +335,45 @@ def validate_dataset(items, corpus_text):
             continue
         roles = {member.get("pair_role") for member in members}
         if roles != REWRITE_ROLES:
-            problems.append(f"{pair_id}：同义改写题对必须同时包含 original 和 paraphrase")
+            problems.append(
+                f"{pair_id}：同义改写题对必须同时包含 original 和 paraphrase"
+            )
         if any(member.get("type") != "同义改写" for member in members):
             problems.append(f"{pair_id}：题对中的题型必须都是同义改写")
-        if any(member.get("answerable") != members[0].get("answerable") for member in members):
+        if any(
+            member.get("answerable") != members[0].get("answerable")
+            for member in members
+        ):
             problems.append(f"{pair_id}：题对中的可回答标记必须一致")
-        if any(member.get("evidence", []) != members[0].get("evidence", []) for member in members):
+        if any(
+            member.get("evidence", []) != members[0].get("evidence", [])
+            for member in members
+        ):
             problems.append(f"{pair_id}：题对中的标准证据必须一致")
-        if any(member.get("evidence_groups") != members[0].get("evidence_groups") for member in members):
+        if any(
+            member.get("evidence_groups") != members[0].get("evidence_groups")
+            for member in members
+        ):
             problems.append(f"{pair_id}：题对的计分项和目标分片必须一致")
         if any(member.get("split") != members[0].get("split") for member in members):
             problems.append(f"{pair_id}：题对中的题目范围必须一致")
     return problems
+
+
+def update_prelude(item_id, turns, engine=None):
+    target = engine or bound_engine()
+    with target.begin() as connection:
+        data = connection.execute(
+            select(eval_items.c.data).where(eval_items.c.id == item_id)
+        ).scalar()
+        if data is None:
+            return None
+        item = {**data, "prelude": turns, "history": []}
+        if item.get("type") == "多轮追问" and not turns:
+            raise ValueError("多轮追问题至少需要一轮前置问答")
+        connection.execute(
+            eval_items.update()
+            .where(eval_items.c.id == item_id)
+            .values(data=item, updated=now_text())
+        )
+    return item

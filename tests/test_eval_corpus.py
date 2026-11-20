@@ -33,88 +33,6 @@ def upload(client, *files):
     )
 
 
-# 语料库：第一次用到时登记仓库里的初始语料；上传只收 UTF-8 的 .md / .txt，同名、内容相同的不收；
-# 能看正文、导入情况；删除时评测账号里导入过的文档一起删掉，上传的文件也删掉。
-def test_corpus_library_upload_list_delete(setup, eval_dir, upload_dir):
-    client, store = setup
-    assert client.get("/eval/corpus").status_code == 401
-    listed = client.get("/eval/corpus", headers=headers()).json()["items"]
-    # 初始语料复制进上传目录，和上传的一样。
-    assert [(item["title"], item["created_by"], item["status"]) for item in listed] == [
-        ("售后", "system", "not_imported"),
-        ("物流", "system", "not_imported"),
-    ]
-    logistics = (eval_dir / "seed" / "corpus" / "物流.md").read_text(encoding="utf-8")
-    seeded = Path(corpus_module.get_entry(store.engine, listed[1]["id"])["path"])
-    assert (
-        seeded.parent == upload_dir / "eval_corpus"
-        and seeded.read_text(encoding="utf-8") == logistics
-    )
-    result = upload(
-        client,
-        ("会员.md", "# 会员\n\n会员积分一年内有效。".encode(), "text/markdown"),
-        ("手册.pdf", b"%PDF", "application/pdf"),
-        ("售后.txt", "重名".encode(), "text/plain"),
-        ("旧编码.txt", "中文".encode("gbk"), "text/plain"),
-        ("副本.md", logistics.encode(), "text/markdown"),
-        ("空.txt", b"  \n", "text/plain"),
-    )
-    assert result.status_code == 201
-    body = result.json()
-    assert [item["title"] for item in body["added"]] == ["会员"]
-    reasons = [item["reason"] for item in body["rejected"]]
-    assert (
-        "只支持 .md、.txt" in reasons[0]
-        and "同名" in reasons[1]
-        and "UTF-8" in reasons[2]
-    )
-    assert "完全相同" in reasons[3] and "空的" in reasons[4]
-    member = body["added"][0]
-    assert (
-        client.get(f"/eval/corpus/{member['id']}", headers=headers()).json()["content"]
-        == "# 会员\n\n会员积分一年内有效。"
-    )
-    stored = Path(corpus_module.get_entry(store.engine, member["id"])["path"])
-    assert stored.parent == upload_dir / "eval_corpus" and stored.is_file()
-    # 评测语料浏览和证据校验也用语料库。
-    assert client.get("/eval/dataset", headers=headers()).json()["corpus"] == [
-        "会员",
-        "售后",
-        "物流",
-    ]
-    assert "会员积分一年内有效" in dataset_module.corpus_text()
-    import_corpus(store, client.app.state.models)
-    statuses = {
-        item["title"]: (item["status"], item["chunks"])
-        for item in client.get("/eval/corpus", headers=headers()).json()["items"]
-    }
-    assert statuses["会员"] == ("imported", 1) and statuses["售后"][0] == "imported"
-    deleted = client.delete(f"/eval/corpus/{member['id']}", headers=headers())
-    assert deleted.status_code == 200 and not stored.exists()
-    assert eval_titles(store) == ["售后", "物流"]
-    assert (
-        client.delete(f"/eval/corpus/{member['id']}", headers=headers()).status_code
-        == 404
-    )
-    # 初始语料删掉后不会再自动登记回来：上传目录里的副本删掉，仓库里的初始文件不动。
-    repo_entry = next(
-        item
-        for item in client.get("/eval/corpus", headers=headers()).json()["items"]
-        if item["title"] == "物流"
-    )
-    client.delete(f"/eval/corpus/{repo_entry['id']}", headers=headers())
-    assert [
-        item["title"]
-        for item in client.get("/eval/corpus", headers=headers()).json()["items"]
-    ] == ["售后"]
-    assert (
-        not seeded.exists()
-        and (eval_dir / "seed" / "corpus" / "物流.md").is_file()
-        and eval_titles(store) == ["售后"]
-    )
-
-
-# 勾选了几份语料：只导入这几份，评测账号也只检索这几份（别的账号不受影响）；离开后恢复。
 def test_limit_titles_restricts_import_and_search(setup, eval_dir):
     client, store = setup
     models = client.app.state.models
@@ -203,115 +121,258 @@ def test_eval_run_records_picked_corpus(setup, eval_dir, monkeypatch):
 
 
 # 没导入时看不到分片；点「导入」在后台导入（和评测共用一把锁），导入后能分页看分片，格式和知识库文档的分块一样。
-def test_corpus_import_and_chunks(setup, eval_dir):
+
+
+from sqlalchemy import select
+from app.evaluation import document_refs
+from app.mysql.store import documents, document_heads
+from app.retrieval_policy import use_methods
+from test_app import headers as user_headers
+
+
+# 引用接口测试按身份显式传递。
+def headers(owner="admin"):
+    return user_headers(owner)
+
+
+def test_reference_selection_isolated_and_removal_preserves_documents(setup):
     client, store = setup
-    entries = {
-        item["title"]: item
-        for item in client.get("/eval/corpus", headers=headers()).json()["items"]
+    with store.engine.begin() as connection:
+        for key in ("a", "b", "c"):
+            connection.execute(
+                documents.insert().values(
+                    id=key,
+                    owner="alice",
+                    title=key,
+                    filename=key,
+                    path="",
+                    status="ready:0",
+                    created="t",
+                    updated="t",
+                    doc_key=key,
+                    version=1,
+                )
+            )
+            connection.execute(
+                document_heads.insert().values(
+                    doc_key=key,
+                    owner="alice",
+                    title=key,
+                    current_document_id=key,
+                    current_version=1,
+                    listed=True,
+                    updated="t",
+                )
+            )
+    assert (
+        client.get("/eval/document-candidates", headers=headers("alice")).status_code
+        == 403
+    )
+    response = client.put(
+        "/eval/document-references",
+        headers=headers("admin"),
+        json={"document_ids": ["a", "b"]},
+    )
+    assert response.status_code == 200, response.text
+    scope = document_refs.scope(store.engine)
+    assert set(scope["versions"]) == {"a", "b"}
+    document_refs.save(store.engine, ["c"])
+    with use_methods(["graph"], scope, []):
+        assert set(document_refs.scope(store.engine)["versions"]) == {"a", "b"}
+    result = client.delete("/eval/corpus/c", headers=headers("admin"))
+    assert result.status_code == 200
+    assert document_refs.saved(store.engine) == []
+    with store.engine.connect() as connection:
+        assert len(connection.execute(select(documents.c.id)).all()) == 3
+    assert (
+        client.post(
+            "/eval/corpus", headers=headers("admin"), files={"files": ("x.txt", b"x")}
+        ).status_code
+        == 410
+    )
+
+
+def test_reference_scoring_reads_original_chunks_and_frozen_versions(setup):
+    from app.mysql.store import chunks, document_chunks
+    from app.evaluation.retrieval import current_chunk_texts, import_corpus
+    from app.evaluation.evidence import stored_chunk_rows
+
+    client, store = setup
+    with store.engine.begin() as connection:
+        for key in ("a", "b", "c"):
+            connection.execute(
+                documents.insert().values(
+                    id=key,
+                    owner="alice",
+                    title=key,
+                    filename=key,
+                    path="",
+                    status="ready:1",
+                    created="t",
+                    updated="t",
+                    doc_key=key,
+                    version=1,
+                )
+            )
+            connection.execute(
+                document_heads.insert().values(
+                    doc_key=key,
+                    owner="alice",
+                    title=key,
+                    current_document_id=key,
+                    current_version=1,
+                    listed=True,
+                    updated="t",
+                )
+            )
+            connection.execute(
+                chunks.insert().values(
+                    id=key + ":0",
+                    owner="alice",
+                    title=key,
+                    text="证据 " + key,
+                    content="证据 " + key,
+                )
+            )
+            connection.execute(
+                document_chunks.insert().values(
+                    document_id=key, chunk_id=key + ":0", position=0
+                )
+            )
+    document_refs.save(store.engine, ["a", "b"])
+    frozen = document_refs.scope(store.engine)
+    with use_methods(["keyword"], frozen, []):
+        document_refs.save(store.engine, ["c"])
+        assert set(current_chunk_texts(store)) == {"a:0", "b:0"}
+        assert {row["chunk_id"] for row in stored_chunk_rows(store.engine)} == {
+            "a:0",
+            "b:0",
+        }
+        assert {row["document_id"] for row in import_corpus(store, None)} == {"a", "b"}
+    assert set(current_chunk_texts(store)) == {"c:0"}
+
+
+def test_referenced_corpus_batch_freezes_original_documents(
+    setup, monkeypatch, runtime
+):
+    from app.evaluation.dataset import replace_dataset
+    from app.models import Models
+    from test_evaluation import fake_rerank
+    from test_eval_batch import wait_batch
+
+    client, store = setup
+    runtime(contextual_retrieval=False, local_intent_enabled=False)
+    monkeypatch.setattr(client.app.state.models, "embedding_mode", "demo")
+    monkeypatch.setattr(Models, "rerank", fake_rerank)
+    store.mysql.create_document(
+        "original-a", "alice", "原文", "a.txt", "", {}, doc_key="original-a", version=1
+    )
+    count = store.ingest(
+        "alice",
+        "原文",
+        "耳机保修期为一年。",
+        client.app.state.models,
+        "original-a",
+        "original-a",
+    )
+    store.activate_version("original-a", count)
+    document_refs.save(store.engine, ["original-a"])
+    replace_dataset(
+        [
+            {
+                "id": "q",
+                "type": "事实",
+                "question": "耳机保修多久？",
+                "answerable": True,
+                "reviewed": True,
+                "split": "dev",
+                "evidence": ["耳机保修期为一年"],
+                "reference_answer": "一年",
+            }
+        ],
+        store.engine,
+    )
+    body = {
+        "configs": [
+            {
+                "version": 2,
+                "split": "dev",
+                "mode": "fixed",
+                "methods": ["keyword"],
+                "corpus_ids": ["original-a"],
+            }
+        ]
     }
-    after_sales = entries["售后"]
-    assert (
-        client.get(
-            f"/eval/corpus/{after_sales['id']}/chunks", headers=headers()
-        ).status_code
-        == 404
-    )
-    started = client.post(f"/eval/corpus/{after_sales['id']}/import", headers=headers())
-    assert started.status_code == 202
-    for _ in range(100):
-        item = next(
-            entry
-            for entry in client.get("/eval/corpus", headers=headers()).json()["items"]
-            if entry["title"] == "售后"
-        )
-        if item["status"] != "importing":
-            break
-        time.sleep(0.05)
-    assert (
-        item["status"] == "imported"
-        and item["chunks"] >= 1
-        and item["import_error"] is None
-    )
-    # 只导入了点的那一份。
-    assert eval_titles(store) == ["售后"]
-    page = client.get(
-        f"/eval/corpus/{after_sales['id']}/chunks", headers=headers()
-    ).json()
-    assert page["total"] == item["chunks"] and page["stale"] is False
-    assert "耳机签收后七天内可以无理由退货" in page["chunks"][0]["content"]
-    assert client.post("/eval/corpus/nope/import", headers=headers()).status_code == 404
+    response = client.post("/eval/batches", headers=headers("admin"), json=body)
+    assert response.status_code == 202, response.text
+    report = wait_batch(client, response.json()["id"])
+    assert report["arms"][0]["status"] == "completed", report
+    run = report["runs"][0]
+    assert set(run["frozen"]["data_scope"]["versions"]) == {"original-a"}
+    assert run["questions"][0]["stages"]["pool"]["recall"] == 1
+    body["configs"][0]["methods"] = ["graph"]
+    response = client.post("/eval/batches", headers=headers("admin"), json=body)
+    assert response.status_code == 422
+    assert "没有生效图谱" in response.text
+    with store.engine.connect() as connection:
+        assert not connection.execute(
+            select(documents.c.id).where(documents.c.owner == "eval")
+        ).first()
 
 
-def test_replace_one_corpus_keeps_id_old_file_and_active_version(setup, eval_dir):
-    client, store = setup
-    client.app.state.models.embedding_mode = "demo"
-    client.app.state.models.contextual = False
-    first = upload(
-        client,
-        ("海边.md", "# 沙岸\n\n海边的椅子是蓝色的。\n".encode(), "text/markdown"),
-    ).json()["added"][0]
-    import_corpus(store, client.app.state.models)
-    old_entry = corpus_module.get_entry(store.engine, first["id"])
-    path = f"/eval/corpus/{first['id']}"
-    payload = [
-        (
-            "files",
-            ("海边.md", "# 沙岸\n\n海边的椅子是红色的。\n".encode(), "text/markdown"),
-        )
-    ]
-    assert client.put(path, files=payload).status_code == 401
-    assert client.put(path, headers=headers("alice"), files=payload).status_code == 403
-    assert client.put(path, headers=headers(), files=payload * 2).status_code == 422
-    assert (
-        client.put(
-            path,
-            headers=headers(),
-            files=[("files", ("海边.md", b"  ", "text/markdown"))],
-        ).status_code
-        == 422
-    )
-    assert (
-        client.put(
-            path,
-            headers=headers(),
-            files=[("files", ("海边.md", b"\xff", "text/markdown"))],
-        ).status_code
-        == 422
-    )
-    assert client.app.state.eval_lock.acquire(blocking=False)
-    try:
-        assert client.put(path, headers=headers(), files=payload).status_code == 409
-    finally:
-        client.app.state.eval_lock.release()
-    changed = client.put(path, headers=headers(), files=payload)
-    assert changed.status_code == 200, changed.text
-    assert changed.json()["id"] == first["id"]
-    entry = corpus_module.get_entry(store.engine, first["id"])
-    assert entry["path"] != old_entry["path"]
-    assert Path(old_entry["path"]).read_text() == "# 沙岸\n\n海边的椅子是蓝色的。\n"
-    assert (
-        client.get(path, headers=headers()).json()["content"]
-        == "# 沙岸\n\n海边的椅子是红色的。\n"
-    )
-    status = next(
-        row
-        for row in client.get("/eval/corpus", headers=headers()).json()["items"]
-        if row["id"] == first["id"]
-    )
-    assert status["status"] == "stale"
-    # 当前检索版本在再次导入前仍是旧版，原文更新不会提前激活半成品。
-    page = client.get(path + "/chunks", headers=headers()).json()
-    assert page["stale"] is True
-    assert "蓝色" in str(page) and "红色" not in str(page)
-    import_corpus(store, client.app.state.models)
-    page = client.get(path + "/chunks", headers=headers()).json()
-    assert page["stale"] is False and "红色" in str(page)
-    # 重复相同更新不再生成新原文文件。
-    assert client.put(path, headers=headers(), files=payload).status_code == 200
-    assert corpus_module.get_entry(store.engine, first["id"])["path"] == entry["path"]
-    assert (
-        client.put(
-            "/eval/corpus/not-found", headers=headers(), files=payload
-        ).status_code
-        == 404
-    )
+def test_two_document_graph_scope_pins_versions(setup):
+    from app.mysql.store import graph_versions
+    from app.graph.retrieve import scope_versions
+
+    _, store = setup
+    with store.engine.begin() as connection:
+        for key in ("a", "b", "c"):
+            connection.execute(
+                documents.insert().values(
+                    id=key,
+                    owner="alice",
+                    title=key,
+                    filename=key,
+                    path="",
+                    status="ready:0",
+                    created="t",
+                    updated="t",
+                    doc_key=key,
+                    version=1,
+                )
+            )
+            connection.execute(
+                document_heads.insert().values(
+                    doc_key=key,
+                    owner="alice",
+                    title=key,
+                    current_document_id=key,
+                    current_version=1,
+                    listed=True,
+                    updated="t",
+                )
+            )
+            connection.execute(
+                graph_versions.insert().values(
+                    id="graph-" + key,
+                    build_id=key,
+                    space="online",
+                    document_id=key,
+                    doc_key=key,
+                    number=1,
+                    active=True,
+                    origin="build",
+                    created_by="alice",
+                    created="t",
+                )
+            )
+    document_refs.save(store.engine, ["a", "b"])
+    frozen = document_refs.scope(store.engine)
+    ids = [row["version_id"] for row in scope_versions(store.engine, frozen)]
+    assert set(ids) == {"graph-a", "graph-b"}
+    with store.engine.begin() as connection:
+        connection.execute(graph_versions.update().values(active=False))
+    with use_methods(["graph"], frozen, ids):
+        assert {
+            row["version_id"] for row in scope_versions(store.engine, frozen)
+        } == set(ids)

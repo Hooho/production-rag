@@ -261,9 +261,16 @@ def text_value(value, label, limit, required=True):
 
 # 按评测方式校验一道题，返回要保存的字段。证据必须能在评测语料里逐字找到，否则这道题永远判为没找到。
 def check_item(method, data, corpus=None, catalog=None):
+    if data.get("version") == 2:
+        method = "retrieval"
     question = text_value(data.get("question"), "问题", QUESTION_LIMIT)
-    cleaned = {"question": question}
-    if method in ("retrieval", "answer") and data.get("evidence_groups") is not None:
+    answerable = data.get("answerable", True)
+    cleaned = {"question": question, "answerable": answerable}
+    if not answerable:
+        if data.get("evidence") or data.get("evidence_groups"):
+            raise ValueError("无法回答题不应设置计分证据")
+        cleaned["evidence"] = []
+    elif data.get("evidence_groups") is not None:
         from .grouped_evidence import validate_groups
 
         groups = validate_groups(data["evidence_groups"], catalog or [])
@@ -275,7 +282,7 @@ def check_item(method, data, corpus=None, catalog=None):
             for text in data.get("evidence") or []
             if isinstance(text, str) and text.strip()
         ]
-        if method == "retrieval" and not evidence:
+        if method == "retrieval" and not evidence and not data.get("reference_answer"):
             raise ValueError("检索方式的题目至少要有一条证据原文")
         folded = normalize(corpus if corpus is not None else corpus_text())
         for text in evidence:
@@ -283,7 +290,22 @@ def check_item(method, data, corpus=None, catalog=None):
             if missing:
                 raise ValueError(f"证据不在评测语料中：{missing[0][:60]}")
         cleaned["evidence"] = evidence
-    if method == "dialogue":
+    prelude = data.get("prelude") or []
+    if not isinstance(prelude, list) or len(prelude) > 20:
+        raise ValueError("前置问答最多20轮")
+    for turn in prelude:
+        if (
+            not isinstance(turn, dict)
+            or not all(
+                isinstance(turn.get(key), str) and turn[key].strip()
+                for key in ("question", "answer")
+            )
+            or turn.get("confirmed") is not True
+        ):
+            raise ValueError("请填写并确认每轮前置问答")
+    if prelude:
+        cleaned["prelude"] = prelude
+    if method == "dialogue" and not prelude:
         turns = [
             text.strip()
             for text in data.get("turns") or []
@@ -298,7 +320,7 @@ def check_item(method, data, corpus=None, catalog=None):
         data.get("reference_answer"),
         "参考答案",
         ANSWER_LIMIT,
-        required=method in LLM_METHODS,
+        required=answerable and method in LLM_METHODS,
     )
     if reference:
         cleaned["reference_answer"] = reference
@@ -368,6 +390,7 @@ def update_item(engine, suite_id, item_id, data):
                 eval_suite_items.c.suite_id == suite_id,
             )
         ).scalar()
+        cleaned["enabled"] = (previous or {}).get("enabled", True)
         if (
             previous
             and previous.get("evidence_groups")
@@ -386,6 +409,28 @@ def update_item(engine, suite_id, item_id, data):
         ).rowcount
         if not updated:
             return None
+    return get_suite(engine, suite_id)
+
+
+def set_item_enabled(engine, suite_id, item_id, enabled):
+    now = now_text()
+    with engine.begin() as connection:
+        condition = (eval_suite_items.c.suite_id == suite_id) & (
+            eval_suite_items.c.id == item_id
+        )
+        previous = connection.execute(
+            select(eval_suite_items.c.data).where(condition).with_for_update()
+        ).scalar()
+        if previous is None:
+            return None
+        connection.execute(
+            eval_suite_items.update()
+            .where(condition)
+            .values(data={**previous, "enabled": enabled}, updated=now)
+        )
+        connection.execute(
+            eval_suites.update().where(eval_suites.c.id == suite_id).values(updated=now)
+        )
     return get_suite(engine, suite_id)
 
 
@@ -425,8 +470,11 @@ def load_for_run(engine, suite_ids):
                 .mappings()
                 .all()
             )
+            items = [
+                item for item in items if (item["data"] or {}).get("enabled", True)
+            ]
             if not items:
-                raise ValueError(f"「{row['name']}」还没有题目")
+                raise ValueError(f"「{row['name']}」没有启用的题目")
             loaded.append(
                 {
                     "id": row["id"],
@@ -558,6 +606,7 @@ def run_search_suite(
             # 和 Agent 逐题对比时要用：过滤后的召回、证据去向、交给回答模型的来源、检索词和耗时。
             "recall_final": found,
             "given_recall": row.get("given_recall"),
+            "graph_hits": row.get("graph_hits"),
             # 证据去向：status（没召回 / 没进候选池 / 低于阈值被过滤 / 超出返回段数 / 交给模型）和合并名次、重排名次、重排分，
             # 页面据此写出「召回到了但丢在哪一步」。
             "fixed_evidence": [
@@ -748,6 +797,7 @@ def run_dialogue_suite(store, models, suite, run_id, compare, progress):
                 },
                 outcome["answer"],
                 outcome["sources"],
+                outcome.get("relations") or [],
             )
             rows.append(
                 {

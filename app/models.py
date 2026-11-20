@@ -293,23 +293,33 @@ class Models:
             return None
         timeout = runtime_value("rerank_timeout")
         try:
-            data = self.call_url(
-                os.getenv("RERANK_URL", "http://embedding:8090/v1"),
-                "rerank",
-                {
-                    "query": query,
-                    "documents": documents,
-                },
-                timeout=timeout,
-            )
-            scores = [0.0] * len(documents)
-            for item in data["data"]:
-                # fastembed 的 TextCrossEncoder 返回原始 logit（约 -10 到 10），不是 0~1 的概率。
-                # 以前直接截断到 0~1，负分全变 0、大于 1 全变 1，模型的区分度被抹平。
-                # sigmoid 是单调变换，不改变排序，但保留全部区分度，并让分数可以理解为相关概率，
-                # 后续的相关性阈值也需要设在这个概率上。
-                logit = float(item["score"])
-                scores[int(item["index"])] = 1 / (1 + math.exp(-logit))
+            scores = []
+            # 重排服务 RerankInput 限制单次最多 32 条；关系和分片共用这个入口。
+            # 每条独立打分，按原始位置拼接各批结果，调用方最后统一排序。
+            for start in range(0, len(documents), 32):
+                batch = documents[start : start + 32]
+                data = self.call_url(
+                    os.getenv("RERANK_URL", "http://embedding:8090/v1"),
+                    "rerank",
+                    {"query": query, "documents": batch},
+                    timeout=timeout,
+                )
+                batch_scores = [None] * len(batch)
+                for item in data["data"]:
+                    index = int(item["index"])
+                    if not 0 <= index < len(batch) or batch_scores[index] is not None:
+                        raise ValueError("重排结果包含无效或重复的索引")
+                    logit = float(item["score"])
+                    if not math.isfinite(logit):
+                        raise ValueError("重排结果包含无效分数")
+                    batch_scores[index] = (
+                        1 / (1 + math.exp(-logit))
+                        if logit >= 0
+                        else math.exp(logit) / (1 + math.exp(logit))
+                    )
+                if any(score is None for score in batch_scores):
+                    raise ValueError("重排结果缺少候选分数")
+                scores.extend(batch_scores)
             return scores
         except httpx.TimeoutException as error:
             raise RerankError(f"重排服务超时（超过 {timeout:g} 秒）") from error
@@ -774,7 +784,7 @@ class Models:
     # 或"主题相关却没有答案"（问 2025 年的数据，库里只有 2024 年）。这里做的是整组资料的绝对判断，
     # 不足或只能回答一部分时还让模型说明缺什么、给出一个补充检索用的短问题。
     # 调用失败时按 sufficient 处理：判断只是额外的保护，不能因为它失败就让正常问答变成拒答。
-    def judge_sufficiency(self, question, sources):
+    def judge_sufficiency(self, question, sources, relations=()):
         source_lines = []
         for source in sources:
             # 相关性是重排模型给的分数，低分的资料由判断模型自己看是否切题。
@@ -782,6 +792,11 @@ class Models:
             if source.get("relevance") is not None:
                 note = f"（相关性 {source['relevance']:.2f}{'，相关性较低' if source.get('low_relevance') else ''}）"
             source_lines.append(f"[{source['id']}]{note} {source['text']}")
+        # 图谱关系（G 编号）也是回答模型会看到的资料，一起交给判断；标明是模型抽取的，可能有误。
+        for relation in relations or ():
+            source_lines.append(
+                f"[{relation['id']}]（图谱关系，模型从原文抽取） {relation['text']}"
+            )
         prompt = ChatPromptTemplate.from_messages(
             [
                 ("system", prompts.compose("sufficiency", template=True)),
@@ -816,21 +831,24 @@ class Models:
 
     # 检查模型引用只指向本轮真实检索来源。
     @staticmethod
-    def validate_citations(answer, sources):
-        if not Models.check_citations(answer, sources)["passed"]:
+    def validate_citations(answer, sources, relations=()):
+        if not Models.check_citations(answer, sources, relations)["passed"]:
             return CITATION_REJECTED
         return answer
 
     # 引用检查的明细：没有标注任何引用（no_citation）或引用了本轮不存在的来源编号（unknown_source）都不通过。
     # 单独返回明细，是为了在回答被拦截时记下具体原因，排查时能分清是"忘了标"还是"标错了"。
     @staticmethod
-    def check_citations(answer, sources):
+    # 检索来源是 S 编号，图谱关系是 G 编号，两种都可以引用。
+    def check_citations(answer, sources, relations=()):
         allowed = []
         for source in sources:
             allowed.append(source["id"])
+        for relation in relations or ():
+            allowed.append(relation["id"])
         cited = sorted(
-            set(re.findall(r"\[(S\d+)\]", answer or "")),
-            key=lambda value: int(value[1:]),
+            set(re.findall(r"\[([SG]\d+)\]", answer or "")),
+            key=lambda value: ("SG".index(value[0]), int(value[1:])),
         )
         unknown = [value for value in cited if value not in allowed]
         reason = "no_citation" if not cited else "unknown_source" if unknown else None

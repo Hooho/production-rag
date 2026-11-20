@@ -18,15 +18,40 @@ HISTORY_LIMIT = 6
 # 保留的 Token 最多是阈值的一半（和设置页的约束一致），阈值调小时保留的 Token 跟着收到一半以内。
 def memory_variants(settings):
     trigger, keep = settings["memory_trigger_tokens"], settings["memory_keep_tokens"]
-    variants = [{"name": "current", "label": f"当前设置（{trigger} Token / 保留 {keep} Token）", "trigger": trigger, "keep": keep}]
+    variants = [
+        {
+            "name": "current",
+            "label": f"当前设置（{trigger} Token / 保留 {keep} Token）",
+            "trigger": trigger,
+            "keep": keep,
+        }
+    ]
     for value in (max(800, trigger // 2), trigger * 2):
         if value != trigger:
             kept = min(keep, value // 2)
-            label = f"压缩阈值 {value} Token" + (f"（保留 {kept} Token）" if kept != keep else "")
-            variants.append({"name": f"trigger_{value}", "label": label, "trigger": value, "keep": kept})
+            label = f"压缩阈值 {value} Token" + (
+                f"（保留 {kept} Token）" if kept != keep else ""
+            )
+            variants.append(
+                {
+                    "name": f"trigger_{value}",
+                    "label": label,
+                    "trigger": value,
+                    "keep": kept,
+                }
+            )
     for value in (max(200, keep // 2), trigger // 2):
-        if value != keep and not any(item["name"] == f"keep_{value}" for item in variants):
-            variants.append({"name": f"keep_{value}", "label": f"保留最近 {value} Token", "trigger": trigger, "keep": value})
+        if value != keep and not any(
+            item["name"] == f"keep_{value}" for item in variants
+        ):
+            variants.append(
+                {
+                    "name": f"keep_{value}",
+                    "label": f"保留最近 {value} Token",
+                    "trigger": trigger,
+                    "keep": value,
+                }
+            )
     return variants
 
 
@@ -46,17 +71,46 @@ def run_dialogue(store, models, run_id, variant, dialogue):
     result = None
     try:
         for question in dialogue["turns"] + [dialogue["question"]]:
-            result = agent.run(store, models, EVAL_OWNER, session_id, question, previous[-HISTORY_LIMIT:], None)
-            previous.append({"question": question, "response": {"answer": result["answer"]}, "created": now()})
+            result = agent.run(
+                store,
+                models,
+                EVAL_OWNER,
+                session_id,
+                question,
+                previous[-HISTORY_LIMIT:],
+                None,
+            )
+            previous.append(
+                {
+                    "question": question,
+                    "response": {"answer": result["answer"]},
+                    "created": now(),
+                }
+            )
             for step in result["steps"]:
-                if step["id"] == "response" and (step.get("result") or {}).get("summary_updated"):
+                if step["id"] == "response" and (step.get("result") or {}).get(
+                    "summary_updated"
+                ):
                     summarized = True
     finally:
         agent.close()
-    response = next((step.get("result") or {} for step in result["steps"] if step["id"] == "response"), {})
+    response = next(
+        (
+            step.get("result") or {}
+            for step in result["steps"]
+            if step["id"] == "response"
+        ),
+        {},
+    )
     usage = response.get("token_usage") or {}
-    return {"answer": result["answer"], "sources": result.get("sources") or [], "route": result.get("route"),
-        "summarized": summarized, "input_tokens": usage.get("input")}
+    return {
+        "answer": result["answer"],
+        "sources": result.get("sources") or [],
+        "relations": result.get("relations") or [],
+        "route": result.get("route"),
+        "summarized": summarized,
+        "input_tokens": usage.get("input"),
+    }
 
 
 def average(values):

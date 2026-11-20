@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 
 
+from ..textnorm import TEXT_FOLD, fold_sections
 from .spreadsheet import SPREADSHEET_EXTENSIONS, TABLE_CHUNKING, spreadsheet_sections
 
 ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf", ".docx"} | SPREADSHEET_EXTENSIONS
@@ -230,7 +231,13 @@ def unstructured_version():
 # hi_res 解析一本书要好几分钟，以前任何一步失败重试、worker 重启都要从头再解析一遍；
 # 现在按"文件内容 + 解析器版本 + 表格识别开关"缓存成 JSON，同一文件再次处理时直接读取。
 # TXT/Markdown 解析只需几毫秒，不做缓存。缓存读写失败只当作未命中，不影响导入。
+# 解析结果统一把部首字换回汉字（缓存里存的是换之前的，读出来也要换）。
 def extract_sections_cached(path, cache_dir):
+    sections, stats, cached = parse_sections_cached(path, cache_dir)
+    return fold_sections(sections), stats, cached
+
+
+def parse_sections_cached(path, cache_dir):
     suffix = Path(path).suffix.lower()
     # Excel、CSV 自己解析，几百毫秒就完成，不做缓存；表格识别结果放进统计里，记到文档元数据。
     if suffix in SPREADSHEET_EXTENSIONS:
@@ -307,6 +314,8 @@ def parse_metadata(path, sections, elements=None, stats=None):
         "parse_strategy": "hi_res" if suffix == ".pdf" else ("default" if suffix == ".docx" else None),
         "table_structure_inference": TABLE_STRUCTURE_ENABLED if suffix == ".pdf" else None,
         "ocr_languages": list(OCR_LANGUAGES) if suffix == ".pdf" else None,
+        # 部首字换回汉字的规则版本（app/textnorm.py）
+        "text_fold": TEXT_FOLD,
         "table_chunking": TABLE_CHUNKING if suffix in SPREADSHEET_EXTENSIONS else None,
         "table_fallback_reason": TABLE_FALLBACK_REASON if suffix == ".pdf" and not TABLE_STRUCTURE_ENABLED else None,
         "page_count": total_pages or (max(pages) if pages else None),

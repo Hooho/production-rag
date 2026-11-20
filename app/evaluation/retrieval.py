@@ -1,23 +1,18 @@
-import hashlib
+from ..retrieval_policy import selected_methods
 import math
 import os
 import time
-from uuid import uuid4
 
-from sqlalchemy import select
 
 from ..models import Models
-from ..mysql.store import chunks, document_chunks, document_heads
 from ..runtime_config import snapshot as runtime_snapshot
-from ..tools.search import DocumentSearchTool, title_limit
-from .corpus import documents_for as corpus_documents
+from ..tools.search import DocumentSearchTool
 from .dataset import QUESTION_TYPES, evidence_variants, normalize, select_split
 from .grouped_evidence import bind_groups, evidence_fields, match_evidence
-from .flow import apply_sufficiency, given_chunk_ids, rewrite_item
+from .flow import apply_sufficiency, given_chunk_ids, rewrite_item, item_history
 
 
-# 评测语料导入到专门的评测用户下，和 alice、bob 的真实知识库完全隔离：
-# 评测数据不会混进用户的检索结果，用户上传或删除文档也不会改变评测分数。
+# 评测请求身份；实际检索范围由文档引用和冻结版本提供。
 EVAL_OWNER = "eval"
 # 阈值扫描的取值：0.05 到 0.9，每 0.05 一档。
 SWEEP_THRESHOLDS = []
@@ -51,90 +46,26 @@ VARIANTS = {
 SUITES = {"ablation": "消融实验", "params": "参数对比"}
 
 
-# 把评测语料库里的文档导入评测用户，走和线上导入相同的"去重 → 新版本 → 切换当前版本"流程。
-# 内容没变时 sha256 去重直接跳过，所以每次评测前都可以放心调用：语料改了才会重新切分和向量化。
-# 评测开跑时勾选了几份语料（limit_titles）就只导入这几份，没勾的不用花时间切分和向量化。
+# 保留调用入口，直接返回引用文档，不复制或重新索引。
 def import_corpus(store, models):
-    report = []
-    for entry in corpus_documents(title_limit(EVAL_OWNER), store.engine):
-        title = entry["title"]
-        content = entry["content"]
-        filename = entry["filename"]
-        content_sha256 = hashlib.sha256(content.encode()).hexdigest()
-        with store.engine.connect() as connection:
-            head = connection.execute(
-                select(document_heads.c.current_document_id).where(
-                    document_heads.c.owner == EVAL_OWNER,
-                    document_heads.c.title == title,
-                )
-            ).first()
-        replace_id = head[0] if head else None
-        doc_key, version = store.next_version(EVAL_OWNER, replace_id)
-        # 带上 Contextual Retrieval 开关：开关变化后语料要重新导入，评测才能反映开关的效果。
-        duplicate = store.find_duplicate(
-            EVAL_OWNER, content_sha256, doc_key, getattr(models, "contextual", False)
-        )
-        if duplicate:
-            report.append(
-                {
-                    "title": title,
-                    "document_id": duplicate,
-                    "status": "unchanged",
-                    "sha256": content_sha256,
-                }
-            )
-            continue
-        document_id = str(uuid4())
-        store.mysql.create_document(
-            document_id,
-            EVAL_OWNER,
-            title,
-            filename,
-            "",
-            {"sha256": content_sha256},
-            doc_key=doc_key,
-            version=version,
-            version_note="评测语料",
-            content_sha256=content_sha256,
-        )
-        try:
-            count = store.ingest(
-                EVAL_OWNER, title, content, models, document_id, doc_key or document_id
-            )
-            store.activate_version(document_id, count)
-        except Exception:
-            store.mysql.update_document(document_id, "failed", "评测语料导入失败")
-            store.remove_version_data(document_id)
-            raise
-        report.append(
-            {
-                "title": title,
-                "document_id": document_id,
-                "status": "imported",
-                "chunks": count,
-                "sha256": content_sha256,
-            }
-        )
-    return report
+    from .document_refs import scope
+
+    return [
+        {
+            "document_id": item["document_id"],
+            "title": item["title"],
+            "status": "referenced",
+        }
+        for item in scope(store.engine)["documents"]
+    ]
 
 
-# 读取评测用户当前版本的全部分片原文 {分片 id: 文本}。
+# 读取本次评测范围内的全部分片原文 {分片 id: 文本}。
 # 检索诊断里只有 80 字预览，判断"分片是否包含证据原文"需要完整文本，所以一次性从 MySQL 取出。
 def current_chunk_texts(store):
-    joined = document_heads.join(
-        document_chunks,
-        document_chunks.c.document_id == document_heads.c.current_document_id,
-    ).join(chunks, chunks.c.id == document_chunks.c.chunk_id)
-    with store.engine.connect() as connection:
-        rows = connection.execute(
-            select(chunks.c.id, chunks.c.text)
-            .select_from(joined)
-            .where(document_heads.c.owner == EVAL_OWNER)
-        ).all()
-    texts = {}
-    for chunk_id, text in rows:
-        texts[chunk_id] = normalize(text)
-    return texts
+    from .document_refs import rows
+
+    return {row[0]: normalize(row[2]) for row in rows(store.engine)}
 
 
 def scoring_item(store, item):
@@ -142,25 +73,23 @@ def scoring_item(store, item):
         isinstance(value, dict) for value in item.get("evidence", [])
     ):
         return item
-    joined = document_heads.join(
-        document_chunks,
-        document_chunks.c.document_id == document_heads.c.current_document_id,
-    ).join(chunks, chunks.c.id == document_chunks.c.chunk_id)
-    with store.engine.connect() as connection:
-        catalog = (
-            connection.execute(
-                select(
-                    document_heads.c.title,
-                    document_chunks.c.position,
-                    document_chunks.c.chunk_id,
-                    chunks.c.content,
-                )
-                .select_from(joined)
-                .where(document_heads.c.owner == EVAL_OWNER)
-            )
-            .mappings()
-            .all()
-        )
+    from .document_refs import rows
+
+    if any(group.get("relations") for group in item["evidence_groups"]):
+        from .evidence import target_catalog
+        from .grouped_evidence import validate_groups
+
+        validate_groups(item["evidence_groups"], target_catalog(store.engine))
+
+    catalog = [
+        {
+            "title": row[1],
+            "position": row[4],
+            "chunk_id": row[0],
+            "content": row[3] or row[2],
+        }
+        for row in rows(store.engine)
+    ]
     return {
         **item,
         "evidence": bind_groups(item["evidence"], item["evidence_groups"], catalog),
@@ -170,9 +99,7 @@ def scoring_item(store, item):
 # 按规则补全指代、用原问题检索（不调用模型）。固定流程现在和线上一样用大模型改写（见 app/evaluation/flow.py），
 # 这里只剩 Agent 评测用它算"实际提问"：Agent 收到的是按规则补全的问题。
 def plan_queries(item):
-    history = []
-    for question in item.get("history", []):
-        history.append({"question": question})
+    history = item_history(item)
     analysis = Models.fallback_query(item["question"], history, None)
     return analysis["queries"], analysis["standalone_query"], "rule"
 
@@ -220,11 +147,14 @@ def score_question(item, retrieval, chunk_texts, pool_size):
     evidence = item.get("evidence") or []
     return_limit = config["return_limit"]
     hits = evidence_hits(candidates, evidence, chunk_texts)
-    # 阶段一：召回。RRF 前 pool_size 名就是交给重排的候选池，证据没进池子，后面再强的重排也救不回来。
+    # 阶段一：召回。交给重排的候选池，证据没进池子，后面再强的重排也救不回来。
+    # 候选池分两份：按 RRF 名次进的（pool_via = rrf）和只被图找到、按图的名次进的（pool_via = graph），
+    # 按实际进池的那批算，排序仍按 RRF 名次。旧记录没有 pool_via，退回按 RRF 前 pool_size 名算。
     by_rrf = sorted(candidates, key=lambda row: row["rrf_rank"])
-    pool_ids = []
-    for row in by_rrf[:pool_size]:
-        pool_ids.append(row["chunk_id"])
+    if any(row.get("pool_via") for row in candidates):
+        pool_ids = [row["chunk_id"] for row in by_rrf if row.get("pool_via")]
+    else:
+        pool_ids = [row["chunk_id"] for row in by_rrf[:pool_size]]
     # 阶段二：重排后前 return_limit 名，不考虑阈值；没启用重排时就是 RRF 顺序。
     pool_rows = []
     for row in candidates:
@@ -321,6 +251,27 @@ def score_question(item, retrieval, chunk_texts, pool_size):
                 "status": best["status"] if best else "not_recalled",
             }
         )
+    # 关系召回后在关系筛选阶段丢失，也属于已召回后过滤；不改变分片候选池指标。
+    relations = (diagnostics.get("graph") or {}).get("relation_candidates") or []
+    for index, row in enumerate(evidence_rows):
+        if row["status"] != "not_recalled":
+            continue
+        matched = [
+            relation
+            for relation in relations
+            if index in evidence_found([relation], evidence, chunk_texts)
+        ]
+        if matched and all(not relation.get("kept") for relation in matched):
+            reasons = list(
+                dict.fromkeys(
+                    relation.get("reason") or "关系筛选未保留" for relation in matched
+                )
+            )
+            row.update(
+                status="graph_relation_filtered",
+                graph_filter_reason="；".join(reasons),
+                filter_stages=["graph_relation_filtered"],
+            )
     # 交给回答模型的资料（given）：最终来源经过父块扩展，正文里拼进了相邻分片；这些分片里的证据模型也看得到。
     # 上面三个阶段只认命中的那一个分片（用来调召回、重排、阈值），这里把父块里的分片都算上，
     # 和 Agent 比较时用它，两边口径一致（Agent 那边同样算父块里的分片，再加上 read_context 读到的）。
@@ -382,6 +333,8 @@ def score_question(item, retrieval, chunk_texts, pool_size):
     return {
         "id": item["id"],
         "question": item["question"],
+        "prelude": item.get("prelude") or [],
+        "reference_answer": item.get("reference_answer"),
         "type": item["type"],
         # 题目仍独立计分；保留题对关系只用于评测结果中的成对分析。
         "pair_id": item.get("pair_id"),
@@ -447,7 +400,11 @@ def material_summary(materials, prefix):
 # 一批来源交给模型的分片（含父块扩展拼进来的）里找到了哪几条证据，返回证据序号集合。
 def evidence_found(sources, evidence, chunk_texts):
     hits = evidence_hits(
-        [{"chunk_id": chunk_id} for chunk_id in given_chunk_ids(sources)],
+        (
+            [source for source in sources if source.get("relation_id")]
+            if sources and all(source.get("relation_id") for source in sources)
+            else [{"chunk_id": chunk_id} for chunk_id in given_chunk_ids(sources)]
+        ),
         evidence,
         chunk_texts,
     )
@@ -469,15 +426,81 @@ def evidence_found_main(sources, evidence, chunk_texts):
 
 # 扩展命中：最后交给模型的资料里拿到的证据中，不在检索命中的那一片、只在父块扩展拼进来的分片里的。
 # 记在评测行上（given_hits 拿到几条、ext_hits 其中靠扩展的几条），每条证据标 via：direct / extension。
-def mark_extension(row, sources, evidence, chunk_texts):
-    given = evidence_found(sources, evidence, chunk_texts)
-    main = evidence_found_main(sources, evidence, chunk_texts)
-    row["given_hits"] = len(given)
-    row["ext_hits"] = len(given - main)
-    for index, entry in enumerate(row.get("evidence") or []):
-        entry["via"] = (
-            None if index not in given else "direct" if index in main else "extension"
+def graph_evidence_paths(diagnostics, sources, relations, evidence, chunk_texts):
+    """只追踪最终保留、且原文或关系实际交付的图关系，不给父块邻片归因。"""
+    graph = (diagnostics or {}).get("graph")
+    if graph is None:
+        return None
+    candidates = graph.get("relation_candidates")
+    if candidates is None:
+        return [[] for _ in evidence] if graph.get("status") != "ok" else None
+    main = {
+        str(source["chunk_id"]) for source in sources or [] if source.get("chunk_id")
+    }
+    delivered = {relation["relation_id"] for relation in relations or []}
+    paths = [set() for _ in evidence]
+    for relation in candidates:
+        if not relation.get("kept") or not (
+            str(relation["chunk_id"]) in main or relation["relation_id"] in delivered
+        ):
+            continue
+        origins = relation.get("origins")
+        if not origins:
+            return None  # 旧记录缺失来源，不能当成零命中。
+        routes = {"global" if origin == "global" else "entity" for origin in origins}
+        # 图通过任意关系找回有效原文，也有召回贡献；关系自身计分必须显式选择。
+        material = (
+            {"chunk_id": relation["chunk_id"]}
+            if str(relation["chunk_id"]) in main
+            else relation
         )
+        for index in evidence_found([material], evidence, chunk_texts):
+            paths[index].update(routes)
+    return [sorted(routes) for routes in paths]
+
+
+def graph_hit_summary(paths):
+    if paths is None:
+        return None
+    return {
+        "entity_only": sum(set(routes) == {"entity"} for routes in paths),
+        "global_only": sum(set(routes) == {"global"} for routes in paths),
+        "both": sum(set(routes) == {"entity", "global"} for routes in paths),
+    }
+
+
+def mark_extension(
+    row, sources, evidence, chunk_texts, relations=None, diagnostics=None
+):
+    chunks = evidence_found(sources, evidence, chunk_texts)
+    main = evidence_found_main(sources, evidence, chunk_texts)
+    relation_found = evidence_found(relations, evidence, chunk_texts)
+    given = chunks | relation_found
+    row["given_hits"] = len(given)
+    row["given_recall"] = len(given) / len(evidence) if evidence else None
+    row["ext_hits"] = len(chunks - main)
+    row["relation_hits"] = len(relation_found - chunks)
+    row["relations"] = list(relations or [])
+    paths = graph_evidence_paths(diagnostics, sources, relations, evidence, chunk_texts)
+    row["graph_hits"] = graph_hit_summary(paths)
+    for index, entry in enumerate(row.get("evidence") or []):
+        entry["given"] = index in given
+        if paths is not None:
+            entry["graph_paths"] = paths[index]
+        entry["via"] = (
+            "direct"
+            if index in main
+            else "extension"
+            if index in chunks
+            else "relation"
+            if index in relation_found
+            else None
+        )
+        entry["relation_ids"] = [
+            relation.get("id")
+            for relation in relations or []
+            if index in evidence_found([relation], evidence, chunk_texts)
+        ]
 
 
 # 求平均，空列表返回 None（表示这一组没有可统计的题），避免除零。
@@ -524,6 +547,7 @@ def summarize(rows):
         row["given_recall"] for row in answerable if row.get("given_recall") is not None
     ]
     summary["recall_given"] = mean(given)
+    summary["relation_hits"] = sum(row.get("relation_hits", 0) for row in rows)
     summary.update(material_summary([row.get("material") for row in rows], ""))
     # 得分：全部找到 100，部分按比例最高 90，一条没找到按证据条数扣分（规则见 score.py）。
     from .score import fixed_item, summarize_scores
@@ -543,7 +567,10 @@ def summarize(rows):
     evidence_total = sum(row["evidence_count"] for row in counted)
     summary["recall_direct"] = (
         round(
-            sum(row["given_hits"] - row["ext_hits"] for row in counted)
+            sum(
+                row["given_hits"] - row["ext_hits"] - row.get("relation_hits", 0)
+                for row in counted
+            )
             / evidence_total,
             4,
         )
@@ -667,7 +694,9 @@ def funnel(rows):
 # 按题目类型分别统计：整体分数可能掩盖某类题特别差，例如同义改写题更依赖向量召回。
 def summarize_by_type(rows):
     groups = {}
-    for question_type in QUESTION_TYPES:
+    for question_type in dict.fromkeys(
+        [*QUESTION_TYPES, *(row["type"] for row in rows)]
+    ):
         selected = []
         for row in rows:
             if row["type"] == question_type:
@@ -891,7 +920,12 @@ def evaluate_items(
         queries, rerank_query = rewrite["queries"], rewrite["standalone_query"]
         started = time.monotonic()
         retrieval = tool.execute(
-            store, models, EVAL_OWNER, queries, rerank_query, **options
+            store,
+            models,
+            EVAL_OWNER,
+            queries,
+            rerank_query,
+            **{**options, "graph_question_source": "评测的独立问题"},
         )
         latency_ms = round((time.monotonic() - started) * 1000)
         row = score_question(item, retrieval, chunk_texts, pool_size)
@@ -932,9 +966,27 @@ def evaluate_items(
             if check.get("retried"):
                 retry = check["retry_retrieval"]
                 retry_score = score_question(item, retry, chunk_texts, pool_size)
-                mark_extension(retry_score, retry["sources"], evidence, chunk_texts)
+                mark_extension(
+                    retry_score,
+                    retry["sources"],
+                    evidence,
+                    chunk_texts,
+                    retry.get("relations"),
+                    retry.get("diagnostics"),
+                )
+                if keep_diagnostics:
+                    row["retry"]["diagnostics"] = retry["diagnostics"]
                 row["retry"].update(
                     {
+                        "relations": retry_score["relations"],
+                        "relation_hits": retry_score["relation_hits"],
+                        "graph_hits": retry_score["graph_hits"],
+                        "given_recall": retry_score["given_recall"],
+                        "found": [
+                            index
+                            for index, entry in enumerate(retry_score["evidence"])
+                            if entry.get("given")
+                        ],
                         "queries": [*queries, check["retry_query"]],
                         "query_routes": retry_score["query_routes"],
                         "evidence": retry_score["evidence"],
@@ -943,14 +995,36 @@ def evaluate_items(
                     }
                 )
             row["check_ms"] = check_ms
-            mark_extension(row, check["sources"], evidence, chunk_texts)
+            first_found = evidence_found(
+                retrieval["sources"], evidence, chunk_texts
+            ) | evidence_found(retrieval.get("relations"), evidence, chunk_texts)
+            row["first_given_recall"] = (
+                len(first_found) / len(evidence) if evidence else None
+            )
+            for index, entry in enumerate(row["evidence"]):
+                entry["first_given"] = index in first_found
+            mark_extension(
+                row,
+                check["sources"],
+                evidence,
+                chunk_texts,
+                check.get("relations"),
+                (check.get("retry_retrieval") or {}).get("diagnostics")
+                if check.get("retry_used")
+                else retrieval.get("diagnostics"),
+            )
             row["material"] = material(check["sources"])
             row["flow_latency_ms"] = rewrite["duration_ms"] + latency_ms + check_ms
             # 生成评测接着回答时直接用这次的判断结果，不再判断一次（见 results.answer_hook）。
             retrieval["sufficiency_check"] = check
         if not judge:
             mark_extension(
-                row, retrieval["sources"], item.get("evidence") or [], chunk_texts
+                row,
+                retrieval["sources"],
+                item.get("evidence") or [],
+                chunk_texts,
+                retrieval.get("relations"),
+                retrieval.get("diagnostics"),
             )
             row["material"] = material(retrieval["sources"])
         if keep_diagnostics:
@@ -1057,7 +1131,7 @@ def run_retrieval(
         "min_score": min_score,
         "reranked": reranked,
         "fusion": "sum",
-        "methods": ["dense", "keyword"],
+        "methods": list(selected_methods() or ["dense", "keyword"]),
         "model_mode": models.mode,
         "embedding_mode": models.embedding_mode,
         "embedding_model": models.embedding_model,

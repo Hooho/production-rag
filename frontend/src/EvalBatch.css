@@ -18,36 +18,102 @@
   font-size: 18px;
 }
 
-.evb-head span,
-.evb-arm p {
+.evb-head span {
   color: var(--ev-muted);
   font-size: 12px;
 }
 
-.evb-error {
-  color: var(--ev-bad);
-  font-size: 12px;
+/* 某一组跑失败：整张卡标红，错误原因单独一块贴在卡里。 */
+.evb-arm.is-error {
+  border-color: var(--ev-bad);
+  background: color-mix(in srgb, var(--ev-bad) 6%, var(--t-ffffff, #fff));
 }
 
+.evb-arm.is-error .evb-arm-title strong {
+  color: var(--ev-bad);
+}
+
+/* 跑完的组：整张卡标绿。 */
+.evb-arm.is-success {
+  border-color: var(--ev-good);
+  background: color-mix(in srgb, var(--ev-good) 6%, var(--t-ffffff, #fff));
+}
+
+.evb-arm.is-success .evb-arm-title strong {
+  color: var(--ev-good);
+}
+
+.evb-arm .evb-error {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ev-bad) 12%, transparent);
+  color: var(--ev-bad);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+/* 每组配置的状态卡：卡片本身放大一点，文字和内边距跟着放大。 */
 .evb-arms {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
 }
 
 .evb-arm {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
+  gap: 8px;
   border: 1px solid var(--ev-line);
+  border-radius: 8px;
   background: var(--t-f7fbff);
-  padding: 10px 12px;
+  padding: 14px 16px;
 }
 
 .evb-arm p {
   margin: 0;
+  color: var(--ev-muted);
+  font-size: 13px;
   line-height: 1.6;
+}
+
+.evb-arm-title strong {
+  font-size: 16px;
+}
+
+/* 「运行配置快照」弹窗里的参数：名称和值并排一行，字号压到 12px。 */
+.evb-snapshot-line {
+  margin: 0 0 6px;
+  color: var(--ev-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.evb-snapshot {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 14px;
+  margin: 0 0 6px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.evb-snapshot dt {
+  color: var(--ev-muted);
+}
+
+.evb-snapshot dd {
+  margin: 0;
+  color: var(--ev-ink);
+  overflow-wrap: anywhere;
+}
+
+/* 参数快照的气泡比通用气泡窄一点，少压住左侧导航。 */
+.info-popover:has(.evb-snapshot) {
+  width: min(420px, calc(100vw - 16px));
+  max-width: min(420px, calc(100vw - 16px));
 }
 
 .evb-arm-title {
@@ -117,12 +183,8 @@
 
 .evb-saved-card input {
   width: 100%;
-  border: 1px solid var(--t-abc4dc);
-  background: var(--t-eef5fb);
-  padding: 4px 8px;
   color: var(--ev-ink);
   font-weight: 600;
-  font-size: 13px;
 }
 
 .evb-saved-card ul {
@@ -151,21 +213,62 @@
   font-size: 12px;
 }
 
-/* 「保存为一组配置」和「开始评测」并排：和主按钮同样的尺寸、圆角、字重，只是描边样式，两个按钮一样高。 */
-.evb-launch-actions .secondary-button {
-  border: 1px solid var(--t-2563eb);
-  border-radius: 3px;
-  background: transparent;
-  color: var(--t-2563eb);
-  padding: 10px 14px;
-  font-weight: 800;
+/* 每份配置一套浅色，贯穿分组标题、指标列和汇总。 */
+.batch-config-colors .batch-color-0 {
+  --batch-bg: #f0f6ff;
+  --batch-head: #e3edfc;
+  --batch-text: #356aa8;
+}
+.batch-config-colors .batch-color-1 {
+  --batch-bg: #eff9f5;
+  --batch-head: #dff1e9;
+  --batch-text: #28785d;
+}
+.batch-config-colors .batch-color-2 {
+  --batch-bg: #fff9ed;
+  --batch-head: #fbefd3;
+  --batch-text: #926c28;
+}
+.batch-config-colors .batch-color-3 {
+  --batch-bg: #f7f3fc;
+  --batch-head: #ede5f7;
+  --batch-text: #7655a2;
+}
+.type-stats.batch-config-colors tr > [class*="batch-color-"] {
+  background: var(--batch-bg);
+}
+.type-stats.batch-config-colors thead tr > [class*="batch-color-"],
+.type-stats.batch-config-colors tr.is-total > [class*="batch-color-"] {
+  background: var(--batch-head);
+}
+.type-stats.batch-config-colors th.is-group {
+  color: var(--batch-text);
+}
+.type-stats.batch-config-colors .is-col-start {
+  border-left: 2px solid #d6e0eb;
 }
 
-.evb-launch-actions .secondary-button:hover:not(:disabled) {
-  background: rgb(var(--t-2563eb-rgb) / 0.08);
+/* 汇总卡片也用配置色，和下面「按类型」的表对应：同一份配置同一套颜色。 */
+.batch-config-colors .ag-mode-card {
+  background: var(--batch-bg);
+  border-color: var(--batch-head);
+}
+.batch-config-colors .ag-mode-card h4 {
+  color: var(--batch-text);
 }
 
-.evb-launch-actions .secondary-button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+/* 逐题多配置对比仅横向滚动，高度随内容展开，不撑宽外层报告。 */
+.ag-batch-scroll {
+  min-width: 0;
+  max-width: 100%;
+}
+.ag-batch-scroll .ag-columns {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  align-items: start;
+}
+.ag-batch-scroll .ag-batch-column {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }

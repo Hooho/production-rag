@@ -38,15 +38,6 @@
    justify-content: flex-end;
 }
 
-.lt-panel .primary-button,
-.lt-panel .secondary-button {
-   height: 32px;
-   border-radius: 4px;
-   padding: 0 14px;
-   font-size: 13px;
-   white-space: nowrap;
-}
-
 .lt-panel button:disabled {
    opacity: .5;
    cursor: not-allowed;
@@ -152,11 +143,6 @@
 .lt-option textarea {
    width: 100%;
    box-sizing: border-box;
-   border: 1px solid var(--t-cedfec);
-   border-radius: 4px;
-   padding: 6px 8px;
-   font: inherit;
-   font-size: 12px;
    resize: vertical;
 }
 

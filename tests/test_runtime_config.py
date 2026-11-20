@@ -19,20 +19,40 @@ def test_runtime_settings_save_and_reset(setup, monkeypatch):
     monkeypatch.setenv("RERANK_MIN_SCORE", "0.5")
     assert client.get("/settings/runtime", headers=headers("bob")).status_code == 403
     current = items(client.get("/settings/runtime", headers=admin()))
-    assert current["rerank_min_score"]["value"] == 0.85 and current["rerank_min_score"]["source"] == "default"
+    assert (
+        current["rerank_min_score"]["value"] == 0.85
+        and current["rerank_min_score"]["source"] == "default"
+    )
     assert "env" not in current["rerank_min_score"]
 
-    saved = client.put("/settings/runtime", headers=admin(), json={"changes": {"rerank_min_score": 0.7, "return_limit": 3}})
+    saved = client.put(
+        "/settings/runtime",
+        headers=admin(),
+        json={"changes": {"rerank_min_score": 0.7, "return_limit": 3}},
+    )
     assert saved.status_code == 200, saved.text
     current = {item["key"]: item for item in saved.json()["items"]}
-    assert current["rerank_min_score"]["value"] == 0.7 and current["rerank_min_score"]["source"] == "settings"
+    assert (
+        current["rerank_min_score"]["value"] == 0.7
+        and current["rerank_min_score"]["source"] == "settings"
+    )
     assert runtime_config.value("return_limit") == 3
     assert saved.json()["history"][0]["by"] == "admin"
-    assert {change["key"] for change in saved.json()["history"][0]["changes"]} == {"rerank_min_score", "return_limit"}
+    assert {change["key"] for change in saved.json()["history"][0]["changes"]} == {
+        "rerank_min_score",
+        "return_limit",
+    }
 
-    reset = client.put("/settings/runtime", headers=admin(), json={"changes": {"rerank_min_score": None}})
+    reset = client.put(
+        "/settings/runtime",
+        headers=admin(),
+        json={"changes": {"rerank_min_score": None}},
+    )
     current = {item["key"]: item for item in reset.json()["items"]}
-    assert current["rerank_min_score"]["value"] == 0.85 and current["rerank_min_score"]["source"] == "default"
+    assert (
+        current["rerank_min_score"]["value"] == 0.85
+        and current["rerank_min_score"]["source"] == "default"
+    )
 
 
 # 保存时校验范围和参数之间的约束，不合规整批不保存。
@@ -49,19 +69,44 @@ def test_runtime_settings_validation(setup):
         {"nope": 1},
     ]
     for changes in bad:
-        response = client.put("/settings/runtime", headers=admin(), json={"changes": changes})
+        response = client.put(
+            "/settings/runtime", headers=admin(), json={"changes": changes}
+        )
         assert response.status_code == 422, (changes, response.text)
-    assert items(client.get("/settings/runtime", headers=admin()))["return_limit"]["source"] == "default"
-    assert client.put("/settings/runtime", headers=admin(), json={"changes": {"business_tz": "UTC"}}).status_code == 200
+    assert (
+        items(client.get("/settings/runtime", headers=admin()))["return_limit"][
+            "source"
+        ]
+        == "default"
+    )
+    assert (
+        client.put(
+            "/settings/runtime",
+            headers=admin(),
+            json={"changes": {"business_tz": "UTC"}},
+        ).status_code
+        == 200
+    )
 
 
 # 检索在运行时读取参数：改了交给模型的段数和父子分块，下一次检索就生效，诊断里记下实际用的值。
 def test_search_uses_runtime_settings(setup, monkeypatch):
     client, store = setup
-    upload(client, content="退货政策：退货期限 7 天。\n\n退货运费：买家承担。\n\n换货政策：15 天内可换货。")
-    monkeypatch.setattr(Models, "rerank", lambda self, query, documents: [0.95] * len(documents))
-    assert client.put("/settings/runtime", headers=admin(),
-        json={"changes": {"return_limit": 1, "parent_context": False}}).status_code == 200
+    upload(
+        client,
+        content="退货政策：退货期限 7 天。\n\n退货运费：买家承担。\n\n换货政策：15 天内可换货。",
+    )
+    monkeypatch.setattr(
+        Models, "rerank", lambda self, query, documents: [0.95] * len(documents)
+    )
+    assert (
+        client.put(
+            "/settings/runtime",
+            headers=admin(),
+            json={"changes": {"return_limit": 1, "parent_context": False}},
+        ).status_code
+        == 200
+    )
     result = DocumentSearchTool().execute(store, Models(), "alice", ["退货"], "退货")
     assert len(result["sources"]) == 1
     config = result["diagnostics"]["config"]
@@ -72,13 +117,36 @@ def test_search_uses_runtime_settings(setup, monkeypatch):
 # 「交给模型的段数」离线扫描：段数只截掉排在后面的资料，证据排在第 2 名时，段数为 1 就丢一半证据。
 def test_return_limit_sweep():
     from app.evaluation.retrieval import return_limit_sweep
+
     rows = [
-        {"answerable": True, "evidence_count": 2, "pool": [{"p": 0.99, "ev": [0]}, {"p": 0.9, "ev": [1]}, {"p": 0.1, "ev": []}]},
-        {"answerable": False, "evidence_count": 0, "pool": [{"p": 0.95, "ev": []}, {"p": 0.2, "ev": []}]},
+        {
+            "answerable": True,
+            "evidence_count": 2,
+            "pool": [
+                {"p": 0.99, "ev": [0]},
+                {"p": 0.9, "ev": [1]},
+                {"p": 0.1, "ev": []},
+            ],
+        },
+        {
+            "answerable": False,
+            "evidence_count": 0,
+            "pool": [{"p": 0.95, "ev": []}, {"p": 0.2, "ev": []}],
+        },
     ]
-    points = {point["return_limit"]: point for point in return_limit_sweep(rows, 0.85, 3)}
-    assert points[1]["recall_final"] == 0.5 and points[1]["capped"] == 1 and points[1]["multi_evidence_recall"] == 0.5
-    assert points[2]["recall_final"] == 1.0 and points[2]["complete"] == 1 and points[2]["avg_returned"] == 1.5
+    points = {
+        point["return_limit"]: point for point in return_limit_sweep(rows, 0.85, 3)
+    }
+    assert (
+        points[1]["recall_final"] == 0.5
+        and points[1]["capped"] == 1
+        and points[1]["multi_evidence_recall"] == 0.5
+    )
+    assert (
+        points[2]["recall_final"] == 1.0
+        and points[2]["complete"] == 1
+        and points[2]["avg_returned"] == 1.5
+    )
     assert points[3]["capped"] == 0
 
 
@@ -87,8 +155,16 @@ def test_memory_settings_rebuild(setup):
     client, store = setup
     agent = client.app.state.agent.response_agent
     assert agent.memory.trigger_tokens == 6000
-    assert client.put("/settings/runtime", headers=admin(),
-        json={"changes": {"memory_trigger_tokens": 4000, "memory_keep_tokens": 2000}}).status_code == 200
+    assert (
+        client.put(
+            "/settings/runtime",
+            headers=admin(),
+            json={
+                "changes": {"memory_trigger_tokens": 4000, "memory_keep_tokens": 2000}
+            },
+        ).status_code
+        == 200
+    )
     agent.sync_memory_settings()
     assert (agent.memory.trigger_tokens, agent.memory.keep_tokens) == (4000, 2000)
 
@@ -99,19 +175,43 @@ def test_memory_eval_dialogue(setup):
     from sqlalchemy import func, select
     from app.evaluation.memory import memory_variants, run_dialogue
     from app.mysql.store import runs
+
     client, store = setup
-    variants = memory_variants({"memory_trigger_tokens": 2400, "memory_keep_tokens": 1200})
+    variants = memory_variants(
+        {"memory_trigger_tokens": 2400, "memory_keep_tokens": 1200}
+    )
     # 阈值减半时保留的 Token 跟着收到一半以内；保留 Token 已经是阈值的一半，只能往小调。
-    assert [(variant["trigger"], variant["keep"]) for variant in variants] == [(2400, 1200), (1200, 600), (4800, 1200), (2400, 600)]
+    assert [(variant["trigger"], variant["keep"]) for variant in variants] == [
+        (2400, 1200),
+        (1200, 600),
+        (4800, 1200),
+        (2400, 600),
+    ]
     dialogue = {"id": "t1", "turns": ["退货期限是多久"], "question": "那运费呢"}
-    outcome = run_dialogue(store, client.app.state.models, "test", variants[0], dialogue)
+    outcome = run_dialogue(
+        store, client.app.state.models, "test", variants[0], dialogue
+    )
     assert outcome["route"] == "knowledge" and outcome["summarized"] is False
     with store.engine.connect() as connection:
         assert connection.execute(select(func.count()).select_from(runs)).scalar() == 0
-    suites = client.get("/eval/suites", headers=admin()).json()["items"]
-    dialogue_suite = next(suite for suite in suites if suite["method"] == "dialogue")
-    assert dialogue_suite["item_count"] >= 3
-    response = client.post("/eval/runs", headers=admin(), json={"kind": "special", "suite_ids": [dialogue_suite["id"]]})
+    dialogue_suite = client.post(
+        "/eval/suites", headers=admin(), json={"name": "多轮对话", "method": "dialogue"}
+    ).json()
+    added = client.post(
+        f"/eval/suites/{dialogue_suite['id']}/items",
+        headers=admin(),
+        json={
+            "question": "那运费呢",
+            "turns": ["退货期限是多久"],
+            "reference_answer": "运费由买家承担",
+        },
+    )
+    assert added.status_code == 201, added.text
+    response = client.post(
+        "/eval/runs",
+        headers=admin(),
+        json={"kind": "special", "suite_ids": [dialogue_suite["id"]]},
+    )
     assert response.status_code == 422 and "真实大模型" in response.json()["detail"]
 
 
@@ -119,6 +219,54 @@ def test_memory_eval_dialogue(setup):
 def test_ui_theme_setting(setup):
     client, store = setup
     assert client.get("/settings/ui").json() == {"theme": "blue"}
-    assert client.put("/settings/runtime", headers=admin(), json={"changes": {"ui_theme": "red"}}).status_code == 422
-    assert client.put("/settings/runtime", headers=admin(), json={"changes": {"ui_theme": "green"}}).status_code == 200
+    assert (
+        client.put(
+            "/settings/runtime", headers=admin(), json={"changes": {"ui_theme": "red"}}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.put(
+            "/settings/runtime",
+            headers=admin(),
+            json={"changes": {"ui_theme": "green"}},
+        ).status_code
+        == 200
+    )
     assert client.get("/settings/ui").json() == {"theme": "green"}
+
+
+def test_requires_point_to_real_settings_with_valid_values():
+    from app.runtime_config import BY_KEY, CARDS, REQUIRES, unmet
+
+    for key, rules in REQUIRES.items():
+        assert key in BY_KEY, key
+        for rule in rules:
+            spec = BY_KEY[rule["key"]]
+            if spec["type"] == "bool":
+                assert isinstance(rule["equals"], bool), (key, rule)
+            else:
+                assert rule["equals"] in spec["choices"], (key, rule)
+    for card in CARDS.values():
+        assert all(key in BY_KEY for key in card["keys"])
+    values = {"source_selection_mode": "count", "graph_retrieval": True}
+    assert [rule["key"] for rule in unmet("source_graph_budget_ratio", values)] == [
+        "source_selection_mode"
+    ]
+    assert unmet("return_limit", values) == []
+    assert unmet("source_token_budget", values)[0]["equals"] == "tokens"
+
+
+def test_view_returns_requires_and_cards(monkeypatch):
+    from app import runtime_config
+
+    # 只看参数定义，不读数据库（前面的测试可能留下已关闭的连接）。
+    monkeypatch.setattr(runtime_config, "_engine", None)
+    monkeypatch.setattr(runtime_config, "saved_values", lambda: {})
+    result = runtime_config.view()
+    items = {item["key"]: item for item in result["items"]}
+    assert items["source_token_budget"]["card"] == "source_selection"
+    assert "source_graph_budget_ratio" not in items
+    assert runtime_config.check_overrides({"source_graph_budget_ratio": 0.5}) == {}
+    assert "requires" not in items["source_selection_mode"]
+    assert result["cards"]["source_selection"]["title"] == "交给回答模型的资料"

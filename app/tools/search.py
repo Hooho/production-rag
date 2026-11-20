@@ -1,3 +1,6 @@
+from contextvars import copy_context
+from ..retrieval_policy import selected_methods, selected_scope
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 import logging
 import math
@@ -5,6 +8,7 @@ import os
 import threading
 import time
 
+from ..graph import retrieve as graph_retrieve
 from ..security import sanitize_source
 from ..models import RerankError
 from ..runtime_config import BY_KEY, snapshot as runtime_snapshot
@@ -47,6 +51,18 @@ def title_limit(owner):
         return _title_limits.get(owner)
 
 
+# 交给回答模型的一条图谱关系：起点 → 终点（分类）：描述。原文引用：「……」。不写出处，出处由 G 编号在界面上对应。
+def relation_context_text(row):
+    description = (row.get("description") or "").strip().rstrip("。")
+    text = f"{row.get('source')} → {row.get('target')}（{row.get('category')}）：{description}"
+    quotes = [
+        part.strip() for part in (row.get("evidence") or "").split("||") if part.strip()
+    ]
+    if quotes:
+        text += "。原文引用：" + "".join(f"「{quote}」" for quote in quotes)
+    return text
+
+
 class DocumentSearchTool:
     """执行向量、关键词召回和结果融合。"""
 
@@ -66,7 +82,7 @@ class DocumentSearchTool:
         owner,
         queries,
         rerank_query,
-        methods=("dense", "keyword"),
+        methods=None,
         pool_size=None,
         fusion="sum",
         rerank=True,
@@ -75,11 +91,35 @@ class DocumentSearchTool:
         scope=None,
         return_limit=None,
         excellent_score=None,
+        source_selection_mode=None,
+        source_token_budget=None,
+        graph_keywords=None,
+        graph_question=None,
+        graph_question_source=None,
     ):
         # 一次检索只读一次参数，整条检索用同一份；实际用到的值写进诊断配置，事后能查到这次用的是哪组参数。
         config = runtime_snapshot()
+        if source_selection_mode is not None:
+            config["source_selection_mode"] = source_selection_mode
+        if source_token_budget is not None:
+            config["source_token_budget"] = source_token_budget
+        # 召回方式：不传就是向量 + 关键词，设置页打开了图检索再加上图（固定流程、Agent 的 hybrid 都走这里）。
+        # 调用方明确传了 methods（Agent 的 vector / keyword 模式、评测的消融）时，只有里面有 graph 才走图。
+        if selected_methods() is not None:
+            methods = selected_methods()
+        if methods is None:
+            methods = ("dense", "keyword") + (
+                ("graph",) if config.get("graph_retrieval") else ()
+            )
+        methods = tuple(methods)
+        # pool_size 只管按 RRF 名次进重排的那一份；只被图找到的分片另有上限（graph_chunk_rerank_candidates）。
         if pool_size is None:
             pool_size = config["rerank_candidates"]
+        graph_pool_size = (
+            int(config.get("graph_chunk_rerank_candidates") or 0)
+            if "graph" in methods
+            else 0
+        )
         candidates = {}
         lists = []
         dense_hits = 0
@@ -89,12 +129,20 @@ class DocumentSearchTool:
         # 权限范围每次检索只查一次，所有检索词和召回方式共用；范围由服务端按登录身份从 MySQL 查出，模型和前端改不了。
         # 测试和评测里的替身存储没有权限范围，这时退回各自查询、诊断里不记范围。
         # scope 只给知识巡检用：传入全库范围，判断"提问人看不到、但知识库里其实有"的权限缺口。线上问答不传。
+        scope_started = time.monotonic()
+        if selected_scope() is not None:
+            scope = selected_scope()
+        if scope is None and owner == "eval" and hasattr(store, "engine"):
+            from ..evaluation.document_refs import scope as evaluation_scope
+
+            scope = evaluation_scope(store.engine)
         if scope is None:
             scope = (
                 store.readable_scope(owner)
                 if hasattr(store, "readable_scope")
                 else None
             )
+        scope_ms = round((time.monotonic() - scope_started) * 1000)
         limit = title_limit(owner)
         if limit is not None and scope is not None:
             kept = [item for item in scope["documents"] if item["title"] in limit]
@@ -103,9 +151,29 @@ class DocumentSearchTool:
                 "documents": kept,
             }
         scoped = {"versions": scope["versions"]} if scope else {}
+        # 图检索（提关键词要调用模型，最慢）放到另一个线程，和向量、关键词两路同时进行。
+        graph_future = None
+        graph_executor = None
+        if "graph" in methods:
+            graph_executor = ThreadPoolExecutor(max_workers=1)
+            graph_future = graph_executor.submit(
+                copy_context().run,
+                self.graph_recall,
+                store,
+                models,
+                graph_question or rerank_query,
+                scope,
+                config,
+                graph_keywords,
+                graph_question_source,
+            )
+        dense_ms = 0
+        keyword_ms = 0
         for query in queries:
             if "dense" in methods:
+                started = time.monotonic()
                 dense = store.search(owner, query, models, limit=12, **scoped)
+                dense_ms += round((time.monotonic() - started) * 1000)
                 dense_hits += len(dense)
                 lists.append(
                     self.add_candidates(
@@ -113,13 +181,41 @@ class DocumentSearchTool:
                     )
                 )
             if "keyword" in methods:
+                started = time.monotonic()
                 keyword = store.search_keyword(owner, query, limit=30, **scoped)
+                keyword_ms += round((time.monotonic() - started) * 1000)
                 keyword_hits += len(keyword)
                 lists.append(
                     self.add_candidates(
                         candidates, keyword, "keyword", query, config["rrf_k"]
                     )
                 )
+        graph = None
+        graph_hits = 0
+        if graph_future is not None:
+            graph = graph_future.result()
+            graph_executor.shutdown(wait=False)
+            graph_tables = (
+                (("unified", "图检索"),)
+                if "unified" in graph.get("sources", {})
+                else (("entity", "图 · 实体"), ("relation", "图 · 关系"))
+            )
+            for table, label in graph_tables:
+                rows = graph.get("sources", {}).get(table) or []
+                graph_hits += len(rows)
+                listing = self.add_candidates(
+                    candidates, rows, "graph", label, config["rrf_k"]
+                )
+                listing["table"] = table
+                for row, hit in zip(rows, listing["hits"]):
+                    hit["relation_ids"] = row.get("relation_ids") or []
+                    item = candidates[hit["chunk_id"]]
+                    linked = item.setdefault("graph_relation_ids", [])
+                    for relation_id in hit["relation_ids"]:
+                        if relation_id not in linked:
+                            linked.append(relation_id)
+                if graph.get("status") == "ok":
+                    lists.append(listing)
         recall_ms = round((time.monotonic() - recall_started) * 1000)
         ranked = []
         for candidate in candidates.values():
@@ -133,8 +229,35 @@ class DocumentSearchTool:
         for rrf_rank, item in enumerate(ranked, start=1):
             item["rrf_rank"] = rrf_rank
             item["status"] = "not_in_pool"
-        # RRF 只负责挑出进入重排的候选池；池子比最终返回数大，给重排留出纠正召回排序的空间。
-        pool = ranked[:pool_size]
+
+        # 交给重排的候选分两份：
+        #   1. RRF 候选：向量、关键词找到的分片（图也找到的照样有图的 RRF 分），按 RRF 名次取前 pool_size 个；
+        #   2. 图独有候选：只被图找到的分片不和其他分片比 RRF 名次，按图检索的名次取前 graph_pool_size 个。
+        # 图只有一张排名表，向量、关键词每个检索词各一张，只被图找到的分片 RRF 分数天生低，比名次几乎进不了候选池。
+        # LightRAG 也是把图带回的分片直接和向量分片一起交给重排，不先按名次筛。
+        def graph_only(item):
+            return set(item["retrieval_methods"]) == {"graph"}
+
+        def graph_rank(item):
+            return min(
+                contribution["rank"]
+                for contribution in item["contributions"]
+                if contribution["method"] == "graph"
+            )
+
+        pool = [item for item in ranked if not graph_only(item)][:pool_size]
+        for item in pool:
+            item["pool_via"] = "rrf"
+        graph_candidates = sorted(
+            (item for item in ranked if graph_only(item)),
+            key=lambda item: (graph_rank(item), item["rrf_rank"]),
+        )
+        for graph_only_rank, item in enumerate(graph_candidates, start=1):
+            item["graph_only_rank"] = graph_only_rank
+            if graph_only_rank <= graph_pool_size:
+                item["pool_via"] = "graph"
+                pool.append(item)
+        graph_pool_count = min(len(graph_candidates), graph_pool_size)
         rerank_documents = []
         for item in pool:
             item["status"] = "in_pool"
@@ -196,6 +319,22 @@ class DocumentSearchTool:
         # 重排关闭或调用失败时 ranked 保持 RRF 顺序且不做相关性过滤：此时没有可靠的分数可设阈值，
         # 统计中标记 relevance_filter 为 off，避免误以为结果已经过相关性检查。
         sources = []
+        budget_mode = config.get("source_selection_mode") == "tokens"
+        token_budget = config.get("source_token_budget", 8000)
+        tokens_used = 0
+        child_tokens = 0
+        expansion_skipped = 0
+        budget_skipped = 0
+        if budget_mode:
+            from ..memory.framework import text_tokens
+        relations, relation_rows, relation_reason = self.select_relations(
+            graph if "graph" in methods else None,
+            budget_mode,
+            token_budget if budget_mode else 0,
+            bool(rerank_count) and not fallback_used,
+        )
+        relation_tokens = sum(row["tokens"] for row in relations)
+        tokens_used = relation_tokens
         # 已被某个父块包含的分片 {分片 id: 来源编号}。两个命中分片在同一小节里相邻时，
         # 后一个直接归入前一个父块，不再重复给模型同一段文字；诊断里它的来源编号指向那个父块。
         covered = {}
@@ -204,7 +343,7 @@ class DocumentSearchTool:
         limit = config["return_limit"] if return_limit is None else return_limit
         # 优秀阈值：重排得分不低于它的全部返回，不受上面的条数限制；不传就用设置页的（固定流程），Agent 传自己的。
         # 1.0 表示不启用。没有重排分（重排关闭或失败）、兜底返回时也不启用。ranked 已按得分从高到低排好，
-        # 优秀的都在最前面，所以只要把条数放宽到优秀的条数。
+        # 优秀的都在最前面，所以遇到优秀分片时直接放行，不用把条数整体放宽。
         excellent = (
             config["rerank_excellent_score"]
             if excellent_score is None
@@ -213,22 +352,38 @@ class DocumentSearchTool:
         if excellent >= 1 or not rerank_count or fallback_used:
             excellent = None
         base_limit = limit
-        if excellent is not None:
-            limit = max(
-                limit, sum(1 for item in ranked if item["final_score"] >= excellent)
-            )
         beyond_limit = 0
         parent_characters = 0
         injection_redacted = 0
-        for index, item in enumerate(ranked, start=1):
-            if index > limit:
+        for item in ranked:
+            # 已经被前面的父块包含：内容就在某条来源里，不单独成源，也不占返回名额。
+            # 诊断里它的来源编号指向那个父块，并标出「已并入」，免得看成重复返回。
+            if item["id"] in covered:
+                item["status"] = "returned"
+                item["source_id"] = covered[item["id"]]
+                item["merged"] = True
+                continue
+            # 返回条数按实际产出的来源数算：并进来的分片不占名额，所以这里数的是已产出的来源条数。
+            # 优秀阈值之上的分片不受条数限制，照样单独成源。
+            if (
+                not budget_mode
+                and len(sources) >= limit
+                and not (excellent is not None and item["final_score"] >= excellent)
+            ):
                 item["status"] = "beyond_limit"
                 beyond_limit += 1
                 continue
+            if budget_mode:
+                clean_text, _ = sanitize_source(item["text"])
+                size = text_tokens(clean_text)
+                item["source_tokens"] = size
+                additional = size
+                if tokens_used + additional > token_budget:
+                    item["status"] = "beyond_budget"
+                    budget_skipped += 1
+                    continue
+                tokens_used += additional
             item["status"] = "returned"
-            if item["id"] in covered:
-                item["source_id"] = covered[item["id"]]
-                continue
             item["source_id"] = f"S{len(sources) + 1}"
             text = item["text"]
             chunk_ids = [item["id"]]
@@ -241,7 +396,7 @@ class DocumentSearchTool:
                     "context": item.get("context"),
                 }
             ]
-            if use_parent:
+            if use_parent and not budget_mode:
                 expanded = self.parent_context(
                     store,
                     item,
@@ -284,10 +439,57 @@ class DocumentSearchTool:
                     "low_relevance": bool(item.get("low_relevance")),
                 }
             )
+        if budget_mode:
+            child_tokens = tokens_used
+            # 所有原始命中先占预算、登记覆盖；第二轮扩展不能吞掉其他命中。
+            if use_parent:
+                by_id = {item["id"]: item for item in ranked}
+                for source in sources:
+                    expanded = self.parent_context(
+                        store,
+                        by_id[source["chunk_id"]],
+                        covered,
+                        config["parent_radius"],
+                        config["parent_max_chars"],
+                    )
+                    if not expanded:
+                        continue
+                    text, chunk_ids, parts = expanded
+                    if len(chunk_ids) <= 1:
+                        continue
+                    clean, injection_hits = sanitize_source(text)
+                    new_tokens = text_tokens(clean)
+                    old_tokens = text_tokens(source["text"])
+                    if tokens_used - old_tokens + new_tokens > token_budget:
+                        expansion_skipped += 1
+                        continue
+                    tokens_used += new_tokens - old_tokens
+                    source.update(
+                        text=clean,
+                        parent_chunk_ids=chunk_ids,
+                        parent_parts=parts,
+                        injection=injection_hits,
+                    )
+                    for chunk_id in chunk_ids:
+                        covered[chunk_id] = source["id"]
+                for item in ranked:
+                    if item["id"] in covered and item["status"] == "beyond_budget":
+                        item.update(
+                            status="returned",
+                            source_id=covered[item["id"]],
+                            merged=True,
+                        )
+                        budget_skipped -= 1
+            parent_characters = sum(len(source["text"]) for source in sources)
         stats = {
             "queries": len(queries),
             "dense_hits": dense_hits,
             "keyword_hits": keyword_hits,
+            "graph_hits": graph_hits,
+            "scope_ms": scope_ms,
+            "dense_ms": dense_ms,
+            "keyword_ms": keyword_ms,
+            "graph_ms": (graph or {}).get("timings", {}).get("total_ms"),
             "fused_candidates": len(candidates),
             "rerank_query": rerank_query,
             "reranked": rerank_count,
@@ -302,6 +504,27 @@ class DocumentSearchTool:
             "returned": len(sources),
             "parent_context": "on" if use_parent else "off",
             "source_characters": parent_characters,
+            "graph_pool_size": graph_pool_size,
+            "graph_pool_count": graph_pool_count,
+            "source_allocation_policy": "relations_first_v1",
+            "source_direct_tokens": child_tokens - relation_tokens
+            if budget_mode
+            else None,
+            "source_expansion_tokens": tokens_used - child_tokens
+            if budget_mode
+            else None,
+            "source_graph_relation_count": len(relations),
+            "source_graph_relation_tokens": sum(row["tokens"] for row in relations),
+            "source_graph_relation_skipped": sum(
+                1 for row in relation_rows if row["status"] == "beyond_budget"
+            ),
+            "source_selection_mode": "tokens" if budget_mode else "count",
+            "source_token_budget": token_budget if budget_mode else None,
+            "source_tokens_used": tokens_used if budget_mode else None,
+            "source_child_tokens": child_tokens if budget_mode else None,
+            "source_tokens_estimated": budget_mode,
+            "source_budget_skipped": budget_skipped,
+            "source_expansion_skipped": expansion_skipped,
             "recall_ms": recall_ms,
             "rerank_ms": rerank_ms,
             "injection_redacted": injection_redacted,
@@ -337,7 +560,154 @@ class DocumentSearchTool:
         )
         if scope:
             diagnostics["scope"] = self.scope_summary(scope["documents"])
-        return {"sources": sources, "stats": stats, "diagnostics": diagnostics}
+        # 每一步、每一路的耗时：检索过程拆成「权限范围 / 混合检索 / 重排与过滤」三步显示时用。
+        diagnostics["timings"] = {
+            "scope_ms": scope_ms,
+            "dense_ms": dense_ms,
+            "keyword_ms": keyword_ms,
+            "graph_ms": stats["graph_ms"],
+            "recall_ms": recall_ms,
+            "rerank_ms": rerank_ms,
+        }
+        if graph is not None:
+            # 两张图排名表的来源正文已经在候选里，诊断里不再重复存。
+            diagnostics["graph"] = {
+                key: value for key, value in graph.items() if key != "sources"
+            }
+            delivered = {
+                cid
+                for source in sources
+                for cid in source.get("parent_chunk_ids", [source["chunk_id"]])
+            }
+            reasons = {
+                "not_in_pool": "未进入重排候选池",
+                "filtered_low_score": "原文重排分数低于门槛",
+                "beyond_limit": "超出最终返回条数上限",
+                "beyond_budget": "超出最终资料预算",
+            }
+            for table in diagnostics["graph"].get("tables", {}).values():
+                for row in table:
+                    cid = row["chunk_id"]
+                    status = candidates.get(cid, {}).get("status")
+                    if cid in delivered:
+                        row["delivery_status"] = "returned"
+                    elif status in reasons:
+                        row["delivery_status"] = "filtered"
+                        row["delivery_reason"] = reasons[status]
+            if scope:
+                diagnostics["scope"]["graph_versions"] = graph.get("scope") or []
+            # 图检索留下的关系和去向：放进上下文（G 编号）还是额度不够没放；没放任何关系时写明原因。
+            diagnostics["context_relations"] = {
+                "reason": relation_reason,
+                "items": relation_rows,
+            }
+        return {
+            "sources": sources,
+            "relations": relations,
+            "stats": stats,
+            "diagnostics": diagnostics,
+        }
+
+    # 选出放进上下文的图谱关系。返回 (交给模型的关系, 诊断里每条留下的关系及去向, 一条关系都没放时的原因)。
+    # 只在 token 预算模式、分片重排成功、关系重排成功时交付。
+    # 已入选关系按选择顺序优先使用总预算，不为图原文分配保底。
+    @staticmethod
+    def select_relations(graph, budget_mode, token_budget, reranked):
+        if graph is None or graph.get("status") != "ok":
+            return [], [], None
+        kept = [
+            row for row in graph.get("relation_candidates") or [] if row.get("kept")
+        ]
+        kept.sort(
+            key=lambda row: (
+                row.get("selection_rank") or float("inf"),
+                row.get("rerank_rank") or float("inf"),
+                row.get("fusion_rank") or float("inf"),
+            )
+        )
+        if not budget_mode:
+            reason = "按条数选来源时不放图谱关系，只在 token 预算模式下放"
+        elif token_budget <= 0:
+            reason = "总资料 token 预算不足，不放图谱关系"
+        elif not reranked:
+            reason = "分片重排未成功或走了兜底，未交付图谱关系"
+        elif graph.get("relation_rerank_error"):
+            reason = "关系重排失败，不放图谱关系"
+        elif not kept:
+            reason = "图检索没有留下关系"
+        else:
+            reason = None
+        relations = []
+        rows = []
+        used = 0
+        if reason is None:
+            from ..memory.framework import text_tokens
+        for row in kept:
+            text, injection_hits = sanitize_source(relation_context_text(row))
+            item = {
+                "relation_id": row["relation_id"],
+                "source": row.get("source"),
+                "target": row.get("target"),
+                "category": row.get("category"),
+                "description": row.get("description"),
+                "evidence": row.get("evidence"),
+                "chunk_id": row.get("chunk_id"),
+                "document_id": row.get("document_id"),
+                "title": row.get("title"),
+                "version": row.get("version_number"),
+                "rerank_score": row.get("rerank_score"),
+                "rerank_rank": row.get("rerank_rank"),
+                "text": text,
+                "injection": injection_hits,
+                "tokens": None,
+                "context_id": None,
+                "status": "off",
+            }
+            if reason is None:
+                size = text_tokens(text)
+                item["tokens"] = size
+                if used + size <= token_budget:
+                    used += size
+                    item.update(status="context", context_id=f"G{len(relations) + 1}")
+                    relations.append(
+                        {
+                            "id": item["context_id"],
+                            **{
+                                key: value
+                                for key, value in item.items()
+                                if key not in ("context_id", "status")
+                            },
+                        }
+                    )
+                else:
+                    item["status"] = "beyond_budget"
+            rows.append(item)
+        return relations, rows, reason
+
+    # 图检索这一路：失败不影响向量、关键词两路，诊断里写明原因。
+    @staticmethod
+    def graph_recall(
+        store, models, question, scope, config, keywords=None, question_source=None
+    ):
+        if scope is None:
+            return graph_retrieve.empty(
+                "skipped", "这次检索没有权限范围（测试替身），不走图检索"
+            )
+        keywords = keywords or {}
+        try:
+            return graph_retrieve.retrieve(
+                store,
+                models,
+                question,
+                scope,
+                config,
+                entities=keywords.get("entities"),
+                themes=keywords.get("themes"),
+                question_source=question_source,
+            )
+        except Exception as error:
+            logger.exception("graph_recall_failed")
+            return graph_retrieve.empty("failed", f"图检索失败：{str(error)[:300]}")
 
     # 权限范围的摘要：按自己上传 / 共享给我 / 公开分别计数，文档列表最多保留 50 份，避免追踪记录过大。
     @staticmethod
@@ -414,6 +784,14 @@ class DocumentSearchTool:
     # 演示模式没有聊天模型、或设置页关闭了充分性判断、或来源已为空（重排阈值已过滤光）时不判断。
     VERDICT_RANK = {"insufficient": 0, "partial": 1, "sufficient": 2}
 
+    # 有图谱关系时才把关系传给判断，没有时调用方式和以前一样。
+    @staticmethod
+    def judge(models, question, retrieval):
+        relations = retrieval.get("relations") or []
+        if relations:
+            return models.judge_sufficiency(question, retrieval["sources"], relations)
+        return models.judge_sufficiency(question, retrieval["sources"])
+
     # options 原样传给补充检索（评测的专项可以只用一路检索，补充检索也要用同样的方式）。
     def check_sufficiency(
         self, store, models, owner, queries, rerank_query, retrieval, **options
@@ -427,6 +805,7 @@ class DocumentSearchTool:
             "retry_query": None,
             "retrieval": retrieval,
             "sources": retrieval["sources"],
+            "relations": retrieval.get("relations") or [],
             "refused": False,
         }
         if (
@@ -436,7 +815,8 @@ class DocumentSearchTool:
         ):
             return result
         result["checked"] = True
-        judgement = models.judge_sufficiency(rerank_query, retrieval["sources"])
+        # 图谱关系和检索来源一起交给充分性判断：关系也是回答模型会看到的资料。
+        judgement = self.judge(models, rerank_query, retrieval)
         result["judgements"].append(judgement)
         rewrite = judgement["rewrite_query"]
         if (
@@ -447,15 +827,25 @@ class DocumentSearchTool:
             retry_queries = list(queries)
             retry_queries.append(rewrite)
             retry_started = time.monotonic()
+            # 图检索用补充检索词重新提关键词：原问题的关键词第一次已经用过了。
             retry = self.execute(
-                store, models, owner, retry_queries, rerank_query, **options
+                store,
+                models,
+                owner,
+                retry_queries,
+                rerank_query,
+                **{
+                    **options,
+                    "graph_question": rewrite,
+                    "graph_question_source": "补充检索词",
+                },
             )
             result["retry_ms"] = round((time.monotonic() - retry_started) * 1000)
             result.update(
                 {"retried": True, "retry_query": rewrite, "retry_retrieval": retry}
             )
             if retry["sources"]:
-                second = models.judge_sufficiency(rerank_query, retry["sources"])
+                second = self.judge(models, rerank_query, retry)
                 result["judgements"].append(second)
                 if (
                     self.VERDICT_RANK[second["verdict"]]
@@ -468,6 +858,9 @@ class DocumentSearchTool:
         result["missing"] = judgement["missing"]
         result["refused"] = judgement["verdict"] == "insufficient"
         result["sources"] = [] if result["refused"] else result["retrieval"]["sources"]
+        result["relations"] = (
+            [] if result["refused"] else result["retrieval"].get("relations") or []
+        )
         return result
 
     # 把命中的子块扩展为父块，返回 (父块文字, 组成父块的分片 id 列表, 每片的 id/序号/字数/上下文说明)；找不到分片记录时返回 None，沿用子块。
@@ -571,10 +964,12 @@ class DocumentSearchTool:
         methods=("dense", "keyword"),
         settings=None,
     ):
+        methods = methods or ("dense", "keyword")
         settings = settings or runtime_snapshot()
         status_order = {
             "returned": 0,
             "beyond_limit": 1,
+            "beyond_budget": 1,
             "filtered_low_score": 2,
             "in_pool": 3,
             "not_in_pool": 4,
@@ -603,6 +998,9 @@ class DocumentSearchTool:
                     "preview": item["text"][:PREVIEW_CHARACTERS],
                     "status": item["status"],
                     "source_id": item.get("source_id"),
+                    "source_tokens": item.get("source_tokens"),
+                    # 并入了前面某个父块：内容已经在那条来源里，不单独成源，也不占返回名额。
+                    "merged": bool(item.get("merged")),
                     "retrieval_methods": item["retrieval_methods"],
                     "contributions": item["contributions"],
                     "rrf_score": round(item["rrf_score"], 6),
@@ -612,15 +1010,40 @@ class DocumentSearchTool:
                     if "rerank_probability" in item
                     else None,
                     "rerank_rank": item.get("rerank_rank"),
+                    "graph_relation_ids": item.get("graph_relation_ids") or [],
+                    # 怎么进的重排：rrf = 按 RRF 名次；graph = 只被图找到，按图的名次（graph_only_rank）进的。
+                    "pool_via": item.get("pool_via"),
+                    "graph_only_rank": item.get("graph_only_rank"),
                 }
             )
         # 候选池、融合方式和召回方式写进诊断配置，评测对比不同参数时能看出每次实际用的是哪一组。
         config = {
             "rrf_k": settings["rrf_k"],
             "rerank_candidates": pool_size,
+            # 只被图找到的分片进重排的上限和实际进了几个；没走图检索时为 0。
+            "graph_pool_size": stats.get("graph_pool_size", 0),
+            "graph_pool_count": stats.get("graph_pool_count", 0),
             "fusion": fusion,
             "methods": list(methods),
             "return_limit": settings["return_limit"],
+            **{
+                key: stats.get(key)
+                for key in (
+                    "source_allocation_policy",
+                    "source_direct_tokens",
+                    "source_expansion_tokens",
+                    "source_graph_relation_count",
+                    "source_graph_relation_tokens",
+                    "source_graph_relation_skipped",
+                    "source_selection_mode",
+                    "source_token_budget",
+                    "source_tokens_used",
+                    "source_child_tokens",
+                    "source_tokens_estimated",
+                    "source_budget_skipped",
+                    "source_expansion_skipped",
+                )
+            },
             "reranked": reranked,
             "parent_context": settings["parent_context"],
             "parent_max_chars": settings["parent_max_chars"],

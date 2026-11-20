@@ -1,3 +1,5 @@
+from .flow import item_history
+
 """Agent 检索评测：同一套调参题让 Agent 跑一遍，看它最后拿到的资料里有没有题目预设的证据（最后命中）。
 
 固定流程的检索评测分三个阶段算命中（候选池 / 重排 / 过滤后），用来调检索参数；
@@ -27,10 +29,10 @@ from ..agentic.query_explanation import query_explanation
 from .. import prompts
 from ..runtime_config import snapshot as runtime_snapshot
 from .dataset import QUESTION_TYPES, select_split
-from sqlalchemy import select
 
-from ..mysql.store import document_chunks, document_heads
 from .retrieval import (
+    graph_evidence_paths,
+    graph_hit_summary,
     EVAL_OWNER,
     current_chunk_texts,
     evidence_hits,
@@ -61,17 +63,9 @@ def parse_arguments(raw):
 # 评测语料当前版本里每个分块在文档里的序号（从 0 开始，页面显示成「第 N 片」，和知识库页面一致）。
 # S1、S2 只是某一次检索返回结果的顺序编号，每次检索都从 S1 开始；「第 N 片」才是分块固定的编号。
 def chunk_positions(store):
-    joined = document_heads.join(
-        document_chunks,
-        document_chunks.c.document_id == document_heads.c.current_document_id,
-    )
-    with store.engine.connect() as connection:
-        rows = connection.execute(
-            select(document_chunks.c.chunk_id, document_chunks.c.position)
-            .select_from(joined)
-            .where(document_heads.c.owner == EVAL_OWNER)
-        ).all()
-    return {str(chunk_id): position for chunk_id, position in rows}
+    from .document_refs import rows
+
+    return {str(row[0]): row[4] for row in rows(store.engine)}
 
 
 # 一组分片各自包含哪几条证据（证据序号）。
@@ -237,11 +231,19 @@ def evaluate_agent(agent_mode, store, models, item, chunk_texts, positions=None)
     evidence = item.get("evidence") or []
     # 多轮追问题和固定流程一样，用规则补全后的完整问题（评测没有真实的上一轮对话）。
     _, question, _ = plan_queries(item)
+    if item.get("prelude"):
+        question = item["question"]
     started = time.monotonic()
     row = {"question_sent": question, "status": "completed", "error": None}
     try:
         result = agent_mode.run(
-            store, models, EVAL_OWNER, f"eval-{uuid4()}", question, [], None
+            store,
+            models,
+            EVAL_OWNER,
+            f"eval-{uuid4()}",
+            question,
+            item_history(item),
+            None,
         )
         outcome = result.get("agent") or {}
         answer = result.get("answer") or ""
@@ -378,6 +380,31 @@ def evaluate_agent(agent_mode, store, models, item, chunk_texts, positions=None)
             "answer": answer[:ANSWER_LIMIT],
         }
     )
+    graph_paths = [set() for _ in evidence]
+    graph_known = True
+    for call in searches:
+        diagnostics = call.get("retrieval_diagnostics") or {}
+        if "graph" not in diagnostics:
+            continue
+        paths = graph_evidence_paths(
+            diagnostics,
+            call.get("results"),
+            [
+                relation
+                for relation in (diagnostics.get("context_relations") or {}).get(
+                    "items", []
+                )
+                if relation.get("status") == "context"
+            ],
+            evidence,
+            chunk_texts,
+        )
+        if paths is None:
+            graph_known = False
+        else:
+            for combined, routes in zip(graph_paths, paths):
+                combined.update(routes)
+    row["graph_hits"] = graph_hit_summary(graph_paths if graph_known else None)
     return row
 
 
@@ -386,6 +413,8 @@ def base_row(item):
     return {
         "id": item["id"],
         "question": item["question"],
+        "prelude": item.get("prelude") or [],
+        "reference_answer": item.get("reference_answer"),
         "type": item["type"],
         "pair_id": item.get("pair_id"),
         "pair_role": item.get("pair_role"),
@@ -633,7 +662,9 @@ def run_agent_retrieval(
         }
     result["config"]["agent"] = agent_config(models)
     result["summary"].update(summarize_agent(rows))
-    for question_type in QUESTION_TYPES:
+    for question_type in dict.fromkeys(
+        [*QUESTION_TYPES, *(row["type"] for row in rows)]
+    ):
         selected = [row for row in rows if row["type"] == question_type]
         if selected:
             result["by_type"].setdefault(question_type, {}).update(

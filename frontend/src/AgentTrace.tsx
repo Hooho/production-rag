@@ -1,3 +1,4 @@
+import Table from "./Table";
 // Agent 模式的执行链（设计稿：问答页 · Agent 模式执行链）。
 // 处理阶段里的「Agent 循环」这一步换成这里的视图：先是统计和每轮概览，再逐轮展开
 // ① 收到（模型收到的输入，原样）→ ② 输出（接口原始响应和提取出的字段）→ ③ 程序处理 → ④ 工具返回。
@@ -23,6 +24,12 @@ import { formatDuration } from "./format";
 import { huePicker } from "./hues";
 import { Tag } from "./Tag";
 import { DetailDialog } from "./DetailDialog";
+import { GraphRetrievalTrace } from "./GraphRetrievalTrace";
+import type {
+  ContextRelation,
+  GraphRetrievalTrace as GraphRetrievalTraceData,
+} from "./api";
+import { ContextRelationList } from "./ContextRelations";
 import "./AgentTrace.css";
 
 const TOOL_LABELS: Record<string, string> = {
@@ -249,7 +256,7 @@ function EvidenceId({
   cited?: boolean;
 }) {
   const kind = id[0] === "O" ? "o" : id[0] === "D" ? "d" : "s";
-  // 编号的颜色跟着产出它的工具：S 是 search_knowledge，O 是 lookup_order，D 是 query_data。
+  // 编号的颜色跟着产出它的工具：S、G（图谱关系）是 search_knowledge，O 是 lookup_order，D 是 query_data。
   const hue = toolHue(
     kind === "o"
       ? "lookup_order"
@@ -269,9 +276,31 @@ function EvidenceId({
   );
 }
 
+// search_knowledge 这次放进上下文的图谱关系，编号换成整次问答的 G 编号（relation_ids 和关系一一对应）。
+function toolRelations(result: AgentToolResult): ContextRelation[] {
+  const trace = result.trace ?? {};
+  const retrieval = trace.retrieval as
+    | { relations?: ContextRelation[] }
+    | undefined;
+  const ids = Array.isArray(trace.relation_ids)
+    ? (trace.relation_ids as string[])
+    : [];
+  return (retrieval?.relations ?? []).map((relation, index) => ({
+    ...relation,
+    id: ids[index] ?? relation.id,
+  }));
+}
+
 function evidenceIds(result: AgentToolResult) {
   const trace = result.trace ?? {};
-  if (Array.isArray(trace.evidence_ids)) return trace.evidence_ids as string[];
+  // 图谱关系的 G 编号接在资料编号后面。
+  if (Array.isArray(trace.evidence_ids))
+    return [
+      ...(trace.evidence_ids as string[]),
+      ...(Array.isArray(trace.relation_ids)
+        ? (trace.relation_ids as string[])
+        : []),
+    ];
   if (typeof trace.evidence_id === "string") return [trace.evidence_id];
   return [];
 }
@@ -450,136 +479,137 @@ function Summary({ result }: { result: Record<string, unknown> }) {
 function Overview({ rounds }: { rounds: AgentRound[] }) {
   const seen = new Set<string>();
   return (
-    <div className="agent-table-wrap">
-      <table className="agent-table">
-        <thead>
-          <tr>
-            <th>轮次</th>
-            <th>模型的决定</th>
-            <th>工具调用参数</th>
-            <th>结果</th>
-            <th>耗时</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rounds.map((round) => {
-            const results = round.tool_results ?? [];
-            if (results.length === 0) {
-              const label = round.error
-                ? "调用失败"
-                : round.kind === "forced"
-                  ? "强制回答"
-                  : round.kind === "citation_retry"
-                    ? "重写回答"
-                    : "直接回答";
-              return (
-                <tr key={round.round} className="round-start">
-                  <td>第 {round.round} 轮</td>
-                  <td>
-                    <Tag size="sm" mono outline>
-                      {label}
-                    </Tag>
-                  </td>
-                  <td>
-                    <span className="agent-muted">无（没有调用工具）</span>
-                  </td>
-                  <td>
-                    {round.citation_check ? (
-                      <>
-                        {round.citation_check.passed
-                          ? "引用 "
-                          : "引用检查没通过 "}
-                        {round.citation_check.cited.map((id) => (
-                          <EvidenceId key={id} id={id} />
-                        ))}
-                      </>
-                    ) : round.error ? (
-                      <span className="agent-warn">{round.error}</span>
-                    ) : (
-                      ""
-                    )}
-                  </td>
-                  <td>{formatDuration(round.duration_ms)}</td>
-                </tr>
-              );
-            }
-            return results.map((result, index) => {
-              const ids = evidenceIds(result);
-              const args = parseArguments(result.arguments);
-              return (
-                <tr
-                  key={`${round.round}-${index}`}
-                  className={index === 0 ? "round-start" : undefined}
-                >
-                  {index === 0 && (
-                    <td rowSpan={results.length}>
-                      第 {round.round} 轮
-                      {results.length > 1 && (
-                        <small>同时调用 {results.length} 个</small>
-                      )}
-                    </td>
+    <Table
+      containerProps={{ className: "agent-table-wrap" }}
+      className="agent-table"
+    >
+      <thead>
+        <tr>
+          <th>轮次</th>
+          <th>模型的决定</th>
+          <th>工具调用参数</th>
+          <th>结果</th>
+          <th>耗时</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rounds.map((round) => {
+          const results = round.tool_results ?? [];
+          if (results.length === 0) {
+            const label = round.error
+              ? "调用失败"
+              : round.kind === "forced"
+                ? "强制回答"
+                : round.kind === "citation_retry"
+                  ? "重写回答"
+                  : "直接回答";
+            return (
+              <tr key={round.round} className="round-start">
+                <td>第 {round.round} 轮</td>
+                <td>
+                  <Tag size="sm" mono outline>
+                    {label}
+                  </Tag>
+                </td>
+                <td>
+                  <span className="agent-muted">无（没有调用工具）</span>
+                </td>
+                <td>
+                  {round.citation_check ? (
+                    <>
+                      {round.citation_check.passed
+                        ? "引用 "
+                        : "引用检查没通过 "}
+                      {round.citation_check.cited.map((id) => (
+                        <EvidenceId key={id} id={id} />
+                      ))}
+                    </>
+                  ) : round.error ? (
+                    <span className="agent-warn">{round.error}</span>
+                  ) : (
+                    ""
                   )}
-                  <td>
-                    <ToolTag name={result.name} />
-                  </td>
-                  <td>
-                    {args && typeof args === "object" ? (
-                      <table
-                        className="agent-param-table tool-tinted-table"
-                        style={
-                          {
-                            "--tool-h": toolHue(result.name),
-                          } as React.CSSProperties
-                        }
-                      >
-                        <tbody>
-                          {Object.entries(args as Record<string, unknown>).map(
-                            ([key, value]) => (
-                              <tr key={key}>
-                                <th>{key}</th>
-                                <td>
-                                  <code>
-                                    {typeof value === "string"
-                                      ? value
-                                      : JSON.stringify(value)}
-                                  </code>
-                                </td>
-                              </tr>
-                            ),
-                          )}
-                        </tbody>
-                      </table>
-                    ) : (
-                      <code>{String(args)}</code>
+                </td>
+                <td>{formatDuration(round.duration_ms)}</td>
+              </tr>
+            );
+          }
+          return results.map((result, index) => {
+            const ids = evidenceIds(result);
+            const args = parseArguments(result.arguments);
+            return (
+              <tr
+                key={`${round.round}-${index}`}
+                className={index === 0 ? "round-start" : undefined}
+              >
+                {index === 0 && (
+                  <td rowSpan={results.length}>
+                    第 {round.round} 轮
+                    {results.length > 1 && (
+                      <small>同时调用 {results.length} 个</small>
                     )}
                   </td>
-                  <td>
-                    {result.status !== "ok" ? (
-                      <span className="agent-warn">
-                        {STATUS_LABELS[result.status]}
-                      </span>
-                    ) : ids.length ? (
-                      ids.map((id) => {
-                        const fresh = !seen.has(id);
-                        seen.add(id);
-                        return <EvidenceId key={id} id={id} fresh={fresh} />;
-                      })
-                    ) : (
-                      <span className="agent-muted">没有资料</span>
-                    )}
-                  </td>
-                  {index === 0 && (
-                    <td rowSpan={results.length}>
-                      {formatDuration(round.duration_ms)}
-                    </td>
+                )}
+                <td>
+                  <ToolTag name={result.name} />
+                </td>
+                <td>
+                  {args && typeof args === "object" ? (
+                    <Table
+                      className="agent-param-table tool-tinted-table"
+                      style={
+                        {
+                          "--tool-h": toolHue(result.name),
+                        } as React.CSSProperties
+                      }
+                    >
+                      <tbody>
+                        {Object.entries(args as Record<string, unknown>).map(
+                          ([key, value]) => (
+                            <tr key={key}>
+                              <th>{key}</th>
+                              <td>
+                                <code>
+                                  {typeof value === "string"
+                                    ? value
+                                    : JSON.stringify(value)}
+                                </code>
+                              </td>
+                            </tr>
+                          ),
+                        )}
+                      </tbody>
+                    </Table>
+                  ) : (
+                    <code>{String(args)}</code>
                   )}
-                </tr>
-              );
-            });
-          })}
-        </tbody>
-      </table>
-    </div>
+                </td>
+                <td>
+                  {result.status !== "ok" ? (
+                    <span className="agent-warn">
+                      {STATUS_LABELS[result.status]}
+                    </span>
+                  ) : ids.length ? (
+                    ids.map((id) => {
+                      const fresh = !seen.has(id);
+                      seen.add(id);
+                      return <EvidenceId key={id} id={id} fresh={fresh} />;
+                    })
+                  ) : (
+                    <span className="agent-muted">没有资料</span>
+                  )}
+                </td>
+                {index === 0 && (
+                  <td rowSpan={results.length}>
+                    {formatDuration(round.duration_ms)}
+                  </td>
+                )}
+              </tr>
+            );
+          });
+        })}
+      </tbody>
+    </Table>
   );
 }
 
@@ -1323,8 +1353,12 @@ function RequestInput({
 function ProgramItem({ result }: { result: AgentToolResult }) {
   const trace = result.trace ?? {};
   const retrieval = trace.retrieval as
-    | { stats?: Record<string, unknown> }
+    | {
+        stats?: Record<string, unknown>;
+        diagnostics?: { graph?: GraphRetrievalTraceData };
+      }
     | undefined;
+  const graphTrace = retrieval?.diagnostics?.graph;
   const stats = retrieval?.stats ?? {};
   const ids = evidenceIds(result);
   // 每次工具调用一张可折叠的卡片，默认展开；标题行写工具、执行状态、耗时、剩余预算和返回了几条资料，收起后也能看个大概。
@@ -1381,6 +1415,22 @@ function ProgramItem({ result }: { result: AgentToolResult }) {
       {result.name === "search_knowledge" && retrieval && (
         <RetrievalFunnel stats={stats} topK={trace.top_k} given={ids.length} />
       )}
+      {/* 打开图检索时：这次调用的图检索明细（从检索词里提出的关键词、找到哪些实体和关系、带回哪些分片）。 */}
+      {result.name === "search_knowledge" && graphTrace && (
+        <details className="agent-graph-trace">
+          <summary>
+            图检索
+            <small>
+              {graphTrace.status === "ok"
+                ? `${graphTrace.counts?.chunks ?? 0} 个分片 · 关键词：${[...(graphTrace.keywords?.entities ?? []), ...(graphTrace.keywords?.themes ?? [])].join("、") || "—"}`
+                : graphTrace.reason}
+            </small>
+          </summary>
+          <div className="diag">
+            <GraphRetrievalTrace graph={graphTrace} />
+          </div>
+        </details>
+      )}
       {result.name === "query_data" && trace.plan != null && result.ok && (
         <>
           <div className="agent-block-label">
@@ -1393,6 +1443,19 @@ function ProgramItem({ result }: { result: AgentToolResult }) {
           <JsonView value={trace.plan} />
         </>
       )}
+      {/* 这次放进上下文的图谱关系：编号换成整次问答的 G 编号。 */}
+      {result.name === "search_knowledge" &&
+        toolRelations(result).length > 0 && (
+          <>
+            <div className="agent-block-label">
+              放进上下文的图谱关系
+              <span>
+                {toolRelations(result).length} 条，接在资料后面交给模型
+              </span>
+            </div>
+            <ContextRelationList relations={toolRelations(result)} />
+          </>
+        )}
       {/* 工具的最终结果放在最后：这次返回了哪几条资料、编号是什么（资料池是整次问答所有工具查到的资料的总清单）。 */}
       {ids.length > 0 && (
         <div className="agent-evidence-result">
@@ -1422,7 +1485,11 @@ function RetrievalFunnel({
   const num = (value: unknown) => (typeof value === "number" ? value : 0);
   const dense = num(stats.dense_hits),
     keyword = num(stats.keyword_hits),
+    graph = num(stats.graph_hits),
     fused = num(stats.fused_candidates);
+  // 只被图找到、按图检索名次进重排的个数和上限；旧记录没有。
+  const graphPool = num(stats.graph_pool_count),
+    graphPoolSize = num(stats.graph_pool_size);
   const reranked = num(stats.reranked),
     filtered = num(stats.filtered),
     returned = num(stats.returned);
@@ -1435,20 +1502,30 @@ function RetrievalFunnel({
   const passed = hasRerank ? reranked - filtered : fused;
   const stages = [
     {
-      label: "向量 + 关键词召回",
-      value: dense + keyword,
-      ...{ text: `向量 ${dense} · 关键词 ${keyword}`, removed: false },
+      label: graph > 0 ? "向量 + 关键词 + 图检索召回" : "向量 + 关键词召回",
+      value: dense + keyword + graph,
+      ...{
+        text: `向量 ${dense} · 关键词 ${keyword}${graph > 0 ? ` · 图检索 ${graph}` : ""}`,
+        removed: false,
+      },
     },
     {
       label: "RRF 融合去重",
       value: fused,
-      ...removed(dense + keyword - fused, "重复", "没有重复"),
+      ...removed(dense + keyword + graph - fused, "重复", "没有重复"),
     },
     hasRerank
       ? {
-          label: "交给重排",
+          label:
+            graphPool > 0
+              ? `交给重排（含只被图找到的 ${graphPool}）`
+              : "交给重排",
           value: reranked,
-          ...removed(fused - reranked, "超出候选上限", "全部交给重排"),
+          ...removed(
+            fused - reranked,
+            graphPoolSize > 0 ? "超出候选上限（RRF / 图名次）" : "超出候选上限",
+            "全部交给重排",
+          ),
         }
       : {
           label: stats.rerank_error ? "重排失败" : "未重排",

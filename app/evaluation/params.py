@@ -17,10 +17,12 @@ params 的结构：
 两次评测比较时直接看 effective 的差别。
 """
 
+import copy
 from contextlib import contextmanager
 from contextvars import ContextVar
 
 from .. import prompts, runtime_config
+from ..retrieval_policy import use_methods
 
 GROUPS = runtime_config.EVAL_GROUPS
 _judge = ContextVar("eval_judge_models", default=None)
@@ -143,6 +145,7 @@ def prepare(store, models, raw):
 @contextmanager
 def applied(models, prepared):
     prepared = prepared or {}
+    models = prepared.get("base_models") or models
     run_models = models.fork(prepared["llm"]) if prepared.get("llm") else models
     judge_models = models.fork(prepared["judge"]) if prepared.get("judge") else None
     token = _judge.set(judge_models)
@@ -150,6 +153,11 @@ def applied(models, prepared):
         with (
             runtime_config.override(prepared.get("settings") or {}),
             prompts.override(prepared.get("prompts") or {}),
+            use_methods(
+                prepared.get("methods"),
+                prepared.get("data_scope"),
+                prepared.get("graph_versions"),
+            ),
         ):
             yield run_models, judge_models or run_models
     finally:
@@ -183,3 +191,27 @@ def effective(run_models, judge_models):
             prompt_id: prompts.tag(prompt_id) for prompt_id in prompts.EVAL_PROMPTS
         },
     }
+
+
+def freeze(store, models, prepared):
+    """Resolve system-following values before any arm starts running."""
+    prepared = dict(prepared)
+    prepared["base_models"] = copy.copy(models)
+    values = runtime_config.snapshot()
+    prepared["settings"] = {
+        **{
+            spec["key"]: values[spec["key"]]
+            for spec in runtime_config.SPECS
+            if spec.get("eval")
+        },
+        **prepared["settings"],
+    }
+    chosen = {}
+    for prompt_id in prompts.EVAL_PROMPTS:
+        version, _ = prompts.current(prompt_id)
+        chosen[prompt_id] = version
+    prepared["prompts"] = {
+        **prompts.resolve_versions(store.engine, chosen),
+        **prepared["prompts"],
+    }
+    return prepared

@@ -7,9 +7,9 @@ import unicodedata
 from sqlalchemy import select
 
 from ..ingestion.chunking import chunk_document_records
-from ..mysql.store import chunks, document_chunks, document_heads, documents
+from ..mysql.store import chunks, document_chunks, documents
+from ..textnorm import fold_radicals
 from .dataset import EVIDENCE_OR, normalize
-from .retrieval import EVAL_OWNER
 
 
 # 规范化后的文字（去空白、NFKC）中每个字符对应原文的下标，用来把规范化后的匹配位置换回原文位置。
@@ -17,7 +17,7 @@ def normalized_index(text):
     folded = []
     positions = []
     for index, character in enumerate(text):
-        for piece in unicodedata.normalize("NFKC", character):
+        for piece in fold_radicals(unicodedata.normalize("NFKC", character)):
             if piece.isspace():
                 continue
             folded.append(piece)
@@ -41,15 +41,20 @@ def find_in(indexed, evidence):
 
 # 评测语料当前的全部分片：(分片 id, 标题, 送去算向量的文字, 正文, 元数据)。
 def stored_chunk_rows(engine):
-    joined = document_heads.join(document_chunks,
-        document_chunks.c.document_id == document_heads.c.current_document_id).join(
-        chunks, chunks.c.id == document_chunks.c.chunk_id)
-    with engine.connect() as connection:
-        rows = connection.execute(select(chunks.c.id, chunks.c.title, chunks.c.text, chunks.c.content,
-            document_chunks.c.position, document_chunks.c.chunk_metadata).select_from(joined).where(
-                document_heads.c.owner == EVAL_OWNER).order_by(chunks.c.title, document_chunks.c.position)).all()
-    return [{"chunk_id": row[0], "title": row[1], "text": row[2], "content": row[3] or row[2],
-        "position": row[4], "metadata": row[5] or {}} for row in rows]
+    from .document_refs import rows as reference_rows
+
+    rows = reference_rows(engine)
+    return [
+        {
+            "chunk_id": row[0],
+            "title": row[1],
+            "text": row[2],
+            "content": row[3] or row[2],
+            "position": row[4],
+            "metadata": row[5] or {},
+        }
+        for row in rows
+    ]
 
 
 def stored_chunks(store):
@@ -58,18 +63,63 @@ def stored_chunks(store):
 
 def target_catalog(engine):
     from .grouped_evidence import fingerprint
+
     rows = stored_chunk_rows(engine) or file_chunks(engine)
-    return [{"title": row["title"], "position": row["position"],
-        "fingerprint": fingerprint(row["content"]), "quote": row["content"]} for row in rows]
+    from ..mysql.tables import graph_versions
+    from ..graph.query import relation_rows
+
+    with engine.connect() as connection:
+        versions = list(
+            connection.execute(
+                select(graph_versions.c.id).where(graph_versions.c.active.is_(True))
+            ).scalars()
+        )
+        relations = relation_rows(connection, versions)
+    by_chunk = {}
+    for relation in relations:
+        by_chunk.setdefault(str(relation["chunk_id"]), []).append(
+            {
+                "relation_id": relation["id"],
+                "build_id": relation["build_id"],
+                "source": relation["source_name"],
+                "target": relation["target_name"],
+                "category": relation["category"],
+                "description": relation["description"] or "",
+                "evidence": relation["evidence"] or "",
+            }
+        )
+    return [
+        {
+            "title": row["title"],
+            "position": row["position"],
+            "fingerprint": fingerprint(row["content"]),
+            "quote": row["content"],
+            **(
+                {"relations": by_chunk[str(row["chunk_id"])]}
+                if str(row["chunk_id"]) in by_chunk
+                else {}
+            ),
+        }
+        for row in rows
+    ]
 
 
 def file_chunks(engine):
     from .corpus import documents_for
+
     result = []
     for item in documents_for(engine=engine):
         for position, record in enumerate(chunk_document_records(item["content"])):
-            result.append({"chunk_id": None, "title": item["title"], "text": record["embedding_text"],
-                "content": record["content"], "position": position, "metadata": record})
+            result.append(
+                {
+                    "chunk_id": None,
+                    "title": item["title"],
+                    "text": record["embedding_text"],
+                    "content": record["content"],
+                    "position": position,
+                    "metadata": record,
+                }
+            )
     return result
 
 
@@ -91,34 +141,74 @@ def locate_evidence(store, models, texts):
                 continue
             metadata = chunk["metadata"]
             # 正文前面送去算向量的部分：标题路径，开了上下文检索时还有模型补的上下文说明。
-            prefix = chunk["text"][:-len(chunk["content"])] if chunk["text"].endswith(chunk["content"]) else ""
-            entry = {"chunk_id": chunk["chunk_id"], "title": chunk["title"], "position": chunk["position"],
-                "heading": " / ".join(metadata.get("heading_path") or []) or None, "content": chunk["content"],
-                "prefix": prefix.strip() or None, "match": list(span), "chars": len(chunk["content"]),
-                "token_count": metadata.get("token_count"), "truncated": metadata.get("truncated"), "cut": None}
+            prefix = (
+                chunk["text"][: -len(chunk["content"])]
+                if chunk["text"].endswith(chunk["content"])
+                else ""
+            )
+            entry = {
+                "chunk_id": chunk["chunk_id"],
+                "title": chunk["title"],
+                "position": chunk["position"],
+                "heading": " / ".join(metadata.get("heading_path") or []) or None,
+                "content": chunk["content"],
+                "prefix": prefix.strip() or None,
+                "match": list(span),
+                "chars": len(chunk["content"]),
+                "token_count": metadata.get("token_count"),
+                "truncated": metadata.get("truncated"),
+                "cut": None,
+            }
             matches.append(entry)
             found.append((entry, chunk["text"], len(prefix)))
         items.append({"text": text, "chunks": matches})
     # 截断位置换算到正文里：cut 落在前缀里，说明正文整段都没参与向量计算（记为 0）。
-    cuts = models.truncation_cuts([text for _, text, _ in found]) if imported and found else None
+    cuts = (
+        models.truncation_cuts([text for _, text, _ in found])
+        if imported and found
+        else None
+    )
     for (entry, _, prefix_length), cut in zip(found, cuts or []):
         entry["token_count"] = cut["tokens"]
         entry["max_tokens"] = cut["max_tokens"]
         entry["truncated"] = cut["cut"] is not None
-        entry["cut"] = None if cut["cut"] is None else max(0, cut["cut"] - prefix_length)
+        entry["cut"] = (
+            None if cut["cut"] is None else max(0, cut["cut"] - prefix_length)
+        )
     return {"imported": imported, "cuts_available": cuts is not None, "items": items}
 
 
 # 仅返回指定评测分片的正文，避免把父块扩展后的交付文本当作单片原文。
 def load_chunk(store, chunk_id):
-    joined = document_chunks.join(chunks, document_chunks.c.chunk_id == chunks.c.id).join(
-        documents, document_chunks.c.document_id == documents.c.id)
+    from .document_refs import scope
+
+    joined = document_chunks.join(
+        chunks, document_chunks.c.chunk_id == chunks.c.id
+    ).join(documents, document_chunks.c.document_id == documents.c.id)
     with store.engine.connect() as connection:
-        row = connection.execute(select(chunks.c.id, chunks.c.title, chunks.c.content,
-            chunks.c.text, document_chunks.c.chunk_metadata, document_chunks.c.position).select_from(joined).where(
-                chunks.c.id == chunk_id, documents.c.owner == EVAL_OWNER).limit(1)).first()
+        row = connection.execute(
+            select(
+                chunks.c.id,
+                chunks.c.title,
+                chunks.c.content,
+                chunks.c.text,
+                document_chunks.c.chunk_metadata,
+                document_chunks.c.position,
+            )
+            .select_from(joined)
+            .where(
+                chunks.c.id == chunk_id,
+                documents.c.id.in_(list(scope(store.engine)["versions"])),
+            )
+            .limit(1)
+        ).first()
     if row is None:
         return None
     metadata = row[4] or {}
-    return {"chunk_id": row[0], "position": row[5], "title": row[1], "content": row[2] if row[2] is not None else row[3],
-        "heading": " / ".join(metadata.get("heading_path") or []) or None}
+    return {
+        "chunk_id": row[0],
+        "position": row[5],
+        "title": row[1],
+        "content": row[2] if row[2] is not None else row[3],
+        "heading": " / ".join(metadata.get("heading_path") or []) or None,
+    }

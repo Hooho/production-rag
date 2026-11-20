@@ -1,0 +1,215 @@
+.unified-eval-launch {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--border, var(--t-cdddec, #d0dfec));
+  padding: 16px;
+  background: var(--t-ffffff, #fff);
+}
+.unified-eval-launch header,
+.unified-eval-launch footer {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.unified-eval-launch header span,
+.unified-eval-launch footer span,
+.unified-eval-launch small {
+  color: var(--t-6b7f93, #6b849d);
+  font-size: 12px;
+}
+.unified-eval-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr);
+  gap: 24px;
+  margin: 0;
+}
+.unified-eval-row {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  letter-spacing: normal;
+}
+.unified-eval-row > span {
+  padding-top: 5px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.unified-eval-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  align-items: center;
+  min-height: 32px;
+}
+.unified-eval-options label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  margin: 0;
+  font: inherit;
+  letter-spacing: normal;
+}
+.unified-eval-options input {
+  width: auto;
+}
+.unified-eval-row input,
+.unified-eval-row select {
+  min-width: 0;
+}
+/* 右侧「本次运行配置」模块：整块用浅蓝底 + 边框和左侧表单分开，标题、说明、配置卡片、按钮之间统一留间距。 */
+.unified-eval-configs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-self: start;
+  padding: 14px;
+  border: 1px solid var(--t-d2e2f0, #d2e2f0);
+  border-radius: 8px;
+  background: var(--t-eaf3fb, #eaf3fb);
+}
+.unified-eval-configs > strong {
+  font-size: 14px;
+  color: var(--t-173b5b, #173b5b);
+}
+.unified-eval-configs > p {
+  margin: 0;
+  color: var(--t-6b7f93, #6b7f93);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.unified-eval-configs > button {
+  align-self: flex-start;
+}
+.unified-eval-configs article {
+  border: 1px solid var(--t-d2e2f0, #d2e2f0);
+  border-radius: 6px;
+  padding: 12px;
+  margin: 0;
+  background: var(--t-ffffff, #fff);
+}
+.unified-eval-configs article.is-current {
+  border-color: var(--t-2563eb, #2563eb);
+  background: var(--t-eef5fb, #eef5fb);
+}
+.unified-eval-configs article p {
+  margin: 6px 0;
+}
+.unified-eval-configs article > div {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.unified-eval-editor {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+.unified-eval-editor footer {
+  margin-top: 0;
+}
+@media (max-width: 1000px) {
+  .unified-eval-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.unified-eval-prelude-heading,
+.eval-prelude-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.eval-prelude-editor {
+  grid-column: 1/-1;
+}
+/* 每一轮是一个可折叠块：标题行点开/收起，确认后自动收起。 */
+.eval-prelude-editor .eval-prelude-turn {
+  border: 1px solid var(--t-cdddec, #d0dfec);
+  padding: 12px;
+  margin: 10px 0;
+}
+.eval-prelude-editor .eval-prelude-turn > summary {
+  cursor: pointer;
+  color: var(--t-1d3550);
+  font-weight: 700;
+}
+.eval-prelude-editor .eval-prelude-turn-body {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+/* 收起时标题行里带上问题摘要，方便一眼看出是哪一轮。 */
+.eval-prelude-summary-question {
+  margin-left: 10px;
+  color: var(--t-7d95ac);
+  font-size: 12px;
+  font-weight: 400;
+}
+.eval-prelude-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+  font: inherit;
+  letter-spacing: normal;
+}
+/* 每一轮内部的字段：标签和输入框之间留出间距，字段之间靠网格间距分开，不再挤成一团。 */
+.eval-prelude-editor .eval-prelude-turn label {
+  gap: 8px;
+  margin: 0;
+}
+/* 语料列表里的复选框按行排，只作用于语料那一个折叠块。 */
+.eval-prelude-editor .eval-prelude-corpus label {
+  flex-direction: row;
+  align-items: center;
+}
+.eval-prelude-editor .eval-prelude-corpus input {
+  width: auto;
+}
+/* 已确认的轮次只读展示：标题 + 内容块，不使用输入框。 */
+.eval-prelude-field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.eval-prelude-field > span {
+  color: var(--t-6b849d);
+  font-size: 13px;
+}
+.eval-prelude-readonly {
+  margin: 0;
+  padding: 8px 11px;
+  border-radius: 4px;
+  background: #f5f8fb;
+  color: var(--t-1d3550);
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.unified-eval-configs > article {
+  position: relative;
+}
+.unified-eval-configs > article > strong {
+  display: block;
+  padding-right: 28px;
+}
+.unified-eval-configs .unified-eval-drag-handle {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  cursor: grab;
+}
+.unified-eval-configs .unified-eval-drag-handle:active {
+  cursor: grabbing;
+}
+.unified-eval-configs > article.is-dragging {
+  opacity: 0.5;
+}

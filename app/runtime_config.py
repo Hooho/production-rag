@@ -113,7 +113,7 @@ SPECS = [
         "type": "int",
         "default": 12,
         "min": 5,
-        "max": 50,
+        "max": 200,
         "eval": "common",
     },
     {
@@ -124,6 +124,32 @@ SPECS = [
         "min": 1,
         "max": 50,
         "eval": "fixed",
+    },
+    {
+        "key": "source_selection_mode",
+        "group": "retrieval",
+        "type": "choice",
+        "default": "count",
+        "choices": ["count", "tokens"],
+        "eval": "fixed",
+    },
+    {
+        "key": "source_token_budget",
+        "group": "retrieval",
+        "type": "int",
+        "default": 8000,
+        "min": 100,
+        "max": 128000,
+        "eval": "fixed",
+    },
+    {
+        "key": "source_graph_budget_ratio",
+        "group": "retrieval",
+        "type": "float",
+        "default": 0.25,
+        "min": 0,
+        "max": 1,
+        "deprecated": True,
     },
     {
         "key": "parent_context",
@@ -164,6 +190,143 @@ SPECS = [
         "default": 60,
         "min": 1,
         "max": 200,
+        "advanced": True,
+    },
+    # 图检索：打开后向量、关键词、图检索三路一起用（固定流程和 Agent 都是）。默认关，关闭时问答和以前完全一样。
+    # 阈值、条数先按 LightRAG 的量级定，还没有评测依据（docs：claude/graph-retrieval-phase2-plan.md）。
+    {"key": "graph_retrieval", "group": "retrieval", "type": "bool", "default": False},
+    # 找实体：每个关键词以字面命中里分数最高的名字为基准（没有字面命中就用向量第一名），
+    # 比基准低超过这个差距的候选去掉。分数挤在 0.6～0.7，固定阈值（原来的 graph_name_min_score 0.5）不起作用（2026-11-13）。
+    {
+        "key": "graph_entity_score_gap",
+        "group": "retrieval",
+        "type": "float",
+        "default": 0.03,
+        "min": 0,
+        "max": 0.3,
+        "advanced": True,
+    },
+    {
+        "key": "graph_name_top_k",
+        "group": "retrieval",
+        "type": "int",
+        "default": 10,
+        "min": 1,
+        "max": 50,
+        "advanced": True,
+    },
+    # 每个具体关键词最多留几个实体（字面命中的排最前）。参考 RAGFlow 只留前 6 个实体（ent_topn=6）。
+    {
+        "key": "graph_entity_top_k",
+        "group": "retrieval",
+        "type": "int",
+        "default": 6,
+        "min": 1,
+        "max": 50,
+        "advanced": True,
+    },
+    # 向量路径分数线；关键词路径独立召回，最终按关系重排筛选。
+    {
+        "key": "graph_entity_min_score",
+        "group": "retrieval",
+        "type": "float",
+        "default": 0.5,
+        "min": 0,
+        "max": 1,
+        "advanced": True,
+    },
+    # 每个实体内每一路粗召回的上限，不是最终保留名额。
+    {
+        "key": "graph_entity_relation_limit",
+        "group": "retrieval",
+        "type": "int",
+        "default": 100,
+        "min": 1,
+        "max": 500,
+        "advanced": True,
+    },
+    {
+        "key": "graph_relation_min_score",
+        "group": "retrieval",
+        "type": "float",
+        "default": 0.5,
+        "min": 0,
+        "max": 1,
+        "advanced": True,
+    },
+    {
+        "key": "graph_relation_top_k",
+        "group": "retrieval",
+        "type": "int",
+        "default": 100,
+        "min": 1,
+        "max": 500,
+        "advanced": True,
+    },
+    {
+        "key": "graph_entity_relation_quota",
+        "group": "retrieval",
+        "type": "int",
+        "default": 5,
+        "min": 0,
+        "max": 100,
+        "advanced": True,
+    },
+    {
+        "key": "graph_global_relation_quota",
+        "group": "retrieval",
+        "type": "int",
+        "default": 10,
+        "min": 0,
+        "max": 100,
+        "advanced": True,
+    },
+    {
+        "key": "graph_relation_rerank_candidates",
+        "group": "retrieval",
+        "type": "int",
+        "default": 100,
+        "min": 1,
+        "max": 500,
+        "advanced": True,
+    },
+    {
+        "key": "graph_relation_grouping",
+        "group": "retrieval",
+        "type": "bool",
+        "default": True,
+        "eval": "common",
+        "advanced": True,
+    },
+    {
+        "key": "graph_relation_return_limit",
+        "group": "retrieval",
+        "type": "int",
+        "default": 30,
+        "min": 1,
+        "max": 500,
+        "advanced": True,
+    },
+    {
+        "key": "graph_relation_rerank_min_score",
+        "group": "retrieval",
+        "type": "float",
+        "default": 0.0,
+        "min": 0,
+        "max": 1,
+        "advanced": True,
+    },
+    # 只被图找到的分片进重排的上限：这些分片不和其他分片比 RRF 名次（图只有一张排名表，向量、关键词每个检索词各一张，
+    # 只被图找到的分片 RRF 分数天生低，2026-11-08 查：最好第 32 名），按图检索的名次单独取前 N 个交给重排。
+    # 被其他路也找到的分片仍按 RRF 名次进 rerank_candidates 那一份。0 表示只被图找到的分片不进重排。
+    # 以前的「图检索名额」（graph_rerank_quota）和「开图检索时候选池至少 50」都去掉了（2026-11-13）。
+    {
+        "key": "graph_chunk_rerank_candidates",
+        "group": "retrieval",
+        "type": "int",
+        "default": 15,
+        "min": 0,
+        "max": 100,
         "advanced": True,
     },
     # 分片大小和重叠只在切分文档时用，改了只影响之后导入的文档；已导入的分片不变。
@@ -241,6 +404,23 @@ SPECS = [
     # Agent 每次检索最多返回几条、要不要做父块扩展，和固定流程的 return_limit、parent_context 分开。
     # 每次要几条由 Agent 自己定（search_knowledge 的 top_k），这里只是上限；超过上限时工具会告诉它没给全。
     # 默认和固定流程一样（6 条、做父块扩展），行为不变；要不要放宽先在评测里单独指定对比。
+    {
+        "key": "agent_source_selection_mode",
+        "group": "answer",
+        "type": "choice",
+        "default": "count",
+        "choices": ["count", "tokens"],
+        "eval": "agent",
+    },
+    {
+        "key": "agent_source_token_budget",
+        "group": "answer",
+        "type": "int",
+        "default": 8000,
+        "min": 100,
+        "max": 128000,
+        "eval": "agent",
+    },
     {
         "key": "agent_return_limit",
         "group": "answer",
@@ -427,6 +607,86 @@ SPECS = [
 ]
 BY_KEY = {spec["key"]: spec for spec in SPECS}
 
+
+# 生效条件：参数只在这些条件都满足时起作用，不满足时设置页把整项置灰并写明原因（原因由页面按参数名和取值生成）。
+# 每条是 {"key": 依赖的参数, "equals": 要求的取值}；开关类参数写 True 表示「打开时才生效」。
+# 以前写在前端（SystemSettings.tsx 的 dependsOn），只能依赖一个开关；现在统一放这里，也能依赖选项的取值、同时依赖多项。
+def _on(key):
+    return {"key": key, "equals": True}
+
+
+def _is(key, value):
+    return {"key": key, "equals": value}
+
+
+REQUIRES = {
+    "agent_return_limit": [_is("agent_source_selection_mode", "count")],
+    "agent_excellent_score": [_is("agent_source_selection_mode", "count")],
+    "agent_source_token_budget": [_is("agent_source_selection_mode", "tokens")],
+    "rerank_min_score": [_on("rerank_enabled")],
+    "rerank_fallback_min_score": [_on("rerank_enabled")],
+    # 优秀阈值只在按条数选来源时放行（按 token 预算时不受条数限制，也就用不上它）。
+    "rerank_excellent_score": [
+        _on("rerank_enabled"),
+        _is("source_selection_mode", "count"),
+    ],
+    "return_limit": [_is("source_selection_mode", "count")],
+    "source_token_budget": [_is("source_selection_mode", "tokens")],
+    # 图保底（图谱关系 + 只被图找到的分片）只在按 token 预算时分配，图检索打开才有东西可保。
+    "source_graph_budget_ratio": [
+        _is("source_selection_mode", "tokens"),
+        _on("graph_retrieval"),
+    ],
+    "parent_max_chars": [_on("parent_context")],
+    "parent_radius": [_on("parent_context")],
+    **{
+        key: [_on("graph_retrieval")]
+        for key in (
+            "graph_entity_score_gap",
+            "graph_name_top_k",
+            "graph_entity_top_k",
+            "graph_entity_min_score",
+            "graph_entity_relation_limit",
+            "graph_relation_min_score",
+            "graph_relation_top_k",
+            "graph_entity_relation_quota",
+            "graph_global_relation_quota",
+            "graph_relation_rerank_candidates",
+            "graph_relation_return_limit",
+            "graph_relation_grouping",
+            "graph_relation_rerank_min_score",
+            "graph_chunk_rerank_candidates",
+        )
+    },
+    "agent_rerank_min_score": [_on("rerank_enabled")],
+    "agent_excellent_score": [_on("rerank_enabled")],
+    "long_memory_max_items": [_on("long_memory_enabled")],
+    "injection_vector_threshold": [_on("injection_vector_enabled")],
+    "injection_vector_action": [_on("injection_vector_enabled")],
+    "injection_model_threshold": [_on("injection_model_enabled")],
+    "injection_model_action": [_on("injection_model_enabled")],
+    "chunk_context_max_tokens": [_on("contextual_retrieval")],
+}
+
+# 卡片：几项放在设置页的同一张卡片里（按这里的顺序），卡片出现在组里第一项原来的位置。
+CARDS = {
+    "source_selection": {
+        "title": "交给回答模型的资料",
+        "keys": ["source_selection_mode", "source_token_budget", "return_limit"],
+    },
+}
+CARD_OF = {key: name for name, card in CARDS.items() for key in card["keys"]}
+
+
+# 当前取值下这一项是否生效：返回不满足的条件列表（空表示生效）。values 是 {参数: 取值}。
+def unmet(key, values):
+    return [
+        rule
+        for rule in REQUIRES.get(key, [])
+        if values.get(rule["key"]) != rule["equals"]
+    ]
+
+
 _engine = None
 _cache = {"at": 0.0, "saved": None}
 _lock = threading.Lock()
@@ -513,6 +773,11 @@ def snapshot():
 # 校验评测要覆盖的参数：只能是带 eval 标记的项，范围和设置页一样，合进当前值后参数之间的约束也要满足。
 # 返回整理后的值（int / float 已转换）；不合法时抛 ValueError，发起评测时直接拦下。
 def check_overrides(changes):
+    changes = {
+        key: value
+        for key, value in changes.items()
+        if key != "source_graph_budget_ratio"
+    }
     unknown = [
         key for key in changes if key not in BY_KEY or not BY_KEY[key].get("eval")
     ]
@@ -570,6 +835,11 @@ def check(spec, raw, strict=True):
 # （否则压缩完仍然接近或超过阈值，下一轮又要压缩，等于每轮都多调一次大模型）；
 # 分片重叠最多是分片大小的三分之一（切分时也按这个上限截断），否则相邻分片大半内容重复。
 def check_relations(values):
+    if (
+        values["graph_relation_return_limit"]
+        > values["graph_relation_rerank_candidates"]
+    ):
+        raise ValueError("关系保留数不能超过关系重排候选数")
     if values["chunk_overlap"] * 3 > values["chunk_size"]:
         raise ValueError("分片重叠不能超过分片大小的三分之一")
     if values["rerank_fallback_min_score"] > values["rerank_min_score"]:
@@ -591,6 +861,8 @@ def view(engine=None):
     saved = saved_values()
     items = []
     for spec in SPECS:
+        if spec.get("deprecated"):
+            continue
         current, source = resolve(spec, saved)
         item = {
             key: spec[key]
@@ -603,6 +875,10 @@ def view(engine=None):
         for key in ("min", "max", "choices"):
             if key in spec:
                 item[key] = spec[key]
+        if spec["key"] in REQUIRES:
+            item["requires"] = REQUIRES[spec["key"]]
+        if spec["key"] in CARD_OF:
+            item["card"] = CARD_OF[spec["key"]]
         items.append(item)
     history = []
     target = engine or _engine
@@ -618,6 +894,7 @@ def view(engine=None):
         "items": items,
         "groups": GROUPS,
         "pages": PAGES,
+        "cards": CARDS,
         "history": history[:10],
         "cache_seconds": CACHE_SECONDS,
     }

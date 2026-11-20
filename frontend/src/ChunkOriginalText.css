@@ -1,0 +1,43 @@
+/* 原文三段（说明 / 标题路径 / 正文）的统一底色，各页面共用 ChunkOriginalText。 */
+.chunk-original {
+  display: grid;
+  gap: 8px;
+}
+
+.chunk-original-part {
+  padding: 8px 10px;
+  border-radius: 4px;
+}
+
+/* 正文段落：保留原文换行。 */
+.chunk-original-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+}
+
+/* 上下文说明：次要信息，浅灰底。 */
+.chunk-original-note {
+  background: #eef2f7;
+  color: #52687d;
+}
+
+/* 标题路径：定位信息，浅蓝底。 */
+.chunk-original-path {
+  background: #e6f0fd;
+  color: #33587f;
+  font-size: 12px;
+}
+
+/* 正文：主体内容，白底加一圈浅边。 */
+.chunk-original-body {
+  background: #fff;
+  border: 1px solid #dde8f2;
+}
+
+/* 原文引用在这片里没找到时的提示（HighlightedText 给的）。 */
+.chunk-original .hl-missing {
+  color: #7a8799;
+  font-size: 12px;
+}

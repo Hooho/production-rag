@@ -7,7 +7,7 @@ import threading
 
 from sqlalchemy import select
 
-from ..mysql.store import eval_runs, settings as settings_table
+from ..mysql.store import eval_runs, eval_suites, settings as settings_table
 from ..runtime_config import bound_engine
 from .dataset import EVAL_DIR, QUESTION_TYPES
 from .generation import answer_question, cited_ids, judge_answer, summarize_generation
@@ -120,7 +120,40 @@ def target_engine(engine=None):
 
 # 保存（新建或覆盖）一次评测：列表要用的概要单独存一列，读列表时不用把逐题明细一起读出来。
 # 评测进行中会反复保存进度，每次整条覆盖，读到的总是完整的一版。
+def execution_errors(value):
+    errors = []
+    if isinstance(value, dict):
+        if value.get("status") in ("error", "failed"):
+            reason = (
+                value.get("error")
+                or (value.get("trace") or {}).get("error")
+                or value.get("content")
+            )
+            if reason:
+                errors.append(str(reason)[:500])
+        for key, child in value.items():
+            if key not in ("attempts", "config", "effective", "params"):
+                errors.extend(execution_errors(child))
+    elif isinstance(value, list):
+        for child in value:
+            errors.extend(execution_errors(child))
+    return list(dict.fromkeys(errors))
+
+
+def with_execution_status(run):
+    if run and run.get("status") == "completed":
+        errors = execution_errors(run)
+        if errors:
+            return {
+                **run,
+                "status": "failed",
+                "error": "评测执行出错：" + "；".join(errors)[:1500],
+            }
+    return run
+
+
 def save_run(run, engine=None):
+    run = with_execution_status(run)
     check_run_id(run["id"])
     values = {
         "kind": run.get("kind") or "",
@@ -150,7 +183,7 @@ def load_run(run_id, engine=None):
                 settings_table.c.key == NOTE_PREFIX + run_id
             )
         ).scalar()
-    return {**data, **(note or {})} if data is not None else None
+    return with_execution_status({**data, **(note or {})}) if data is not None else None
 
 
 def save_run_note(run_id, note, author, engine=None):
@@ -341,7 +374,36 @@ def list_runs(engine=None):
                 )
             ).all()
         )
+        fill_suite_names(connection, rows)
     return [{**row, **(notes.get(NOTE_PREFIX + row["id"]) or {})} for row in rows]
+
+
+# 旧记录只存了 suite_ids 没存题集名字：按当前题集补上，已经删掉的题集写「已删除的题集」。
+def fill_suite_names(connection, rows):
+    pending = [
+        row
+        for row in rows
+        if (row.get("config") or {}).get("suite_ids")
+        and not row["config"].get("suite_names")
+    ]
+    if not pending:
+        return
+    ids = {suite_id for row in pending for suite_id in row["config"]["suite_ids"]}
+    names = dict(
+        connection.execute(
+            select(eval_suites.c.id, eval_suites.c.name).where(
+                eval_suites.c.id.in_(ids)
+            )
+        ).all()
+    )
+    for row in pending:
+        row["config"] = {
+            **row["config"],
+            "suite_names": [
+                names.get(suite_id, "已删除的题集")
+                for suite_id in dict.fromkeys(row["config"]["suite_ids"])
+            ],
+        }
 
 
 # 一次评测的概要：编号、时间、提交号、配置、主要指标和进度。
@@ -612,8 +674,16 @@ def answer_hook(store, models, responder, run_id):
             else None
         )
         sources = check["sources"]
+        relations = check.get("relations") or []
         answer = answer_question(
-            models, responder, run_id, item, row["rerank_query"], sources, coverage
+            models,
+            responder,
+            run_id,
+            item,
+            row["rerank_query"],
+            sources,
+            coverage,
+            relations,
         )
         row["answer"] = answer
         row["cited"] = cited_ids(answer)
@@ -626,8 +696,9 @@ def answer_hook(store, models, responder, run_id):
             "retry_used": check.get("retry_used", False),
             "refused": check["refused"],
             "source_count": len(sources),
+            "relation_count": len(relations),
         }
-        row["judgement"] = judge_answer(models, item, answer, sources)
+        row["judgement"] = judge_answer(models, item, answer, sources, relations)
 
     return on_item
 
@@ -679,11 +750,21 @@ def execute_run(
                 store, models, items, split, suites, on_progress, on_item
             )
         result["config"]["modes"] = modes
+        if run["config"].get("version") == 2:
+            result["config"]["corpus"] = run["config"].get("corpus") or []
+        unified_config = {
+            key: run["config"][key]
+            for key in ("version", "methods", "suite_ids")
+            if key in run["config"]
+        }
         run.update(result)
+        run["config"].update(unified_config)
         if generate:
             generation = summarize_generation(result["questions"])
             run["summary"].update(generation)
-            for question_type in QUESTION_TYPES:
+            for question_type in dict.fromkeys(
+                row["type"] for row in result["questions"]
+            ):
                 selected = []
                 for row in result["questions"]:
                     if row["type"] == question_type:

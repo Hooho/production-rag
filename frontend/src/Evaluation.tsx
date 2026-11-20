@@ -1,4 +1,12 @@
+import Table from "./Table";
+import EvalConfigTemplates from "./EvalConfigTemplates";
+import type { EvalConfigTemplate } from "./api";
+import { errorText, useToast } from "./Toast";
+import EvalPreludeEditor from "./EvalPreludeEditor";
+import { saveEvalDatasetPrelude, type EvalPreludeTurn } from "./api";
+import UnifiedEvalLauncher from "./UnifiedEvalLauncher";
 import "./EvaluationNotes.css";
+import { ConfirmPopover } from "./ConfirmPopover";
 import { DetailDialog } from "./DetailDialog";
 import { ScoringItems } from "./ScoringItems";
 import { ScoringItemEditor } from "./ScoringItemEditor";
@@ -26,11 +34,13 @@ import {
   getEvalParamOptions,
   startEvalBatch,
   rerunEvalRun,
+  rerunEvalBatch,
   type EvalLaunchBody,
   type EvalCorpusEntry,
   type EvalParamGroup,
   type EvalParamOptions,
   type EvalParams,
+  type EvalConfig,
   type EvalSuiteBrief,
   deleteEvalRun,
   saveEvalRunNote,
@@ -90,7 +100,8 @@ export type EvaluationSection =
   | "dataset"
   | "special"
   | "regression"
-  | "corpus";
+  | "corpus"
+  | "templates";
 type TopTab = EvaluationSection;
 type DetailTab = "overview" | "questions" | "sweep" | "variants";
 // 勾了 Agent 的检索评测：第一层按模式分页签（对比、固定流程、Agent），固定流程里再分原来的四个子页签。
@@ -102,48 +113,6 @@ const MODE_TAB_LABELS: Record<ModeTab, string> = {
 };
 // memory 是以前单独的多轮对话评测，现在并入专项评测集，只用来显示旧记录。
 type EvalKind = "retrieval" | "generation" | "memory" | "special";
-type LaunchKind = "retrieval" | "generation";
-// 一次评测最多保存几组配置一起跑（后端 app/evaluation/batch.py 的 MAX_ARMS）。
-const MAX_SAVED_CONFIGS = 4;
-// 一组配置的比较用指纹：勾选顺序不同、参数项先后不同都算同一组配置。
-function configKey(body: EvalLaunchBody) {
-  const normalize = (value: unknown): unknown => {
-    if (Array.isArray(value))
-      return value
-        .map(normalize)
-        .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
-    if (value && typeof value === "object")
-      return Object.fromEntries(
-        Object.entries(value as Record<string, unknown>)
-          .filter(([, item]) => item !== undefined)
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([key, item]) => [key, normalize(item)]),
-      );
-    return value;
-  };
-  const { label: _label, ...rest } = body;
-  return JSON.stringify(normalize(rest));
-}
-
-// 保存配置时记下的发起表单状态，「载入到表单」时原样放回去。
-type LaunchForm = {
-  launchMode: "tuning" | "special";
-  launchKind: LaunchKind;
-  launchSplit: string;
-  launchSuites: string[];
-  launchModes: EvalMode[];
-  specialModes: EvalMode[];
-  pickedSuites: string[];
-  compareMemory: boolean;
-  pickedCorpus: string[];
-  launchParams: EvalParams;
-};
-type SavedConfig = {
-  label: string;
-  body: EvalLaunchBody;
-  form: LaunchForm;
-  summary: string[];
-};
 const KIND_LABELS: Record<EvalKind, string> = {
   retrieval: "检索",
   generation: "生成",
@@ -171,9 +140,10 @@ type Props = {
 const TOP_TAB_LABELS: Record<TopTab, string> = {
   history: "历史评测记录",
   dataset: "调参评测集",
-  special: "专项评测集",
+  special: "自建题集",
   regression: "巡检复测集",
   corpus: "评测语料库",
+  templates: "评测配置模板",
 };
 const DETAIL_TAB_LABELS: Record<DetailTab, string> = {
   overview: "总览",
@@ -184,8 +154,16 @@ const DETAIL_TAB_LABELS: Record<DetailTab, string> = {
 const SPLIT_LABELS: Record<string, string> = {
   dev: "开发集",
   holdout: "留出集",
-  all: "全部题目",
+  all: "全部已审核题目",
 };
+// 一次评测的题目范围：选了自建题集就写题集名字（这时 split 固定是 all，不能按 split 显示），否则按 split。
+function scopeLabel(config: EvalConfig | undefined) {
+  if (config?.suite_ids?.length)
+    return config.suite_names?.length
+      ? config.suite_names.join("、")
+      : "自建题集";
+  return SPLIT_LABELS[config?.split ?? ""] ?? config?.split ?? "—";
+}
 // 丢失阶段的说明：告诉读者该去优化哪一环。
 const LOST_LABELS: Record<string, { label: string; hint: string }> = {
   recall: {
@@ -250,7 +228,7 @@ function progressBreakdown(run: EvalRunBrief, suites: EvalSuite[]) {
     for (const variant of suite.variants) groups.push(variant);
   }
   const questions = Math.round(total / groups.length);
-  const splitLabel = SPLIT_LABELS[run.config.split ?? ""] ?? run.config.split;
+  const splitLabel = scopeLabel(run.config);
   const groupText = parts.length
     ? `${parts.join("和")}，再加上基线，一共 ${groups.length} 组配置`
     : "只跑基线（当前线上配置），1 组配置";
@@ -695,6 +673,7 @@ const TAB_PATHS: Record<TopTab, string> = {
   special: "/eval/special",
   regression: "/eval/regression",
   corpus: "/eval/corpus",
+  templates: "/eval/templates",
 };
 
 function Evaluation({
@@ -707,6 +686,8 @@ function Evaluation({
   suiteId,
   onNavigate,
 }: Props) {
+  const [chosenTemplate, setChosenTemplate] =
+    useState<EvalConfigTemplate | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>("overview");
   const [runs, setRuns] = useState<EvalRunBrief[]>([]);
   const [running, setRunning] = useState<string | null>(null);
@@ -718,34 +699,6 @@ function Evaluation({
   const [runsLoading, setRunsLoading] = useState(true);
   const [datasetLoading, setDatasetLoading] = useState(true);
   const [error, setError] = useState("");
-  // 发起评测：调参（开发集 / 留出集）或专项（勾选几个专项一起跑）。
-  const [launchMode, setLaunchMode] = useState<"tuning" | "special">("tuning");
-  const [specialSuites, setSpecialSuites] = useState<EvalSuiteBrief[] | null>(
-    null,
-  );
-  const [pickedSuites, setPickedSuites] = useState<string[]>([]);
-  const [compareMemory, setCompareMemory] = useState(false);
-  const [launchKind, setLaunchKind] = useState<LaunchKind>("retrieval");
-  const [launchSplit, setLaunchSplit] = useState("dev");
-  const [launchSuites, setLaunchSuites] = useState<string[]>([]);
-  // 检索评测跑哪些模式：固定流程、Agent，至少勾一个；只勾 Agent 时实验组（消融、参数对比）不跑。
-  const [launchModes, setLaunchModes] = useState<EvalMode[]>(["fixed"]);
-  // 专项也能选模式：只对检索方式的专项生效，回答和多轮对话方式照常只跑固定流程。
-  const [specialModes, setSpecialModes] = useState<EvalMode[]>(["fixed"]);
-  // 用评测语料库里的哪几份语料：每次打开历史记录页签重新读，默认全选。
-  const [corpusEntries, setCorpusEntries] = useState<EvalCorpusEntry[] | null>(
-    null,
-  );
-  const [pickedCorpus, setPickedCorpus] = useState<string[]>([]);
-  // 参数配置：只对这次评测生效的模型、运行参数和提示词版本；没改的项跟随系统设置（不提交）。
-  const [paramOptions, setParamOptions] = useState<EvalParamOptions | null>(
-    null,
-  );
-  const [launchParams, setLaunchParams] = useState<EvalParams>({});
-  // 保存的几组配置（最多 4 组，只在这次发起时用）：每组是保存那一刻发起表单的全部内容，点开始评测时按顺序都跑。
-  const [savedConfigs, setSavedConfigs] = useState<SavedConfig[]>([]);
-  const [launching, setLaunching] = useState(false);
-
   // 刷新评测列表时不再自动打开某条记录，让页面首次进入先展示历史表格。
   async function refreshRuns() {
     const data = await listEvalRuns();
@@ -829,204 +782,6 @@ function Evaluation({
     };
   }, [selectedId, runs.find((item) => item.id === selectedId)?.status]);
 
-  useEffect(() => {
-    if (section !== "history") return;
-    listEvalCorpus()
-      .then((data) => {
-        setCorpusEntries(data.items);
-        setPickedCorpus(
-          data.items.filter((item) => !item.missing).map((item) => item.id),
-        );
-      })
-      .catch((reason: Error) => setError(reason.message));
-  }, [section]);
-
-  // 参数配置里显示的「系统当前值」每次打开历史记录页签重新读，设置页刚改过也能看到新值。
-  useEffect(() => {
-    if (section !== "history") return;
-    getEvalParamOptions()
-      .then(setParamOptions)
-      .catch((reason: Error) => setError(reason.message));
-  }, [section]);
-
-  // 切到「专项」时读取专项列表（专项页签里可能刚新建过，每次切换都重新读）。
-  useEffect(() => {
-    if (section !== "history" || launchMode !== "special") return;
-    listEvalSuites()
-      .then((data) => setSpecialSuites(data.items))
-      .catch((reason: Error) => setError(reason.message));
-  }, [section, launchMode]);
-
-  async function launch() {
-    setLaunching(true);
-    setError("");
-    try {
-      if (savedConfigs.length) {
-        const started = await startEvalBatch(
-          "",
-          savedConfigs.map((item) => ({ ...item.body, label: item.label })),
-        );
-        setSavedConfigs([]);
-        onNavigate(`/eval/batches/${encodeURIComponent(started.id)}`);
-        await refreshRuns();
-        onToast("success", `${started.runs.length} 组配置已开始，按顺序跑。`);
-        return;
-      }
-      if (launchMode === "special") {
-        const started = await startSpecialRun(
-          pickedSuites,
-          compareMemory,
-          specialModes,
-          pickedCorpus,
-          visibleParams(
-            launchParams,
-            paramOptions,
-            specialParamGroups,
-            specialJudge,
-          ),
-        );
-        onNavigate(`/eval/runs/${encodeURIComponent(started.id)}`);
-        await refreshRuns();
-        onToast("success", "专项评测已启动。");
-        return;
-      }
-      const modes: EvalMode[] =
-        launchKind === "retrieval" ? launchModes : ["fixed"];
-      const suites =
-        launchKind !== "retrieval" || !modes.includes("fixed")
-          ? []
-          : launchSuites;
-      const started = await startEvalRun(
-        launchKind,
-        launchSplit,
-        suites,
-        modes,
-        pickedCorpus,
-        visibleParams(
-          launchParams,
-          paramOptions,
-          tuningParamGroups,
-          launchKind === "generation",
-        ),
-      );
-      onNavigate(`/eval/runs/${encodeURIComponent(started.id)}`);
-      setDetailTab("overview");
-      await refreshRuns();
-      // 评测进度继续留在页面内；Toast 只确认启动结果，避免把持续状态变成短暂提示。
-      onToast("success", `${KIND_LABELS[launchKind]}评测已启动。`);
-    } catch (reason) {
-      onToast("error", (reason as Error).message);
-    } finally {
-      setLaunching(false);
-    }
-  }
-
-  // 发起表单现在的全部内容，转成接口要的一组配置（和单独发起时提交的内容一样）。
-  function currentBody(): EvalLaunchBody {
-    if (launchMode === "special") {
-      return {
-        kind: "special",
-        suite_ids: pickedSuites,
-        compare_memory: compareMemory,
-        modes: specialModes,
-        corpus_ids: pickedCorpus,
-        params: visibleParams(
-          launchParams,
-          paramOptions,
-          specialParamGroups,
-          specialJudge,
-        ),
-      };
-    }
-    const modes: EvalMode[] =
-      launchKind === "retrieval" ? launchModes : ["fixed"];
-    return {
-      kind: launchKind,
-      split: launchSplit,
-      suites:
-        launchKind !== "retrieval" || !modes.includes("fixed")
-          ? []
-          : launchSuites,
-      modes,
-      corpus_ids: pickedCorpus,
-      params: visibleParams(
-        launchParams,
-        paramOptions,
-        tuningParamGroups,
-        launchKind === "generation",
-      ),
-    };
-  }
-
-  // 一组配置的几行说明：题目、运行模式、语料、改了哪些参数。
-  function configSummary(body: EvalLaunchBody): string[] {
-    const scope =
-      body.kind === "special"
-        ? `专项：${(specialSuites ?? [])
-            .filter((suite) => body.suite_ids?.includes(suite.id))
-            .map((suite) => suite.name)
-            .join("、")}`
-        : `${KIND_LABELS[body.kind]}评测 · ${SPLIT_LABELS[body.split ?? ""] ?? body.split}${body.suites?.length ? ` · 实验组 ${body.suites.length} 个` : ""}`;
-    const corpus = (corpusEntries ?? [])
-      .filter((entry) => body.corpus_ids.includes(entry.id))
-      .map((entry) => `《${entry.title}》`)
-      .join("、");
-    const params = paramsSummary(body.params);
-    return [
-      scope,
-      `运行模式：${body.modes.map((mode) => (mode === "agent" ? "Agent" : "固定流程")).join(" + ")}`,
-      `语料：${corpus || "—"}`,
-      ...(params.length ? params : ["参数全部跟随系统设置"]),
-    ];
-  }
-
-  function saveConfig() {
-    if (savedConfigs.length >= MAX_SAVED_CONFIGS) return;
-    const body = currentBody();
-    // 和已保存的某一组完全一样（题目、模式、语料、参数都相同）就不再存一份，跑两遍一样的配置没有意义。
-    const same = savedConfigs.find(
-      (item) => configKey(item.body) === configKey(body),
-    );
-    if (same) {
-      onToast("error", `和「${same.label}」的配置完全一样，没有保存。`);
-      return;
-    }
-    setSavedConfigs((items) => [
-      ...items,
-      {
-        label: `配置 ${"ABCD"[items.length]}`,
-        body,
-        summary: configSummary(body),
-        form: {
-          launchMode,
-          launchKind,
-          launchSplit,
-          launchSuites,
-          launchModes,
-          specialModes,
-          pickedSuites,
-          compareMemory,
-          pickedCorpus,
-          launchParams,
-        },
-      },
-    ]);
-  }
-
-  // 把保存的一组配置放回上面的表单，接着改了可以再保存成新的一组。
-  function loadConfig(form: LaunchForm) {
-    setLaunchMode(form.launchMode);
-    setLaunchKind(form.launchKind);
-    setLaunchSplit(form.launchSplit);
-    setLaunchSuites(form.launchSuites);
-    setLaunchModes(form.launchModes);
-    setSpecialModes(form.specialModes);
-    setPickedSuites(form.pickedSuites);
-    setCompareMemory(form.compareMemory);
-    setPickedCorpus(form.pickedCorpus);
-    setLaunchParams(form.launchParams);
-  }
-
   // 删除后刷新历史列表，并清理可能仍指向该记录的详情状态，避免页面继续显示已删除内容。
   // 历史列表「选项 → 重跑」：照这条记录的配置重新发起，打开新记录看进度。
   async function rerunRun(runId: string) {
@@ -1041,6 +796,18 @@ function Evaluation({
     }
   }
 
+  // 历史列表批次行的「重跑」：照这份报告里每组的配置整批重新跑一份，新报告独立，原报告不动。
+  async function rerunBatch(batchId: string) {
+    try {
+      const started = await rerunEvalBatch(batchId);
+      onNavigate(`/eval/batches/${encodeURIComponent(started.id)}`);
+      await refreshRuns();
+      onToast("success", "已按这份报告的配置重新开始评测。");
+    } catch (reason) {
+      onToast("error", errorText(reason));
+    }
+  }
+
   async function removeRun(runId: string) {
     try {
       await deleteEvalRun(runId);
@@ -1052,98 +819,19 @@ function Evaluation({
       await refreshRuns();
       onToast("success", "评测记录已删除。");
     } catch (reason) {
-      onToast("error", (reason as Error).message);
+      onToast("error", errorText(reason));
+      throw reason;
     }
-  }
-
-  // 生成评测只跑基线；切换到生成时清空已选的检索实验，避免把无效组合提交给后端。
-  function changeLaunchKind(kind: LaunchKind) {
-    setLaunchKind(kind);
-    if (kind !== "retrieval") setLaunchSuites([]);
-  }
-
-  function toggleMode(mode: EvalMode) {
-    setLaunchModes((items) => {
-      const next = items.includes(mode)
-        ? items.filter((item) => item !== mode)
-        : [...items, mode];
-      if (!next.includes("fixed")) setLaunchSuites([]);
-      return next;
-    });
-  }
-
-  function toggleSuite(key: string) {
-    setLaunchSuites((items) =>
-      items.includes(key)
-        ? items.filter((item) => item !== key)
-        : [...items, key],
-    );
   }
 
   const runningRun = runs.find((item) => item.id === running) ?? null;
   const questionCount = run?.questions?.length ?? 0;
-  // 调参评测集题数随题目增删变化，运行时计算后展示，避免操作栏的题数和实际可选范围不一致。
-  const splitCounts = useMemo(() => {
-    const counts = { dev: 0, holdout: 0 };
-    for (const item of dataset?.items ?? []) {
-      // 操作栏只显示真正可运行的题数，待审核草稿不会误导用户以为已经纳入评测。
-      if (item.reviewed !== true) continue;
-      if (item.split === "dev") counts.dev += 1;
-      if (item.split === "holdout") counts.holdout += 1;
-    }
-    return counts;
-  }, [dataset]);
   const detailCounts: Record<DetailTab, string | number> = {
     overview: "",
     questions: questionCount || "",
     sweep: run?.sweep?.length ? "" : "",
     variants: run?.variants?.length || "",
   };
-  // 表单还没填完整（没勾语料、没选专项、没勾模式）时不能开始，也不能保存成一组配置。
-  const formInvalid =
-    pickedCorpus.length === 0 ||
-    (launchMode === "special" &&
-      (pickedSuites.length === 0 || specialModes.length === 0)) ||
-    (launchMode === "tuning" &&
-      launchKind === "retrieval" &&
-      launchModes.length === 0);
-  const agentLaunch =
-    launchMode === "tuning" &&
-    launchKind === "retrieval" &&
-    launchModes.includes("agent");
-  // 参数配置显示哪几组：公共参数一直有；固定流程参数在跑固定流程（生成评测也走固定流程）时有；Agent 参数在勾了 Agent 时有。
-  const tuningParamGroups: EvalParamGroup[] = [
-    "common",
-    ...(launchKind === "generation" || launchModes.includes("fixed")
-      ? (["fixed"] as EvalParamGroup[])
-      : []),
-    ...(launchKind === "retrieval" && launchModes.includes("agent")
-      ? (["agent"] as EvalParamGroup[])
-      : []),
-  ];
-  const pickedSpecial = (specialSuites ?? []).filter((suite) =>
-    pickedSuites.includes(suite.id),
-  );
-  const specialParamGroups: EvalParamGroup[] = [
-    "common",
-    ...(pickedSpecial.some(
-      (suite) =>
-        suite.method === "answer" ||
-        suite.method === "dialogue" ||
-        (suite.method === "retrieval" && specialModes.includes("fixed")),
-    )
-      ? (["fixed"] as EvalParamGroup[])
-      : []),
-    ...(specialModes.includes("agent") &&
-    pickedSpecial.some((suite) => suite.method === "retrieval")
-      ? (["agent"] as EvalParamGroup[])
-      : []),
-  ];
-  // 回答、多轮对话方式的专项要评审打分，才显示评审模型。
-  const specialJudge = pickedSpecial.some(
-    (suite) => suite.method === "answer" || suite.method === "dialogue",
-  );
-
   return (
     <section className="ev-root">
       <div className="ev-heading">
@@ -1165,7 +853,7 @@ function Evaluation({
             {(key === "history" || key === "dataset") && (
               <span>
                 {key === "history"
-                  ? runs.length
+                  ? new Set(runs.map((item) => item.batch?.id ?? item.id)).size
                   : (dataset?.reviewed_count ??
                     dataset?.items.filter((item) => item.reviewed === true)
                       .length ??
@@ -1178,552 +866,30 @@ function Evaluation({
       {section === "history" && !selectedId && !batchId && (
         <>
           {/* 操作区只属于历史记录，评测集 Tab 保持为题目管理入口。 */}
-          <div className="ev-launch">
-            <div className="ev-launch-title">
-              操作：发起
-              {launchMode === "special" ? "专项" : KIND_LABELS[launchKind]}评测
-              <small>
-                {launchKind === "generation" && launchMode !== "special"
-                  ? "会调用大模型，有少量费用"
-                  : agentLaunch
-                    ? "Agent 每题调用大模型几轮，较慢"
-                    : "会调用大模型"}
-              </small>
-            </div>
-            <div className="ev-launch-options">
-              <div className="ev-launch-option is-stacked">
-                <div
-                  className="sp-mode"
-                  role="radiogroup"
-                  aria-label="评测目的"
-                >
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={launchMode === "tuning"}
-                    className={launchMode === "tuning" ? "is-selected" : ""}
-                    onClick={() => setLaunchMode("tuning")}
-                  >
-                    调参
-                  </button>
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={launchMode === "special"}
-                    className={launchMode === "special" ? "is-selected" : ""}
-                    onClick={() => setLaunchMode("special")}
-                  >
-                    专项
-                  </button>
-                </div>
-                <Hint
-                  text={
-                    launchMode === "special"
-                      ? "检查某个方向的问题，不计入调参分数；每个专项单独出结果。"
-                      : "用开发集或留出集比较参数好坏。"
-                  }
-                />
-              </div>
-              {launchMode === "special" ? (
-                <div className="ev-launch-option sp-pick-option">
-                  {specialSuites === null ? (
-                    <span className="ev-muted-note">正在读取专项…</span>
-                  ) : specialSuites.length === 0 ? (
-                    <span className="ev-muted-note">
-                      还没有专项，先到「专项评测集」新建。
-                    </span>
-                  ) : (
-                    <ul className="sp-pick-list">
-                      {specialSuites.map((suite) => (
-                        <li key={suite.id}>
-                          <label>
-                            <input
-                              type="checkbox"
-                              checked={pickedSuites.includes(suite.id)}
-                              disabled={suite.item_count === 0}
-                              onChange={() =>
-                                setPickedSuites((items) =>
-                                  items.includes(suite.id)
-                                    ? items.filter((item) => item !== suite.id)
-                                    : [...items, suite.id],
-                                )
-                              }
-                            />
-                            <span className="sp-pick-text">
-                              <span className="sp-pick-name">
-                                {suite.name}
-                                <HueTag size="sm" label={suite.method_label} />
-                                {suite.method !== "dialogue" && (
-                                  <Tag size="sm" outline plain>
-                                    {suite.search_mode_label}
-                                  </Tag>
-                                )}
-                                <em>{suite.item_count} 题</em>
-                              </span>
-                              {suite.description && (
-                                <small>{suite.description}</small>
-                              )}
-                            </span>
-                          </label>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {specialSuites?.some(
-                    (suite) =>
-                      suite.method === "retrieval" &&
-                      pickedSuites.includes(suite.id),
-                  ) && (
-                    <div className="sp-mode-line">
-                      <span className="ev-option-title">运行模式</span>
-                      <label
-                        className={`ev-radio-option ${specialModes.includes("fixed") ? "is-selected" : ""}`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={specialModes.includes("fixed")}
-                          onChange={() =>
-                            setSpecialModes((items) =>
-                              items.includes("fixed")
-                                ? items.filter((item) => item !== "fixed")
-                                : ["fixed", ...items],
-                            )
-                          }
-                        />
-                        固定流程
-                      </label>
-                      <label
-                        className={`ev-radio-option ${specialModes.includes("agent") ? "is-selected" : ""}`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={specialModes.includes("agent")}
-                          onChange={() =>
-                            setSpecialModes((items) =>
-                              items.includes("agent")
-                                ? items.filter((item) => item !== "agent")
-                                : [...items, "agent"],
-                            )
-                          }
-                        />
-                        Agent
-                      </label>
-                      <span className="ev-option-description is-below ev-hint">
-                        <span className="ev-info-icon" aria-hidden="true">
-                          i
-                        </span>
-                        只对检索方式的专项生效。
-                        {specialModes.includes("agent") &&
-                        specialSuites.some(
-                          (suite) =>
-                            suite.method === "retrieval" &&
-                            suite.search_mode !== "hybrid" &&
-                            pickedSuites.includes(suite.id),
-                        )
-                          ? "选中的专项有不是混合检索的，和 Agent 比不公平。"
-                          : ""}
-                      </span>
-                    </div>
-                  )}
-                  {specialSuites?.some(
-                    (suite) =>
-                      suite.method === "dialogue" &&
-                      pickedSuites.includes(suite.id),
-                  ) && (
-                    <div className="sp-switch-line">
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={compareMemory}
-                        className={`sp-switch ${compareMemory ? "is-on" : ""}`}
-                        onClick={() => setCompareMemory(!compareMemory)}
-                      >
-                        <span />
-                      </button>
-                      <span>
-                        对比记忆参数：压缩阈值、保留条数各调大调小再跑，共 5
-                        组，大模型调用是 5 倍。
-                      </span>
-                    </div>
-                  )}
-                  {pickedSpecial.length > 0 && (
-                    <div className="sp-mode-line evp-line">
-                      <span className="ev-option-title">参数配置</span>
-                      <EvalParamsPanel
-                        options={paramOptions}
-                        value={launchParams}
-                        onChange={setLaunchParams}
-                        groups={specialParamGroups}
-                        showJudge={specialJudge}
-                      />
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <>
-                  <div className="ev-launch-option is-stacked">
-                    <fieldset className="ev-radio-field">
-                      <legend>
-                        <span className="ev-option-title">评测类型</span>
-                      </legend>
-                      <div
-                        className="ev-radio-options"
-                        role="radiogroup"
-                        aria-label="评测类型"
-                      >
-                        <label
-                          className={`ev-radio-option ${launchKind === "retrieval" ? "is-selected" : ""}`}
-                        >
-                          <input
-                            type="radio"
-                            name="eval-kind"
-                            value="retrieval"
-                            checked={launchKind === "retrieval"}
-                            onChange={() => changeLaunchKind("retrieval")}
-                          />
-                          检索评测
-                        </label>
-                        <label
-                          className={`ev-radio-option ${launchKind === "generation" ? "is-selected" : ""}`}
-                        >
-                          <input
-                            type="radio"
-                            name="eval-kind"
-                            value="generation"
-                            checked={launchKind === "generation"}
-                            onChange={() => changeLaunchKind("generation")}
-                          />
-                          生成评测
-                        </label>
-                      </div>
-                      <Hint
-                        text={
-                          launchKind === "generation"
-                            ? "检索后生成回答，由评审模型打分。"
-                            : "改写 → 检索 → 充分性判断 → 补充检索，和线上一致。"
-                        }
-                      />
-                    </fieldset>
-                  </div>
-                  {launchKind === "retrieval" && (
-                    <div className="ev-launch-option is-stacked">
-                      <fieldset className="ev-radio-field">
-                        <legend>
-                          <span className="ev-option-title">运行模式</span>
-                        </legend>
-                        <div
-                          className="ev-radio-options"
-                          role="group"
-                          aria-label="运行模式"
-                        >
-                          <label
-                            className={`ev-radio-option ${launchModes.includes("fixed") ? "is-selected" : ""}`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={launchModes.includes("fixed")}
-                              onChange={() => toggleMode("fixed")}
-                            />
-                            固定流程
-                          </label>
-                          <label
-                            className={`ev-radio-option ${launchModes.includes("agent") ? "is-selected" : ""}`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={launchModes.includes("agent")}
-                              onChange={() => toggleMode("agent")}
-                            />
-                            Agent
-                          </label>
-                        </div>
-                        <Hint
-                          text={
-                            launchModes.length === 0
-                              ? "至少勾一个。"
-                              : launchModes.length === 2
-                                ? "两边逐题对比，点开看各自的检索日志。"
-                                : launchModes.includes("agent")
-                                  ? "只看 Agent 最后拿到的资料；实验组不跑。"
-                                  : ""
-                          }
-                        />
-                      </fieldset>
-                    </div>
-                  )}
-                  <div className="ev-launch-option is-stacked">
-                    <fieldset className="ev-radio-field">
-                      <legend>
-                        <span className="ev-option-title">参数配置</span>
-                      </legend>
-                      <EvalParamsPanel
-                        options={paramOptions}
-                        value={launchParams}
-                        onChange={setLaunchParams}
-                        groups={tuningParamGroups}
-                        showJudge={launchKind === "generation"}
-                      />
-                      <Hint text="默认全部跟随系统设置；改成自定义的项只对这次评测生效，不影响线上。" />
-                    </fieldset>
-                  </div>
-                  <div className="ev-launch-option is-stacked">
-                    <fieldset className="ev-radio-field">
-                      <legend>
-                        <span className="ev-option-title">题目范围</span>
-                      </legend>
-                      <div
-                        className="ev-radio-options"
-                        role="radiogroup"
-                        aria-label="题目范围"
-                      >
-                        <label
-                          className={`ev-radio-option ${launchSplit === "dev" ? "is-selected" : ""}`}
-                        >
-                          <input
-                            type="radio"
-                            name="eval-split"
-                            value="dev"
-                            checked={launchSplit === "dev"}
-                            onChange={() => setLaunchSplit("dev")}
-                          />
-                          开发集（日常调参）
-                        </label>
-                        <label
-                          className={`ev-radio-option ${launchSplit === "holdout" ? "is-selected" : ""}`}
-                        >
-                          <input
-                            type="radio"
-                            name="eval-split"
-                            value="holdout"
-                            checked={launchSplit === "holdout"}
-                            onChange={() => setLaunchSplit("holdout")}
-                          />
-                          留出集（最终验证）
-                        </label>
-                        <label
-                          className={`ev-radio-option ${launchSplit === "all" ? "is-selected" : ""}`}
-                        >
-                          <input
-                            type="radio"
-                            name="eval-split"
-                            value="all"
-                            checked={launchSplit === "all"}
-                            onChange={() => setLaunchSplit("all")}
-                          />
-                          全部题目
-                        </label>
-                      </div>
-                      <Hint
-                        text={
-                          launchSplit === "dev"
-                            ? `${splitCounts.dev || "—"} 题，调参时用。`
-                            : launchSplit === "holdout"
-                              ? `${splitCounts.holdout || "—"} 题，调参完成后验证。`
-                              : `${splitCounts.dev + splitCounts.holdout || "—"} 题，看总体，不用来定参数。`
-                        }
-                      />
-                    </fieldset>
-                  </div>
-                  {/* 生成评测只跑基线，先在界面层禁用检索实验组选项，避免用户提交无效组合。 */}
-                  {suites.map((suite) => {
-                    const suiteOff =
-                      launchKind !== "retrieval" ||
-                      !launchModes.includes("fixed");
-                    const suiteDescription =
-                      launchKind !== "retrieval"
-                        ? "只有检索评测能跑。"
-                        : !launchModes.includes("fixed")
-                          ? "要勾选固定流程才能跑。"
-                          : `${SUITE_DESCRIPTIONS[suite.key] ?? "和基线对比"}：${suite.variants.join("、")}。`;
-                    const suiteClass = suiteOff
-                      ? "ev-check is-disabled"
-                      : "ev-check";
-                    return (
-                      <div
-                        className="ev-launch-option is-stacked"
-                        key={suite.key}
-                      >
-                        <label
-                          className={suiteClass}
-                          title={
-                            launchKind !== "retrieval"
-                              ? "只有检索评测能运行这组实验"
-                              : suite.variants.join("、")
-                          }
-                        >
-                          <input
-                            type="checkbox"
-                            disabled={suiteOff}
-                            checked={launchSuites.includes(suite.key)}
-                            onChange={() => toggleSuite(suite.key)}
-                          />
-                          {suite.label}
-                          <small>{suite.variants.length} 组</small>
-                        </label>
-                        <Hint text={suiteDescription} />
-                      </div>
-                    );
-                  })}
-                </>
-              )}
-              <div className="ev-launch-option sp-pick-option">
-                <span className="ev-option-title">评测语料</span>
-                {corpusEntries === null ? (
-                  <span className="ev-muted-note">正在读取语料库…</span>
-                ) : corpusEntries.length === 0 ? (
-                  <span className="ev-muted-note">
-                    语料库是空的，先到「评测语料库」上传。
-                  </span>
-                ) : (
-                  <ul className="sp-pick-list cp-pick-list">
-                    {corpusEntries.map((entry) => (
-                      <li key={entry.id}>
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={pickedCorpus.includes(entry.id)}
-                            disabled={entry.missing}
-                            onChange={() =>
-                              setPickedCorpus((items) =>
-                                items.includes(entry.id)
-                                  ? items.filter((item) => item !== entry.id)
-                                  : [...items, entry.id],
-                              )
-                            }
-                          />
-                          <span className="sp-pick-text">
-                            <span className="sp-pick-name">
-                              {entry.title}
-                              <em>
-                                {entry.missing
-                                  ? "文件不存在"
-                                  : `${entry.char_count.toLocaleString()} 字`}
-                              </em>
-                            </span>
-                          </span>
-                        </label>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <Hint
-                  text={
-                    pickedCorpus.length === 0
-                      ? "至少勾一份。"
-                      : "只导入、只检索勾选的；计分项不在勾选语料里的题会找不到。"
-                  }
-                />
-              </div>
-            </div>
-            <div className="ev-launch-actions evb-launch-actions">
-              <small>
-                {savedConfigs.length
-                  ? `将按顺序跑已保存的 ${savedConfigs.length} 组配置，放进同一份批次报告；表单上没保存的修改不会跑。`
-                  : "想一次对比几组配置：调好一组点「保存为一组配置」，最多 4 组。"}
-              </small>
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={
-                  formInvalid || savedConfigs.length >= MAX_SAVED_CONFIGS
-                }
-                onClick={saveConfig}
-              >
-                保存为一组配置
-                {savedConfigs.length ? `（${savedConfigs.length}/4）` : ""}
-              </button>
-              <button
-                className="primary-button"
-                disabled={
-                  launching ||
-                  Boolean(running) ||
-                  (!savedConfigs.length && formInvalid)
-                }
-                onClick={() => void launch()}
-              >
-                {running
-                  ? "评测进行中…"
-                  : launching
-                    ? "正在启动…"
-                    : savedConfigs.length
-                      ? `开始评测（${savedConfigs.length} 组）`
-                      : "开始评测"}
-              </button>
-            </div>
-            {savedConfigs.length > 0 && (
-              <div className="evb-saved">
-                {savedConfigs.map((item, index) => (
-                  <article key={index} className="evb-saved-card">
-                    <input
-                      value={item.label}
-                      maxLength={40}
-                      aria-label="配置名称"
-                      onChange={(event) =>
-                        setSavedConfigs((items) =>
-                          items.map((entry, position) =>
-                            position === index
-                              ? { ...entry, label: event.target.value }
-                              : entry,
-                          ),
-                        )
-                      }
-                    />
-                    <ul>
-                      {item.summary.map((line, lineIndex) => (
-                        <li key={lineIndex}>{line}</li>
-                      ))}
-                    </ul>
-                    <div className="evb-saved-actions">
-                      <button
-                        type="button"
-                        className="ev-link"
-                        onClick={() => loadConfig(item.form)}
-                      >
-                        载入到表单
-                      </button>
-                      <button
-                        type="button"
-                        className="ev-link"
-                        onClick={() =>
-                          setSavedConfigs((items) =>
-                            items.filter((_, position) => position !== index),
-                          )
-                        }
-                      >
-                        删除
-                      </button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            )}
-            {runningRun && (
-              <div className="ev-progress" aria-live="polite">
-                <div className="ev-progress-track">
-                  <div
-                    className="ev-progress-fill"
-                    style={{ width: `${progressPercent(runningRun)}%` }}
-                  />
-                </div>
-                <span>
-                  {runningRun.progress?.done ?? 0} /{" "}
-                  {runningRun.progress?.total || "…"}{" "}
-                  {runningRun.kind === "special" ? "题" : "次检索"}
-                </span>
-              </div>
-            )}
-            {runningRun &&
-              runningRun.kind !== "special" &&
-              progressBreakdown(runningRun, suites) && (
-                <p className="ev-progress-note">
-                  {progressBreakdown(runningRun, suites)}
-                </p>
-              )}
-          </div>
+          <UnifiedEvalLauncher
+            initialTemplate={chosenTemplate}
+            disabled={false}
+            onStarted={(id) => {
+              onNavigate(`/eval/batches/${encodeURIComponent(id)}`);
+              void refreshRuns();
+            }}
+          />
         </>
       )}
       {error && <div className="error-banner">{error}</div>}
-      {section === "corpus" ? (
+      {section === "templates" && (
+        <EvalConfigTemplates
+          onCreate={() => {
+            setChosenTemplate(null);
+            onNavigate("/eval/runs");
+          }}
+          onUse={(item) => {
+            setChosenTemplate(item);
+            onNavigate("/eval/runs");
+          }}
+        />
+      )}
+      {section === "templates" ? null : section === "corpus" ? (
         <Corpus onToast={onToast} />
       ) : section === "regression" ? (
         <Regression
@@ -1796,6 +962,7 @@ function Evaluation({
           onDelete={removeRun}
           running={Boolean(running)}
           onRerun={(id) => void rerunRun(id)}
+          onRerunBatch={rerunBatch}
         />
       )}
     </section>
@@ -1823,27 +990,7 @@ function RunHistorySkeleton() {
         <SkeletonBlock className="skeleton-title" />
         <SkeletonBlock className="skeleton-button" />
       </div>
-      <div className="ev-skeleton-table">
-        <SkeletonBlock />
-        <SkeletonBlock />
-        <SkeletonBlock />
-        <SkeletonBlock />
-        <SkeletonBlock />
-      </div>
-      <div className="ev-skeleton-table">
-        <SkeletonBlock />
-        <SkeletonBlock />
-        <SkeletonBlock />
-        <SkeletonBlock />
-        <SkeletonBlock />
-      </div>
-      <div className="ev-skeleton-table">
-        <SkeletonBlock />
-        <SkeletonBlock />
-        <SkeletonBlock />
-        <SkeletonBlock />
-        <SkeletonBlock />
-      </div>
+      <Table loading columnCount={10} className="diag-table ev-table" />
     </LoadingSkeleton>
   );
 }
@@ -2066,43 +1213,41 @@ function MemoryResults({ run }: { run: EvalRun }) {
         共 {run.config.dataset_size ?? "—"}{" "}
         段对话，最后一问要用到开头的内容。正确性：1 一致，0.5 部分，0 错误。
       </p>
-      <div className="diag-table-wrap">
-        <table className="diag-table ev-table">
-          <thead>
-            <tr>
-              <th>参数</th>
-              <th className="num">最后一问正确性</th>
-              <th className="num">忠实度</th>
-              <th className="num">触发了压缩</th>
-              <th className="num">最后一问平均输入</th>
+      <Table
+        containerProps={{ className: "diag-table-wrap" }}
+        className="diag-table ev-table"
+      >
+        <thead>
+          <tr>
+            <th>参数</th>
+            <th className="num">最后一问正确性</th>
+            <th className="num">忠实度</th>
+            <th className="num">触发了压缩</th>
+            <th className="num">最后一问平均输入</th>
+          </tr>
+        </thead>
+        <tbody>
+          {variants.map((variant, index) => (
+            <tr key={variant.name} className={index === 0 ? "is-current" : ""}>
+              <td>{variant.label}</td>
+              <td className="num">
+                {formatScore(variant.summary.correctness, 2)}
+              </td>
+              <td className="num">
+                {formatScore(variant.summary.faithfulness, 2)}
+              </td>
+              <td className="num">
+                {formatPercent(variant.summary.summarized_rate)}
+              </td>
+              <td className="num">
+                {variant.summary.input_tokens_avg !== null
+                  ? `${Math.round(variant.summary.input_tokens_avg)} Token`
+                  : "—"}
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {variants.map((variant, index) => (
-              <tr
-                key={variant.name}
-                className={index === 0 ? "is-current" : ""}
-              >
-                <td>{variant.label}</td>
-                <td className="num">
-                  {formatScore(variant.summary.correctness, 2)}
-                </td>
-                <td className="num">
-                  {formatScore(variant.summary.faithfulness, 2)}
-                </td>
-                <td className="num">
-                  {formatPercent(variant.summary.summarized_rate)}
-                </td>
-                <td className="num">
-                  {variant.summary.input_tokens_avg !== null
-                    ? `${Math.round(variant.summary.input_tokens_avg)} Token`
-                    : "—"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          ))}
+        </tbody>
+      </Table>
       {variants.map((variant) => (
         <details key={variant.name} className="ev-table-view">
           <summary>{variant.label}：逐段对话</summary>
@@ -2138,7 +1283,7 @@ function RunConfig({ run }: { run: EvalRunBrief }) {
   const items: [string, string][] = [
     [
       "题目",
-      `${SPLIT_LABELS[config.split ?? ""] ?? config.split}${config.dataset_size ? ` · ${config.dataset_size} 题` : ""}`,
+      `${scopeLabel(config)}${config.dataset_size ? ` · ${config.dataset_size} 题` : ""}`,
     ],
     ["模式", modesLabel(run)],
     ...(paramsSummary(run.params).length
@@ -2703,8 +1848,12 @@ function stageCandidates(
   returnLimit: number,
 ) {
   const candidates = [...(question.diagnostics?.candidates ?? [])];
+  // 交给重排的候选：新记录按 pool_via（RRF 名次进的 + 只被图找到、按图名次进的），旧记录按 RRF 前 poolSize 名。
+  const marked = candidates.some((candidate) => candidate.pool_via);
   const pool = candidates
-    .filter((candidate) => candidate.rrf_rank <= poolSize)
+    .filter((candidate) =>
+      marked ? Boolean(candidate.pool_via) : candidate.rrf_rank <= poolSize,
+    )
     .sort((left, right) => left.rrf_rank - right.rrf_rank);
   if (stage === "pool") return pool;
   if (stage === "top")
@@ -2807,8 +1956,11 @@ function QuestionChunkComparison({
                         </div>
                         <p>{candidate.preview}</p>
                         <small>
-                          RRF {candidate.rrf_rank} · 重排{" "}
-                          {candidate.rerank_rank ?? "—"}
+                          RRF {candidate.rrf_rank}
+                          {candidate.pool_via === "graph"
+                            ? ` · 图名次 ${candidate.graph_only_rank}`
+                            : ""}{" "}
+                          · 重排 {candidate.rerank_rank ?? "—"}
                           {stage.key === "final"
                             ? ` · ${candidate.source_id ?? "未编号"}`
                             : ""}
@@ -2844,73 +1996,74 @@ function TypeTable({ run }: { run: EvalRun }) {
   const toggleParaphrase = () => setParaphraseExpanded((expanded) => !expanded);
   const paraphrasePanelId = `paraphrase-analysis-${run.id}`;
   return (
-    <div className="diag-table-wrap">
-      <table className="diag-table ev-table">
-        <thead>
-          <tr>
-            <th>题型</th>
-            <th className="num">题数</th>
-            {columns.map((key) => (
-              <th key={key} className="num" title={METRIC_HINTS[key]}>
-                {metricLabel(key, run)}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {Object.entries(byType).map(([type, summary]) => {
-            const isParaphrase = type === "同义改写" && hasParaphrase;
-            const expanded = isParaphrase && paraphraseExpanded;
-            return (
-              <Fragment key={type}>
-                <tr
-                  className={isParaphrase ? "ev-type-main-row" : undefined}
-                  tabIndex={isParaphrase ? 0 : undefined}
-                  aria-expanded={isParaphrase ? expanded : undefined}
-                  aria-controls={isParaphrase ? paraphrasePanelId : undefined}
-                  title={
-                    isParaphrase ? "点击展开或收起同义改写专项结果" : undefined
-                  }
-                  onClick={isParaphrase ? toggleParaphrase : undefined}
-                  onKeyDown={
-                    isParaphrase
-                      ? (event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            toggleParaphrase();
-                          }
+    <Table
+      containerProps={{ className: "diag-table-wrap" }}
+      className="diag-table ev-table"
+    >
+      <thead>
+        <tr>
+          <th>题型</th>
+          <th className="num">题数</th>
+          {columns.map((key) => (
+            <th key={key} className="num" title={METRIC_HINTS[key]}>
+              {metricLabel(key, run)}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {Object.entries(byType).map(([type, summary]) => {
+          const isParaphrase = type === "同义改写" && hasParaphrase;
+          const expanded = isParaphrase && paraphraseExpanded;
+          return (
+            <Fragment key={type}>
+              <tr
+                className={isParaphrase ? "ev-type-main-row" : undefined}
+                tabIndex={isParaphrase ? 0 : undefined}
+                aria-expanded={isParaphrase ? expanded : undefined}
+                aria-controls={isParaphrase ? paraphrasePanelId : undefined}
+                title={
+                  isParaphrase ? "点击展开或收起同义改写专项结果" : undefined
+                }
+                onClick={isParaphrase ? toggleParaphrase : undefined}
+                onKeyDown={
+                  isParaphrase
+                    ? (event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          toggleParaphrase();
                         }
-                      : undefined
-                  }
-                >
-                  <td>
-                    {isParaphrase && (
-                      <span className="ev-type-expand-hint" aria-hidden="true">
-                        {expanded ? "▼" : "▶"}
-                      </span>
-                    )}
-                    {type}
+                      }
+                    : undefined
+                }
+              >
+                <td>
+                  {isParaphrase && (
+                    <span className="ev-type-expand-hint" aria-hidden="true">
+                      {expanded ? "▼" : "▶"}
+                    </span>
+                  )}
+                  {type}
+                </td>
+                <td className="num">{summary.count}</td>
+                {columns.map((key) => (
+                  <td key={key} className="num">
+                    {formatMetric(key, summary[key])}
                   </td>
-                  <td className="num">{summary.count}</td>
-                  {columns.map((key) => (
-                    <td key={key} className="num">
-                      {formatMetric(key, summary[key])}
-                    </td>
-                  ))}
+                ))}
+              </tr>
+              {expanded && run.paraphrase && (
+                <tr id={paraphrasePanelId} className="ev-type-subitem-row">
+                  <td colSpan={columns.length + 2}>
+                    <ParaphraseAnalysis run={run} analysis={run.paraphrase} />
+                  </td>
                 </tr>
-                {expanded && run.paraphrase && (
-                  <tr id={paraphrasePanelId} className="ev-type-subitem-row">
-                    <td colSpan={columns.length + 2}>
-                      <ParaphraseAnalysis run={run} analysis={run.paraphrase} />
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+              )}
+            </Fragment>
+          );
+        })}
+      </tbody>
+    </Table>
   );
 }
 
@@ -2980,37 +2133,36 @@ function ParaphraseAnalysis({
           <small>改写后独立检索结果</small>
         </div>
       </div>
-      <div className="diag-table-wrap">
-        <table className="diag-table ev-table ev-paraphrase-table">
-          <thead>
-            <tr>
-              <th>指标</th>
-              <th className="num">原问题</th>
-              <th className="num">改写问题</th>
-              <th className="num">变化</th>
-            </tr>
-          </thead>
-          <tbody>
-            {PARAPHRASE_METRICS.map((key) => {
-              const metric = analysis.metrics[key];
-              return (
-                <tr key={key}>
-                  <td>{metricLabel(key, run)}</td>
-                  <td className="num">{formatMetric(key, metric?.original)}</td>
-                  <td className="num">
-                    {formatMetric(key, metric?.paraphrase)}
-                  </td>
-                  <td
-                    className={`num ${metric?.delta !== null && metric?.delta < 0 ? "ev-paraphrase-negative" : ""}`}
-                  >
-                    {formatParaphraseDelta(key, metric?.delta ?? null)}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <Table
+        containerProps={{ className: "diag-table-wrap" }}
+        className="diag-table ev-table ev-paraphrase-table"
+      >
+        <thead>
+          <tr>
+            <th>指标</th>
+            <th className="num">原问题</th>
+            <th className="num">改写问题</th>
+            <th className="num">变化</th>
+          </tr>
+        </thead>
+        <tbody>
+          {PARAPHRASE_METRICS.map((key) => {
+            const metric = analysis.metrics[key];
+            return (
+              <tr key={key}>
+                <td>{metricLabel(key, run)}</td>
+                <td className="num">{formatMetric(key, metric?.original)}</td>
+                <td className="num">{formatMetric(key, metric?.paraphrase)}</td>
+                <td
+                  className={`num ${metric?.delta !== null && metric?.delta < 0 ? "ev-paraphrase-negative" : ""}`}
+                >
+                  {formatParaphraseDelta(key, metric?.delta ?? null)}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </Table>
       <details className="ev-paraphrase-details">
         <summary>查看题对明细</summary>
         <div className="ev-paraphrase-pairs">
@@ -3332,7 +2484,11 @@ function QuestionList({
                                   </span>
                                 </button>
                                 <div className="ev-leak-chunk-meta">
-                                  <span>RRF 第 {candidate.rrf_rank} 名</span>
+                                  <span>
+                                    RRF 第 {candidate.rrf_rank} 名
+                                    {candidate.pool_via === "graph" &&
+                                      `（只被图找到，按图名次第 ${candidate.graph_only_rank} 进重排）`}
+                                  </span>
                                   <span>
                                     重排第 {candidate.rerank_rank ?? "—"} 名
                                   </span>
@@ -3576,40 +2732,40 @@ function SweepPanel({ run }: { run: EvalRun }) {
       <SweepChart sweep={sweep} current={current} />
       <details className="ev-table-view">
         <summary>表格视图</summary>
-        <div className="diag-table-wrap">
-          <table className="diag-table ev-table">
-            <thead>
-              <tr>
-                <th className="num">阈值</th>
-                <th className="num">误杀率</th>
-                <th className="num">漏放率</th>
-                <th className="num">过滤后 Recall</th>
+        <Table
+          containerProps={{ className: "diag-table-wrap" }}
+          className="diag-table ev-table"
+        >
+          <thead>
+            <tr>
+              <th className="num">阈值</th>
+              <th className="num">误杀率</th>
+              <th className="num">漏放率</th>
+              <th className="num">过滤后 Recall</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sweep.map((point) => (
+              <tr
+                key={point.threshold}
+                className={
+                  current !== null && Math.abs(point.threshold - current) < 1e-6
+                    ? "is-current"
+                    : ""
+                }
+              >
+                <td className="num">{point.threshold.toFixed(2)}</td>
+                <td className="num">
+                  {formatPercent(point.false_reject_rate)}
+                </td>
+                <td className="num">
+                  {formatPercent(point.false_accept_rate)}
+                </td>
+                <td className="num">{formatPercent(point.recall_final)}</td>
               </tr>
-            </thead>
-            <tbody>
-              {sweep.map((point) => (
-                <tr
-                  key={point.threshold}
-                  className={
-                    current !== null &&
-                    Math.abs(point.threshold - current) < 1e-6
-                      ? "is-current"
-                      : ""
-                  }
-                >
-                  <td className="num">{point.threshold.toFixed(2)}</td>
-                  <td className="num">
-                    {formatPercent(point.false_reject_rate)}
-                  </td>
-                  <td className="num">
-                    {formatPercent(point.false_accept_rate)}
-                  </td>
-                  <td className="num">{formatPercent(point.recall_final)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </Table>
       </details>
       <LimitSweep
         points={run.limit_sweep ?? []}
@@ -3645,45 +2801,46 @@ function LimitSweep({
         )}
         现在是 {current ?? "—"} 段。
       </p>
-      <div className="diag-table-wrap">
-        <table className="diag-table ev-table">
-          <thead>
-            <tr>
-              <th className="num">段数</th>
-              <th className="num">计分项召回</th>
-              <th className="num">计分项全部命中</th>
-              <th className="num">多计分项题召回</th>
-              <th className="num">平均实际交给模型</th>
-              <th className="num">被段数截断的题</th>
+      <Table
+        containerProps={{ className: "diag-table-wrap" }}
+        className="diag-table ev-table"
+      >
+        <thead>
+          <tr>
+            <th className="num">段数</th>
+            <th className="num">计分项召回</th>
+            <th className="num">计分项全部命中</th>
+            <th className="num">多计分项题召回</th>
+            <th className="num">平均实际交给模型</th>
+            <th className="num">被段数截断的题</th>
+          </tr>
+        </thead>
+        <tbody>
+          {points.map((point) => (
+            <tr
+              key={point.return_limit}
+              className={point.return_limit === current ? "is-current" : ""}
+            >
+              <td className="num">{point.return_limit}</td>
+              <td className="num">{formatPercent(point.recall_final)}</td>
+              <td className="num">
+                {point.complete} / {point.answerable}
+              </td>
+              <td className="num">
+                {point.multi_evidence
+                  ? `${formatPercent(point.multi_evidence_recall)}（${point.multi_evidence} 题）`
+                  : "—"}
+              </td>
+              <td className="num">
+                {point.avg_returned?.toFixed(2) ?? "—"} 段
+              </td>
+              <td className="num">
+                {point.capped} / {point.total}
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {points.map((point) => (
-              <tr
-                key={point.return_limit}
-                className={point.return_limit === current ? "is-current" : ""}
-              >
-                <td className="num">{point.return_limit}</td>
-                <td className="num">{formatPercent(point.recall_final)}</td>
-                <td className="num">
-                  {point.complete} / {point.answerable}
-                </td>
-                <td className="num">
-                  {point.multi_evidence
-                    ? `${formatPercent(point.multi_evidence_recall)}（${point.multi_evidence} 题）`
-                    : "—"}
-                </td>
-                <td className="num">
-                  {point.avg_returned?.toFixed(2) ?? "—"} 段
-                </td>
-                <td className="num">
-                  {point.capped} / {point.total}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          ))}
+        </tbody>
+      </Table>
     </div>
   );
 }
@@ -4006,45 +3163,46 @@ function VariantPanel({ run }: { run: EvalRun }) {
       <p className="ev-muted-note">
         差值相对基线。没有重排的几组也没有阈值过滤，漏放率会偏高。
       </p>
-      <div className="diag-table-wrap">
-        <table className="diag-table ev-table">
-          <thead>
-            <tr>
-              <th>配置</th>
-              {keys.map((key) => (
-                <th key={key} className="num" title={METRIC_HINTS[key]}>
-                  {metricLabel(key, run)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            <tr className="is-current">
-              <td>基线（当前配置）</td>
-              {keys.map((key) => (
-                <td key={key} className="num">
-                  {formatMetric(key, baseline[key])}
-                </td>
-              ))}
-            </tr>
-            {Object.entries(groups).map(([suite, items]) => [
-              <tr key={suite} className="ev-group-row">
-                <td colSpan={keys.length + 1}>
-                  {suite === "ablation"
-                    ? "消融实验：去掉一个组件，看它贡献了多少"
-                    : "参数对比：凭经验定的参数换一个值会怎样"}
-                </td>
-              </tr>,
-              ...items.map((variant) => (
-                <tr key={variant.name}>
-                  <td>{variant.label}</td>
-                  {keys.map((key) => cell(key, variant.summary[key]))}
-                </tr>
-              )),
-            ])}
-          </tbody>
-        </table>
-      </div>
+      <Table
+        containerProps={{ className: "diag-table-wrap" }}
+        className="diag-table ev-table"
+      >
+        <thead>
+          <tr>
+            <th>配置</th>
+            {keys.map((key) => (
+              <th key={key} className="num" title={METRIC_HINTS[key]}>
+                {metricLabel(key, run)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          <tr className="is-current">
+            <td>基线（当前配置）</td>
+            {keys.map((key) => (
+              <td key={key} className="num">
+                {formatMetric(key, baseline[key])}
+              </td>
+            ))}
+          </tr>
+          {Object.entries(groups).map(([suite, items]) => [
+            <tr key={suite} className="ev-group-row">
+              <td colSpan={keys.length + 1}>
+                {suite === "ablation"
+                  ? "消融实验：去掉一个组件，看它贡献了多少"
+                  : "参数对比：凭经验定的参数换一个值会怎样"}
+              </td>
+            </tr>,
+            ...items.map((variant) => (
+              <tr key={variant.name}>
+                <td>{variant.label}</td>
+                {keys.map((key) => cell(key, variant.summary[key]))}
+              </tr>
+            )),
+          ])}
+        </tbody>
+      </Table>
     </div>
   );
 }
@@ -4193,6 +3351,7 @@ function RunHistory({
   onNote,
   running,
   onRerun,
+  onRerunBatch,
 }: {
   runs: EvalRunBrief[];
   onOpen: (id: string) => void;
@@ -4201,7 +3360,14 @@ function RunHistory({
   onNote: (id: string, note: string) => void;
   running: boolean;
   onRerun: (id: string) => void;
+  onRerunBatch: (id: string) => Promise<void>;
 }) {
+  const toast = useToast();
+  const historyRows = runs.filter(
+    (run, index) =>
+      !run.batch ||
+      runs.findIndex((item) => item.batch?.id === run.batch?.id) === index,
+  );
   const [noteTarget, setNoteTarget] = useState<EvalRunBrief | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [noteSaving, setNoteSaving] = useState(false);
@@ -4215,13 +3381,15 @@ function RunHistory({
       onNote(value.id, value.note);
       setNoteTarget(null);
     } catch (reason) {
-      setNoteError((reason as Error).message);
+      toast("error", errorText(reason));
     } finally {
       setNoteSaving(false);
     }
   }
   const [picked, setPicked] = useState<string[]>([]);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // 正在重跑的批次：只有被点的那一个按钮转圈，同一行的其他按钮只禁用。
+  const [rerunningId, setRerunningId] = useState<string | null>(null);
   // 指标子项不能跨表格行使用 details；显式记录展开项。记录默认都收起，点一行才展开它的指标。
   const [expandedMetricRuns, setExpandedMetricRuns] = useState<string[]>([]);
   const [comparison, setComparison] = useState<EvalComparison | null>(null);
@@ -4266,12 +3434,6 @@ function RunHistory({
   // 删除前明确展示时间和状态，避免把误点“删除”当成可逆操作。
   async function remove(item: EvalRunBrief) {
     if (item.status === "running") return;
-    if (
-      !window.confirm(
-        `确定删除 ${formatTime(item.created)} 的${KIND_LABELS[item.kind]}评测记录吗？删除后不可恢复。`,
-      )
-    )
-      return;
     setDeletingId(item.id);
     try {
       await onDelete(item.id);
@@ -4313,221 +3475,333 @@ function RunHistory({
           {comparing ? "正在对比…" : `对比（${picked.length}/2）`}
         </button>
       </div>
-      <div className="diag-table-wrap ev-history-table-wrap">
-        <table className="diag-table ev-table ev-history-table">
-          {/* 历史记录只保留运行结果相关字段；提交号属于构建元数据，移除后给题数、配置和状态留出空间。 */}
-          <thead>
-            <tr>
-              <th>对比</th>
-              <th>时间</th>
-              <th>类型</th>
-              <th>范围</th>
-              <th>题数</th>
-              <th>结果</th>
-              <th>备注</th>
-              <th>耗时</th>
-              <th>状态</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {runs.map((item) => {
-              const metricsExpanded = expandedMetricRuns.includes(item.id);
-              // 指标说明所需统计已随历史列表返回，展开行只做本地渲染，不再触发逐条详情请求。
-              const stats = historyEvidenceStats(item.history_metrics);
-              // 指标卡片下面的一句说明，和详情页总览同一套（metricSentence）；旧记录没有逐题统计时退回通用说明。
-              const sentence = (key: string) =>
-                metricSentence(key, stats, item.config) ??
-                METRIC_HINTS[key] ??
-                FLOW_METRIC_EXPLANATIONS[key] ??
-                "—";
+      <Table
+        containerProps={{ className: "diag-table-wrap ev-history-table-wrap" }}
+        className="diag-table ev-table ev-history-table"
+      >
+        {/* 历史记录只保留运行结果相关字段；提交号属于构建元数据，移除后给题数、配置和状态留出空间。 */}
+        <thead>
+          <tr>
+            <th>对比</th>
+            <th>时间</th>
+            <th>类型</th>
+            <th>范围</th>
+            <th>题数</th>
+            <th>结果</th>
+            <th>备注</th>
+            <th>耗时</th>
+            <th>状态</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {historyRows.map((item) => {
+            if (item.batch) {
+              const members = runs.filter(
+                (run) => run.batch?.id === item.batch?.id,
+              );
+              const done = members.filter(
+                (run) => run.status === "completed",
+              ).length;
+              const active = members.find(
+                (run) => run.status === "running" || run.status === "queued",
+              );
+              const status =
+                active?.status ??
+                (done === members.length ? "completed" : "failed");
               return (
-                <Fragment key={item.id}>
-                  <tr
-                    className={`ev-history-main-row ${picked.includes(item.id) ? "is-current" : ""}`}
-                    tabIndex={0}
-                    aria-expanded={metricsExpanded}
-                    aria-controls={`history-metrics-${item.id}`}
-                    title="点击展开或收起指标"
-                    onClick={() => toggleMetrics(item.id)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        toggleMetrics(item.id);
-                      }
-                    }}
-                  >
-                    <td>
-                      <input
-                        type="checkbox"
-                        aria-label={`选择 ${item.id}`}
-                        checked={picked.includes(item.id)}
-                        disabled={item.status !== "completed"}
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={() => toggle(item.id)}
-                      />
-                    </td>
-                    <td className="ev-history-time">
-                      {formatTime(item.created)}
-                    </td>
-                    <td>
-                      <span className="tag-row">
-                        <HueTag label={KIND_LABELS[item.kind]} />
-                        {(item.kind === "retrieval" ||
-                          item.kind === "special") &&
-                          runModes(item).includes("agent") &&
-                          runModes(item).map((mode) => (
-                            <HueTag
-                              key={mode}
-                              label={mode === "agent" ? "Agent" : "固定流程"}
-                            />
-                          ))}
-                      </span>
-                    </td>
-                    <td>
-                      {item.kind === "special"
-                        ? (item.config.special?.suites ?? [])
-                            .map((suite) => suite.name)
-                            .join("、")
-                        : (SPLIT_LABELS[item.config.split ?? ""] ??
-                          item.config.split)}
-                    </td>
-                    <td className="num ev-history-number">
-                      {item.kind === "special"
-                        ? (item.summary?.count ?? "—")
-                        : (item.config.dataset_size ?? "—")}
-                    </td>
-                    {/* 结果列：每次最主要的那个数；参数平时不变，只在和上一次同类评测不一样时标「参数改过」，鼠标放上去看改了什么。 */}
-                    <td className="ev-result-cell">
-                      <span className="tag-row">
-                        <span>{runResult(item)}</span>
-                        {(() => {
-                          const changes = settingsChanges(item, runs);
-                          return (
-                            changes.length > 0 && (
-                              <Tag
-                                size="sm"
-                                tone="warning"
-                                title={`和上一次同一种评测比：\n${changes.join("\n")}`}
-                              >
-                                参数改过
-                              </Tag>
-                            )
-                          );
-                        })()}
-                        {paramsSummary(item.params).length > 0 && (
-                          <Tag
-                            size="sm"
-                            tone="info"
-                            title={`这次评测单独指定的参数：\n${paramsSummary(item.params).join("\n")}`}
-                          >
-                            自定义参数
-                          </Tag>
-                        )}
-                        {item.batch && (
-                          <Tag
-                            size="sm"
-                            tone="accent"
-                            title={`一次跑了 ${item.batch.size} 组配置，点开看批次报告`}
-                            onClick={() => onOpenBatch(item.batch!.id)}
-                          >
-                            批次 · {item.batch.label}（{item.batch.index + 1}/
-                            {item.batch.size}）
-                          </Tag>
-                        )}
-                      </span>
-                    </td>
-                    <td className="ev-history-note-cell">
-                      <span title={item.note || ""}>{item.note || "—"}</span>
-                    </td>
-                    <td
-                      className="num ev-history-latency"
-                      title={durationTitle(
-                        item.summary?.flow_latency_avg_ms ??
-                          item.summary?.latency_avg_ms ??
-                          item.summary?.agent_latency_avg_ms,
-                      )}
+                <tr key={item.batch.id}>
+                  <td>—</td>
+                  <td>{formatTime(item.created)}</td>
+                  <td>评测报告</td>
+                  <td>{scopeLabel(item.config)}</td>
+                  <td>{item.config.dataset_size ?? "—"}</td>
+                  <td>
+                    {members.length} 组配置 · 完成 {done}/{members.length}
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="link-button button-sm"
+                      onClick={() => {
+                        setNoteTarget(item);
+                        setNoteDraft(item.note || "");
+                        setNoteError("");
+                      }}
                     >
-                      {formatMs(
-                        item.summary?.flow_latency_avg_ms ??
-                          item.summary?.latency_avg_ms ??
-                          item.summary?.agent_latency_avg_ms,
-                      )}
-                    </td>
-                    <td>
-                      <span className="tag-row">
-                        <Tag dot tone={runStatus(item.status).tone}>
-                          {runStatus(item.status).label}
-                          {item.status === "running"
-                            ? ` ${progressPercent(item)}%`
-                            : ""}
-                        </Tag>
-                      </span>
-                    </td>
-                    <td>
-                      <div className="ev-history-actions">
-                        <details
-                          className="ev-note-options"
-                          onClick={(event) => event.stopPropagation()}
+                      {item.note || "添加备注"}
+                    </button>
+                  </td>
+                  <td>—</td>
+                  <td>
+                    <Tag dot tone={runStatus(status).tone}>
+                      {runStatus(status).label}
+                    </Tag>
+                  </td>
+                  <td>
+                    <div className="ev-history-actions">
+                      <button
+                        type="button"
+                        className="secondary-button button-sm"
+                        disabled={deletingId !== null || rerunningId !== null}
+                        onClick={() => onOpenBatch(item.batch!.id)}
+                      >
+                        查看
+                      </button>
+                      <button
+                        type="button"
+                        className={`secondary-button button-sm${rerunningId === item.batch.id ? " is-loading" : ""}`}
+                        disabled={
+                          Boolean(active) || running || rerunningId !== null
+                        }
+                        title={
+                          active
+                            ? "评测正在运行或排队，不能重跑"
+                            : running
+                              ? "已有评测在运行，跑完再重跑"
+                              : "照这份报告里每组的配置重新跑一份，原报告不动"
+                        }
+                        onClick={() => {
+                          setRerunningId(item.batch!.id);
+                          void onRerunBatch(item.batch!.id).finally(() =>
+                            setRerunningId(null),
+                          );
+                        }}
+                      >
+                        重跑
+                      </button>
+                      <ConfirmPopover
+                        danger
+                        message={`删除这份评测报告及其中 ${members.length} 组配置记录？删除后不可恢复。`}
+                        confirmText="删除报告"
+                        onConfirm={async () => {
+                          if (active) return;
+                          setDeletingId(item.batch!.id);
+                          try {
+                            for (const member of members)
+                              await onDelete(member.id);
+                            setPicked((previous) =>
+                              previous.filter(
+                                (id) =>
+                                  !members.some((member) => member.id === id),
+                              ),
+                            );
+                          } finally {
+                            setDeletingId(null);
+                          }
+                        }}
+                      >
+                        <button
+                          type="button"
+                          className={`delete-button button-sm${deletingId === item.batch.id ? " is-loading" : ""}`}
+                          disabled={
+                            Boolean(active) ||
+                            deletingId !== null ||
+                            rerunningId !== null
+                          }
+                          title={
+                            active
+                              ? "评测正在运行或排队，不能删除"
+                              : "删除整份评测报告"
+                          }
                         >
-                          <summary className="ev-link">选项</summary>
-                          <div className="ev-note-menu">
+                          删除
+                        </button>
+                      </ConfirmPopover>
+                    </div>
+                  </td>
+                </tr>
+              );
+            }
+            const metricsExpanded = expandedMetricRuns.includes(item.id);
+            // 指标说明所需统计已随历史列表返回，展开行只做本地渲染，不再触发逐条详情请求。
+            const stats = historyEvidenceStats(item.history_metrics);
+            // 指标卡片下面的一句说明，和详情页总览同一套（metricSentence）；旧记录没有逐题统计时退回通用说明。
+            const sentence = (key: string) =>
+              metricSentence(key, stats, item.config) ??
+              METRIC_HINTS[key] ??
+              FLOW_METRIC_EXPLANATIONS[key] ??
+              "—";
+            return (
+              <Fragment key={item.id}>
+                <tr
+                  className={`ev-history-main-row ${picked.includes(item.id) ? "is-current" : ""}`}
+                  tabIndex={0}
+                  aria-expanded={metricsExpanded}
+                  aria-controls={`history-metrics-${item.id}`}
+                  title="点击展开或收起指标"
+                  onClick={() => toggleMetrics(item.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      toggleMetrics(item.id);
+                    }
+                  }}
+                >
+                  <td>
+                    <input
+                      type="checkbox"
+                      aria-label={`选择 ${item.id}`}
+                      checked={picked.includes(item.id)}
+                      disabled={item.status !== "completed"}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={() => toggle(item.id)}
+                    />
+                  </td>
+                  <td className="ev-history-time">
+                    {formatTime(item.created)}
+                  </td>
+                  <td>
+                    <span className="tag-row">
+                      <HueTag label={KIND_LABELS[item.kind]} />
+                      {(item.kind === "retrieval" || item.kind === "special") &&
+                        runModes(item).includes("agent") &&
+                        runModes(item).map((mode) => (
+                          <HueTag
+                            key={mode}
+                            label={mode === "agent" ? "Agent" : "固定流程"}
+                          />
+                        ))}
+                    </span>
+                  </td>
+                  <td>
+                    {item.kind === "special"
+                      ? (item.config.special?.suites ?? [])
+                          .map((suite) => suite.name)
+                          .join("、")
+                      : scopeLabel(item.config)}
+                  </td>
+                  <td className="num ev-history-number">
+                    {item.kind === "special"
+                      ? (item.summary?.count ?? "—")
+                      : (item.config.dataset_size ?? "—")}
+                  </td>
+                  {/* 结果列：每次最主要的那个数；参数平时不变，只在和上一次同类评测不一样时标「参数改过」，鼠标放上去看改了什么。 */}
+                  <td className="ev-result-cell">
+                    <span className="tag-row">
+                      <span>{runResult(item)}</span>
+                      {(() => {
+                        const changes = settingsChanges(item, runs);
+                        return (
+                          changes.length > 0 && (
+                            <Tag
+                              size="sm"
+                              tone="warning"
+                              title={`和上一次同一种评测比：\n${changes.join("\n")}`}
+                            >
+                              参数改过
+                            </Tag>
+                          )
+                        );
+                      })()}
+                      {paramsSummary(item.params).length > 0 && (
+                        <Tag
+                          size="sm"
+                          tone="info"
+                          title={`这次评测单独指定的参数：\n${paramsSummary(item.params).join("\n")}`}
+                        >
+                          自定义参数
+                        </Tag>
+                      )}
+                    </span>
+                  </td>
+                  <td className="ev-history-note-cell">
+                    <span title={item.note || ""}>{item.note || "—"}</span>
+                  </td>
+                  <td
+                    className="num ev-history-latency"
+                    title={durationTitle(
+                      item.summary?.flow_latency_avg_ms ??
+                        item.summary?.latency_avg_ms ??
+                        item.summary?.agent_latency_avg_ms,
+                    )}
+                  >
+                    {formatMs(
+                      item.summary?.flow_latency_avg_ms ??
+                        item.summary?.latency_avg_ms ??
+                        item.summary?.agent_latency_avg_ms,
+                    )}
+                  </td>
+                  <td>
+                    <span className="tag-row">
+                      <Tag dot tone={runStatus(item.status).tone}>
+                        {runStatus(item.status).label}
+                        {item.status === "running"
+                          ? ` ${progressPercent(item)}%`
+                          : ""}
+                      </Tag>
+                    </span>
+                  </td>
+                  <td>
+                    <div className="ev-history-actions">
+                      <details
+                        className="ev-note-options"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <summary className="ev-link">选项</summary>
+                        <div className="ev-note-menu">
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.currentTarget
+                                .closest("details")
+                                ?.removeAttribute("open");
+                              setNoteTarget(item);
+                              setNoteDraft(item.note || "");
+                              setNoteError("");
+                            }}
+                          >
+                            {item.note ? "编辑备注" : "添加备注"}
+                          </button>
+                          {["retrieval", "generation", "special"].includes(
+                            item.kind,
+                          ) && (
                             <button
                               type="button"
+                              disabled={running}
+                              title={
+                                running
+                                  ? "已有评测在运行，跑完再重跑"
+                                  : "按这条记录的题目、模式、语料和参数重新跑一次，生成一条新记录"
+                              }
                               onClick={(event) => {
                                 event.currentTarget
                                   .closest("details")
                                   ?.removeAttribute("open");
-                                setNoteTarget(item);
-                                setNoteDraft(item.note || "");
-                                setNoteError("");
+                                onRerun(item.id);
                               }}
                             >
-                              {item.note ? "编辑备注" : "添加备注"}
+                              重跑
                             </button>
-                            {["retrieval", "generation", "special"].includes(
-                              item.kind,
-                            ) && (
-                              <button
-                                type="button"
-                                disabled={running}
-                                title={
-                                  running
-                                    ? "已有评测在运行，跑完再重跑"
-                                    : "按这条记录的题目、模式、语料和参数重新跑一次，生成一条新记录"
-                                }
-                                onClick={(event) => {
-                                  event.currentTarget
-                                    .closest("details")
-                                    ?.removeAttribute("open");
-                                  onRerun(item.id);
-                                }}
-                              >
-                                重跑
-                              </button>
-                            )}
-                          </div>
-                        </details>
-                        <button
-                          className="ev-link ev-expand-link"
-                          aria-expanded={metricsExpanded}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            toggleMetrics(item.id);
-                          }}
-                        >
-                          {item.kind === "special" ? "各专项" : "指标"}{" "}
-                          {metricsExpanded ? "▴" : "▾"}
-                        </button>
-                        <button
-                          className="ev-link"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onOpen(item.id);
-                          }}
-                        >
-                          查看
-                        </button>
+                          )}
+                        </div>
+                      </details>
+                      <button
+                        className="ev-link ev-expand-link"
+                        aria-expanded={metricsExpanded}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleMetrics(item.id);
+                        }}
+                      >
+                        {item.kind === "special" ? "各专项" : "指标"}{" "}
+                        {metricsExpanded ? "▴" : "▾"}
+                      </button>
+                      <button
+                        className="ev-link"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpen(item.id);
+                        }}
+                      >
+                        查看
+                      </button>
+                      <ConfirmPopover
+                        danger
+                        message={`删除 ${formatTime(item.created)} 的${KIND_LABELS[item.kind]}评测记录？删除后不可恢复。`}
+                        confirmText="删除"
+                        onConfirm={() => remove(item)}
+                      >
                         <button
                           className="ev-delete-link"
                           disabled={
@@ -4538,213 +3812,203 @@ function RunHistory({
                               ? "评测运行中，不能删除"
                               : "删除这条评测记录"
                           }
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void remove(item);
-                          }}
                         >
                           {deletingId === item.id ? "删除中…" : "删除"}
                         </button>
+                      </ConfirmPopover>
+                    </div>
+                  </td>
+                </tr>
+                {metricsExpanded && item.kind === "special" && (
+                  <tr
+                    id={`history-metrics-${item.id}`}
+                    className="ev-history-metrics-row"
+                  >
+                    <td colSpan={10}>
+                      <div className="ev-history-metrics-panel">
+                        <div className="ev-history-metrics-heading">
+                          各专项结果
+                        </div>
+                        <div className="ev-history-metrics-grid">
+                          {Object.entries(
+                            (
+                              item.summary as unknown as {
+                                suites?: Record<
+                                  string,
+                                  {
+                                    name: string;
+                                    count: number;
+                                    passed: number;
+                                    modes?: EvalMode[];
+                                    agent_passed?: number | null;
+                                    fixed_score?: number | null;
+                                    agent_score?: number | null;
+                                  }
+                                >;
+                              } | null
+                            )?.suites ?? {},
+                          ).map(([key, entry]) => {
+                            const agentOnly =
+                              (entry.modes ?? []).length === 1 &&
+                              entry.modes?.[0] === "agent";
+                            const both =
+                              (entry.modes ?? []).includes("agent") &&
+                              !agentOnly;
+                            return (
+                              <HistoryMetric
+                                key={key}
+                                label={entry.name}
+                                value={
+                                  both ? (
+                                    <span className="ev-metric-pair">
+                                      <span>
+                                        <small>固定流程</small>
+                                        {entry.passed} / {entry.count}
+                                        {entry.fixed_score !== undefined &&
+                                        entry.fixed_score !== null
+                                          ? ` · ${formatPoints(entry.fixed_score)}`
+                                          : ""}
+                                      </span>
+                                      <span>
+                                        <small>Agent</small>
+                                        {entry.agent_passed ?? 0} /{" "}
+                                        {entry.count}
+                                        {entry.agent_score !== undefined &&
+                                        entry.agent_score !== null
+                                          ? ` · ${formatPoints(entry.agent_score)}`
+                                          : ""}
+                                      </span>
+                                    </span>
+                                  ) : (
+                                    `${entry.passed} / ${entry.count}${(agentOnly ? entry.agent_score : entry.fixed_score) !== undefined && (agentOnly ? entry.agent_score : entry.fixed_score) !== null ? ` · ${formatPoints(agentOnly ? entry.agent_score : entry.fixed_score)}` : ""}`
+                                  )
+                                }
+                                hint={`${entry.count} 道题里，通过的题数（计分项全拿到算通过）和得分${agentOnly ? "，只跑了 Agent" : ""}`}
+                              />
+                            );
+                          })}
+                          {item.status !== "completed" && (
+                            <span className="ev-muted-note">
+                              {runStatus(item.status).label}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </td>
                   </tr>
-                  {metricsExpanded && item.kind === "special" && (
-                    <tr
-                      id={`history-metrics-${item.id}`}
-                      className="ev-history-metrics-row"
-                    >
-                      <td colSpan={10}>
-                        <div className="ev-history-metrics-panel">
-                          <div className="ev-history-metrics-heading">
-                            各专项结果
-                          </div>
-                          <div className="ev-history-metrics-grid">
-                            {Object.entries(
-                              (
-                                item.summary as unknown as {
-                                  suites?: Record<
-                                    string,
-                                    {
-                                      name: string;
-                                      count: number;
-                                      passed: number;
-                                      modes?: EvalMode[];
-                                      agent_passed?: number | null;
-                                      fixed_score?: number | null;
-                                      agent_score?: number | null;
-                                    }
-                                  >;
-                                } | null
-                              )?.suites ?? {},
-                            ).map(([key, entry]) => {
-                              const agentOnly =
-                                (entry.modes ?? []).length === 1 &&
-                                entry.modes?.[0] === "agent";
-                              const both =
-                                (entry.modes ?? []).includes("agent") &&
-                                !agentOnly;
-                              return (
-                                <HistoryMetric
-                                  key={key}
-                                  label={entry.name}
-                                  value={
-                                    both ? (
-                                      <span className="ev-metric-pair">
-                                        <span>
-                                          <small>固定流程</small>
-                                          {entry.passed} / {entry.count}
-                                          {entry.fixed_score !== undefined &&
-                                          entry.fixed_score !== null
-                                            ? ` · ${formatPoints(entry.fixed_score)}`
-                                            : ""}
-                                        </span>
-                                        <span>
-                                          <small>Agent</small>
-                                          {entry.agent_passed ?? 0} /{" "}
-                                          {entry.count}
-                                          {entry.agent_score !== undefined &&
-                                          entry.agent_score !== null
-                                            ? ` · ${formatPoints(entry.agent_score)}`
-                                            : ""}
-                                        </span>
-                                      </span>
-                                    ) : (
-                                      `${entry.passed} / ${entry.count}${(agentOnly ? entry.agent_score : entry.fixed_score) !== undefined && (agentOnly ? entry.agent_score : entry.fixed_score) !== null ? ` · ${formatPoints(agentOnly ? entry.agent_score : entry.fixed_score)}` : ""}`
-                                    )
-                                  }
-                                  hint={`${entry.count} 道题里，通过的题数（计分项全拿到算通过）和得分${agentOnly ? "，只跑了 Agent" : ""}`}
-                                />
-                              );
-                            })}
-                            {item.status !== "completed" && (
-                              <span className="ev-muted-note">
-                                {runStatus(item.status).label}
-                              </span>
-                            )}
-                          </div>
+                )}
+                {metricsExpanded && item.kind !== "special" && (
+                  <tr
+                    id={`history-metrics-${item.id}`}
+                    className="ev-history-metrics-row"
+                  >
+                    <td colSpan={10}>
+                      <div className="ev-history-metrics-panel">
+                        <div className="ev-history-metrics-heading">
+                          本条记录指标
                         </div>
-                      </td>
-                    </tr>
-                  )}
-                  {metricsExpanded && item.kind !== "special" && (
-                    <tr
-                      id={`history-metrics-${item.id}`}
-                      className="ev-history-metrics-row"
-                    >
-                      <td colSpan={10}>
-                        <div className="ev-history-metrics-panel">
-                          <div className="ev-history-metrics-heading">
-                            本条记录指标
-                          </div>
-                          <div className="ev-history-metrics-grid">
-                            {runModes(item).includes("agent") && (
+                        <div className="ev-history-metrics-grid">
+                          {runModes(item).includes("agent") && (
+                            <HistoryMetric
+                              label="Agent 得分"
+                              value={formatPoints(item.summary?.agent_score)}
+                              hint={SCORE_RULE}
+                            />
+                          )}
+                          {runModes(item).includes("fixed") &&
+                            item.config.flow?.name === "full" && (
                               <HistoryMetric
-                                label="Agent 得分"
-                                value={formatPoints(item.summary?.agent_score)}
+                                label="固定流程得分"
+                                value={formatPoints(item.summary?.score)}
                                 hint={SCORE_RULE}
                               />
                             )}
-                            {runModes(item).includes("fixed") &&
-                              item.config.flow?.name === "full" && (
+                          {runModes(item).includes("agent") && (
+                            <HistoryMetric
+                              label="Agent 资料命中率"
+                              value={formatPercent(item.summary?.agent_recall)}
+                              hint={
+                                metricSentence(
+                                  "agent_recall",
+                                  stats,
+                                  item.config,
+                                ) ?? "Agent 找到资料，包含题目的计分项的比例"
+                              }
+                            />
+                          )}
+                          {runModes(item).includes("fixed") && (
+                            <>
+                              {/* 完整检索流程的新记录：最终交给模型的命中率（结果列显示的就是它）和误清空率。 */}
+                              {item.config.flow?.name === "full" && (
                                 <HistoryMetric
-                                  label="固定流程得分"
-                                  value={formatPoints(item.summary?.score)}
-                                  hint={SCORE_RULE}
+                                  label="固定流程资料命中率"
+                                  value={formatPercent(
+                                    item.summary?.recall_given,
+                                  )}
+                                  hint={sentence("recall_given")}
                                 />
                               )}
-                            {runModes(item).includes("agent") && (
+                              {item.config.flow?.name === "full" && (
+                                <HistoryMetric
+                                  label="误清空率"
+                                  value={formatPercent(
+                                    item.summary?.wrong_clear_rate,
+                                  )}
+                                  hint={sentence("wrong_clear_rate")}
+                                />
+                              )}
                               <HistoryMetric
-                                label="Agent 资料命中率"
-                                value={formatPercent(
-                                  item.summary?.agent_recall,
-                                )}
-                                hint={
-                                  metricSentence(
-                                    "agent_recall",
-                                    stats,
-                                    item.config,
-                                  ) ?? "Agent 找到资料，包含题目的计分项的比例"
-                                }
+                                label="候选池 Recall"
+                                value={formatPercent(item.summary?.recall_pool)}
+                                hint={sentence("recall_pool")}
                               />
-                            )}
-                            {runModes(item).includes("fixed") && (
-                              <>
-                                {/* 完整检索流程的新记录：最终交给模型的命中率（结果列显示的就是它）和误清空率。 */}
-                                {item.config.flow?.name === "full" && (
-                                  <HistoryMetric
-                                    label="固定流程资料命中率"
-                                    value={formatPercent(
-                                      item.summary?.recall_given,
-                                    )}
-                                    hint={sentence("recall_given")}
-                                  />
+                              {/* 补齐召回、重排、阈值过滤三个阶段，避免只看首尾指标而定位不到重排损失。 */}
+                              <HistoryMetric
+                                label="重排 Recall"
+                                value={formatPercent(item.summary?.recall_top)}
+                                hint={sentence("recall_top")}
+                              />
+                              <HistoryMetric
+                                label="最终 Recall"
+                                value={formatPercent(
+                                  item.summary?.recall_final,
                                 )}
-                                {item.config.flow?.name === "full" && (
-                                  <HistoryMetric
-                                    label="误清空率"
-                                    value={formatPercent(
-                                      item.summary?.wrong_clear_rate,
-                                    )}
-                                    hint={sentence("wrong_clear_rate")}
-                                  />
+                                hint={sentence("recall_final")}
+                              />
+                              <HistoryMetric
+                                label="候选池 MRR"
+                                value={formatMetric(
+                                  "mrr_pool",
+                                  item.summary?.mrr_pool,
                                 )}
-                                <HistoryMetric
-                                  label="候选池 Recall"
-                                  value={formatPercent(
-                                    item.summary?.recall_pool,
-                                  )}
-                                  hint={sentence("recall_pool")}
-                                />
-                                {/* 补齐召回、重排、阈值过滤三个阶段，避免只看首尾指标而定位不到重排损失。 */}
-                                <HistoryMetric
-                                  label="重排 Recall"
-                                  value={formatPercent(
-                                    item.summary?.recall_top,
-                                  )}
-                                  hint={sentence("recall_top")}
-                                />
-                                <HistoryMetric
-                                  label="最终 Recall"
-                                  value={formatPercent(
-                                    item.summary?.recall_final,
-                                  )}
-                                  hint={sentence("recall_final")}
-                                />
-                                <HistoryMetric
-                                  label="候选池 MRR"
-                                  value={formatMetric(
-                                    "mrr_pool",
-                                    item.summary?.mrr_pool,
-                                  )}
-                                  hint={sentence("mrr_pool")}
-                                />
-                                <HistoryMetric
-                                  label="误杀率"
-                                  value={formatPercent(
-                                    item.summary?.false_reject_rate,
-                                  )}
-                                  hint={sentence("false_reject_rate")}
-                                />
-                                <HistoryMetric
-                                  label="漏放率"
-                                  value={formatPercent(
-                                    item.summary?.false_accept_rate,
-                                  )}
-                                  hint={sentence("false_accept_rate")}
-                                />
-                              </>
-                            )}
-                          </div>
+                                hint={sentence("mrr_pool")}
+                              />
+                              <HistoryMetric
+                                label="误杀率"
+                                value={formatPercent(
+                                  item.summary?.false_reject_rate,
+                                )}
+                                hint={sentence("false_reject_rate")}
+                              />
+                              <HistoryMetric
+                                label="漏放率"
+                                value={formatPercent(
+                                  item.summary?.false_accept_rate,
+                                )}
+                                hint={sentence("false_accept_rate")}
+                              />
+                            </>
+                          )}
                         </div>
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </Table>
       <DetailDialog
         open={noteTarget !== null}
         title={noteTarget?.note ? "编辑评测备注" : "添加评测备注"}
@@ -4834,10 +4098,7 @@ function RunHistory({
                   {comparison.base.kind === "retrieval"
                     ? ` · ${modesLabel(comparison.base)}`
                     : ""}{" "}
-                  ·{" "}
-                  {SPLIT_LABELS[comparison.base.config.split ?? ""] ??
-                    comparison.base.config.split ??
-                    "—"}
+                  · {scopeLabel(comparison.base.config)}
                 </small>
               </div>
               <span className="ev-compare-arrow" aria-hidden="true">
@@ -4851,10 +4112,7 @@ function RunHistory({
                   {comparison.target.kind === "retrieval"
                     ? ` · ${modesLabel(comparison.target)}`
                     : ""}{" "}
-                  ·{" "}
-                  {SPLIT_LABELS[comparison.target.config.split ?? ""] ??
-                    comparison.target.config.split ??
-                    "—"}
+                  · {scopeLabel(comparison.target.config)}
                 </small>
               </div>
             </div>
@@ -4871,47 +4129,46 @@ function RunHistory({
                   。分数变化可能来自这些改动。
                 </div>
               )}
-            <div className="diag-table-wrap">
-              <table className="diag-table ev-table">
-                <thead>
-                  <tr>
-                    <th>指标</th>
-                    <th className="num">基准</th>
-                    <th className="num">对比</th>
-                    <th className="num">变化</th>
-                    <th>结论</th>
+            <Table
+              containerProps={{ className: "diag-table-wrap" }}
+              className="diag-table ev-table"
+            >
+              <thead>
+                <tr>
+                  <th>指标</th>
+                  <th className="num">基准</th>
+                  <th className="num">对比</th>
+                  <th className="num">变化</th>
+                  <th>结论</th>
+                </tr>
+              </thead>
+              <tbody>
+                {comparison.metrics.map((row) => (
+                  <tr key={row.key}>
+                    <td title={METRIC_HINTS[row.key]}>
+                      {row.label}
+                      <small className="diag-sub">
+                        {row.direction === "higher" ? "越高越好" : "越低越好"}
+                      </small>
+                    </td>
+                    <td className="num">{formatMetric(row.key, row.base)}</td>
+                    <td className="num">{formatMetric(row.key, row.target)}</td>
+                    <td className="num">
+                      {row.delta === null
+                        ? "—"
+                        : row.key.includes("_ms")
+                          ? formatDurationDelta(row.delta)
+                          : row.key.startsWith("mrr")
+                            ? `${row.delta > 0 ? "+" : ""}${row.delta.toFixed(3)}`
+                            : `${row.delta > 0 ? "+" : ""}${(row.delta * 100).toFixed(1)} 个百分点`}
+                    </td>
+                    <td>
+                      <ChangeTag row={row} metricKey={row.key} />
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {comparison.metrics.map((row) => (
-                    <tr key={row.key}>
-                      <td title={METRIC_HINTS[row.key]}>
-                        {row.label}
-                        <small className="diag-sub">
-                          {row.direction === "higher" ? "越高越好" : "越低越好"}
-                        </small>
-                      </td>
-                      <td className="num">{formatMetric(row.key, row.base)}</td>
-                      <td className="num">
-                        {formatMetric(row.key, row.target)}
-                      </td>
-                      <td className="num">
-                        {row.delta === null
-                          ? "—"
-                          : row.key.includes("_ms")
-                            ? formatDurationDelta(row.delta)
-                            : row.key.startsWith("mrr")
-                              ? `${row.delta > 0 ? "+" : ""}${row.delta.toFixed(3)}`
-                              : `${row.delta > 0 ? "+" : ""}${(row.delta * 100).toFixed(1)} 个百分点`}
-                      </td>
-                      <td>
-                        <ChangeTag row={row} metricKey={row.key} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                ))}
+              </tbody>
+            </Table>
           </div>
         </div>
       )}
@@ -4942,6 +4199,11 @@ function DatasetBrowser({
   const [referenceAnswer, setReferenceAnswer] = useState("");
   const [questionSplit, setQuestionSplit] = useState("dev");
   const [history, setHistory] = useState("");
+  const [prelude, setPrelude] = useState<EvalPreludeTurn[]>([]);
+  const [contextTarget, setContextTarget] = useState<EvalItem | null>(null);
+  const [contextDraft, setContextDraft] = useState<EvalPreludeTurn[]>([]);
+  const [contextSaving, setContextSaving] = useState(false);
+
   const [aiCount, setAiCount] = useState(1);
   const [aiType, setAiType] = useState("");
   const [aiSplit, setAiSplit] = useState("dev");
@@ -5068,7 +4330,8 @@ function DatasetBrowser({
           ...(answerable ? { evidence_groups: groups } : {}),
           reference_answer: referenceAnswer,
           split: questionSplit,
-          history: readLines(history),
+          history: [],
+          prelude,
         });
       }
       await onSaved();
@@ -5077,6 +4340,7 @@ function DatasetBrowser({
       setGroups([{ label: "", targets: [] }]);
       setReferenceAnswer("");
       setHistory("");
+      setPrelude([]);
       closeAddDialog();
       onToast(
         "success",
@@ -5310,20 +4574,13 @@ function DatasetBrowser({
                         required
                       />
                     </label>
-                    <label className="ev-form-field ev-form-wide">
-                      多轮追问历史 <small>可选，每行一条</small>
-                      <textarea
-                        value={history}
-                        onChange={(event) => setHistory(event.target.value)}
-                        disabled={questionType !== "多轮追问"}
-                        rows={2}
-                      />
-                    </label>
+                    <EvalPreludeEditor value={prelude} onChange={setPrelude} />
                     <button
                       className="primary-button ev-form-submit"
                       type="submit"
                       disabled={
                         saving ||
+                        prelude.some((turn) => !turn.confirmed) ||
                         (answerable &&
                           (!groups.length ||
                             groups.some(
@@ -5479,6 +4736,36 @@ function DatasetBrowser({
                 <p>{item.history.join(" → ")}</p>
               </div>
             )}
+            {item.prelude?.length ? (
+              <details>
+                <summary>已确认前置对话（{item.prelude.length} 轮）</summary>
+                {item.prelude.map((turn, index) => (
+                  <div key={index}>
+                    <p>问：{turn.question}</p>
+                    <p>答：{turn.answer}</p>
+                  </div>
+                ))}
+              </details>
+            ) : null}
+            <button
+              type="button"
+              className="secondary-button button-sm"
+              onClick={() => {
+                setContextTarget(item);
+                setContextDraft(
+                  structuredClone(
+                    item.prelude ??
+                      (item.history ?? []).map((question) => ({
+                        question,
+                        answer: "",
+                        confirmed: false,
+                      })),
+                  ),
+                );
+              }}
+            >
+              编辑前置对话
+            </button>
             <h4>问题：{item.question}</h4>
             {item.answerable ? (
               <ScoringItems items={item.evidence_groups ?? []} />
@@ -5506,6 +4793,69 @@ function DatasetBrowser({
           </article>
         ))}
       </div>
+      {contextTarget && (
+        <DetailDialog
+          open
+          title={`前置对话 · ${contextTarget.id}`}
+          onClose={() => {
+            if (contextSaving) return;
+            if (
+              JSON.stringify(contextDraft) !==
+              JSON.stringify(contextTarget.prelude ?? [])
+            ) {
+              onToast("error", "前置对话尚未保存，请保存或点击取消放弃修改。");
+              return;
+            }
+            setContextTarget(null);
+          }}
+        >
+          <p>{contextTarget.question}</p>
+          <EvalPreludeEditor value={contextDraft} onChange={setContextDraft} />
+          <div className="rg-buttons">
+            <ConfirmPopover
+              when={
+                JSON.stringify(contextDraft) !==
+                JSON.stringify(contextTarget.prelude ?? [])
+              }
+              message="当前前置问答的未保存修改将丢失。"
+              confirmText="放弃修改"
+              onConfirm={() => setContextTarget(null)}
+            >
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={contextSaving}
+              >
+                取消
+              </button>
+            </ConfirmPopover>
+            <button
+              type="button"
+              className={`primary-button${contextSaving ? " is-loading" : ""}`}
+              disabled={
+                contextSaving ||
+                contextDraft.some((turn) => !turn.confirmed) ||
+                (contextTarget.type === "多轮追问" && !contextDraft.length)
+              }
+              onClick={async () => {
+                setContextSaving(true);
+                try {
+                  await saveEvalDatasetPrelude(contextTarget.id, contextDraft);
+                  await onSaved();
+                  setContextTarget(null);
+                  onToast("success", "前置对话已保存");
+                } catch (reason) {
+                  onToast("error", errorText(reason));
+                } finally {
+                  setContextSaving(false);
+                }
+              }}
+            >
+              保存
+            </button>
+          </div>
+        </DetailDialog>
+      )}
     </div>
   );
 }

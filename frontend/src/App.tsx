@@ -1,8 +1,27 @@
+import Table from "./Table";
+import { DetailDialog } from "./DetailDialog";
+import { ChunkOriginalPanel } from "./ChunkOriginalPanel";
+import { ChunkOriginalText } from "./ChunkOriginalText";
+import { ContextRelationList, ContextRelationTable } from "./ContextRelations";
+import { ConfirmPopover } from "./ConfirmPopover";
+import { InfoPopover } from "./Popover";
+import {
+  checkOverview,
+  GraphCheckDialogBody,
+  GraphReviewBody,
+  pendingCount,
+  summarizeCheck,
+} from "./GraphReviewPanel";
+import { errorText, useToast, type ShowToast, type ToastKind } from "./Toast";
+import type { CheckReport, CheckStepName, GraphReviewReport } from "./api";
 import DataManagement from "./DataManagement";
 import Evaluation, { type EvaluationSection } from "./Evaluation";
 import { DocumentChunkCard } from "./DocumentChunkCard";
 import AnswerFeedback from "./Feedback";
 import Inspection from "./Inspection";
+import KnowledgeGraph, { type KnowledgeGraphTab } from "./KnowledgeGraph";
+import { DocumentGraph } from "./DocumentGraph";
+import { GraphOptions, type GraphChoice } from "./GraphBuildDialog";
 import Overview from "./Overview";
 import Maintenance, {
   MAINTENANCE_TABS,
@@ -25,6 +44,7 @@ import { documentStatusTone, VISIBILITY_TONES, type Tone } from "./tags";
 import Settings from "./Settings";
 import { LoadingSkeleton, SkeletonBlock } from "./LoadingSkeleton";
 import { AgentLiveRounds, AgentStepView } from "./AgentTrace";
+import { GraphRetrievalTrace } from "./GraphRetrievalTrace";
 import {
   durationTitle,
   formatDuration,
@@ -33,7 +53,10 @@ import {
 } from "./format";
 import {
   Fragment,
+  createContext,
+  useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
@@ -56,6 +79,10 @@ import {
   deleteDocument,
   retryDocument,
   retryDocumentContexts,
+  retryDocumentGraph,
+  retryGraphReview,
+  type ChunkGraphStatus,
+  type UploadGraphOption,
   listGroups,
   login,
   logout,
@@ -66,13 +93,17 @@ import {
   type DocumentVisibility,
   type Group,
   getDocument,
+  getChunkOriginals,
   getSessionHistory,
+  listChatSessions,
+  type ChatSessionSummary,
   listDocumentChunks,
   listDocuments,
-  listHistory,
   sendChatStream,
   uploadDocument,
   type ChatResult,
+  type ContextRelation,
+  type ChunkOriginal,
   type DocumentChunk,
   type ChunkSource,
   type DocumentChunkPage,
@@ -81,7 +112,9 @@ import {
   type FeedbackRecord,
   type HistoryRun,
   type RetrievalCandidate,
+  type RetrievalContribution,
   type RetrievalDiagnosticsData,
+  type RetrievalList,
   type Source,
   type TraceStep,
 } from "./api";
@@ -102,6 +135,7 @@ type Route =
       suiteId?: string;
     }
   | { page: "inspection" }
+  | { page: "graph"; tab: KnowledgeGraphTab }
   | { page: "overview" }
   | { page: "memory"; sessionId?: string; tab?: "long" }
   | {
@@ -111,15 +145,13 @@ type Route =
       reviewId?: string;
     }
   | { page: "settings" };
-type ToastKind = "success" | "error";
-type ToastMessage = { id: number; kind: ToastKind; message: string };
-type ShowToast = (kind: ToastKind, message: string) => void;
 type NavIconName =
   | "spark"
   | "library"
   | "table"
   | "target"
   | "pulse"
+  | "graph"
   | "chart"
   | "memory"
   | "prompt"
@@ -154,6 +186,14 @@ function NavIcon({ name }: { name: NavIconName }) {
     pulse: (
       <>
         <path d="M2 10h3.5l2-5 3 10 2-6 1.5 1H18" />
+      </>
+    ),
+    graph: (
+      <>
+        <circle cx="5" cy="5" r="2.2" />
+        <circle cx="15" cy="6" r="2.2" />
+        <circle cx="9" cy="15" r="2.2" />
+        <path d="M7.1 5.3 12.8 5.8M6 6.9l2.1 6.1M13.9 8l-3.6 5.3" />
       </>
     ),
     chart: (
@@ -231,6 +271,7 @@ function readRoute(pathname = window.location.pathname): Route {
       runId: decodeURIComponent(evalRun[1]),
     };
   if (path === "/eval/dataset") return { page: "eval", section: "dataset" };
+  if (path === "/eval/templates") return { page: "eval", section: "templates" };
   if (path === "/eval/corpus") return { page: "eval", section: "corpus" };
   if (path === "/eval/special") return { page: "eval", section: "special" };
   if (path.startsWith("/eval/special/"))
@@ -248,6 +289,11 @@ function readRoute(pathname = window.location.pathname): Route {
       setId: decodeURIComponent(path.slice("/eval/regression/".length)),
     };
   if (path === "/inspection") return { page: "inspection" };
+  // 知识图谱（只对管理员显示）：/graph 总图，/graph/tasks 建图任务。
+  if (path === "/graph") return { page: "graph", tab: "overview" };
+  if (path === "/graph/experiments")
+    return { page: "graph", tab: "experiments" };
+  if (path === "/graph/tasks") return { page: "graph", tab: "tasks" };
   if (path === "/overview") return { page: "overview" };
   if (path === "/memory") return { page: "memory" };
   if (path === "/memory/long") return { page: "memory", tab: "long" };
@@ -297,7 +343,15 @@ function App() {
   const [user, setUser] = useState<AuthUser | null>(() => storedUser());
   const [sessionId, setSessionId] = useState("");
   const [savedMessages, setSavedMessages] = useState<ChatResult[]>([]);
-  const [historyRuns, setHistoryRuns] = useState<HistoryRun[]>([]);
+  // 当前会话里还没读到的更早消息条数：一次只读最近 10 条，往上翻再分页取。
+  const [hiddenCount, setHiddenCount] = useState(0);
+  // 左侧历史对话列表，每个会话一行（GET /sessions）。
+  const [chatSessions, setChatSessions] = useState<ChatSessionSummary[]>([]);
+  // 点了历史对话、新会话的第一页还没回来：消息区显示骨架。openToken 防止连点两个会话时旧的结果覆盖新的。
+  const [conversationLoading, setConversationLoading] = useState(false);
+  const openToken = useRef(0);
+  // 已经计入列表条数的问答：同一个结果可能从原连接和续看两处到达，只算一次。
+  const recordedRuns = useRef(new Set<string>());
   const [route, setRoute] = useState<Route>(() => readRoute());
   const [sessionLoading, setSessionLoading] = useState(true);
   const [error, setError] = useState("");
@@ -305,8 +359,8 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem(sidebarStorage) === "true",
   );
-  // 原先操作结果分散在页面正文和弹窗里；根层统一托管 Toast，保证评测和知识库使用同一套提示体验。
-  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  // 操作结果统一用 Toast（Toast.tsx 的 ToastProvider 托管）；子页面通过 onToast 属性或 useToast 拿到的是同一个函数。
+  const showToast = useToast();
   // 业务数据入口：只有对至少一类业务数据有查看权限时才显示；null 表示还在查询。
   // 评测入口只对管理员显示（后端评测接口也只允许管理员调用）。
   const [dataAllowed, setDataAllowed] = useState<boolean | null>(null);
@@ -339,7 +393,6 @@ function App() {
     )
       navigate("/chat");
   }, [route.page, user, dataAllowed]);
-  const toastIdRef = useRef(0);
 
   useEffect(() => {
     if (window.location.pathname === "/")
@@ -367,9 +420,10 @@ function App() {
     let cancelled = false;
     async function connect() {
       let currentSession = localStorage.getItem(sessionStorage) ?? "";
+      let page: Awaited<ReturnType<typeof getSessionHistory>> | null = null;
       if (currentSession) {
         try {
-          await getSessionHistory(currentSession);
+          page = await getSessionHistory(currentSession);
         } catch {
           currentSession = "";
         }
@@ -379,19 +433,13 @@ function App() {
         currentSession = created.session_id;
         localStorage.setItem(sessionStorage, currentSession);
       }
-      const history = await listHistory();
+      const listed = await listChatSessions();
       if (cancelled) return;
+      recordedRuns.current = new Set();
       setSessionId(currentSession);
-      setHistoryRuns(history.messages);
-      setSavedMessages(
-        history.messages
-          .filter((item) => item.session_id === currentSession)
-          .map((item) => ({
-            ...item.response,
-            request_id: item.response.request_id || item.id,
-            feedback: item.feedback,
-          })),
-      );
+      setChatSessions(listed.sessions);
+      setSavedMessages(page ? page.messages.map(historyMessage) : []);
+      setHiddenCount(page ? page.total - page.messages.length : 0);
     }
     connect()
       .catch((reason: Error) => {
@@ -418,7 +466,8 @@ function App() {
     localStorage.removeItem(sessionStorage);
     setSessionId("");
     setSavedMessages([]);
-    setHistoryRuns([]);
+    setHiddenCount(0);
+    setChatSessions([]);
     setUser(null);
   }
 
@@ -435,9 +484,12 @@ function App() {
     setError("");
     try {
       const created = await createSession();
+      openToken.current += 1;
+      setConversationLoading(false);
       localStorage.setItem(sessionStorage, created.session_id);
       setSessionId(created.session_id);
       setSavedMessages([]);
+      setHiddenCount(0);
     } catch (reason) {
       setError((reason as Error).message);
     } finally {
@@ -445,22 +497,38 @@ function App() {
     }
   }
 
-  function openHistory(session: string) {
-    const sessionMessages = historyRuns
-      .filter((item) => item.session_id === session)
-      .map((item) => ({
-        ...item.response,
-        request_id: item.response.request_id || item.id,
-        feedback: item.feedback,
-      }));
-    localStorage.setItem(sessionStorage, session);
-    setSessionId(session);
-    setSavedMessages(sessionMessages);
+  // 点历史对话：向后端读这个会话最近 10 条，更早的在消息区往上翻时再分页取。
+  async function openHistory(session: string) {
+    if (session === sessionId && !conversationLoading) return;
+    const token = ++openToken.current;
+    setConversationLoading(true);
+    try {
+      const page = await getSessionHistory(session);
+      if (token !== openToken.current) return;
+      localStorage.setItem(sessionStorage, session);
+      setSessionId(session);
+      setSavedMessages(page.messages.map(historyMessage));
+      setHiddenCount(page.total - page.messages.length);
+    } catch (reason) {
+      if (token === openToken.current) showToast("error", errorText(reason));
+    } finally {
+      if (token === openToken.current) setConversationLoading(false);
+    }
+  }
+
+  // 消息区往上翻读到的更早消息：放回上层，切到别的页面再回来时不用重新读。
+  function recordOlder(session: string, older: ChatResult[], hidden: number) {
+    if (session !== sessionId) return;
+    setSavedMessages((items) => {
+      const known = new Set(items.map((item) => item.request_id));
+      return [...older.filter((item) => !known.has(item.request_id)), ...items];
+    });
+    setHiddenCount(hidden);
   }
 
   // 会话删除后从历史列表里去掉；删的是当前会话时换成一个新会话，不再停留在已经不存在的会话上。
   function removeHistory(session: string) {
-    setHistoryRuns((items) =>
+    setChatSessions((items) =>
       items.filter((item) => item.session_id !== session),
     );
     if (session === sessionId) void startNewChat();
@@ -476,7 +544,25 @@ function App() {
   // 问答完成后同步到上层：历史记录，以及当前会话的消息。知识问答页切走时会卸载，切回来按 savedMessages 重新显示；
   // 以前只更新了历史记录，切到别的页面再回来就看不到刚问的问题（要刷新页面重新加载才有）。
   function recordHistory(run: HistoryRun) {
-    setHistoryRuns((items) => [...items, run]);
+    if (!recordedRuns.current.has(run.id)) {
+      recordedRuns.current.add(run.id);
+      setChatSessions((items) => {
+        const existing = items.find(
+          (item) => item.session_id === run.session_id,
+        );
+        const updated: ChatSessionSummary = {
+          session_id: run.session_id,
+          title: existing?.title || run.question,
+          count: (existing?.count ?? 0) + 1,
+          updated: run.created,
+          route: run.response.route,
+        };
+        return [
+          updated,
+          ...items.filter((item) => item.session_id !== run.session_id),
+        ];
+      });
+    }
     if (run.session_id === sessionId) {
       setSavedMessages((items) =>
         items.some((item) => item.request_id === run.id)
@@ -495,11 +581,6 @@ function App() {
 
   // 反馈保存后同步到历史记录和当前会话的消息，切换会话或页面再切回来时仍显示已提交的反馈。
   function recordFeedback(value: FeedbackRecord) {
-    setHistoryRuns((items) =>
-      items.map((item) =>
-        item.id === value.request_id ? { ...item, feedback: value } : item,
-      ),
-    );
     setSavedMessages((items) =>
       items.map((item) =>
         item.request_id === value.request_id
@@ -509,30 +590,12 @@ function App() {
     );
   }
 
-  // 成功提示短暂展示，失败提示多停留一会儿，避免用户来不及读完错误原因。
-  function showToast(kind: ToastKind, message: string) {
-    const id = toastIdRef.current + 1;
-    toastIdRef.current = id;
-    setToasts((items) => [...items.slice(-2), { id, kind, message }]);
-    window.setTimeout(
-      () => {
-        setToasts((items) => items.filter((item) => item.id !== id));
-      },
-      kind === "success" ? 3200 : 5200,
-    );
-  }
-
-  function dismissToast(id: number) {
-    setToasts((items) => items.filter((item) => item.id !== id));
-  }
-
   if (!user) {
     return <Login onLogin={handleLogin} />;
   }
 
   return (
     <>
-      <ToastHost messages={toasts} onDismiss={dismissToast} />
       <div className={`shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
         <aside className="sidebar">
           <div className="sidebar-heading">
@@ -631,6 +694,20 @@ function App() {
           {user.is_admin && (
             <button
               className={
+                route.page === "graph" ? "nav-item active" : "nav-item"
+              }
+              onClick={() => navigate("/graph")}
+              title="知识图谱：所有文档的实体和关系、建图任务"
+            >
+              <span className="nav-icon">
+                <NavIcon name="graph" />
+              </span>
+              <span className="nav-label">知识图谱</span>
+            </button>
+          )}
+          {user.is_admin && (
+            <button
+              className={
                 route.page === "overview" ? "nav-item active" : "nav-item"
               }
               onClick={() => navigate("/overview")}
@@ -704,6 +781,12 @@ function App() {
             />
           ) : route.page === "inspection" && user.is_admin ? (
             <Inspection onToast={showToast} />
+          ) : route.page === "graph" && user.is_admin ? (
+            <KnowledgeGraph
+              tab={route.tab}
+              onNavigate={navigate}
+              onToast={showToast}
+            />
           ) : route.page === "overview" && user.is_admin ? (
             <Overview />
           ) : route.page === "maintenance" && user.is_admin ? (
@@ -727,9 +810,12 @@ function App() {
               <Chat
                 sessionId={sessionId}
                 initialMessages={savedMessages}
-                historyRuns={historyRuns}
+                hiddenCount={hiddenCount}
+                loading={conversationLoading}
+                sessions={chatSessions}
                 onNewChat={() => void startNewChat()}
-                onOpenHistory={openHistory}
+                onOpenHistory={(session) => void openHistory(session)}
+                onOlderLoaded={recordOlder}
                 onSessionDeleted={removeHistory}
                 onMessageSaved={recordHistory}
                 onFeedbackSaved={recordFeedback}
@@ -754,40 +840,6 @@ function App() {
         </main>
       </div>
     </>
-  );
-}
-
-// 统一承载用户主动操作的结果，避免成功或失败信息占用页面内容区。
-function ToastHost({
-  messages,
-  onDismiss,
-}: {
-  messages: ToastMessage[];
-  onDismiss: (id: number) => void;
-}) {
-  return (
-    <div className="app-toast-host" aria-live="polite" aria-atomic="false">
-      {messages.map((toast) => (
-        <div
-          className={`app-toast is-${toast.kind}`}
-          role={toast.kind === "error" ? "alert" : "status"}
-          key={toast.id}
-        >
-          <span className="app-toast-icon" aria-hidden="true">
-            {toast.kind === "success" ? "✓" : "!"}
-          </span>
-          <span className="app-toast-message">{toast.message}</span>
-          <button
-            className="app-toast-close"
-            type="button"
-            aria-label="关闭提示"
-            onClick={() => onDismiss(toast.id)}
-          >
-            ×
-          </button>
-        </div>
-      ))}
-    </div>
   );
 }
 
@@ -862,6 +914,32 @@ function Login({ onLogin }: { onLogin: (user: AuthUser) => void }) {
   );
 }
 
+// 历史问答记录转成消息区用的格式。
+function historyMessage(item: HistoryRun): ChatResult {
+  return {
+    ...item.response,
+    request_id: item.response.request_id || item.id,
+    feedback: item.feedback,
+  };
+}
+
+function ChatMessageSkeletonCards() {
+  return (
+    <>
+      <div className="chat-loading-card">
+        <SkeletonBlock className="skeleton-line-short" />
+        <SkeletonBlock className="skeleton-line-long" />
+        <SkeletonBlock className="skeleton-line" />
+      </div>
+      <div className="chat-loading-card is-right">
+        <SkeletonBlock className="skeleton-line" />
+        <SkeletonBlock className="skeleton-line-long" />
+        <SkeletonBlock className="skeleton-line-short" />
+      </div>
+    </>
+  );
+}
+
 // 会话和历史记录并行恢复时先展示聊天结构；原来会误显示空对话，加载完成后又突然替换成历史内容。
 function ChatLoading() {
   return (
@@ -880,16 +958,7 @@ function ChatLoading() {
       </aside>
       <div className="chat-column">
         <div className="messages chat-loading-messages">
-          <div className="chat-loading-card">
-            <SkeletonBlock className="skeleton-line-short" />
-            <SkeletonBlock className="skeleton-line-long" />
-            <SkeletonBlock className="skeleton-line" />
-          </div>
-          <div className="chat-loading-card is-right">
-            <SkeletonBlock className="skeleton-line" />
-            <SkeletonBlock className="skeleton-line-long" />
-            <SkeletonBlock className="skeleton-line-short" />
-          </div>
+          <ChatMessageSkeletonCards />
         </div>
         <div className="composer chat-loading-composer">
           <SkeletonBlock className="skeleton-line-long" />
@@ -903,25 +972,35 @@ function ChatLoading() {
 function Chat({
   sessionId,
   initialMessages,
-  historyRuns,
+  hiddenCount,
+  loading,
+  sessions,
   onNewChat,
   onOpenHistory,
+  onOlderLoaded,
   onSessionDeleted,
   onMessageSaved,
   onFeedbackSaved,
 }: {
   sessionId: string;
   initialMessages: ChatResult[];
-  historyRuns: HistoryRun[];
+  hiddenCount: number;
+  loading: boolean;
+  sessions: ChatSessionSummary[];
   onNewChat: () => void;
   onOpenHistory: (sessionId: string) => void;
+  onOlderLoaded: (
+    sessionId: string,
+    older: ChatResult[],
+    hidden: number,
+  ) => void;
   onSessionDeleted: (sessionId: string) => void;
   onMessageSaved: (run: HistoryRun) => void;
   onFeedbackSaved: (value: FeedbackRecord) => void;
 }) {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<ChatResult[]>(initialMessages);
-  const [localHistory, setLocalHistory] = useState<HistoryRun[]>(historyRuns);
+  const toast = useToast();
   // 正在回答的问题放在 liveChat 里（按会话保存，不随组件卸载丢失）：切到别的页面再回来，进度还在。
   // streamAnswer 是回答生成过程中已收到的文字；complete 后以服务端最终回答为准（引用校验失败时最终回答会被替换）。
   const live = useLiveChat(sessionId);
@@ -963,7 +1042,57 @@ function Chat({
     if (!element) return;
     followRef.current =
       element.scrollHeight - element.scrollTop - element.clientHeight < 80;
+    // 翻到接近顶部时读更早的 10 条。
+    if (element.scrollTop < 120) void loadOlder();
   };
+
+  // 往上翻页：取当前最早一条之前的 10 条，插到前面，并保持用户正在看的位置不跳。
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const loadingOlderRef = useRef(false);
+  const currentSessionRef = useRef(sessionId);
+  currentSessionRef.current = sessionId;
+  // 插入前记下滚动高度和位置，渲染后按新增的高度把 scrollTop 往下补，内容就停在原处。
+  const prependRef = useRef<{ height: number; top: number } | null>(null);
+  // 刚往前插入：下面按消息条数变化的处理（重新折叠、滚到底）这次跳过。
+  const prependedRef = useRef(false);
+  async function loadOlder() {
+    if (loadingOlderRef.current || loading || hiddenCount <= 0) return;
+    const first = latestMessages.current[0]?.request_id;
+    if (!first) return;
+    const session = sessionId;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      const page = await getSessionHistory(session, first);
+      if (currentSessionRef.current !== session) return;
+      const known = new Set(
+        latestMessages.current.map((item) => item.request_id),
+      );
+      const older = page.messages
+        .map(historyMessage)
+        .filter((item) => !known.has(item.request_id));
+      const hidden = page.has_more
+        ? Math.max(0, page.total - latestMessages.current.length - older.length)
+        : 0;
+      const element = messagesRef.current;
+      prependRef.current = element
+        ? { height: element.scrollHeight, top: element.scrollTop }
+        : null;
+      prependedRef.current = older.length > 0;
+      // 新读到的更早消息默认折叠，已经展开/折叠过的保持不变。
+      setCollapsedMessages((items) => ({
+        ...Object.fromEntries(older.map((item) => [item.request_id, true])),
+        ...items,
+      }));
+      setMessages((items) => [...older, ...items]);
+      onOlderLoaded(session, older, hidden);
+    } catch (reason) {
+      toast("error", errorText(reason));
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }
 
   // 上层的 initialMessages 有两种变化：切换会话（换成另一组消息，要回到底部），和本页刚问完、反馈后同步上去的
   // （内容和这里已经一样）。后一种不能再强制滚到底：以前回答一完成就同步上去，又触发这里，用户往上翻着也被拉回底部。
@@ -988,18 +1117,37 @@ function Chat({
     requestAnimationFrame(() => scrollToBottom(true));
   }, [initialMessages]);
 
+  useLayoutEffect(() => {
+    const element = messagesRef.current;
+    const before = prependRef.current;
+    if (!element || !before) return;
+    prependRef.current = null;
+    element.scrollTop = before.top + (element.scrollHeight - before.height);
+  }, [messages]);
+
   useEffect(() => {
+    if (prependedRef.current) {
+      prependedRef.current = false;
+      return;
+    }
     setCollapsedMessages(collapsedStateForLast(messages));
     requestAnimationFrame(() => scrollToBottom());
   }, [messages.length]);
 
+  // 消息都折叠着时 10 条可能不满一屏，出不了滚动条，没法往上翻：这时直接接着读，直到满屏或读完。
+  useEffect(() => {
+    if (loading || loadingOlder || hiddenCount <= 0) return;
+    const frame = requestAnimationFrame(() => {
+      const element = messagesRef.current;
+      if (element && element.scrollHeight <= element.clientHeight + 120)
+        void loadOlder();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [messages, hiddenCount, loading, loadingOlder]);
+
   useEffect(() => {
     if (busy || pendingQuestion) scrollToBottom();
   }, [busy, pendingQuestion, streamSteps, streamAnswer]);
-
-  useEffect(() => {
-    setLocalHistory(historyRuns);
-  }, [historyRuns]);
 
   // 历史对话右键菜单里确认删除后调用：删除成功后通知上层更新列表；正在回答的会话后端会返回 409。
   async function removeSession(session: string) {
@@ -1074,11 +1222,6 @@ function Chat({
       response: result,
       created: new Date().toISOString(),
     };
-    setLocalHistory((items) =>
-      items.some((item) => item.id === savedRun.id)
-        ? items
-        : [...items, savedRun],
-    );
     onMessageSaved(savedRun);
   }
 
@@ -1201,7 +1344,7 @@ function Chat({
   return (
     <section className="chat-layout">
       <HistoryRail
-        runs={localHistory}
+        sessions={sessions}
         activeSessionId={sessionId}
         onSelect={selectHistory}
         onNewChat={onNewChat}
@@ -1210,157 +1353,162 @@ function Chat({
       />
       <div className="chat-column">
         <div className="messages" ref={messagesRef} onScroll={handleScroll}>
-          {messages.length === 0 && !busy && !pendingQuestion && (
-            <div className="empty-state">
-              <div className="empty-orbit">✦</div>
-              <h2>从一个问题开始</h2>
-              <p>试试“退货政策是什么？”或“查询订单 A1001”。</p>
-            </div>
-          )}
-          {messages.map((message, index) => {
-            const requestId = message.request_id || `message-${index}`;
-            const questionText =
-              (message.steps.find((step) => step.id === "request")?.result
-                ?.question as string) ?? "本轮问题";
-            const collapsed = collapsedMessages[requestId] ?? false;
-            return (
-              <article
-                className={`message-card ${collapsed ? "is-collapsed" : ""}`}
-                key={requestId}
-              >
-                <div className="message-index">
-                  {String(index + 1).padStart(2, "0")}
-                </div>
-                <div className="message-content">
+          {loading ? (
+            <LoadingSkeleton
+              className="chat-loading-messages"
+              label="正在加载聊天记录"
+            >
+              <ChatMessageSkeletonCards />
+            </LoadingSkeleton>
+          ) : (
+            <>
+              {hiddenCount > 0 && messages.length > 0 && (
+                <div className="messages-older">
                   <button
-                    className="message-toggle"
-                    onClick={() => toggleMessage(requestId)}
-                    aria-expanded={!collapsed}
+                    className={`link-button button-sm ${loadingOlder ? "is-loading" : ""}`}
+                    disabled={loadingOlder}
+                    onClick={() => void loadOlder()}
                   >
-                    <span className="question-line">
-                      {questionText}
-                      {message.mode === "agent" && (
-                        <Tag size="sm" className="is-after" hue={true}>
-                          Agent
-                        </Tag>
-                      )}
-                    </span>
-                    <span className="collapse-icon">
-                      {collapsed ? "＋" : "−"}
-                    </span>
+                    更早的 {hiddenCount} 条消息
                   </button>
-                  {!collapsed && (
-                    <div className="message-body">
-                      <TraceTimeline
-                        steps={message.steps}
-                        answer={message.answer}
-                        sources={message.sources}
-                        traceId={message.trace_id}
-                        requestId={message.request_id}
-                        rounds={
-                          roundsByRequest[message.request_id] ??
-                          finishedRoundsFor(message.request_id)
-                        }
-                      />
-                      <div className="answer">
-                        <MarkdownAnswer content={message.answer} />
-                      </div>
-                      {message.request_id && (
-                        <AnswerFeedback
-                          requestId={message.request_id}
-                          initial={message.feedback}
-                          onSaved={saveFeedback}
-                        />
-                      )}
-                      {message.sources.length > 0 && (
-                        <details className="sources-panel">
-                          <summary>
-                            <span>来源</span>
-                            <strong>{message.sources.length} 条检索结果</strong>
-                            <span className="panel-chevron">⌄</span>
-                          </summary>
-                          <div className="sources">
-                            {/* 每条来源默认只显示一行正文，点击展开查看全文；以前长文本超出面板被截断，又没法看到完整内容。 */}
-                            {message.sources.map((source) => (
-                              <details className="source" key={source.id}>
-                                <summary>
-                                  <span>{source.id}</span>
-                                  <div>
-                                    <strong>
-                                      {source.title}
-                                      <small className="source-location">
-                                        {sourceLocation(
-                                          source.version,
-                                          source.page_start,
-                                          source.heading,
-                                        )}
-                                      </small>
-                                    </strong>
-                                    <p>{source.text}</p>
-                                  </div>
-                                  <span
-                                    className="source-toggle"
-                                    aria-hidden="true"
-                                  >
-                                    ⌄
-                                  </span>
-                                </summary>
-                              </details>
-                            ))}
+                </div>
+              )}
+              {messages.length === 0 && !busy && !pendingQuestion && (
+                <div className="empty-state">
+                  <div className="empty-orbit">✦</div>
+                  <h2>从一个问题开始</h2>
+                  <p>试试“退货政策是什么？”或“查询订单 A1001”。</p>
+                </div>
+              )}
+              {messages.map((message, index) => {
+                const requestId = message.request_id || `message-${index}`;
+                const questionText =
+                  (message.steps.find((step) => step.id === "request")?.result
+                    ?.question as string) ?? "本轮问题";
+                const collapsed = collapsedMessages[requestId] ?? false;
+                return (
+                  <article
+                    className={`message-card ${collapsed ? "is-collapsed" : ""}`}
+                    key={requestId}
+                  >
+                    <div className="message-index">
+                      {String(hiddenCount + index + 1).padStart(2, "0")}
+                    </div>
+                    <div className="message-content">
+                      <button
+                        className="message-toggle"
+                        onClick={() => toggleMessage(requestId)}
+                        aria-expanded={!collapsed}
+                      >
+                        <span className="question-line">
+                          {questionText}
+                          {message.mode === "agent" && (
+                            <Tag size="sm" className="is-after" hue={true}>
+                              Agent
+                            </Tag>
+                          )}
+                        </span>
+                        <span className="collapse-icon">
+                          {collapsed ? "＋" : "−"}
+                        </span>
+                      </button>
+                      {!collapsed && (
+                        <div className="message-body">
+                          <TraceTimeline
+                            steps={message.steps}
+                            answer={message.answer}
+                            sources={message.sources}
+                            traceId={message.trace_id}
+                            requestId={message.request_id}
+                            rounds={
+                              roundsByRequest[message.request_id] ??
+                              finishedRoundsFor(message.request_id)
+                            }
+                          />
+                          <div className="answer">
+                            <MarkdownAnswer content={message.answer} />
                           </div>
-                        </details>
-                      )}
-                      <div className="trace">链路编号：{message.trace_id}</div>
-                    </div>
-                  )}
-                </div>
-              </article>
-            );
-          })}
-          {pendingQuestion && (
-            <article className="message-card pending-message">
-              <div className="message-index">
-                {String(messages.length + 1).padStart(2, "0")}
-              </div>
-              <div className="message-content">
-                <div className="pending-question">
-                  <span className="question-line">{pendingQuestion}</span>
-                  {busy && (
-                    <span className="pending-indicator">
-                      <span className="pulse-dot" />
-                      处理中
-                    </span>
-                  )}
-                </div>
-                <div className="message-body">
-                  <TraceTimeline steps={streamSteps} live={busy} />
-                  <AgentLiveRounds rounds={streamRounds} busy={busy} />
-                  {streamAnswer ? (
-                    <div className="answer">
-                      <MarkdownAnswer content={streamAnswer} streaming={busy} />
-                    </div>
-                  ) : busy ? (
-                    <ChatAnswerSkeleton />
-                  ) : null}
-                  {pendingError && (
-                    <div className="pending-error">
-                      <span>
-                        本次处理未完成，已保留收到的阶段记录：{pendingError}
-                      </span>
-                      {!busy && (
-                        <button
-                          type="button"
-                          className="pending-retry"
-                          onClick={() => void submit(pendingQuestion)}
-                        >
-                          重试
-                        </button>
+                          {message.request_id && (
+                            <AnswerFeedback
+                              requestId={message.request_id}
+                              initial={message.feedback}
+                              onSaved={saveFeedback}
+                            />
+                          )}
+                          {message.sources.length > 0 && (
+                            <ContextDetail
+                              title="回答来源"
+                              label={`来源 · ${message.sources.length} 条检索结果${
+                                (message.relations?.length ?? 0) > 0
+                                  ? ` + ${message.relations!.length} 条图谱关系`
+                                  : ""
+                              }`}
+                            >
+                              <AnswerSourceFilters
+                                sources={message.sources}
+                                relations={message.relations ?? []}
+                                answer={message.answer}
+                              />
+                            </ContextDetail>
+                          )}
+                          <div className="trace">
+                            链路编号：{message.trace_id}
+                          </div>
+                        </div>
                       )}
                     </div>
-                  )}
-                </div>
-              </div>
-            </article>
+                  </article>
+                );
+              })}
+              {pendingQuestion && (
+                <article className="message-card pending-message">
+                  <div className="message-index">
+                    {String(hiddenCount + messages.length + 1).padStart(2, "0")}
+                  </div>
+                  <div className="message-content">
+                    <div className="pending-question">
+                      <span className="question-line">{pendingQuestion}</span>
+                      {busy && (
+                        <span className="pending-indicator">
+                          <span className="pulse-dot" />
+                          处理中
+                        </span>
+                      )}
+                    </div>
+                    <div className="message-body">
+                      <TraceTimeline steps={streamSteps} live={busy} />
+                      <AgentLiveRounds rounds={streamRounds} busy={busy} />
+                      {streamAnswer ? (
+                        <div className="answer">
+                          <MarkdownAnswer
+                            content={streamAnswer}
+                            streaming={busy}
+                          />
+                        </div>
+                      ) : busy ? (
+                        <ChatAnswerSkeleton />
+                      ) : null}
+                      {pendingError && (
+                        <div className="pending-error">
+                          <span>
+                            本次处理未完成，已保留收到的阶段记录：{pendingError}
+                          </span>
+                          {!busy && (
+                            <button
+                              type="button"
+                              className="pending-retry"
+                              onClick={() => void submit(pendingQuestion)}
+                            >
+                              重试
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </article>
+              )}
+            </>
           )}
         </div>
         <div className="composer">
@@ -1531,7 +1679,7 @@ function MarkdownBody({ content }: { content: string }) {
       const rows = tableLines.slice(2).map(tableCells);
       blocks.push(
         <div className="answer-table" key={`table-${blocks.length}`}>
-          <table>
+          <Table>
             <thead>
               <tr>
                 {header.map((cell, index) => (
@@ -1558,7 +1706,7 @@ function MarkdownBody({ content }: { content: string }) {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
         </div>,
       );
     } else {
@@ -1670,14 +1818,14 @@ function collapsedStateForLast(messages: ChatResult[]) {
 
 // 持续展示当前用户的历史会话，并允许恢复某个会话继续追问。
 function HistoryRail({
-  runs,
+  sessions,
   activeSessionId,
   onSelect,
   onNewChat,
   onDelete,
   busy,
 }: {
-  runs: HistoryRun[];
+  sessions: ChatSessionSummary[];
   activeSessionId: string;
   onSelect: (sessionId: string) => void;
   onNewChat: () => void;
@@ -1727,21 +1875,6 @@ function HistoryRail({
     });
   }
 
-  const groups: Array<{ sessionId: string; runs: HistoryRun[] }> = [];
-  const grouped = new Map<string, HistoryRun[]>();
-  for (const run of [...runs].reverse()) {
-    const existing = grouped.get(run.session_id);
-    if (existing) {
-      existing.push(run);
-    } else {
-      grouped.set(run.session_id, [run]);
-      groups.push({
-        sessionId: run.session_id,
-        runs: grouped.get(run.session_id) ?? [],
-      });
-    }
-  }
-
   return (
     <aside className="chat-history-rail" aria-label="历史对话">
       <div className="history-rail-heading">
@@ -1749,7 +1882,7 @@ function HistoryRail({
           <strong>历史对话</strong>
         </div>
         <div className="history-rail-actions">
-          <span className="history-count">{groups.length}</span>
+          <span className="history-count">{sessions.length}</span>
           <button
             className="history-new-chat"
             onClick={onNewChat}
@@ -1760,31 +1893,31 @@ function HistoryRail({
         </div>
       </div>
       <div className="history-rail-list">
-        {groups.length === 0 ? (
+        {sessions.length === 0 ? (
           <div className="history-empty">还没有历史对话</div>
         ) : (
-          groups.map((group) => {
-            const latest = group.runs[0];
-            const title =
-              group.runs[group.runs.length - 1]?.question ?? "未命名对话";
+          sessions.map((item) => {
             return (
               <div
-                className={`history-session ${group.sessionId === activeSessionId ? "active" : ""}`}
-                key={group.sessionId}
-                onContextMenu={(event) => openMenu(event, group.sessionId)}
+                className={`history-session ${item.session_id === activeSessionId ? "active" : ""}`}
+                key={item.session_id}
+                onContextMenu={(event) => openMenu(event, item.session_id)}
               >
                 <div className="history-session-heading">
-                  <span>{formatHistoryDate(latest.created)}</span>
-                  <small>{group.runs.length} 条消息</small>
+                  <span>{formatHistoryDate(item.updated)}</span>
+                  <small>{item.count} 条消息</small>
                 </div>
                 <button
                   className="history-item history-conversation"
-                  onClick={() => onSelect(group.sessionId)}
+                  aria-current={
+                    item.session_id === activeSessionId ? "true" : undefined
+                  }
+                  onClick={() => onSelect(item.session_id)}
                 >
-                  <strong>{title}</strong>
+                  <strong>{item.title || "未命名对话"}</strong>
                   <small>
-                    {formatRoute(latest.response.route)} · 最后更新{" "}
-                    {formatHistoryDate(latest.created, true)}
+                    {item.route ? `${formatRoute(item.route)} · ` : ""}最后更新{" "}
+                    {formatHistoryDate(item.updated, true)}
                   </small>
                 </button>
               </div>
@@ -1880,6 +2013,14 @@ function totalElapsed(steps: TraceStep[]) {
   return total;
 }
 
+// 回答里引用的资料编号（去重，按出现顺序）。
+function citedIds(answer: string | undefined, agentMode = true) {
+  const text = (answer ?? "").replace(/<think>[\s\S]*?<\/think>/g, "");
+  return [
+    ...new Set(text.match(agentMode ? /\[[SODG]\d+\]/g : /\[[SG]\d+\]/g) ?? []),
+  ].map((item) => item.slice(1, -1));
+}
+
 // "完成本次处理"的汇总：以前只写"LangGraph 已完成执行，结果将写入 MySQL"，没有有效信息。
 // 现在用前面各步已有的数据汇总成四块：耗时分布、模型调用、回答与引用、结果保存（写到哪、写了什么）。
 // 全部由前端计算，旧记录同样适用。
@@ -1919,11 +2060,12 @@ function RunSummary({
     | undefined;
   const text = (answer ?? "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
   const agentMode = steps.some((step) => step.id === "agent");
-  // Agent 模式的资料有知识库 S、订单 O、业务数据 D 三种编号。
-  const cited = [
-    ...new Set(text.match(agentMode ? /\[[SOD]\d+\]/g : /\[S\d+\]/g) ?? []),
-  ].map((item) => item.slice(1, -1));
-  const sourceCount = sources?.length ?? 0;
+  // Agent 模式的资料有知识库 S、订单 O、业务数据 D、图谱关系 G 四种编号；固定流程有 S 和 G。
+  const cited = citedIds(text, agentMode);
+  const relationCount = Number(
+    (find("context").relation_count as number | undefined) ?? 0,
+  );
+  const sourceCount = (sources?.length ?? 0) + relationCount;
   const route = String(
     find("router").route ?? (find("input_guard").blocked ? "blocked" : ""),
   );
@@ -2417,89 +2559,260 @@ function TraceTimeline({
   requestId?: string;
   rounds?: AgentRound[];
 }) {
+  // 「本步结果」里的两个数字：点开看具体是哪几个分片（候选池、最终返回的）。
+  const [drill, setDrill] = useState<{
+    kind: "pool" | "returned";
+    data: RetrievalDiagnosticsData;
+  } | null>(null);
+  const drillPool = drill?.kind === "pool" ? poolCandidates(drill.data) : [];
+  const drillReturned =
+    drill?.kind === "returned" ? returnedCandidates(drill.data) : [];
   return (
-    <details
-      className={`trace-timeline ${live ? "is-live" : ""}`}
-      open={live || undefined}
-    >
-      <summary className="trace-toggle">
-        <span>{live ? "当前处理阶段" : "处理阶段"}</span>
-        <strong>
-          {steps.length} 个阶段
-          {totalElapsed(steps) !== null
-            ? ` · 共 ${formatDuration(totalElapsed(steps))}`
-            : ""}
-          {live ? " · 实时更新" : ""}
-        </strong>
-        <span className="panel-chevron">⌄</span>
-      </summary>
-      <div className="trace-body">
-        {steps.map((step, index) => (
-          <details
-            className={`trace-step ${step.status}`}
-            key={step.id}
-            open={live || undefined}
-          >
-            <summary>
-              <span className="step-number">
-                {String(index + 1).padStart(2, "0")}
-              </span>
-              <span className="step-status">
-                {step.status === "failed"
-                  ? "!"
-                  : step.status === "running"
-                    ? "·"
-                    : "✓"}
-              </span>
-              <span className="step-copy">
-                <strong>{step.title}</strong>
-                <small>
-                  {(step.status !== "failed" && stepPurpose(step.result)) ||
-                    step.detail}
-                </small>
-              </span>
-              {step.duration_ms !== undefined && (
-                <time title={durationTitle(step.duration_ms)}>
-                  {formatDuration(step.duration_ms)}
-                </time>
-              )}
-            </summary>
-            <div className="step-result">
-              {step.id === "agent" ? (
-                <AgentStepView
-                  step={step}
-                  requestId={requestId}
-                  rounds={rounds}
-                />
-              ) : step.id === "complete" && step.status !== "failed" ? (
-                <RunSummary
-                  steps={steps}
-                  answer={answer}
-                  sources={sources}
-                  traceId={traceId}
-                />
-              ) : (
-                formatResult(
-                  step.result,
-                  step.status !== "failed" && stepPurpose(step.result)
-                    ? step.detail
-                    : undefined,
-                  step.field_order,
-                  step,
-                )
-              )}
-            </div>
-          </details>
-        ))}
-        {live && steps.length === 0 && (
-          <LoadingSkeleton className="trace-waiting" label="正在等待处理阶段">
-            <SkeletonBlock className="skeleton-line" />
-            <SkeletonBlock className="skeleton-line-short" />
-          </LoadingSkeleton>
-        )}
-      </div>
-    </details>
+    <>
+      <details
+        className={`trace-timeline ${live ? "is-live" : ""}`}
+        open={live || undefined}
+      >
+        <summary className="trace-toggle">
+          <span>{live ? "当前处理阶段" : "处理阶段"}</span>
+          <strong>
+            {steps.length} 个阶段
+            {totalElapsed(steps) !== null
+              ? ` · 共 ${formatDuration(totalElapsed(steps))}`
+              : ""}
+            {live ? " · 实时更新" : ""}
+          </strong>
+          <span className="panel-chevron">⌄</span>
+        </summary>
+        <div className="trace-body">
+          {traceRows(steps, {
+            onPool: (data) => setDrill({ kind: "pool", data }),
+            onReturned: (data) => setDrill({ kind: "returned", data }),
+          }).map(({ step, part, title, detail, duration }, index) => (
+            <details
+              className={`trace-step ${step.status}`}
+              key={part ? `${step.id}-${part}` : step.id}
+              open={live || undefined}
+            >
+              <summary>
+                <span className="step-number">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <span className="step-status">
+                  {step.status === "failed"
+                    ? "!"
+                    : step.status === "running"
+                      ? "·"
+                      : "✓"}
+                </span>
+                <span className="step-copy">
+                  <strong>{part ? title : step.title}</strong>
+                  <small>
+                    {part
+                      ? PART_PURPOSES[part]
+                      : (step.status !== "failed" &&
+                          stepPurpose(step.result)) ||
+                        step.detail}
+                  </small>
+                </span>
+                {(part ? duration : step.duration_ms) !== undefined && (
+                  <time
+                    title={durationTitle(
+                      (part ? duration : step.duration_ms) ?? 0,
+                    )}
+                  >
+                    {formatDuration((part ? duration : step.duration_ms) ?? 0)}
+                  </time>
+                )}
+              </summary>
+              <div className="step-result">
+                {part ? (
+                  <div className="result-grid">
+                    <div className="result-row result-step_detail">
+                      <span>{formatResultLabel("step_detail")}</span>
+                      <div className="result-value">{detail}</div>
+                    </div>
+                    <div className="result-row result-diagnostics">
+                      <span>{formatResultLabel("diagnostics")}</span>
+                      <div className="result-value">
+                        <RetrievalDiagnostics
+                          part={part}
+                          data={
+                            step.result?.diagnostics as RetrievalDiagnosticsData
+                          }
+                          embeddingModel={String(
+                            step.result?.model_called ?? "",
+                          )
+                            .split("；")[0]
+                            .replace("（向量模型）", "")}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : step.id === "agent" ? (
+                  <AgentStepView
+                    step={step}
+                    requestId={requestId}
+                    rounds={rounds}
+                  />
+                ) : step.id === "complete" && step.status !== "failed" ? (
+                  <RunSummary
+                    steps={steps}
+                    answer={answer}
+                    sources={sources}
+                    traceId={traceId}
+                  />
+                ) : (
+                  formatResult(
+                    step.result,
+                    step.status !== "failed" && stepPurpose(step.result)
+                      ? step.detail
+                      : undefined,
+                    step.field_order,
+                    step,
+                  )
+                )}
+              </div>
+            </details>
+          ))}
+          {live && steps.length === 0 && (
+            <LoadingSkeleton className="trace-waiting" label="正在等待处理阶段">
+              <SkeletonBlock className="skeleton-line" />
+              <SkeletonBlock className="skeleton-line-short" />
+            </LoadingSkeleton>
+          )}
+        </div>
+      </details>
+      {/* 从「本步结果」点开的两个弹窗：候选池和最终返回的分片。 */}
+      {drill?.kind === "pool" && drillPool.length > 0 && (
+        <CandidateChunksDialog
+          open
+          title={`交给重排的 ${drillPool.length} 个分片`}
+          lead={`${poolBreakdownText(drillPool)}，共 ${drillPool.length} 个分片`}
+          leadNote="按 RRF 得分排；每行写清楚这片是哪几路找到的、在各路的排名表里第几"
+          candidates={drillPool}
+          queries={textQueries(drill.data)}
+          scoreKind="rrf"
+          splitQuota
+          rrfK={drill.data.config.rrf_k}
+          fusion={drill.data.config.fusion}
+          onClose={() => setDrill(null)}
+        />
+      )}
+      {drill?.kind === "returned" && drillReturned.length > 0 && (
+        <CandidateChunksDialog
+          open
+          title={`最终返回的 ${drillReturned.length} 个分片`}
+          lead={`交给回答模型的 ${drillReturned.length} 个分片`}
+          leadNote="按重排概率排；每行写清楚这片是哪几路找到的、在各路的排名表里第几"
+          candidates={drillReturned}
+          queries={textQueries(drill.data)}
+          scoreKind="rerank"
+          rrfK={drill.data.config.rrf_k}
+          fusion={drill.data.config.fusion}
+          onClose={() => setDrill(null)}
+        />
+      )}
+    </>
   );
+}
+
+// 处理阶段里，一次检索（retrieval 步骤）拆成三步显示：权限范围 → 混合检索 → 重排与过滤。
+// 后端仍是一条 retrieval 记录（追踪摘要、知识巡检、评测都读它），这里按诊断里的数据拆开，耗时用诊断里记的每步耗时。
+// 正在进行、失败、没有诊断的检索照原样显示一步。
+type TraceRow = {
+  step: TraceStep;
+  part?: DiagnosticsPart;
+  title?: string;
+  detail?: ReactNode;
+  duration?: number;
+};
+const PART_PURPOSES: Record<DiagnosticsPart, string> = {
+  scope: "按登录身份查出可检索的文档和图谱，作为查询条件交给每一路检索",
+  recall:
+    "向量、关键词、图检索各自召回，用 RRF 按名次融合；只被图找到的分片按图的名次单独进重排",
+  rerank: "重排候选，按相关性阈值和返回上限决定交给回答模型的资料",
+};
+
+function traceRows(
+  steps: TraceStep[],
+  drill?: {
+    onPool?: (data: RetrievalDiagnosticsData) => void;
+    onReturned?: (data: RetrievalDiagnosticsData) => void;
+  },
+): TraceRow[] {
+  const rows: TraceRow[] = [];
+  for (const step of steps) {
+    const data = step.result?.diagnostics as
+      | RetrievalDiagnosticsData
+      | undefined;
+    if (step.id !== "retrieval" || step.status === "failed" || !data?.config) {
+      rows.push({ step });
+      continue;
+    }
+    const stats = (step.result?.stats ?? {}) as Record<string, number>;
+    const timings = data.timings ?? {};
+    const candidates = data.candidates ?? [];
+    let hits = 0;
+    for (const list of data.lists ?? []) hits += list.hits.length;
+    // 真正交给回答模型的来源数：并入父块的分片不单独成源，不能算成一条来源。
+    const returned = splitReturned(candidates).owners.length;
+    const pooled = candidates.filter(
+      (item) => item.status !== "not_in_pool",
+    ).length;
+    const methods = (data.config.methods ?? ["dense", "keyword"]).map(
+      (method) => METHOD_LABELS[method] ?? method,
+    );
+    if (data.scope)
+      rows.push({
+        step,
+        part: "scope",
+        title: "权限范围",
+        detail: `可检索 ${data.scope.total} 份文档${
+          data.scope.graph_versions
+            ? `，其中 ${data.scope.graph_versions.length} 份有生效图谱`
+            : ""
+        }`,
+        duration: timings.scope_ms,
+      });
+    rows.push({
+      step,
+      part: "recall",
+      title: "混合检索",
+      detail: `${methods.join(" + ")}，共返回 ${hits} 个分片，去重后 ${candidates.length} 个`,
+      duration: timings.recall_ms ?? stats.recall_ms,
+    });
+    rows.push({
+      step,
+      part: "rerank",
+      title: "重排与过滤",
+      // 两个数字都能点开看具体是哪几个分片：候选池一份、最终返回的一份。
+      // 包一层 span：本步结果那格是 grid，直接放 fragment 会把两个数字拆成两行。
+      detail: drill?.onPool ? (
+        <span>
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => drill.onPool?.(data)}
+          >
+            {data.config.reranked ? pooled : candidates.length} 个候选
+          </button>
+          {" → "}
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => drill.onReturned?.(data)}
+          >
+            返回 {returned} 个
+          </button>
+        </span>
+      ) : (
+        `${data.config.reranked ? pooled : candidates.length} 个候选 → 返回 ${returned} 个`
+      ),
+      duration: timings.rerank_ms ?? stats.rerank_ms,
+    });
+  }
+  return rows;
 }
 
 // 普通字段只保留名称和值，避免说明占满页面；这里只为需要排查的复杂字段提供解释。
@@ -2847,20 +3160,26 @@ function ResultFieldValue({
     return (
       <strong title={durationTitle(value)}>{formatDuration(value)}</strong>
     );
-  // 列表超过 3 项时先显示前 3 项，其余折叠。
+  // 列表超过 3 项时先显示前 3 项，其余折叠；一项一行改成横着排。
   if (Array.isArray(value) && value.length > CLAMP_ITEMS) {
     const items: string[] = [];
     for (const item of value) items.push(formatResultValue(item));
     return (
       <details className="clamp clamp-list">
         <summary>
-          <strong>{items.slice(0, CLAMP_ITEMS).join("\n")}</strong>
+          {/* 全部项都放在标题行里：收起时靠 CSS 只显示前 3 项，展开后全部横着排在一行。 */}
+          <strong className="clamp-items">
+            {items.map((item, index) => (
+              <span className="clamp-item" key={index}>
+                {item}
+              </span>
+            ))}
+          </strong>
           <span className="clamp-toggle">
             <span className="clamp-more">展开全部 {items.length} 项</span>
             <span className="clamp-less">收起</span>
           </span>
         </summary>
-        <strong>{items.slice(CLAMP_ITEMS).join("\n")}</strong>
       </details>
     );
   }
@@ -3040,6 +3359,10 @@ function formatResult(
     "process_method",
     "recent_characters",
     "source_layout",
+    "relation_count",
+    "relation_characters",
+    "relations",
+    "relation_reason",
   ]);
   // 读取 Memory：以前 MySQL 历史、滚动摘要、Checkpoint 存储、Checkpoint 消息数各占一行，看不出哪些是完整记录、
   // 哪些是发给模型的记忆。现在分成"审计历史"（MySQL，完整记录，不发给模型）和"模型记忆"（Checkpoint，发给模型）两块。
@@ -3143,7 +3466,16 @@ function formatResult(
     result.answer_context &&
     typeof result.answer_context === "object"
   )
-    answerRows.push(["answer_sources", result.answer_context]);
+    // 回答里引用了哪些编号：图谱关系里被引用的标「已引用」。
+    answerRows.push([
+      "answer_sources",
+      {
+        ...(result.answer_context as AnswerContext),
+        cited:
+          (result.citation_check as { cited?: string[] } | undefined)?.cited ??
+          [],
+      },
+    ]);
   if (
     answered &&
     Array.isArray(result.ai_memory_sent) &&
@@ -3404,12 +3736,12 @@ function IntentContext({ context }: { context: unknown }) {
         </ol>
       )}
       {value.rolling_summary && (
-        <details>
-          <summary>
-            滚动摘要（{value.rolling_summary.length} 字，较早对话压缩成的摘要）
-          </summary>
-          <p>{value.rolling_summary}</p>
-        </details>
+        <ContextDetail
+          title="滚动摘要"
+          label={`查看滚动摘要（${value.rolling_summary.length} 字）`}
+        >
+          <p className="ag-delivery-text">{value.rolling_summary}</p>
+        </ContextDetail>
       )}
     </div>
   );
@@ -3877,10 +4209,12 @@ function ModelMemory({ result }: { result: Record<string, unknown> }) {
           <i className="is-summary" />
           滚动摘要<b>{summaryCount} 条</b>
           {summary ? (
-            <details className="mem-fold">
-              <summary>{summary.length} 字，展开</summary>
-              <p>{summary}</p>
-            </details>
+            <ContextDetail
+              title="滚动摘要"
+              label={`查看摘要（${summary.length} 字）`}
+            >
+              <p className="ag-delivery-text">{summary}</p>
+            </ContextDetail>
           ) : (
             <small>对话还没超过上限，没有摘要</small>
           )}
@@ -3952,6 +4286,52 @@ function LongMemoryUsed({ items }: { items: unknown[] }) {
   );
 }
 
+const ContextDetailDepth = createContext(0);
+
+function ContextDetail({
+  title,
+  label = "查看详情",
+  children,
+}: {
+  title: string;
+  label?: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const depth = useContext(ContextDetailDepth);
+  const body = (
+    <ContextDetailDepth.Provider value={depth + 1}>
+      {children}
+    </ContextDetailDepth.Provider>
+  );
+  return (
+    <div className="ai-memory-collapse">
+      {depth >= 2 ? (
+        <InfoPopover title={title} content={() => body}>
+          <button type="button" className="link-button button-sm">
+            {label}
+          </button>
+        </InfoPopover>
+      ) : (
+        <>
+          <button
+            type="button"
+            className="link-button button-sm"
+            onClick={() => setOpen(true)}
+          >
+            {label}
+          </button>
+          {open && (
+            <DetailDialog open title={title} onClose={() => setOpen(false)}>
+              {body}
+            </DetailDialog>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // 组装模型上下文的三块内容，按发给模型的顺序排列：滚动摘要 → 最近问答原文 → 检索来源。
 function ContextParts({ result }: { result: Record<string, unknown> }) {
   const summary = Number(result.summary_characters ?? 0);
@@ -3979,6 +4359,18 @@ function ContextParts({ result }: { result: Record<string, unknown> }) {
         : "没有来源，回答阶段直接拒答",
     ],
   ];
+  // 图谱关系拼在检索来源后面；旧记录没有 relation_count 时不显示这一项。
+  const relationCount = Number(result.relation_count ?? 0);
+  const relations = Array.isArray(result.relations)
+    ? (result.relations as ContextRelation[])
+    : [];
+  if (Object.hasOwn(result, "relation_count"))
+    parts.push([
+      "图谱关系",
+      relationCount > 0
+        ? `${relationCount} 条，共 ${Number(result.relation_characters ?? 0)} 字`
+        : `未使用（${String(result.relation_reason ?? "没有放图谱关系")}）`,
+    ]);
   // 检索来源可以展开看每段由哪几片拼成；旧记录没有 source_layout 时只显示条数和字数。
   const layout = Array.isArray(result.source_layout)
     ? (result.source_layout as AnswerSource[])
@@ -3993,10 +4385,17 @@ function ContextParts({ result }: { result: Record<string, unknown> }) {
           <div>
             <strong>{title}</strong>：{text}
             {title === "检索来源" && layout.length > 0 && (
-              <details className="ai-memory-collapse context-source-layout">
-                <summary>展开查看每段由哪几片组成</summary>
+              <ContextDetail
+                title="检索来源分片组成"
+                label="查看每段由哪几片组成"
+              >
                 <SourceLayoutList sources={layout} />
-              </details>
+              </ContextDetail>
+            )}
+            {title === "图谱关系" && relations.length > 0 && (
+              <ContextDetail title="放进上下文的图谱关系" label="查看每条关系">
+                <ContextRelationList relations={relations} />
+              </ContextDetail>
             )}
           </div>
         </li>
@@ -4074,10 +4473,12 @@ function AnswerHistory({ result }: { result: Record<string, unknown> }) {
   if (summary)
     sections.push([
       "更早对话的摘要",
-      <details className="ai-memory-summary">
-        <summary>展开摘要（{summary.length} 字）</summary>
-        <p>{summary}</p>
-      </details>,
+      <ContextDetail
+        title="滚动摘要"
+        label={`查看摘要（${summary.length} 字）`}
+      >
+        <p className="ag-delivery-text">{summary}</p>
+      </ContextDetail>,
     ]);
   if (turns.length > 0)
     sections.push([
@@ -4090,8 +4491,7 @@ function AnswerHistory({ result }: { result: Record<string, unknown> }) {
       <strong>{parts.join(" + ")}</strong>
       <small className="result-help">{note}</small>
       {sections.length > 0 && (
-        <details className="ai-memory-collapse">
-          <summary>展开查看</summary>
+        <ContextDetail title="回答模型收到的对话历史">
           <ol className="intent-trace answer-history-list">
             {sections.map(([title, body], index) => (
               <li key={title}>
@@ -4105,7 +4505,7 @@ function AnswerHistory({ result }: { result: Record<string, unknown> }) {
               </li>
             ))}
           </ol>
-        </details>
+        </ContextDetail>
       )}
     </div>
   );
@@ -4133,6 +4533,10 @@ type AnswerSource = {
 type AnswerContext = {
   note?: string;
   sources?: AnswerSource[];
+  // 图谱关系（G 编号），拼在检索来源后面；旧记录没有。
+  relations?: ContextRelation[];
+  // 回答里引用的编号（引用检查的结果）。
+  cited?: string[];
   profile?: Array<{ category?: string; content?: string }>;
 };
 
@@ -4209,10 +4613,12 @@ function SourceLayoutList({ sources }: { sources: AnswerSource[] }) {
 // 每段来源写明命中的子块和拼成父块的分片，每片只列上下文说明（全文在回答的来源里），命中的那片高亮。
 function AnswerSources({ context }: { context: AnswerContext }) {
   const sources = context.sources ?? [];
+  const relations = context.relations ?? [];
   const profile = context.profile ?? [];
   const note = context.note ?? "";
   const total = sources.reduce((sum, source) => sum + (source.chars ?? 0), 0);
   const parts = [`${sources.length} 段资料（共 ${total} 字）`];
+  if (relations.length > 0) parts.push(`${relations.length} 条图谱关系`);
   if (note) parts.push("缺失提示");
   if (profile.length > 0) parts.push("用户画像");
   const expanded = sources.filter(
@@ -4229,6 +4635,11 @@ function AnswerSources({ context }: { context: AnswerContext }) {
     `检索资料（${sources.length} 段）`,
     <SourceLayoutList sources={sources} />,
   ]);
+  if (relations.length > 0)
+    sections.push([
+      `图谱关系（${relations.length} 条）`,
+      <ContextRelationList relations={relations} cited={context.cited ?? []} />,
+    ]);
   if (profile.length > 0)
     sections.push([
       `用户画像（长期记忆 ${profile.length} 条）`,
@@ -4244,8 +4655,7 @@ function AnswerSources({ context }: { context: AnswerContext }) {
     <div className="answer-history">
       <strong>{parts.join(" + ")}</strong>
       <small className="result-help">{help}</small>
-      <details className="ai-memory-collapse">
-        <summary>展开查看</summary>
+      <ContextDetail title="回答模型收到的资料">
         <ol className="intent-trace answer-history-list">
           {sections.map(([title, body], index) => (
             <li key={title}>
@@ -4259,7 +4669,7 @@ function AnswerSources({ context }: { context: AnswerContext }) {
             </li>
           ))}
         </ol>
-      </details>
+      </ContextDetail>
     </div>
   );
 }
@@ -4294,10 +4704,12 @@ function AIMemorySent({ items }: { items: unknown[] }) {
           >
             <strong>{String(call.target ?? "模型调用")}</strong>
             {summary ? (
-              <details className="ai-memory-summary">
-                <summary>查看滚动摘要（{summary.length} 字）</summary>
-                <p>{summary}</p>
-              </details>
+              <ContextDetail
+                title="滚动摘要"
+                label={`查看滚动摘要（${summary.length} 字）`}
+              >
+                <p className="ag-delivery-text">{summary}</p>
+              </ContextDetail>
             ) : null}
             {questions.length > 0 ? (
               <ol>
@@ -4367,11 +4779,73 @@ function RetrievalSources({ items }: { items: unknown[] }) {
 const METHOD_LABELS: Record<string, string> = {
   dense: "向量",
   keyword: "关键词",
+  graph: "图检索",
 };
 const RAW_SCORE_LABELS: Record<string, string> = {
-  dense: "余弦",
+  dense: "语义相似度",
   keyword: "BM25",
+  graph: "关系相似度",
 };
+
+// RRF 的算式：每张排名表贡献 1 / (k + 名次)，k 是平滑常数（默认 60）。
+// 数字按召回方式着色，和「各路名次」里的标签一一对应，看得出来这一分是哪一路给的。
+// 融合方式选「每路只取最好名次」时，同一路只算名次最好的那次。
+function rrfTerms(
+  contributions: RetrievalContribution[],
+  fusion?: string,
+): RetrievalContribution[] {
+  if (fusion !== "best") return contributions;
+  const best = new Map<string, RetrievalContribution>();
+  for (const contribution of contributions) {
+    const current = best.get(contribution.method);
+    if (!current || contribution.rank < current.rank)
+      best.set(contribution.method, contribution);
+  }
+  return [...best.values()];
+}
+
+// 单张排名表给一个分片的贡献：1 / (k + 名次)。
+function RrfTerm({
+  method,
+  rank,
+  k,
+}: {
+  method: string;
+  rank: number;
+  k: number;
+}) {
+  return (
+    <span
+      className={`rrf-term method-${method}`}
+      title={`${METHOD_LABELS[method] ?? method}第 ${rank} 名：1 / (${k} + ${rank})`}
+    >
+      1/{k + rank}
+    </span>
+  );
+}
+
+// 一个分片的 RRF 分：各张排名表的贡献加起来。
+function RrfFormula({
+  contributions,
+  k,
+  fusion,
+}: {
+  contributions: RetrievalContribution[];
+  k: number;
+  fusion?: string;
+}) {
+  const terms = rrfTerms(contributions, fusion);
+  return (
+    <span className="rrf-formula">
+      {terms.map((term, index) => (
+        <span key={index}>
+          {index > 0 ? <b className="rrf-op">+</b> : null}
+          <RrfTerm method={term.method} rank={term.rank} k={k} />
+        </span>
+      ))}
+    </span>
+  );
+}
 const STATUS_INFO: Record<
   string,
   { icon: string; label: string; hint: string }
@@ -4381,7 +4855,18 @@ const STATUS_INFO: Record<
     label: "已返回",
     hint: "通过相关性阈值，作为来源交给回答模型",
   },
+  // 并入父块的分片：内容已经在上一条来源里，不单独成源，也不占返回名额。
+  merged: {
+    icon: "⇢",
+    label: "已并入",
+    hint: "和上一条命中在同一小节，内容已并入那条来源，不单独成源",
+  },
   // 去向列展示最终处理结果；用“被过滤排除”说明它没有进入来源，而不是只暴露内部数量限制。
+  beyond_budget: {
+    icon: "…",
+    label: "预算不足",
+    hint: "原始分片超出剩余原文 token 预算，未单独入选",
+  },
   beyond_limit: {
     icon: "…",
     label: "被过滤排除",
@@ -4396,7 +4881,7 @@ const STATUS_INFO: Record<
   not_in_pool: {
     icon: "–",
     label: "未进重排",
-    hint: "RRF 名次不在候选池内，没有交给重排模型",
+    hint: "RRF 名次不在候选池内（只被图找到的：超过按图名次进重排的上限），没有交给重排模型",
   },
 };
 
@@ -4418,89 +4903,190 @@ function formatNumber(value: number | null | undefined, digits = 4) {
   return value.toFixed(digits);
 }
 
-// 诊断表只展示 ID 前十位以节省横向空间，完整 ID 放在 title 中供悬停查看。
+// 分片 ID 是「版本 id:序号」（app/storage.py），版本 id 是 36 位 uuid，同一版本的所有分片前缀完全一样，
+// 截前几位会让不同分片显示成同一个 ID。这里只显示序号段，完整 ID 放在 title 中供悬停查看。
 function shortChunkId(chunkId: string) {
-  return chunkId.slice(0, 10);
+  const index = chunkId.match(/:(\d+)$/)?.[1];
+  return index === undefined ? chunkId : `第 ${Number(index) + 1} 片`;
 }
 
-// 候选明细数量较多时固定三条一页，避免完整 diagnostics 在前端连续堆叠；原始排名表仍完整保留在下方。
-const DIAGNOSTICS_PAGE_SIZE = 3;
+// 候选明细每页六条：表格在弹窗里自己上下滚，表头吸在框顶，分页翻得少一点。
+const DIAGNOSTICS_PAGE_SIZE = 6;
+
+// 原始排名表每页六条：表格框高度固定，切换标签时框的大小不变。
+const RANK_PAGE_SIZE = 6;
 
 // 检索诊断面板：把后端每一步的计算结果完整展示出来，便于理解一条来源为什么被返回或被丢弃。
+// 分三块（docs：claude/graph-retrieval-phase2-plan.md 第一部分第四节）：
+//   scope  权限范围：可检索的文档、图检索范围；
+//   recall 混合检索：向量 / 关键词 / 图检索三个模块，各自的排名表，再用 RRF 融合；
+//   rerank 重排与过滤：重排、阈值、返回上限、整体漏斗、候选明细。
+// 处理阶段里一次检索拆成三步显示，每步传自己的 part；补充检索、评测、Agent 里不传 part，三块依次显示。
+type DiagnosticsPart = "scope" | "recall" | "rerank";
+
+// 向量、关键词每个检索词各取前几个分片（app/storage.py search / search_keyword 的 limit）。
+const RECALL_LIMITS: Record<string, number> = { dense: 12, keyword: 30 };
+
 function RetrievalDiagnostics({
   data,
   embeddingModel,
+  part,
 }: {
   data: RetrievalDiagnosticsData;
   embeddingModel?: string;
+  part?: DiagnosticsPart;
 }) {
   const candidates = data.candidates ?? [];
   const lists = data.lists ?? [];
   const config = data.config;
-  const [candidatePage, setCandidatePage] = useState(1);
-  const candidatePageCount = Math.max(
-    1,
-    Math.ceil(candidates.length / DIAGNOSTICS_PAGE_SIZE),
-  );
-  const visibleCandidatePage = Math.min(candidatePage, candidatePageCount);
-  const candidatePageStart = (visibleCandidatePage - 1) * DIAGNOSTICS_PAGE_SIZE;
-  const candidatePageEnd = Math.min(
-    candidatePageStart + DIAGNOSTICS_PAGE_SIZE,
-    candidates.length,
-  );
-  const visibleCandidates = candidates.slice(
-    candidatePageStart,
-    candidatePageEnd,
-  );
-  // 检索问题或候选数量变化时回到第一页，避免复用旧页码后看到空白明细。
+  const timings = data.timings ?? {};
+  const graph = data.graph;
+  // 候选明细在弹窗里看：一页只列六条，页面上不用摊开一张宽表。
+  const [candidatesOpen, setCandidatesOpen] = useState(false);
+  // 最终返回给回答模型的分片单独看：和候选明细同一个弹窗，只是只列返回的那些。
+  const [returnedOpen, setReturnedOpen] = useState(false);
+  // 原始排名表：整块收进弹窗，页面上只留一个入口；弹窗里用标签切换每张表。
+  const [rankOpen, setRankOpen] = useState(false);
+  const [rankIndex, setRankIndex] = useState(0);
+  const [rankPage, setRankPage] = useState(1);
+  // 正在看原文的那一片：点「更多」打开伴随浮窗。
+  const [chunkOpen, setChunkOpen] = useState<string | null>(null);
+  // 交给重排的候选池单独看：页面上只留一个入口，内容在弹窗里。
+  const [poolOpen, setPoolOpen] = useState(false);
+  // 图检索留下的关系和去向（放进上下文 / 额度不够没放）：入口在混合检索最后单独一块（关系不进融合），内容在弹窗里。
+  const [relationsOpen, setRelationsOpen] = useState(false);
+  const contextRelations = data.context_relations;
+  const placedRelations = (contextRelations?.items ?? []).filter(
+    (item) => item.status === "context",
+  ).length;
+  // 「被哪几路找到」里的分片数字：点开看这一组具体是哪些分片、各路排第几。
+  const [comboOpen, setComboOpen] = useState<string | null>(null);
+  // 漏斗里「交给重排」「相关性 ≥ 阈值」「最终返回」三行的数字：点开看这一行具体留下了哪些分片。
+  const [funnelStage, setFunnelStage] = useState<string | null>(null);
+  // 当前这一页分片的原文：来源列显示原文预览，「更多」看全文。读过的留在里面，翻页不用重读。
+  const [chunkOriginals, setChunkOriginals] = useState<
+    Record<string, ChunkOriginal>
+  >({});
+  // 候选明细里按召回方式过滤和翻页的状态放在弹窗组件里（见 CandidateDetailDialog）。
+  // 换标签或排名表换了，回到第一页，避免沿用旧页码后看到空白表格。
   useEffect(() => {
-    setCandidatePage(1);
-  }, [candidates.length, config.rerank_query]);
+    setRankPage(1);
+  }, [lists.length, rankIndex]);
   let totalHits = 0;
-  for (const list of lists) totalHits += list.hits.length;
+  const hitsByMethod: Record<string, number> = {};
+  for (const list of lists) {
+    totalHits += list.hits.length;
+    hitsByMethod[list.method] =
+      (hitsByMethod[list.method] ?? 0) + list.hits.length;
+  }
   let pooled = 0;
   let passed = 0;
-  let returned = 0;
   let filtered = 0;
+  let beyondLimit = 0;
+  let graphOnly = 0;
+  let graphOnlyOutOfPool = 0;
+  // 被哪几路找到：按召回方式的组合分组，融合那一段用。分组里的分片可以点开看具体是哪些。
+  const combos = new Map<string, RetrievalCandidate[]>();
   for (const item of candidates) {
     if (item.status !== "not_in_pool") pooled += 1;
-    if (item.status === "returned" || item.status === "beyond_limit")
+    if (
+      item.status === "returned" ||
+      item.status === "beyond_limit" ||
+      item.status === "beyond_budget"
+    )
       passed += 1;
-    if (item.status === "returned") returned += 1;
+    if (item.status === "beyond_limit") beyondLimit += 1;
     if (item.status === "filtered_low_score") filtered += 1;
+    const methods = ["dense", "keyword", "graph"].filter((method) =>
+      item.retrieval_methods.includes(method),
+    );
+    const key = methods.join("+");
+    const group = combos.get(key);
+    if (group) group.push(item);
+    else combos.set(key, [item]);
+    if (key === "graph") {
+      graphOnly += 1;
+      if (item.status === "not_in_pool") graphOnlyOutOfPool += 1;
+    }
   }
+  // 交给重排的候选池分两份（app/tools/search.py）：其他路也找到的按 RRF 名次取前 rerank_candidates 个（pool_via = rrf），
+  // 只被图找到的按图检索的名次取前 graph_pool_size 个（pool_via = graph）。旧记录是 RRF 前几个 + 图检索名额（graph_quota）。
+  const rerankPool = poolCandidates(data);
+  // 最终返回的分片：漏斗最后一步留下的那几片，按重排名次排。
+  const returnedChunks = returnedCandidates(data);
+  // 真正交给回答模型的来源数：并入父块的分片不单独成源，不能算成一条来源。
+  const returned = returnedChunks.length;
+  // 并入父块的分片数：内容已经在某条来源里，不单独成源，也不占返回名额。
+  const mergedCount = splitReturned(candidates).merged.size;
+  // 入口上写清楚这两批各多少，别让人以为池子就是 RRF 前几个。
+  const poolBreakdown = poolBreakdownText(rerankPool);
   // 漏斗每一行表示"这一步之后剩下多少"，名称里直接写出关键参数（RRF 前几名、阈值、返回上限），
-  // 右侧列出这一步淘汰了多少、为什么。以前名称是"进入重排""通过阈值"这类动作，看不出数字是动作前还是动作后，
-  // 参数也只能悬停查看；重排没执行时还把"进入重排"记成 0，看起来像候选全被丢掉了。
+  // 右侧列出这一步淘汰了多少、为什么。
   const rerankedCount = config.reranked ? pooled : candidates.length;
   const passedCount = config.reranked ? passed : candidates.length;
-  // 右侧两列：剩下多少条、这一步去掉多少条和原因。以前写成"−38 重复""—"，减号和破折号看不出意思，
-  // 现在直接写"去掉 38 条重复"，没有去掉的写明原因（"全部通过""未超过上限"），不再用破折号。
+  // 过了相关性阈值的那批分片：漏斗里「相关性 ≥ 阈值」这一行点开看的就是它们。
+  const passedChunks = candidates
+    .filter(
+      (item) =>
+        item.status === "returned" ||
+        item.status === "beyond_limit" ||
+        item.status === "beyond_budget",
+    )
+    .sort((a, b) => (a.rerank_rank ?? 0) - (b.rerank_rank ?? 0));
   const removed = (count: number, reason: string, none: string) =>
     count > 0 ? `去掉 ${count} 个${reason}` : none;
+  const byMethodText = ["dense", "keyword", "graph"]
+    .filter((method) => hitsByMethod[method] !== undefined)
+    .map((method) => `${METHOD_LABELS[method]} ${hitsByMethod[method]}`)
+    .join(" · ");
+  // 只被图找到、按图的名次进重排的；旧记录是靠图检索名额补进来的。
+  const graphPoolCount = candidates.filter(
+    (item) => item.pool_via === "graph",
+  ).length;
+  const quotaCount = candidates.filter((item) => item.graph_quota).length;
+  const graphPoolMode = config.graph_pool_size !== undefined;
   const funnel = [
     {
-      label: "检索命中（含重复）",
+      label: "三路返回（含重复）",
       value: totalHits,
-      dropped: `${lists.length} 张排名表合计`,
-      hint: `${lists.length} 张排名表的命中总数（同一片段可被多张表命中）`,
+      dropped: byMethodText || `${lists.length} 张排名表合计`,
+      hint: `${lists.length} 张排名表的分片总数（同一分片可被多张表找到）`,
     },
     {
-      label: "去重后的片段",
+      label: "去重后的分片",
       value: candidates.length,
       dropped: removed(totalHits - candidates.length, "重复", "没有重复"),
-      hint: "按片段去重后参与 RRF 融合的候选数",
+      hint: "按分片去重后参与 RRF 融合的候选数",
     },
     config.reranked
       ? {
-          label: `交给重排（RRF 前 ${config.rerank_candidates}）`,
+          label: graphPoolMode
+            ? graphPoolCount > 0
+              ? `交给重排（RRF 前 ${config.rerank_candidates} + 只有图找到的 ${graphPoolCount}）`
+              : `交给重排（RRF 前 ${config.rerank_candidates}）`
+            : quotaCount > 0
+              ? `交给重排（RRF 前 ${config.rerank_candidates} + 图检索名额 ${quotaCount}）`
+              : `交给重排（RRF 前 ${config.rerank_candidates}）`,
+          // 这一行的数字能点开：看交给重排的是哪些分片。
+          kind: "pool",
           value: rerankedCount,
-          dropped: removed(
-            candidates.length - rerankedCount,
-            "排名靠后",
-            "全部交给重排",
-          ),
-          hint: `RRF 前 ${config.rerank_candidates} 名交给交叉编码器重新打分排序`,
+          dropped:
+            removed(
+              candidates.length - rerankedCount,
+              "排名靠后",
+              "全部交给重排",
+            ) +
+            (graphOnlyOutOfPool > 0
+              ? graphPoolMode
+                ? `（其中只有图找到、超过上限 ${config.graph_pool_size} 的 ${graphOnlyOutOfPool} 个）`
+                : `（其中只有图找到的 ${graphOnlyOutOfPool} 个）`
+              : ""),
+          hint: graphPoolMode
+            ? `其他路也找到的分片按 RRF 名次取前 ${config.rerank_candidates} 个；只被图找到的不比 RRF 名次，按图检索的名次取前 ${config.graph_pool_size} 个（这次 ${graphPoolCount} 个）。一起交给交叉编码器重新打分排序`
+            : `RRF 前 ${config.rerank_candidates} 名交给交叉编码器重新打分排序` +
+              (quotaCount > 0
+                ? `；另按图排名表的名次补进 ${quotaCount} 个图检索带回的分片（图检索名额 ${config.graph_rerank_quota}）`
+                : ""),
         }
       : {
           label: config.rerank_error ? "重排失败" : "未启用重排",
@@ -4513,13 +5099,15 @@ function RetrievalDiagnostics({
     config.reranked && config.min_score !== null
       ? {
           label: `相关性 ≥ ${formatNumber(config.min_score, 2)}`,
+          // 这一行的数字能点开：看过阈值的具体是哪些分片。
+          kind: "passed",
           value: passedCount,
           dropped: removed(
             rerankedCount - passedCount,
             "相关性不足",
             "全部通过",
           ),
-          hint: `重排相关概率低于 ${config.min_score} 的片段被过滤`,
+          hint: `重排相关概率低于 ${config.min_score} 的分片被过滤`,
         }
       : {
           label: "未做相关性过滤",
@@ -4530,140 +5118,735 @@ function RetrievalDiagnostics({
             : "没有重排分数或未设置阈值，不做相关性过滤",
         },
     {
-      label: `最终返回（上限 ${config.return_limit}）`,
+      label:
+        config.source_selection_mode === "tokens"
+          ? `最终返回（估算 token ${config.source_tokens_used ?? 0} / ${config.source_token_budget ?? 0}）`
+          : `最终返回（上限 ${config.return_limit}）`,
+      // 这一行的数字能点开：看最终交给回答模型的是哪些来源。
+      kind: "returned",
       value: returned,
-      dropped: removed(passedCount - returned, "超过上限", "未超过上限"),
-      hint: `最多返回 ${config.return_limit} 条来源`,
+      // 过了阈值的分片里，超过上限的被排除，并入父块的不单独成源，两种都不在返回的来源里。
+      dropped:
+        [
+          config.source_selection_mode === "tokens"
+            ? `${config.source_budget_skipped ?? 0} 个分片因预算不足跳过，${config.source_expansion_skipped ?? 0} 次父块扩展未放入`
+            : beyondLimit > 0
+              ? `去掉 ${beyondLimit} 个超过上限`
+              : "",
+          mergedCount > 0 ? `去掉 ${mergedCount} 个并入父块` : "",
+        ]
+          .filter(Boolean)
+          .join("，") || "没有分片被排除",
+      hint:
+        config.source_selection_mode === "tokens"
+          ? config.source_allocation_policy === "relations_first_v1"
+            ? `关系优先使用 ${config.source_graph_relation_tokens ?? 0} token，直接原文 ${config.source_direct_tokens ?? 0} token，父子扩展 ${config.source_expansion_tokens ?? 0} token；所有原文统一重排竞争余额。预算包含原文和图谱关系，不含对话与提示词。`
+            : `图保底上限 ${config.source_graph_budget_reserved ?? 0} token，实际保底 ${config.source_graph_budget_used ?? 0} token（关系 ${config.source_graph_relation_count ?? 0} 条、分片 ${config.source_graph_budget_count ?? 0} 片）；其余公共竞争，原始命中合计估算 ${config.source_child_tokens ?? 0} token，剩余预算再补父子扩展；分片不截断。预算包含原文和图谱关系，不含对话与提示词。`
+          : `最多返回 ${config.return_limit} 条来源；并入父块的分片不单独成源，也不占名额`,
     },
   ];
   const funnelMax = Math.max(1, ...funnel.map((stage) => stage.value));
-  // 多个检索词时用 Q1、Q2 标注每条召回贡献来自哪个检索词。
+  // 漏斗里的数字点开：交给重排看候选池，另外两行各自看这一批分片。
+  const openFunnelStage = (kind: string) => {
+    if (kind === "pool") setPoolOpen(true);
+    else setFunnelStage(kind);
+  };
+  // 多个检索词时用 Q1、Q2 标注每条召回贡献来自哪个检索词；图检索的两张表不按检索词分，不算进去。
   const queries: string[] = [];
-  const methods: string[] = [];
-  for (const list of lists) {
-    if (!queries.includes(list.query)) queries.push(list.query);
-    if (!methods.includes(list.method)) methods.push(list.method);
-  }
-  const methodNames = methods.map((method) => METHOD_LABELS[method] ?? method);
-  // 有权限范围时它是第 1 环，后面的召回、融合……顺延一位；旧记录没有范围，从召回开始编号。
+  for (const list of lists)
+    if (list.method !== "graph" && !queries.includes(list.query))
+      queries.push(list.query);
+  const methods = config.methods ?? [
+    ...new Set(lists.map((list) => list.method)),
+  ];
+  const textLists = lists.filter((list) => list.method !== "graph");
+  const graphLists = lists.filter((list) => list.method === "graph");
+  // 图检索那一路的关系：候选明细悬停时说明这一片是通过哪几条关系找到的。
+  const graphRelations = new Map<string, string>();
+  for (const row of [
+    ...(graph?.relation_candidates ?? []),
+    ...(graph?.entity_relations ?? []),
+    ...(graph?.relation_matches ?? []),
+  ])
+    graphRelations.set(
+      row.relation_id,
+      `${row.source} → ${row.category} → ${row.target}\n${row.description ?? ""}${row.evidence ? `\n「${row.evidence}」` : ""}`,
+    );
   const scope = data.scope;
-  const step = scope ? 1 : 0;
-  // 召回方式按类型各占一行；模型名用标签样式包起来，和普通文字区分开。
-  const recallLines: ReactNode[] = [];
-  if (methods.includes("dense"))
-    recallLines.push(
-      <small key="dense">
-        向量：
-        <StackTag kind="model" variant="embedding">
-          {embeddingModel || "向量模型"}
-        </StackTag>
-        按语义相似（embedding 服务 /v1/embeddings）
-      </small>,
-    );
-  if (methods.includes("keyword"))
-    recallLines.push(
-      <small key="keyword">
-        关键词：<StackTag kind="algo">BM25</StackTag>按字面匹配（
-        <StackTag kind="store">Milvus</StackTag>全文检索）
-      </small>,
-    );
-  // 诊断对象字段较多，先用可折叠说明解释处理链路，降低只看数字时的理解成本。
-  return (
-    <div className="diag">
-      {/* 检索过程：召回 → 融合 → 重排 → 过滤 → 返回，一环接一环写明做了什么、剩下多少。
-        以前参数是一排卡片（重排问题、RRF k、候选池……），解释藏在折叠的"这份诊断是什么"里，模型和调用方式又单独两行，
-        看不出参数在哪一步起作用；现在都写进对应的环节。 */}
-      <ol className="intent-trace diag-process">
-        {scope && (
-          <li>
-            <span className="intent-trace-mark">
-              <b>1</b>
-            </span>
-            <div>
-              <strong>权限范围</strong>：可检索 {scope.total}{" "}
-              份文档（每份只取当前版本）
-              <small>
-                {[
-                  scope.own > 0 ? `自己上传 ${scope.own} 份` : "",
-                  scope.shared > 0
-                    ? `共享给我 ${scope.shared} 份${scope.groups.length > 0 ? `（${scope.groups.join("、")}）` : ""}`
-                    : "",
-                  scope.public > 0 ? `公开 ${scope.public} 份` : "",
-                ]
-                  .filter(Boolean)
-                  .join(" · ") || "没有可检索的文档"}
-              </small>
-              {scope.documents.length > 0 && (
-                <details className="mem-fold">
-                  <summary>查看文档列表</summary>
-                  <ul className="scope-list">
-                    {scope.documents.map((item) => (
-                      <li key={item.document_id}>
-                        {item.title}
-                        <em>v{item.version}</em>
-                        <span>
-                          {item.source === "own"
-                            ? "自己上传"
-                            : item.source === "public"
-                              ? `公开 · ${item.owner}`
-                              : `共享 · ${item.owner}${item.groups.length > 0 ? ` · ${item.groups.join("、")}` : ""}`}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                  {scope.total > scope.documents.length && (
-                    <small>只列出前 {scope.documents.length} 份</small>
-                  )}
-                </details>
-              )}
-              <small>
-                范围由服务端按登录身份从 <StackTag kind="store">MySQL</StackTag>
-                查出，作为过滤条件交给 <StackTag kind="store">Milvus</StackTag>
-                的向量和关键词检索，模型和前端都改不了
-              </small>
-            </div>
-          </li>
+
+  const scopeSection = scope ? (
+    <div className="diag-part">
+      <p className="diag-part-lead">
+        <span>
+          <strong>可检索 {scope.total} 份文档</strong>（每份只取当前版本）
+        </span>
+        <small>
+          {[
+            scope.own > 0 ? `自己上传 ${scope.own} 份` : "",
+            scope.shared > 0
+              ? `共享给我 ${scope.shared} 份${scope.groups.length > 0 ? `（${scope.groups.join("、")}）` : ""}`
+              : "",
+            scope.public > 0 ? `公开 ${scope.public} 份` : "",
+          ]
+            .filter(Boolean)
+            .join(" · ") || "没有可检索的文档"}
+        </small>
+        {scope.graph_versions && (
+          <small>
+            图检索范围：
+            {scope.graph_versions.length > 0
+              ? `${scope.graph_versions.length} 份文档的生效图谱（${scope.graph_versions
+                  .map((item) => `${item.title} v${item.number}`)
+                  .join(" · ")}）`
+              : "没有建了图的文档"}
+            {scope.total > scope.graph_versions.length
+              ? `，另 ${scope.total - scope.graph_versions.length} 份没有建图`
+              : ""}
+          </small>
         )}
-        <li>
-          <span className="intent-trace-mark">
-            <b>{step + 1}</b>
+      </p>
+      {scope.documents.length > 0 && (
+        <InfoPopover
+          title={`可检索文档（${scope.documents.length} 份）`}
+          content={() => (
+            <>
+              <ul className="scope-list">
+                {scope.documents.map((item) => {
+                  const graphVersion = scope.graph_versions?.find(
+                    (version) => version.document_id === item.document_id,
+                  );
+                  return (
+                    <li key={item.document_id}>
+                      {item.title}
+                      <em>v{item.version}</em>
+                      <span>
+                        {item.source === "own"
+                          ? "自己上传"
+                          : item.source === "public"
+                            ? `公开 · ${item.owner}`
+                            : `共享 · ${item.owner}${item.groups.length > 0 ? ` · ${item.groups.join("、")}` : ""}`}
+                      </span>
+                      {scope.graph_versions && (
+                        <span className="scope-graph">
+                          {graphVersion
+                            ? `图谱 v${graphVersion.number} 生效`
+                            : "没有建图"}
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+              {scope.total > scope.documents.length && (
+                <small>只列出前 {scope.documents.length} 份</small>
+              )}
+            </>
+          )}
+        >
+          <button type="button" className="link-button button-sm">
+            查看文档列表
+          </button>
+        </InfoPopover>
+      )}
+      <small className="diag-part-note">
+        范围由服务端按登录身份从 <StackTag kind="store">MySQL</StackTag>
+        查出，作为查询条件交给向量、关键词{graph ? "、图检索三路" : "两路"}
+        ，模型和前端都改不了
+      </small>
+    </div>
+  ) : (
+    <p className="diag-part-lead">这条记录没有保存权限范围</p>
+  );
+
+  // 向量、关键词模块：每个检索词返回了几个分片、分数从第 1 名到最后一名。
+  const textModule = (method: "dense" | "keyword") => {
+    const own = textLists.filter((list) => list.method === method);
+    const limit = RECALL_LIMITS[method];
+    const time = method === "dense" ? timings.dense_ms : timings.keyword_ms;
+    return (
+      <section className={`diag-module method-${method}`} key={method}>
+        <header>
+          <i className={`diag-dot method-${method}`} />
+          <strong>{METHOD_LABELS[method]}</strong>
+          <span>
+            {hitsByMethod[method] ?? 0} 个分片
+            {time !== undefined ? ` · ${formatDuration(time)}` : ""}
           </span>
-          <div>
-            <strong>召回</strong>：{queries.length} 个检索词 ×{" "}
-            {methodNames.join(" + ")}，{lists.length} 张排名表，命中 {totalHits}{" "}
-            个 chunk（含重复）
-            {queries.map((query, index) => (
-              <small key={query} className="diag-process-query">
-                <em>Q{index + 1}</em>
-                {query}
-              </small>
+        </header>
+        <small className="diag-module-desc">
+          {method === "dense" ? (
+            <>
+              <StackTag kind="model" variant="embedding">
+                {embeddingModel || "向量模型"}
+              </StackTag>
+              按语义相似度取前 {limit} 个分片（不设相似度下限；embedding 服务
+              /v1/embeddings → <StackTag kind="store">Milvus</StackTag>
+              向量检索）
+            </>
+          ) : (
+            <>
+              <StackTag kind="algo">BM25</StackTag>
+              包含检索词中任意一个词的分片，按 BM25 分数取前 {limit} 个（
+              <StackTag kind="store">Milvus</StackTag>
+              全文检索）
+            </>
+          )}
+        </small>
+        <Table className="diag-table diag-table-compact">
+          <thead>
+            <tr>
+              <th>序号</th>
+              <th>检索词</th>
+              <th>返回分片</th>
+              <th>
+                {method === "dense" ? "相似度" : "BM25 分数"}（第 1 名 ~
+                最后一名）
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {own.map((list, index) => (
+              <tr key={list.query}>
+                <td className="num">{index + 1}</td>
+                <td title={list.query}>
+                  <em className="diag-q">Q{queries.indexOf(list.query) + 1}</em>
+                </td>
+                <td className="num">
+                  {list.hits.length} /{" "}
+                  {method === "dense" ? limit : `最多 ${limit}`}
+                </td>
+                <td className="num">
+                  {list.hits.length
+                    ? `${formatNumber(list.hits[0].raw_score, 2)} ~ ${formatNumber(list.hits[list.hits.length - 1].raw_score, 2)}`
+                    : "没有找到"}
+                </td>
+              </tr>
             ))}
-            {recallLines}
+          </tbody>
+        </Table>
+        {method === "keyword" &&
+          own.some((list) => list.hits.length < limit) && (
+            <small className="diag-module-desc">
+              不满 {limit} 个：包含这些词的分片只有这么多
+            </small>
+          )}
+      </section>
+    );
+  };
+
+  const listLabel = (list: RetrievalList) =>
+    list.method === "graph"
+      ? list.query
+      : `${METHOD_LABELS[list.method] ?? list.method} · Q${queries.indexOf(list.query) + 1} ${list.query}`;
+
+  // 标签上只放短标签（召回方式 + 检索词序号），完整的检索词写在表格上方。
+  const listTabLabel = (list: RetrievalList) =>
+    list.method === "graph"
+      ? list.query
+      : `${METHOD_LABELS[list.method] ?? list.method} · Q${queries.indexOf(list.query) + 1}`;
+
+  // 当前标签对应的那张表，以及这张表自己的分页。
+  const activeList = lists[rankIndex];
+  const activeHits = activeList?.hits ?? [];
+  const rankPageCount = Math.max(
+    1,
+    Math.ceil(activeHits.length / RANK_PAGE_SIZE),
+  );
+  const visibleRankPage = Math.min(rankPage, rankPageCount);
+  const rankStart = (visibleRankPage - 1) * RANK_PAGE_SIZE;
+  const rankEnd = Math.min(rankStart + RANK_PAGE_SIZE, activeHits.length);
+  const visibleRankHits = activeHits.slice(rankStart, rankEnd);
+  // 来源列要显示原文预览：切页或切标签后取一次当前这一页分片的原文，读过的不再读。
+  const missingChunkKey = visibleRankHits
+    .map((hit) => hit.chunk_id)
+    .filter((id) => !chunkOriginals[id])
+    .join(",");
+  useEffect(() => {
+    if (!rankOpen || !missingChunkKey) return;
+    let cancelled = false;
+    getChunkOriginals(missingChunkKey.split(","))
+      .then((result) => {
+        if (cancelled) return;
+        setChunkOriginals((previous) => {
+          const next = { ...previous };
+          for (const item of result.items) next[item.chunk_id] = item;
+          return next;
+        });
+      })
+      .catch(() => {
+        // 读不到原文就只留标题，不打断这一页的查看。
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [rankOpen, missingChunkKey]);
+
+  // 原始排名表在弹窗里看，页面上只留一个入口。
+  const rankingTables = (
+    <div className="diag-fold-head">
+      <button
+        type="button"
+        className="link-button"
+        onClick={() => setRankOpen(true)}
+      >
+        原始排名表（{lists.length} 张）
+      </button>
+      <small>
+        每个检索词 × 向量 / 关键词各一张
+        {graphLists.length ? "，图检索按实体、关系各一张" : ""}
+        ；点开看每张表的分片排名
+      </small>
+    </div>
+  );
+
+  // 点开的排名表在弹窗里看：标签栏并排放每张表，点标签切换下面的表格；
+  // 表格框高度固定，超出的行在框里滚，底部翻页。
+  // 表格颜色变量在 .diag 上，弹窗不在 .diag 下面，要自己带上。
+  const [rankMethods, setRankMethods] = useState<string[]>([
+    "keyword",
+    "dense",
+    "graph",
+  ]);
+  const rankDialog = rankOpen && activeList && (
+    <DetailDialog
+      open
+      title={`原始排名表（${lists.length} 张）`}
+      onClose={() => setRankOpen(false)}
+      size="table"
+    >
+      <div className="diag">
+        <RetrievalMethodFilter
+          selected={rankMethods}
+          onChange={(methods) => {
+            setRankMethods(methods);
+            const index = lists.findIndex((list) =>
+              methods.includes(list.method),
+            );
+            if (index >= 0) setRankIndex(index);
+          }}
+        />
+        {!rankMethods.length && <p>没有符合筛选条件的排名表</p>}
+        <div hidden={!rankMethods.length}>
+          <div
+            className="grt-chips rank-tabs"
+            role="tablist"
+            aria-label="原始排名表"
+          >
+            {lists.map((list, index) =>
+              rankMethods.includes(list.method) ? (
+                <button
+                  key={`${list.method}-${index}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={index === rankIndex}
+                  className={`grt-chip${index === rankIndex ? " is-active" : ""}`}
+                  onClick={() => setRankIndex(index)}
+                >
+                  <i className={`diag-dot method-${list.method}`} />
+                  {listTabLabel(list)} <em>{list.hits.length}</em>
+                </button>
+              ) : null,
+            )}
           </div>
-        </li>
-        <li>
-          <span className="intent-trace-mark">
-            <b>{step + 2}</b>
-          </span>
-          <div>
-            <strong>融合</strong>：去重后 {candidates.length} 个 chunk，用{" "}
-            <StackTag kind="algo">RRF</StackTag>（k={config.rrf_k}
-            ）按名次合并排序
+          <p className="diag-part-lead">
+            <strong>{listLabel(activeList)}</strong>
+            <small>按这一路召回的名次排列</small>
+          </p>
+          <Table
+            className="diag-table diag-table-compact"
+            containerProps={{ className: "diag-table-wrap" }}
+            stickyHeader
+            empty={activeHits.length === 0}
+            emptyContent="没有找到分片"
+            columnCount={5}
+          >
+            <thead>
+              <tr>
+                <th>名次</th>
+                <th>来源</th>
+                <th>分片</th>
+                <th>{RAW_SCORE_LABELS[activeList.method] ?? "原始分"}</th>
+                <th title={`1 / (${config.rrf_k} + 名次)`}>RRF 贡献</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRankHits.map((hit) => {
+                const body = chunkOriginals[hit.chunk_id]?.content;
+                return (
+                  <tr key={hit.rank}>
+                    <td className="num">{hit.rank}</td>
+                    {/* 来源是这一片出自哪份文档；分片列是这一片的原文。 */}
+                    <td className="rank-source">
+                      <span className="rank-source-title" title={hit.title}>
+                        {hit.title}
+                      </span>
+                    </td>
+                    <td className="rank-chunk">
+                      <span className="rank-chunk-body">
+                        {body ? (
+                          <span
+                            className="diag-preview"
+                            title={body.slice(0, 160)}
+                          >
+                            {body}
+                          </span>
+                        ) : (
+                          <SkeletonBlock className="rank-preview-skeleton" />
+                        )}
+                        <button
+                          type="button"
+                          className="link-button button-sm"
+                          onClick={() => setChunkOpen(hit.chunk_id)}
+                        >
+                          更多
+                        </button>
+                      </span>
+                      {hit.relation_ids?.length ? (
+                        <small className="diag-sub">
+                          通过关系：
+                          {hit.relation_ids
+                            .map((id) => graphRelations.get(id) ?? id)
+                            .join("；")}
+                        </small>
+                      ) : null}
+                    </td>
+                    <td className="num">{formatNumber(hit.raw_score)}</td>
+                    <td className="num">
+                      <RrfTerm
+                        method={activeList.method}
+                        rank={hit.rank}
+                        k={config.rrf_k}
+                      />
+                      <small className="diag-sub">
+                        {formatNumber(hit.rrf, 5)}
+                      </small>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </Table>
+          <div className="diag-pagination" aria-label="排名表分页">
+            <span aria-live="polite">
+              {activeHits.length === 0
+                ? "这张表没有找到分片"
+                : `显示第 ${rankStart + 1}–${rankEnd} 名，共 ${activeHits.length} 个分片`}
+            </span>
+            <div className="diag-pagination-controls">
+              <button
+                type="button"
+                disabled={visibleRankPage === 1}
+                onClick={() => setRankPage((page) => Math.max(1, page - 1))}
+              >
+                上一页
+              </button>
+              <span>
+                第 {visibleRankPage} / {rankPageCount} 页
+              </span>
+              <button
+                type="button"
+                disabled={visibleRankPage === rankPageCount}
+                onClick={() =>
+                  setRankPage((page) => Math.min(rankPageCount, page + 1))
+                }
+              >
+                下一页
+              </button>
+            </div>
+          </div>
+          {/* 「更多」打开的原文：弹窗里再打开的内容是伴随浮窗，贴着「更多」出现。 */}
+          {chunkOpen && (
+            <ChunkOriginalPanel
+              chunkId={chunkOpen}
+              chunk={chunkOriginals[chunkOpen]}
+              onClose={() => setChunkOpen(null)}
+            />
+          )}
+        </div>
+      </div>
+    </DetailDialog>
+  );
+
+  // 交给重排的候选池：每片一行，写清楚是哪几路找到的、在各路的排名表里第几。
+  // 分数用 RRF 分（这一步的得分），原文按钮点开是伴随浮窗。
+  const poolDialog = poolOpen && rerankPool.length > 0 && (
+    <CandidateChunksDialog
+      open
+      title={`交给重排的 ${rerankPool.length} 个分片`}
+      lead={`${poolBreakdown}，共 ${rerankPool.length} 个分片`}
+      leadNote="按 RRF 得分排；每行写清楚这片是哪几路找到的、在各路的排名表里第几"
+      candidates={rerankPool}
+      queries={queries}
+      relations={graphRelations}
+      scoreKind="rrf"
+      splitQuota
+      rrfK={config.rrf_k}
+      fusion={config.fusion}
+      onClose={() => setPoolOpen(false)}
+    />
+  );
+
+  const comboLabel = (key: string) =>
+    key
+      .split("+")
+      .map((method) => METHOD_LABELS[method] ?? method)
+      .join(" + ");
+  // 组合的名字：表格里那一列和弹窗标题都用它。
+  const comboName = (key: string) =>
+    key.split("+").length === 3
+      ? "三路都找到"
+      : key.includes("+")
+        ? comboLabel(key)
+        : `只有${comboLabel(key)}`;
+
+  // 「被哪几路找到」里点分片数量：这一组具体是哪些分片，每片在各路的排名表里第几。
+  const comboGroup = comboOpen ? (combos.get(comboOpen) ?? []) : [];
+  const comboByGraphRank =
+    comboOpen === "graph" && graphPoolMode && graphOnly > 0;
+  const comboDialog = comboOpen && comboGroup.length > 0 && (
+    <CandidateChunksDialog
+      // 换一组就重新翻到第一页。
+      key={comboOpen}
+      open
+      title={`${comboName(comboOpen)}：${comboGroup.length} 个分片`}
+      lead={`这 ${comboGroup.length} 个分片被${comboLabel(comboOpen)}找到`}
+      leadNote={
+        comboByGraphRank
+          ? "按图检索的名次排（不比 RRF 名次），前 " +
+            config.graph_pool_size +
+            " 个进入重排；点「原文」看分片正文"
+          : "按 RRF 得分排；每行写清楚这片是在哪张排名表里第几名，点「原文」看分片正文"
+      }
+      candidates={[...comboGroup].sort((a, b) =>
+        comboByGraphRank
+          ? (a.graph_only_rank ?? 0) - (b.graph_only_rank ?? 0)
+          : (a.rrf_rank ?? 0) - (b.rrf_rank ?? 0),
+      )}
+      queries={queries}
+      relations={graphRelations}
+      scoreKind="rrf"
+      rrfK={config.rrf_k}
+      fusion={config.fusion}
+      onClose={() => setComboOpen(null)}
+    />
+  );
+
+  const comboOrder = [
+    "dense+keyword+graph",
+    "dense+keyword",
+    "dense+graph",
+    "keyword+graph",
+    "dense",
+    "keyword",
+    "graph",
+  ];
+  // 新记录里只被图找到的分片不参加 RRF 排名，单独一条线显示，融合的组合表里不再列「只有图检索」。
+  const splitGraphOnly = graphPoolMode && graphOnly > 0;
+  const fusionCombos = comboOrder.filter(
+    (key) => combos.has(key) && !(splitGraphOnly && key === "graph"),
+  );
+  const recallSection = (
+    <div className="diag-part">
+      <p className="diag-part-lead">
+        <strong>
+          {queries.length} 个检索词 ×{" "}
+          {textLists.length > 0
+            ? methods
+                .filter((method) => method !== "graph")
+                .map((method) => METHOD_LABELS[method] ?? method)
+                .join(" + ")
+            : "—"}{" "}
+          = {textLists.length} 张排名表
+          {graph
+            ? `，图检索 ${graphLists.length} 张（实体 / 关系）`
+            : ""}，共 {lists.length} 张
+        </strong>
+        <small>
+          {graph ? "三" : "两"}路共返回 {totalHits}{" "}
+          个分片（同一分片被多路或多个检索词找到时重复计数），去重后{" "}
+          {candidates.length} 个
+        </small>
+        {queries.map((query, index) => (
+          <small key={query} className="diag-process-query">
+            <em>Q{index + 1}</em>
+            {query}
+          </small>
+        ))}
+      </p>
+      <div className="diag-modules">
+        {methods.includes("dense") && textModule("dense")}
+        {methods.includes("keyword") && textModule("keyword")}
+        {graph && (
+          <section className="diag-module diag-module-wide method-graph">
+            <header>
+              <i className="diag-dot method-graph" />
+              <strong>图检索</strong>
+              <span>
+                {graph.status === "ok"
+                  ? `${graph.counts?.chunks ?? 0} 个分片`
+                  : graph.status === "skipped"
+                    ? "没有走图检索"
+                    : "失败"}
+                {timings.graph_ms
+                  ? ` · ${formatDuration(timings.graph_ms)}`
+                  : ""}
+              </span>
+            </header>
+            <small className="diag-module-desc">
+              提关键词 →{" "}
+              <StackTag kind="model" variant="embedding">
+                {embeddingModel || "向量模型"}
+              </StackTag>
+              按名字、关系描述找相似（<StackTag kind="store">Milvus</StackTag>
+              ）→ 取出处分片（一跳）
+              {graph.scope.length > 0
+                ? `；范围：${graph.scope.map((item) => `${item.title} v${item.number}`).join(" · ")}`
+                : ""}
+            </small>
+            <GraphRetrievalTrace graph={graph} />
+          </section>
+        )}
+      </div>
+      {/* 召回之后分三条线（app/tools/search.py）：
+          ① RRF 融合：向量、关键词找到的分片按名次合并，图也找到的加上图的名次分，前 rerank_candidates 个进重排；
+          ② 只被图找到的分片：不比 RRF 名次，按图检索的名次取前 graph_pool_size 个直接进重排；
+          ③ 图谱关系：不进融合，也不进分片重排，按预算直接放进回答上下文。
+          旧记录（图检索名额 graph_quota）里图独有分片也比 RRF 名次，仍按一张表显示。 */}
+      <div className="diag-fusion">
+        <p className="diag-part-lead">
+          <strong>
+            融合：<StackTag kind="algo">RRF</StackTag>（k={config.rrf_k}
+            ）按名次合并，
+            {splitGraphOnly
+              ? `${candidates.length - graphOnly} 个分片（向量、关键词找到的；图也找到的加上图的名次分），前 ${config.rerank_candidates} 个进入重排`
+              : `${candidates.length} 个分片，前 ${config.rerank_candidates} 个进入重排`}
+          </strong>
+          <small>
+            得分 = Σ 1 / ({config.rrf_k} +
+            名次)，只看名次不看原始分数；被多路找到的分片更靠前
+          </small>
+        </p>
+        {fusionCombos.length > 0 && (
+          <Table className="diag-table diag-table-compact diag-combo">
+            <thead>
+              <tr>
+                <th>序号</th>
+                <th>被哪几路找到</th>
+                <th title="点分片数量，看这一组具体是哪些分片">分片</th>
+              </tr>
+            </thead>
+            <tbody>
+              {fusionCombos.map((key, index) => {
+                const group = combos.get(key) ?? [];
+                return (
+                  <tr
+                    key={key}
+                    className={key === "graph" ? "is-graph-only" : ""}
+                  >
+                    <td className="num">{index + 1}</td>
+                    <td>{comboName(key)}</td>
+                    <td className="num">
+                      <button
+                        type="button"
+                        className="link-button"
+                        title={`点开看这 ${group.length} 个分片`}
+                        onClick={() => setComboOpen(key)}
+                      >
+                        {group.length}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </Table>
+        )}
+        {rankingTables}
+      </div>
+      {splitGraphOnly && (
+        <div className="diag-fusion">
+          <p className="diag-part-lead">
+            <strong>
+              只被图找到的：{graphOnly} 个分片不比 RRF 名次，按图检索的名次取前{" "}
+              {config.graph_pool_size} 个直接进入重排
+            </strong>
             <small>
-              得分 = Σ 1 / ({config.rrf_k} +
-              名次)，只看名次不看原始分数；被多路命中的片段更靠前
+              图只有一张排名表，向量、关键词每个检索词各一张，只被图找到的分片
+              RRF 分天生低，所以单独走这条线
+            </small>
+          </p>
+          <div className="diag-fold-head">
+            <button
+              type="button"
+              className="link-button"
+              onClick={() => setComboOpen("graph")}
+            >
+              只被图找到的 {graphOnly} 个
+            </button>
+            <small>
+              进入重排 {graphPoolCount} 个
+              {graphOnlyOutOfPool > 0
+                ? `，超过上限没进 ${graphOnlyOutOfPool} 个`
+                : ""}
+              ；点开看按图名次的顺序
             </small>
           </div>
-        </li>
+        </div>
+      )}
+      {/* 两条线在这里汇合：交给重排的候选池。没做重排就没有这一批，入口不显示。 */}
+      {config.reranked && rerankPool.length > 0 && (
+        <div className="diag-fold-head">
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => setPoolOpen(true)}
+          >
+            交给重排的 {rerankPool.length} 个
+          </button>
+          <small>{poolBreakdown}；点开看每片是哪几路找到的、各路排第几</small>
+        </div>
+      )}
+      {contextRelations && contextRelations.items.length > 0 && (
+        <div className="diag-fusion">
+          <p className="diag-part-lead">
+            <strong>
+              图谱关系：不进融合，也不进分片重排，直接放入回答上下文
+            </strong>
+          </p>
+          <div className="diag-fold-head">
+            <button
+              type="button"
+              className="link-button"
+              onClick={() => setRelationsOpen(true)}
+            >
+              图检索留下的关系 {contextRelations.items.length} 条
+            </button>
+            <small>
+              {contextRelations.reason
+                ? `用来找分片；没有放进上下文：${contextRelations.reason}`
+                : `按预算放入上下文 ${placedRelations} 条，额度不够没放 ${contextRelations.items.length - placedRelations} 条。点开看每条关系`}
+            </small>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const rerankSection = (
+    <div className="diag-part">
+      <ol className="intent-trace diag-process">
         <li>
           <span className="intent-trace-mark">
-            <b>{step + 3}</b>
+            <b>1</b>
           </span>
           <div>
             <strong>重排</strong>：
             {config.reranked ? (
               <>
-                RRF 前 {config.rerank_candidates} 个 chunk 交给{" "}
+                RRF 前 {config.rerank_candidates} 个分片
+                {graphPoolCount > 0 &&
+                  ` + 只被图找到的 ${graphPoolCount} 个（按图检索名次取，上限 ${config.graph_pool_size}）`}
+                交给{" "}
                 <StackTag kind="model" variant="rerank">
                   {config.rerank_model}
                 </StackTag>
@@ -4676,7 +5859,7 @@ function RetrievalDiagnostics({
             )}
             {config.reranked && (
               <small>
-                交叉编码器把问题和片段放在一起逐条打分，重排概率 =
+                交叉编码器把问题和分片放在一起逐条打分，重排概率 =
                 sigmoid(logit)，最终顺序只看重排概率；调用 embedding 服务
                 /v1/rerank
               </small>
@@ -4685,14 +5868,14 @@ function RetrievalDiagnostics({
         </li>
         <li>
           <span className="intent-trace-mark">
-            <b>{step + 4}</b>
+            <b>2</b>
           </span>
           <div>
             <strong>过滤</strong>：
             {config.reranked && config.min_score !== null ? (
               <>
                 重排概率低于 {formatNumber(config.min_score, 2)} 的去掉{" "}
-                {filtered} 个，剩 {passed} 个 chunk
+                {filtered} 个，剩 {passed} 个分片
               </>
             ) : (
               <>
@@ -4707,18 +5890,46 @@ function RetrievalDiagnostics({
         </li>
         <li>
           <span className="intent-trace-mark">
-            <b>{step + 5}</b>
+            <b>3</b>
           </span>
           <div>
-            <strong>返回</strong>：上限 {config.return_limit} 个，返回{" "}
-            {returned} 个 chunk，交给回答模型
-            {passedCount - returned > 0 && (
-              <small>另有 {passedCount - returned} 个超过上限，没有返回</small>
+            <strong>返回</strong>：上限 {config.return_limit} 条来源，返回{" "}
+            {returned} 条来源，交给回答模型
+            {beyondLimit > 0 && (
+              <small>另有 {beyondLimit} 个超过上限，没有返回</small>
+            )}
+            {mergedCount > 0 && (
+              <small>另有 {mergedCount} 个并入父块，不单独成源</small>
             )}
           </div>
         </li>
       </ol>
       <div className="diag-section-title">检索漏斗</div>
+      {config.source_selection_mode === "tokens" &&
+        config.source_allocation_policy === "relations_first_v1" && (
+          <p className="diag-contrib-hint">
+            资料预算 {config.source_tokens_used ?? 0} /{" "}
+            {config.source_token_budget ?? 0} token： 图谱关系{" "}
+            {config.source_graph_relation_count ?? 0} 条、
+            {config.source_graph_relation_tokens ?? 0} token； 直接原文{" "}
+            {config.source_direct_tokens ?? 0} token；父子扩展{" "}
+            {config.source_expansion_tokens ?? 0} token。
+            关系优先交付，原文按统一重排结果选择，扩展使用余额。
+          </p>
+        )}
+      {config.source_selection_mode === "tokens" &&
+        !config.source_allocation_policy && (
+          <p className="diag-contrib-hint">
+            图保底 {Math.round((config.source_graph_budget_ratio ?? 0) * 100)}
+            %： 上限 {config.source_graph_budget_reserved ??
+              0} token，实际使用 {config.source_graph_budget_used ?? 0} token（
+            图谱关系 {config.source_graph_relation_count ?? 0} 条、共{" "}
+            {config.source_graph_relation_tokens ?? 0} token；只有图找到的分片{" "}
+            {config.source_graph_budget_count ?? 0} 片）。
+            先放关系，剩下的给只有图检索找到的分片；未用完的份额归还公共预算。
+            {!config.reranked && "本次重排未成功，未启用图保底。"}
+          </p>
+        )}
       <div className="diag-funnel">
         <div className="diag-funnel-row diag-funnel-head">
           <span>阶段</span>
@@ -4736,7 +5947,20 @@ function RetrievalDiagnostics({
                 style={{ width: `${(stage.value / funnelMax) * 100}%` }}
               />
             </div>
-            <strong>{stage.value} 个</strong>
+            <strong>
+              {stage.kind ? (
+                <button
+                  type="button"
+                  className="link-button"
+                  title={stage.hint}
+                  onClick={() => openFunnelStage(stage.kind)}
+                >
+                  {stage.value} 个
+                </button>
+              ) : (
+                `${stage.value} 个`
+              )}
+            </strong>
             <small
               className={`diag-funnel-dropped ${stage.dropped.startsWith("去掉") ? "is-removed" : ""}`}
             >
@@ -4745,12 +5969,664 @@ function RetrievalDiagnostics({
           </div>
         ))}
       </div>
-      {/* 候选明细和原始排名表只在排查时看，默认折叠。 */}
-      <details className="diag-fold">
-        <summary>
+      {/* 候选明细在弹窗里看，页面上只留一个入口。 */}
+      <div className="diag-fold-head">
+        <button
+          type="button"
+          className="link-button"
+          onClick={() => setCandidatesOpen(true)}
+        >
           查看候选明细（{candidates.length} 个）
-          <small>按最终处理顺序排列；悬停查看说明</small>
-        </summary>
+        </button>
+        <small>
+          按最终处理顺序排列；悬停查看说明
+          {graphOnly > 0 ? `；只有图找到的 ${graphOnly} 个` : ""}
+        </small>
+      </div>
+      {/* 最终过滤后留下的分片：和候选明细一样的内容，只是只列真正返回的那几个。 */}
+      {returned > 0 && (
+        <div className="diag-fold-head">
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => setReturnedOpen(true)}
+          >
+            查看最终返回（{returned} 个）
+          </button>
+          <small>
+            最终交给回答模型的分片；点开看每片从哪几路找到、分数多少
+          </small>
+        </div>
+      )}
+    </div>
+  );
+
+  // 弹窗统一放在最后渲染：三个步骤分开显示时，入口在各自步骤里，弹窗本身不依赖当前步骤，
+  // 不然从「重排」那步点「交给重排」会开了个没内容的窗。
+  const dialogs = (
+    <>
+      {rankDialog}
+      {poolDialog}
+      {relationsOpen && contextRelations && (
+        <DetailDialog
+          open
+          title={`图检索留下的 ${contextRelations.items.length} 条关系`}
+          onClose={() => setRelationsOpen(false)}
+          size="table"
+        >
+          <ContextRelationTable
+            items={contextRelations.items}
+            reason={contextRelations.reason}
+          />
+        </DetailDialog>
+      )}
+      {comboDialog}
+      {candidatesOpen && (
+        <CandidateDetailDialog
+          open
+          title={`候选明细（${candidates.length} 个）`}
+          candidates={candidates}
+          minScore={config.min_score}
+          queries={queries}
+          relations={graphRelations}
+          showGraph={Boolean(graph)}
+          resetKey={config.rerank_query}
+          rrfK={config.rrf_k}
+          fusion={config.fusion}
+          onClose={() => setCandidatesOpen(false)}
+        />
+      )}
+      {returnedOpen && (
+        <CandidateDetailDialog
+          open
+          title={`最终返回（${returned} 个）`}
+          candidates={returnedChunks}
+          minScore={config.min_score}
+          queries={queries}
+          relations={graphRelations}
+          showGraph={Boolean(graph)}
+          resetKey={config.rerank_query}
+          rrfK={config.rrf_k}
+          fusion={config.fusion}
+          onClose={() => setReturnedOpen(false)}
+        />
+      )}
+      {/* 漏斗里「相关性 ≥ 阈值」这一行点开：过了阈值的具体是哪些分片。 */}
+      {funnelStage === "passed" && passedChunks.length > 0 && (
+        <CandidateChunksDialog
+          key="passed"
+          open
+          title={`过了相关性阈值的 ${passedChunks.length} 个分片`}
+          lead={`重排分不低于 ${formatNumber(config.min_score, 2)} 的 ${passedChunks.length} 个分片`}
+          leadNote={`其中 ${beyondLimit} 个超过上限没有返回${
+            mergedCount > 0 ? `，${mergedCount} 个并入父块` : ""
+          }，${returned} 条成了来源；按重排概率排，点「原文」看分片正文`}
+          candidates={passedChunks}
+          queries={queries}
+          relations={graphRelations}
+          scoreKind="rerank"
+          rrfK={config.rrf_k}
+          fusion={config.fusion}
+          onClose={() => setFunnelStage(null)}
+        />
+      )}
+      {/* 漏斗里「最终返回」这一行点开：交给回答模型的具体是哪些来源。 */}
+      {funnelStage === "returned" && returnedChunks.length > 0 && (
+        <CandidateChunksDialog
+          key="returned"
+          open
+          title={`最终返回的 ${returnedChunks.length} 条来源`}
+          lead={`交给回答模型的 ${returnedChunks.length} 条来源`}
+          leadNote="按重排概率排；并入父块的分片不单独成源，点「原文」看分片正文"
+          candidates={returnedChunks}
+          queries={queries}
+          relations={graphRelations}
+          scoreKind="rerank"
+          rrfK={config.rrf_k}
+          fusion={config.fusion}
+          onClose={() => setFunnelStage(null)}
+        />
+      )}
+    </>
+  );
+
+  if (part === "scope")
+    return (
+      <div className="diag">
+        {scopeSection}
+        {dialogs}
+      </div>
+    );
+  if (part === "recall")
+    return (
+      <div className="diag">
+        {recallSection}
+        {dialogs}
+      </div>
+    );
+  if (part === "rerank")
+    return (
+      <div className="diag">
+        {rerankSection}
+        {dialogs}
+      </div>
+    );
+  return (
+    <div className="diag">
+      {scope && (
+        <>
+          <div className="diag-part-title">
+            权限范围
+            {timings.scope_ms !== undefined && (
+              <small>{formatDuration(timings.scope_ms)}</small>
+            )}
+          </div>
+          {scopeSection}
+        </>
+      )}
+      <div className="diag-part-title">
+        混合检索
+        {timings.recall_ms !== undefined && (
+          <small>{formatDuration(timings.recall_ms)}</small>
+        )}
+      </div>
+      {recallSection}
+      <div className="diag-part-title">
+        重排与过滤
+        {timings.rerank_ms !== undefined && (
+          <small>{formatDuration(timings.rerank_ms)}</small>
+        )}
+      </div>
+      {rerankSection}
+      {dialogs}
+    </div>
+  );
+}
+
+// 候选池：进池的分片（status 不是 not_in_pool），按 RRF 名次排。
+// 后端把候选按去向排的，这里要按 RRF 名次重排。
+function poolCandidates(data: RetrievalDiagnosticsData) {
+  return (data.candidates ?? [])
+    .filter((item) => item.status !== "not_in_pool")
+    .sort((a, b) => a.rrf_rank - b.rrf_rank);
+}
+
+// 一条来源可能包含多片（父子分块扩展）：第一片是来源本身，相邻的命中并进来共用同一个来源编号。
+// 后端给并进来的片标了 merged（app/tools/search.py 里 build_diagnostics）；旧记录没有这个标记，按同来源的顺序判断。
+// owners 是每条来源一行（来源编号去重后的代表片），merged 是并进来的那些片。
+function splitReturned(candidates: RetrievalCandidate[]) {
+  const groups = new Map<string, RetrievalCandidate[]>();
+  for (const item of candidates) {
+    if (item.status !== "returned" || !item.source_id) continue;
+    const list = groups.get(item.source_id);
+    if (list) list.push(item);
+    else groups.set(item.source_id, [item]);
+  }
+  const owners: RetrievalCandidate[] = [];
+  const merged = new Set<string>();
+  for (const list of groups.values()) {
+    owners.push(list[0]);
+    for (const item of list) {
+      if (item.merged || item !== list[0]) merged.add(item.chunk_id);
+    }
+  }
+  return { owners, merged };
+}
+
+// 最终交给回答模型的分片：一条来源一行，按重排名次排。
+function returnedCandidates(data: RetrievalDiagnosticsData) {
+  return splitReturned(data.candidates ?? []).owners.sort(
+    (a, b) => (a.rerank_rank ?? 0) - (b.rerank_rank ?? 0),
+  );
+}
+
+// 候选池两批各多少：按 RRF 名次进的，和只被图找到、按图的名次进的（旧记录：靠图检索名额补进来的）。
+function poolBreakdownText(pool: RetrievalCandidate[]) {
+  const graph = pool.filter((item) => item.pool_via === "graph").length;
+  const quota = pool.filter((item) => item.graph_quota).length;
+  const rrf = pool.length - graph - quota;
+  if (graph) return `RRF 前 ${rrf} 个 + 只有图找到的 ${graph} 个`;
+  return quota
+    ? `RRF 前 ${rrf} 个 + 图检索名额 ${quota} 个`
+    : `RRF 前 ${rrf} 个`;
+}
+
+// 不是按 RRF 名次进重排的：只被图找到、按图名次进的，或旧记录里靠图检索名额补进来的。
+function enteredByGraph(item: RetrievalCandidate) {
+  return item.pool_via === "graph" || Boolean(item.graph_quota);
+}
+
+// 文本检索的检索词（按出现顺序）：多个检索词时用 Q1、Q2 标注每条召回贡献来自哪个。
+// 图检索的两张表不按检索词分，不算进去。
+function textQueries(data: RetrievalDiagnosticsData) {
+  const queries: string[] = [];
+  for (const list of data.lists ?? [])
+    if (list.method !== "graph" && !queries.includes(list.query))
+      queries.push(list.query);
+  return queries;
+}
+
+// 一组候选分片的弹窗：分片、分数、各路名次、原文。
+// 「交给重排的候选池」和「最终返回给回答模型的分片」两处共用。
+// scoreKind 决定分数列写什么：rrf 是融合得分，rerank 是重排概率。
+// splitQuota 把「靠图检索名额补进来的」那几片单独分段，和候选池里一样。
+function RetrievalMethodFilter({
+  selected,
+  onChange,
+}: {
+  selected: string[];
+  onChange: (methods: string[]) => void;
+}) {
+  return (
+    <div className="diag-method-filters" role="group" aria-label="筛选召回方式">
+      {["keyword", "dense", "graph"].map((method) => (
+        <button
+          key={method}
+          type="button"
+          className={`secondary-button button-sm method-${method}`}
+          aria-pressed={selected.includes(method)}
+          onClick={() =>
+            onChange(
+              selected.includes(method)
+                ? selected.filter((value) => value !== method)
+                : [...selected, method],
+            )
+          }
+        >
+          {selected.includes(method) ? "✓ " : ""}
+          {METHOD_LABELS[method]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function CandidateChunksDialog({
+  open,
+  title,
+  lead,
+  leadNote,
+  candidates,
+  queries,
+  relations,
+  scoreKind = "rrf",
+  splitQuota = false,
+  rrfK = 60,
+  fusion,
+  onClose,
+}: {
+  open: boolean;
+  title: string;
+  lead: ReactNode;
+  leadNote?: ReactNode;
+  candidates: RetrievalCandidate[];
+  queries: string[];
+  relations?: Map<string, string>;
+  scoreKind?: "rrf" | "rerank";
+  splitQuota?: boolean;
+  // RRF 的常数和融合方式：算式要按这次实际用的参数写出来。
+  rrfK?: number;
+  fusion?: string;
+  onClose: () => void;
+}) {
+  const [chunkOpen, setChunkOpen] = useState<string | null>(null);
+  // 分片多的时候翻页看，一页六条，和候选明细一样。
+  const [page, setPage] = useState(1);
+  const [selectedMethods, setSelectedMethods] = useState<string[]>([
+    "keyword",
+    "dense",
+    "graph",
+  ]);
+  const filteredCandidates = candidates.filter((item) =>
+    item.retrieval_methods.some((method) => selectedMethods.includes(method)),
+  );
+  const quota = splitQuota ? filteredCandidates.filter(enteredByGraph) : [];
+  const rest = splitQuota
+    ? filteredCandidates.filter((item) => !enteredByGraph(item))
+    : filteredCandidates;
+  const graphOrdered = quota.some((item) => item.pool_via === "graph");
+  // 每一行是一篇分片，或「图检索名额补进来的」那一段的分隔行；翻页按行翻。
+  type Entry =
+    | { kind: "chunk"; item: RetrievalCandidate }
+    | { kind: "group"; count: number };
+  const entries: Entry[] = [];
+  for (const item of rest) entries.push({ kind: "chunk", item });
+  if (quota.length > 0) {
+    entries.push({ kind: "group", count: quota.length });
+    for (const item of quota) entries.push({ kind: "chunk", item });
+  }
+  const pageCount = Math.max(
+    1,
+    Math.ceil(entries.length / DIAGNOSTICS_PAGE_SIZE),
+  );
+  const visiblePage = Math.min(page, pageCount);
+  const pageStart = (visiblePage - 1) * DIAGNOSTICS_PAGE_SIZE;
+  const visible = entries.slice(pageStart, pageStart + DIAGNOSTICS_PAGE_SIZE);
+  // 「图检索名额补进来的」那行分隔不算一条分片，翻页显示的条数要把它排除。
+  const groupIndex = quota.length > 0 ? rest.length : -1;
+  const firstChunk =
+    groupIndex >= 0 && groupIndex < pageStart ? pageStart - 1 : pageStart;
+  const chunkRows = visible.filter((entry) => entry.kind === "chunk").length;
+  // 分片正文：候选里带的 preview 是「上下文说明 + 正文」拼起来的，看不出这一片到底写了什么。
+  // 原文接口返回的就是这一片自己的正文，按当前页取一次，读过的不再取。
+  const [originals, setOriginals] = useState<Record<string, ChunkOriginal>>({});
+  const missingOriginals = visible
+    .filter((entry) => entry.kind === "chunk")
+    .map((entry) => (entry.kind === "chunk" ? entry.item.chunk_id : ""))
+    .filter((id) => id && !originals[id])
+    .join(",");
+  useEffect(() => {
+    if (!missingOriginals) return;
+    let cancelled = false;
+    getChunkOriginals(missingOriginals.split(","))
+      .then((result) => {
+        if (cancelled) return;
+        setOriginals((previous) => {
+          const next = { ...previous };
+          for (const item of result.items) next[item.chunk_id] = item;
+          return next;
+        });
+      })
+      .catch(() => {
+        // 读不到正文就退回候选里带的预览，不打断这一页的查看。
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [missingOriginals]);
+  const row = (item: RetrievalCandidate, serial: number) => {
+    const body = originals[item.chunk_id]?.content;
+    return (
+      <tr key={item.chunk_id}>
+        <td className="num">{serial}</td>
+        {/* 分片：这一片自己的正文，正文没取到时先占位。 */}
+        <td className="diag-snippet">
+          <span className="diag-snippet-body">
+            {body === undefined ? (
+              <LoadingSkeleton
+                label="正在读取分片正文"
+                className="diag-body-loading"
+              >
+                <SkeletonBlock className="skeleton-line" />
+              </LoadingSkeleton>
+            ) : (
+              <span className="diag-preview" title={body}>
+                {body}
+              </span>
+            )}
+            <button
+              type="button"
+              className="link-button button-sm"
+              onClick={() => setChunkOpen(item.chunk_id)}
+            >
+              原文
+            </button>
+          </span>
+          {item.graph_quota && (
+            <span
+              className="diag-graph-only"
+              title="RRF 名次不够进入重排，靠图检索名额补进来的"
+            >
+              图检索名额
+            </span>
+          )}
+          {item.pool_via === "graph" && (
+            <span
+              className="diag-graph-only"
+              title="只被图找到，不比 RRF 名次，按图检索的名次进重排"
+            >
+              按图名次 {item.graph_only_rank}
+            </span>
+          )}
+        </td>
+        {relations && (
+          <td className="diag-relations">
+            {(item.graph_relation_ids ?? []).length > 0 ? (
+              <div className="diag-relation-list">
+                {item.graph_relation_ids!.map((id) => {
+                  const text =
+                    relations.get(id) ?? "此条历史记录未保存关系详情";
+                  // 关系文本第一行是「起点 → 类型 → 终点」，后面是描述和原文引用，各占一行。
+                  const [head, ...rest] = text.split("\n");
+                  return (
+                    <div className="diag-relation" key={id}>
+                      <span className="diag-relation-head">{head}</span>
+                      {rest.map((line, index) => (
+                        <span className="diag-relation-line" key={index}>
+                          {line}
+                        </span>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : item.retrieval_methods.includes("graph") ? (
+              "此条历史记录未保存关系关联"
+            ) : (
+              "—"
+            )}
+          </td>
+        )}
+        <td className="num">
+          {scoreKind === "rerank" ? (
+            <>
+              {formatNumber(item.rerank_probability, 3)}
+              {item.rerank_rank !== null ? (
+                <small className="diag-sub">第 {item.rerank_rank} 名</small>
+              ) : null}
+            </>
+          ) : (
+            <>
+              {formatNumber(item.rrf_score, 5)}
+              <small className="diag-sub">第 {item.rrf_rank} 名</small>
+              <RrfFormula
+                contributions={item.contributions}
+                k={rrfK}
+                fusion={fusion}
+              />
+            </>
+          )}
+        </td>
+        <td>
+          <div className="diag-contribs">
+            {item.contributions.map((contribution, index) => (
+              <span
+                className={`diag-contrib method-${contribution.method}`}
+                key={index}
+                title={`${contribution.query}\n${METHOD_LABELS[contribution.method] ?? contribution.method}第 ${contribution.rank} 名，${RAW_SCORE_LABELS[contribution.method] ?? "原始分"} ${formatNumber(contribution.raw_score)}\nRRF 贡献 1/(${rrfK}+${contribution.rank}) = ${formatNumber(contribution.rrf, 5)}`}
+              >
+                <i className={`diag-dot method-${contribution.method}`} />
+                {METHOD_LABELS[contribution.method] ?? contribution.method}
+                {contribution.method === "graph" ? (
+                  <em>{contribution.query.includes("实体") ? "实" : "关"}</em>
+                ) : queries.length > 1 ? (
+                  <em>Q{queries.indexOf(contribution.query) + 1}</em>
+                ) : null}
+                #{contribution.rank}
+                <small>{formatNumber(contribution.raw_score, 3)}</small>
+              </span>
+            ))}
+          </div>
+        </td>
+        {/* 来源：这一片出自哪份文档、哪个版本、哪一页、哪一小节。 */}
+        <td className="diag-source">
+          <span className="diag-title">
+            {item.title}
+            <small className="source-location">
+              {sourceLocation(item.version, item.page_start, item.heading)}
+            </small>
+          </span>
+        </td>
+      </tr>
+    );
+  };
+  return (
+    <DetailDialog open title={title} onClose={onClose} size="table">
+      <div className="diag">
+        <p className="diag-part-lead">
+          <strong>{lead}</strong>
+          {leadNote ? <small>{leadNote}</small> : null}
+        </p>
+        <RetrievalMethodFilter
+          selected={selectedMethods}
+          onChange={(methods) => {
+            setSelectedMethods(methods);
+            setPage(1);
+          }}
+        />
+        <p className="diag-scroll-hint">表格可左右滑动查看分数</p>
+        <Table
+          containerProps={{ className: "diag-table-wrap" }}
+          className="diag-table diag-pool"
+        >
+          <thead>
+            <tr>
+              <th>序号</th>
+              <th title="这一片自己的正文">分片</th>
+              {relations && <th className="diag-relations">来自哪些关系</th>}
+              <th
+                title={
+                  scoreKind === "rerank"
+                    ? "重排模型给的概率"
+                    : `RRF 得分 = Σ 1 / (${rrfK} + 名次)`
+                }
+              >
+                {scoreKind === "rerank" ? "重排概率" : "RRF 分"}
+              </th>
+              <th>各路名次</th>
+              <th title="这一片出自哪份文档、哪个版本、哪一页、哪一小节">
+                来源
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredCandidates.length === 0 && (
+              <tr>
+                <td colSpan={relations ? 6 : 5}>没有符合筛选条件的分片</td>
+              </tr>
+            )}
+            {visible.map((entry, index) =>
+              entry.kind === "group" ? (
+                // 名额补进来的单独一段，别和 RRF 名前面几个混在一起。
+                <tr className="diag-pool-group" key={`group-${index}`}>
+                  <td colSpan={relations ? 6 : 5}>
+                    {graphOrdered
+                      ? `只被图找到的 ${entry.count} 个：不比 RRF 名次，按图检索的名次进重排`
+                      : `图检索名额补进来的 ${entry.count} 个：RRF 名次不够，靠名额进池`}
+                  </td>
+                </tr>
+              ) : (
+                row(
+                  entry.item,
+                  entries
+                    .slice(0, pageStart + index + 1)
+                    .filter((value) => value.kind === "chunk").length,
+                )
+              ),
+            )}
+          </tbody>
+        </Table>
+        <div className="diag-pagination" aria-label="分片明细分页">
+          <span aria-live="polite">
+            显示第 {chunkRows ? firstChunk + 1 : 0}–{firstChunk + chunkRows}{" "}
+            条，共 {filteredCandidates.length} 条
+          </span>
+          <div className="diag-pagination-controls">
+            <button
+              type="button"
+              disabled={visiblePage === 1}
+              onClick={() => setPage(Math.max(1, visiblePage - 1))}
+            >
+              上一页
+            </button>
+            <span>
+              第 {visiblePage} / {pageCount} 页
+            </span>
+            <button
+              type="button"
+              disabled={visiblePage === pageCount}
+              onClick={() => setPage(Math.min(pageCount, visiblePage + 1))}
+            >
+              下一页
+            </button>
+          </div>
+        </div>
+        {/* 「原文」打开的内容是伴随浮窗，贴着按钮出现。正文这一页已经取过，直接传进去，不用再读一次。 */}
+        {chunkOpen && (
+          <ChunkOriginalPanel
+            chunkId={chunkOpen}
+            chunk={originals[chunkOpen]}
+            onClose={() => setChunkOpen(null)}
+          />
+        )}
+      </div>
+    </DetailDialog>
+  );
+}
+
+// 候选明细弹窗：一组候选分片的完整表格（去向、来源、召回贡献、RRF、重排分数），
+// 可按召回方式筛选、分页查看。
+// 「查看候选明细」和「查看最终返回」两处共用：内容一样，只是列出的候选不同。
+function CandidateDetailDialog({
+  open,
+  title,
+  candidates,
+  minScore,
+  queries,
+  relations,
+  showGraph,
+  resetKey,
+  rrfK = 60,
+  fusion,
+  onClose,
+}: {
+  open: boolean;
+  title: string;
+  candidates: RetrievalCandidate[];
+  minScore: number | null;
+  queries: string[];
+  relations: Map<string, string>;
+  showGraph: boolean;
+  // 检索问题变了就回到第一页：同一批候选换了打分，旧页码对不上。
+  resetKey: string;
+  // RRF 的常数和融合方式：算式要按这次实际用的参数写出来。
+  rrfK?: number;
+  fusion?: string;
+  onClose: () => void;
+}) {
+  const [page, setPage] = useState(1);
+  const [chunkOpen, setChunkOpen] = useState<string | null>(null);
+  const [selectedMethods, setSelectedMethods] = useState<string[]>([
+    "keyword",
+    "dense",
+    "graph",
+  ]);
+  const filtered = candidates.filter((item) =>
+    item.retrieval_methods.some((method) => selectedMethods.includes(method)),
+  );
+  const pageCount = Math.max(
+    1,
+    Math.ceil(filtered.length / DIAGNOSTICS_PAGE_SIZE),
+  );
+  const visiblePage = Math.min(page, pageCount);
+  const pageStart = (visiblePage - 1) * DIAGNOSTICS_PAGE_SIZE;
+  const pageEnd = Math.min(pageStart + DIAGNOSTICS_PAGE_SIZE, filtered.length);
+  const visible = filtered.slice(pageStart, pageEnd);
+  // 候选数量、过滤方式或检索问题变化时回到第一页，避免复用旧页码后看到空白明细。
+  useEffect(() => {
+    setPage(1);
+  }, [candidates.length, selectedMethods, resetKey]);
+  return (
+    <DetailDialog open={open} title={title} onClose={onClose} size="table">
+      {/* 弹窗不在 .diag 下面：自己带上，表格颜色变量才对。 */}
+      <div className="diag">
+        <RetrievalMethodFilter
+          selected={selectedMethods}
+          onChange={(methods) => {
+            setSelectedMethods(methods);
+            setPage(1);
+          }}
+        />
         <div className="diag-legend">
           <span>
             <i className="diag-dot method-dense" />
@@ -4760,6 +6636,12 @@ function RetrievalDiagnostics({
             <i className="diag-dot method-keyword" />
             关键词召回（BM25）
           </span>
+          {showGraph && (
+            <span>
+              <i className="diag-dot method-graph" />
+              图检索
+            </span>
+          )}
           <span>
             <i className="diag-threshold-sample" />
             相关性阈值
@@ -4771,59 +6653,68 @@ function RetrievalDiagnostics({
           6 名，<code>0.700</code> 是这一路的原始分数
         </p>
         <p className="diag-scroll-hint">表格可左右滑动查看分数</p>
-        <div className="diag-table-wrap">
-          <table className="diag-table">
-            <thead>
+        <Table
+          containerProps={{ className: "diag-table-wrap" }}
+          className="diag-table diag-candidates"
+        >
+          <thead>
+            <tr>
+              <th>序号</th>
+              <th>去向</th>
+              <th>来源</th>
+              <th>分片</th>
+              <th title="每张排名表中的名次、原始分数，以及贡献的 RRF 分">
+                召回贡献
+              </th>
+              <th title={`RRF 得分 = Σ 1 / (${rrfK} + 名次)`}>RRF 分 / 名次</th>
+              <th title="重排模型原始输出与重排后名次">重排 logit / 名次</th>
+              <th title="sigmoid(logit)，与阈值比较">重排概率</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && (
               <tr>
-                <th>去向</th>
-                <th>来源</th>
-                <th>片段</th>
-                <th title="每张排名表中的名次、原始分数，以及贡献的 RRF 分">
-                  召回贡献
-                </th>
-                <th title="RRF 得分 = Σ 1 / (k + 名次)">RRF 分 / 名次</th>
-                <th title="重排模型原始输出与重排后名次">重排 logit / 名次</th>
-                <th title="sigmoid(logit)，与阈值比较">重排概率</th>
+                <td colSpan={8}>没有符合筛选条件的分片</td>
               </tr>
-            </thead>
-            <tbody>
-              {visibleCandidates.map((item) => (
-                <CandidateRow
-                  item={item}
-                  minScore={config.min_score}
-                  queries={queries}
-                  key={item.chunk_id + item.rrf_rank}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
+            )}
+
+            {visible.map((item, index) => (
+              <CandidateRow
+                onOpenOriginal={setChunkOpen}
+                serial={pageStart + index + 1}
+                item={item}
+                minScore={minScore}
+                queries={queries}
+                relations={relations}
+                rrfK={rrfK}
+                fusion={fusion}
+                key={item.chunk_id + item.rrf_rank}
+              />
+            ))}
+          </tbody>
+        </Table>
         {candidates.length > 0 ? (
           <div className="diag-pagination" aria-label="候选明细分页">
             <span aria-live="polite">
-              显示第 {candidatePageStart + 1}–{candidatePageEnd} 条，共{" "}
-              {candidates.length} 条
+              显示第 {filtered.length ? pageStart + 1 : 0}–{pageEnd} 条，共{" "}
+              {filtered.length} 条
             </span>
             <div className="diag-pagination-controls">
               <button
                 type="button"
-                disabled={visibleCandidatePage === 1}
-                onClick={() =>
-                  setCandidatePage((page) => Math.max(1, page - 1))
-                }
+                disabled={visiblePage === 1}
+                onClick={() => setPage((value) => Math.max(1, value - 1))}
               >
                 上一页
               </button>
               <span>
-                第 {visibleCandidatePage} / {candidatePageCount} 页
+                第 {visiblePage} / {pageCount} 页
               </span>
               <button
                 type="button"
-                disabled={visibleCandidatePage === candidatePageCount}
+                disabled={visiblePage === pageCount}
                 onClick={() =>
-                  setCandidatePage((page) =>
-                    Math.min(candidatePageCount, page + 1),
-                  )
+                  setPage((value) => Math.min(pageCount, value + 1))
                 }
               >
                 下一页
@@ -4833,79 +6724,93 @@ function RetrievalDiagnostics({
         ) : (
           <p className="diag-page-summary">暂无候选明细</p>
         )}
-      </details>
-      <details className="diag-fold">
-        <summary>
-          原始排名表（{lists.length} 张）
-          <small>每个检索词 × 每路召回各一张</small>
-        </summary>
-        <div className="diag-lists">
-          {lists.map((list, index) => (
-            <details className="diag-list" key={`${list.method}-${index}`}>
-              <summary>
-                <i className={`diag-dot method-${list.method}`} />
-                {METHOD_LABELS[list.method] ?? list.method} · {list.query}
-                <small>{list.hits.length} 条</small>
-              </summary>
-              {list.hits.length === 0 ? (
-                <p className="diag-empty">没有命中</p>
-              ) : (
-                <table className="diag-table diag-table-compact">
-                  <thead>
-                    <tr>
-                      <th>名次</th>
-                      <th>片段</th>
-                      <th>{RAW_SCORE_LABELS[list.method] ?? "原始分"}</th>
-                      <th>RRF 贡献</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {list.hits.map((hit) => (
-                      <tr key={hit.rank}>
-                        <td className="num">{hit.rank}</td>
-                        <td>
-                          <span className="diag-title">{hit.title}</span>
-                          <code title={hit.chunk_id}>
-                            {shortChunkId(hit.chunk_id)}
-                          </code>
-                        </td>
-                        <td className="num">{formatNumber(hit.raw_score)}</td>
-                        <td className="num">{formatNumber(hit.rrf, 5)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </details>
-          ))}
-        </div>
-      </details>
-    </div>
+        {chunkOpen && (
+          <ChunkOriginalPanel
+            chunkId={chunkOpen}
+            onClose={() => setChunkOpen(null)}
+          />
+        )}
+      </div>
+    </DetailDialog>
   );
 }
 
 // 单个候选的一行：去向、召回贡献、RRF、重排 logit 与带阈值刻度的概率条。
 function CandidateRow({
+  onOpenOriginal,
+  serial,
   item,
   minScore,
   queries,
+  relations,
+  rrfK = 60,
+  fusion,
 }: {
+  onOpenOriginal: (chunkId: string) => void;
+  serial: number;
   item: RetrievalCandidate;
   minScore: number | null;
   queries: string[];
+  relations?: Map<string, string>;
+  rrfK?: number;
+  fusion?: string;
 }) {
-  const status = STATUS_INFO[item.status] ?? STATUS_INFO.in_pool;
+  const graphOnly =
+    item.retrieval_methods.length === 1 &&
+    item.retrieval_methods[0] === "graph";
+  const linked = (item.graph_relation_ids ?? [])
+    .map((id) => relations?.get(id) ?? id)
+    .join("\n");
+  const status = item.merged
+    ? STATUS_INFO.merged
+    : (STATUS_INFO[item.status] ?? STATUS_INFO.in_pool);
   const probability = item.rerank_probability;
   const passes =
     probability !== null && minScore !== null && probability >= minScore;
   return (
-    <tr className={`diag-row status-${item.status}`}>
+    <tr className={`diag-row status-${item.merged ? "merged" : item.status}`}>
+      <td className="num">{serial}</td>
       <td>
         <span
-          className={`diag-status status-${item.status}`}
+          className={`diag-status status-${item.merged ? "merged" : item.status}`}
           title={status.hint}
         >
-          <b>{status.icon}</b>
+          <b aria-hidden="true">
+            <svg
+              viewBox="0 0 16 16"
+              width="10"
+              height="10"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              {status.icon === "✓" ? (
+                <path d="m3 8 3 3 7-7" />
+              ) : status.icon === "⇢" ? (
+                <path d="M3 8h10m-4-4 4 4-4 4" />
+              ) : status.icon === "✕" ? (
+                <path d="m4 4 8 8m0-8-8 8" />
+              ) : status.icon === "…" ? (
+                <g fill="currentColor" stroke="none">
+                  <circle cx="3" cy="8" r="1.3" />
+                  <circle cx="8" cy="8" r="1.3" />
+                  <circle cx="13" cy="8" r="1.3" />
+                </g>
+              ) : status.icon === "·" ? (
+                <circle
+                  cx="8"
+                  cy="8"
+                  r="1.5"
+                  fill="currentColor"
+                  stroke="none"
+                />
+              ) : (
+                <path d="M3 8h10" />
+              )}
+            </svg>
+          </b>
           {status.label}
         </span>
       </td>
@@ -4920,7 +6825,35 @@ function CandidateRow({
         <span className="diag-preview" title={item.preview}>
           {item.preview}
         </span>
-        <code title={item.chunk_id}>{shortChunkId(item.chunk_id)}</code>
+        <button
+          type="button"
+          className="link-button button-sm"
+          title="查看分片原文"
+          onClick={() => onOpenOriginal(item.chunk_id)}
+        >
+          {shortChunkId(item.chunk_id)}
+        </button>
+        {graphOnly && (
+          <span className="diag-graph-only" title={`通过关系找到：\n${linked}`}>
+            只有图找到
+          </span>
+        )}
+        {item.graph_quota && (
+          <span
+            className="diag-graph-only"
+            title="RRF 名次不够进入重排，靠图检索名额补进来的"
+          >
+            图检索名额
+          </span>
+        )}
+        {item.pool_via === "graph" && (
+          <span
+            className="diag-graph-only"
+            title="只被图找到，不比 RRF 名次，按图检索的名次进重排"
+          >
+            按图名次 {item.graph_only_rank}
+          </span>
+        )}
       </td>
       <td>
         <div className="diag-contribs">
@@ -4929,10 +6862,12 @@ function CandidateRow({
             <span
               className={`diag-contrib method-${contribution.method}`}
               key={index}
-              title={`检索词：${contribution.query}\n${METHOD_LABELS[contribution.method] ?? contribution.method}第 ${contribution.rank} 名，${RAW_SCORE_LABELS[contribution.method] ?? "原始分"} ${formatNumber(contribution.raw_score)}\nRRF 贡献 1/(k+${contribution.rank}) = ${formatNumber(contribution.rrf, 5)}`}
+              title={`${contribution.method === "graph" ? "排名表" : "检索词"}：${contribution.query}\n${METHOD_LABELS[contribution.method] ?? contribution.method}第 ${contribution.rank} 名，${RAW_SCORE_LABELS[contribution.method] ?? "原始分"} ${formatNumber(contribution.raw_score)}\nRRF 贡献 1/(${rrfK}+${contribution.rank}) = ${formatNumber(contribution.rrf, 5)}${contribution.method === "graph" && linked ? `\n通过关系：\n${linked}` : ""}`}
             >
               <i className={`diag-dot method-${contribution.method}`} />
-              {queries.length > 1 ? (
+              {contribution.method === "graph" ? (
+                <em>{contribution.query.includes("实体") ? "实" : "关"}</em>
+              ) : queries.length > 1 ? (
                 <em>Q{queries.indexOf(contribution.query) + 1}</em>
               ) : null}
               #{contribution.rank}
@@ -4944,6 +6879,11 @@ function CandidateRow({
       <td className="num">
         {formatNumber(item.rrf_score, 5)}
         <small className="diag-sub">第 {item.rrf_rank} 名</small>
+        <RrfFormula
+          contributions={item.contributions}
+          k={rrfK}
+          fusion={fusion}
+        />
       </td>
       <td className="num">
         {formatNumber(item.rerank_logit, 3)}
@@ -5001,10 +6941,13 @@ function MemoryHistory({ items }: { items: unknown[] }) {
                 <span>问题：</span>
                 {question || "无"}
               </p>
-              <details className="memory-answer">
-                <summary>展开答案（{answer.length} 字）</summary>
-                <p>{answer || "无"}</p>
-              </details>
+              <ContextDetail
+                title="历史答案"
+                label={`查看答案（${answer.length} 字）`}
+              >
+                <p className="ag-muted">问题：{question || "无"}</p>
+                <MarkdownAnswer content={answer || "无"} />
+              </ContextDetail>
             </div>
           </article>
         );
@@ -5034,6 +6977,11 @@ function formatResultValue(value: unknown): string {
 
 function formatResultLabel(key: string) {
   const labels: Record<string, string> = {
+    build_id: "建图记录",
+    entity_count: "实体数",
+    created_count: "新建实体数",
+    mention_count: "名字出处数",
+    relation_count: "关系数",
     // Agent 模式「写入会话记忆」这一步的字段。
     compressed: "是否压缩",
     message_count_before: "写入前的消息数",
@@ -5220,6 +7168,10 @@ function Knowledge({
   const [shareGroups, setShareGroups] = useState<string[]>([]);
   const [allGroups, setAllGroups] = useState<Group[]>([]);
   const [versionNote, setVersionNote] = useState("");
+  // 上传时的图检索选项：null 表示不传（新版本沿用上一版的设置）。
+  const [uploadGraph, setUploadGraph] = useState<UploadGraphOption | null>(
+    null,
+  );
   const [file, setFile] = useState<File | null>(null);
   // 选好文件后在浏览器里算 sha256，查自己和自己能看到的文档里有没有内容完全相同的，在上传弹窗里提示。
   const [contentMatches, setContentMatches] = useState<
@@ -5249,6 +7201,9 @@ function Knowledge({
   const [chunkData, setChunkData] = useState<DocumentChunkPage | null>(null);
   // 分块列表按向量来源筛选：全部 / 复用上一版本 / 新计算。
   const [chunkSource, setChunkSource] = useState<ChunkSource | null>(null);
+  // 分块列表按图谱的抽取状态筛选：全部 / 新抽取 / 复用 / 失败 / 没抽出实体。
+  const [chunkGraphStatus, setChunkGraphStatus] =
+    useState<ChunkGraphStatus | null>(null);
   const [chunkLoading, setChunkLoading] = useState(false);
   const [expandedChunks, setExpandedChunks] = useState<Record<string, boolean>>(
     {},
@@ -5357,7 +7312,7 @@ function Knowledge({
     }
     let cancelled = false;
     setChunkLoading(true);
-    listDocumentChunks(selectedId, chunkPage, 10, chunkSource)
+    listDocumentChunks(selectedId, chunkPage, 10, chunkSource, chunkGraphStatus)
       .then((result) => {
         if (!cancelled) setChunkData(result);
       })
@@ -5370,7 +7325,7 @@ function Knowledge({
     return () => {
       cancelled = true;
     };
-  }, [selectedId, chunkPage, selectedStatus, chunkSource]);
+  }, [selectedId, chunkPage, selectedStatus, chunkSource, chunkGraphStatus]);
 
   function selectDocument(documentId: string) {
     setDetailTab("chunks");
@@ -5389,6 +7344,7 @@ function Knowledge({
     setVersionNote("");
     setVisibility("private");
     setShareGroups([]);
+    setUploadGraph(null);
     setUploadMode(replaceTarget ? "version" : null);
     setError("");
     setUpload({ replaceTarget });
@@ -5410,6 +7366,7 @@ function Knowledge({
         versionNote,
         visibility,
         shareGroups,
+        uploadGraph,
       );
       const refreshed = await listDocuments();
       setDocuments(refreshed.documents);
@@ -5446,13 +7403,6 @@ function Knowledge({
 
   async function remove(document: DocumentStatus) {
     // 原来处理中直接禁止删除，导致失败或卡住的文档无法清理；后端现在会连同未完成版本和已生成数据一起删除。
-    const count = document.versions?.length ?? document.version_count ?? 1;
-    if (
-      !window.confirm(
-        `确定删除“${document.title}”的全部 ${count} 个版本及其检索索引吗？未完成的解析也会一并删除。`,
-      )
-    )
-      return;
     setError("");
     try {
       await deleteDocument(document.document_id);
@@ -5514,6 +7464,27 @@ function Knowledge({
               setChunkPage(1);
               setExpandedChunks({});
             }}
+            chunkGraphStatus={chunkGraphStatus}
+            onGraphStatusChange={(status) => {
+              setChunkGraphStatus(status);
+              setChunkPage(1);
+              setExpandedChunks({});
+            }}
+            onRetryChunkGraph={(chunkId) => {
+              retryDocumentGraph(
+                selected.document_id,
+                chunkData?.graph?.build_id,
+                chunkId,
+              )
+                .then(() =>
+                  onToast(
+                    "success",
+                    "已开始重试这一片，完成后在「实体关系」页签或刷新分块即可看到。",
+                  ),
+                )
+                .catch((reason: Error) => onToast("error", reason.message));
+            }}
+            graphPanel={<DocumentGraph document={selected} onToast={onToast} />}
             onToggleChunk={(chunkId) =>
               setExpandedChunks((items) => ({
                 ...items,
@@ -5524,6 +7495,35 @@ function Knowledge({
             onDelete={() => void remove(selected)}
             onRetry={() => void retry(selected)}
             onRetryContexts={() => void retryContexts(selected)}
+            onReviewChanged={() =>
+              void getDocument(selected.document_id)
+                .then(setDetail)
+                .catch(() => undefined)
+            }
+            onRetryReview={async () => {
+              try {
+                await retryGraphReview(selected.document_id);
+                setDetail(await getDocument(selected.document_id));
+                onToast(
+                  "success",
+                  "检查漏合并已重新排队，将复用已有抽取结果。",
+                );
+              } catch (reason) {
+                onToast("error", (reason as Error).message);
+              }
+            }}
+            onRetryGraph={async (buildId) => {
+              try {
+                await retryDocumentGraph(selected.document_id, buildId);
+                setDetail(await getDocument(selected.document_id));
+                onToast(
+                  "success",
+                  "已开始重试：只补跑失败的分片，再重新合并、写入图谱。",
+                );
+              } catch (reason) {
+                onToast("error", (reason as Error).message);
+              }
+            }}
             onUploadVersion={() => openUpload(selected)}
             onSelectVersion={selectDocument}
             permission={
@@ -5581,6 +7581,8 @@ function Knowledge({
           onVersionNoteChange={setVersionNote}
           onClose={() => setUpload(null)}
           onSubmit={() => void submitUpload()}
+          graph={uploadGraph}
+          onGraphChange={setUploadGraph}
           matches={contentMatches}
           onOpenExisting={(documentId) => {
             setUpload(null);
@@ -5607,7 +7609,7 @@ function Knowledge({
   );
 }
 
-type DetailTab = "chunks" | "trace" | "versions";
+type DetailTab = "chunks" | "trace" | "versions" | "graph";
 // 后端 STAGE_ORDER 固定为接收、解析、切分、上下文、向量、索引、完成 7 个阶段；不能用当前已返回的步骤条数当分母。
 // 上传、解析、切分、上下文、向量、索引、写入校验、安全扫描、完成，共 9 步。
 const DOCUMENT_PROCESS_STEP_TOTAL = 9;
@@ -5620,10 +7622,12 @@ function documentProcessLabel(document: {
   steps: DocumentStep[];
 }) {
   const total = DOCUMENT_PROCESS_STEP_TOTAL;
-  const failed = document.steps.find((step) => step.status === "failed");
+  // 知识图谱的两步（抽取实体关系、合并实体）排在「完成」之后，不算进文档处理进度，进度在「实体关系」页签里看。
+  const steps = document.steps.filter((step) => step.step_order <= total);
+  const failed = steps.find((step) => step.status === "failed");
   if (document.status === "failed")
     return failed ? `第 ${failed.step_order} 步失败` : "处理失败";
-  const running = document.steps.find((step) => step.status === "running");
+  const running = steps.find((step) => step.status === "running");
   // 只显示"当前步骤 / 总步数"，步骤名在下方列表里已经能看到，标签页上再写一遍太长。
   if (running) return `${running.step_order} / ${total}`;
   // worker 遇到暂时性错误会先把当前步骤记为失败、等几秒再重试，这时文档本身还在处理中，不能显示成失败。
@@ -5638,9 +7642,7 @@ function documentProcessLabel(document: {
   )
     return `${total} / ${total}`;
   if (document.status === "queued") return "排队中";
-  const completed = document.steps.filter(
-    (step) => step.status === "completed",
-  ).length;
+  const completed = steps.filter((step) => step.status === "completed").length;
   return `${completed} / ${total}`;
 }
 
@@ -6108,32 +8110,33 @@ function DocumentMetadataPanel({ document }: { document: DocumentStatus }) {
   return (
     <details className="document-metadata-panel">
       <summary>文档与解析信息</summary>
-      <div className="document-metadata-table-wrap">
-        <table className="document-metadata-table">
-          <thead>
-            <tr>
-              <th scope="col">信息项</th>
-              <th scope="col">内容</th>
-              <th scope="col">说明</th>
+      <Table
+        containerProps={{ className: "document-metadata-table-wrap" }}
+        className="document-metadata-table"
+      >
+        <thead>
+          <tr>
+            <th scope="col">信息项</th>
+            <th scope="col">内容</th>
+            <th scope="col">说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([label, value, note]) => (
+            <tr key={label}>
+              <th scope="row">{label}</th>
+              <td className="document-metadata-value">{value}</td>
+              <td>
+                {note ? (
+                  <small>{note}</small>
+                ) : (
+                  <span className="document-metadata-empty">—</span>
+                )}
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {rows.map(([label, value, note]) => (
-              <tr key={label}>
-                <th scope="row">{label}</th>
-                <td className="document-metadata-value">{value}</td>
-                <td>
-                  {note ? (
-                    <small>{note}</small>
-                  ) : (
-                    <span className="document-metadata-empty">—</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          ))}
+        </tbody>
+      </Table>
       {metadata.table_report && (
         <TableReportView report={metadata.table_report} />
       )}
@@ -6300,9 +8303,23 @@ function DocumentDetail({
   permission,
   chunkSource,
   onSourceChange,
+  chunkGraphStatus,
+  onGraphStatusChange,
+  onRetryChunkGraph,
+  onRetryGraph,
+  onRetryReview,
+  onReviewChanged,
+  graphPanel,
 }: {
   chunkSource: ChunkSource | null;
   onSourceChange: (source: ChunkSource | null) => void;
+  chunkGraphStatus: ChunkGraphStatus | null;
+  onGraphStatusChange: (status: ChunkGraphStatus | null) => void;
+  onRetryChunkGraph: (chunkId: string) => void;
+  onRetryGraph: (buildId?: string) => Promise<void>;
+  onRetryReview: () => Promise<void>;
+  onReviewChanged: () => void;
+  graphPanel: ReactNode;
   permission: ReactNode;
   onRetry: () => void;
   onRetryContexts: () => void;
@@ -6328,8 +8345,12 @@ function DocumentDetail({
   const totalChunks = chunkData
     ? chunkData.source && counts
       ? counts.reused + counts.computed
-      : chunkData.total
+      : chunkData.graph_status
+        ? documentChunkCount(document)
+        : chunkData.total
     : documentChunkCount(document);
+  // 建过图的版本才显示按抽取状态筛选。
+  const graphCounts = chunkData?.graph ? chunkData.graph_counts : null;
   // 这个版本记录了每个分片的来源（复用或新计算）才显示筛选；第一版全部是新计算，也不显示。
   const showSourceFilter = Boolean(counts && counts.reused > 0);
   const averageLength = chunkData?.average_length ?? 0;
@@ -6381,12 +8402,16 @@ function DocumentDetail({
               上传新版本
             </button>
             {/* 删除不再依赖解析状态，卡住或失败的版本也必须能被上传者清理。 */}
-            <button
-              className="delete-button detail-delete-button"
-              onClick={onDelete}
+            <ConfirmPopover
+              danger
+              message={`删除“${document.title}”的全部 ${document.versions?.length ?? document.version_count ?? 1} 个版本及其检索索引？未完成的解析也会一并删除。`}
+              confirmText="删除"
+              onConfirm={onDelete}
             >
-              删除文档（全部版本）
-            </button>
+              <button className="delete-button detail-delete-button">
+                删除文档（全部版本）
+              </button>
+            </ConfirmPopover>
           </div>
         )}
       </div>
@@ -6412,6 +8437,12 @@ function DocumentDetail({
           >
             版本历史 <span>{versions.length}</span>
           </button>
+          <button
+            className={tab === "graph" ? "active" : ""}
+            onClick={() => onTabChange("graph")}
+          >
+            实体关系
+          </button>
         </div>
         {tab === "chunks" ? (
           <div className="document-chunks-panel">
@@ -6432,6 +8463,27 @@ function DocumentDetail({
                       onClick={() => onSourceChange(value)}
                     >
                       {label} <span>{count}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {graphCounts && (
+                <div className="chunk-source-filter">
+                  {(
+                    [
+                      [null, "全部抽取状态", null],
+                      ["extracted", "新抽取", graphCounts.extracted],
+                      ["reused", "复用", graphCounts.reused],
+                      ["failed", "抽取失败", graphCounts.failed],
+                      ["empty", "没抽出实体", graphCounts.empty],
+                    ] as Array<[ChunkGraphStatus | null, string, number | null]>
+                  ).map(([value, label, count]) => (
+                    <button
+                      key={label}
+                      className={chunkGraphStatus === value ? "active" : ""}
+                      onClick={() => onGraphStatusChange(value)}
+                    >
+                      {label} {count !== null && <span>{count}</span>}
                     </button>
                   ))}
                 </div>
@@ -6463,6 +8515,11 @@ function DocumentDetail({
                       chunk={chunk}
                       expanded={Boolean(expandedChunks[chunk.chunk_id])}
                       onToggle={() => onToggleChunk(chunk.chunk_id)}
+                      onRetryGraph={
+                        document.can_edit !== false
+                          ? onRetryChunkGraph
+                          : undefined
+                      }
                     />
                   ))}
                 </div>
@@ -6509,6 +8566,8 @@ function DocumentDetail({
               </div>
             )}
           </div>
+        ) : tab === "graph" ? (
+          <div className="document-chunks-panel">{graphPanel}</div>
         ) : tab === "versions" ? (
           <div className="document-chunks-panel">
             <div className="document-panel-heading">
@@ -6520,7 +8579,15 @@ function DocumentDetail({
         ) : (
           <div className="document-trace-panel">
             <DocumentTrace
+              documentId={document.document_id}
+              onReviewChanged={onReviewChanged}
               steps={document.steps}
+              onRetryReview={
+                document.can_edit !== false ? onRetryReview : undefined
+              }
+              onRetryGraph={
+                document.can_edit !== false ? onRetryGraph : undefined
+              }
               missingContexts={document.context_missing ?? 0}
               onRetry={
                 document.status === "failed" && document.can_edit !== false
@@ -6559,7 +8626,11 @@ function UploadModal({
   permission,
   matches,
   onOpenExisting,
+  graph,
+  onGraphChange,
 }: {
+  graph: UploadGraphOption | null;
+  onGraphChange: (value: UploadGraphOption | null) => void;
   permission: ReactNode;
   file: File | null;
   title: string;
@@ -6714,6 +8785,14 @@ function UploadModal({
               placeholder="例如：退货期限改为 15 天"
             />
           </label>
+        )}
+        {!ownSame && (
+          <UploadGraphField
+            value={graph}
+            onChange={onGraphChange}
+            previous={replaceTarget?.document_metadata?.graph ?? null}
+            asVersion={asVersion}
+          />
         )}
         <div className="upload-modal-actions">
           <button className="secondary-button" onClick={onClose}>
@@ -7089,16 +9168,69 @@ function stepResultText(result: Record<string, unknown>) {
 // 文档最终失败时，在失败的那一步旁边放"重试"按钮；重试会从解析重新开始整份文档的处理。
 // 文档已完成但有分片的上下文说明生成失败时，在"生成分片上下文"这一步放"补全"按钮，只重做失败的分片。
 function DocumentTrace({
+  documentId,
+  onReviewChanged,
   steps,
   onRetry,
   onRetryContexts,
   missingContexts = 0,
+  onRetryGraph,
+  onRetryReview,
 }: {
+  documentId: string;
+  onReviewChanged?: () => void;
   steps: DocumentStep[];
   onRetry?: () => void;
   onRetryContexts?: () => void;
   missingContexts?: number;
+  onRetryGraph?: (buildId?: string) => Promise<void>;
+  onRetryReview?: () => Promise<void>;
 }) {
+  const [retryingGraph, setRetryingGraph] = useState(false);
+  const [retryingReview, setRetryingReview] = useState(false);
+  const [reviewDetail, setReviewDetail] = useState<GraphReviewReport | null>(
+    null,
+  );
+  // 图谱检查（补抽、关系核对、类型核对、拆分、合并，以及按确认结果重写）在处理流程里只显示一行「图谱检查」，
+  // 写明 5 步各自的状态，点按钮打开图谱检查弹窗。
+  const [checkOpen, setCheckOpen] = useState(false);
+  const checkRows = steps.filter((step) => CHECK_ROW_IDS.has(step.step_id));
+  const checkResult = (id: string) => {
+    const row = checkRows.find((step) => step.step_id === id);
+    return row?.result && "status" in row.result ? row.result : null;
+  };
+  const overview = checkOverview(
+    Object.fromEntries(
+      CHECK_STEP_IDS.map(([name, id]) => [
+        name,
+        summarizeCheck(checkResult(id) as unknown as CheckReport | null),
+      ]),
+    ),
+    checkResult("graph_review") as unknown as GraphReviewReport | null,
+  );
+  const traceSteps: DocumentStep[] = steps.flatMap((step) =>
+    CHECK_ROW_IDS.has(step.step_id)
+      ? []
+      : step.step_id === "graph_write"
+        ? [
+            step,
+            {
+              ...step,
+              step_id: "graph_check",
+              stage: "graph_check",
+              title: "图谱检查",
+              status: overview.active
+                ? ("running" as const)
+                : overview.done
+                  ? ("completed" as const)
+                  : ("pending" as const),
+              detail: overview.text,
+              result: null,
+              duration_ms: null,
+            },
+          ]
+        : [step],
+  );
   if (steps.length === 0)
     return (
       <LoadingSkeleton
@@ -7113,64 +9245,371 @@ function DocumentTrace({
     );
   return (
     <div className="document-trace">
-      {steps.map((step) => (
-        <div className={`document-step ${step.status}`} key={step.step_id}>
-          <span className="document-step-icon">
-            {step.status === "completed"
-              ? "✓"
-              : step.status === "running"
-                ? "·"
-                : "!"}
-          </span>
-          {/* warning：步骤跑完了但结果有问题（安全扫描发现疑似注入），整行标红。 */}
-          <div className="document-step-copy">
-            <strong>{step.title}</strong>
-            <Clamp text={step.detail}>
-              <small>{step.detail}</small>
-            </Clamp>
-            {/* 以前把 <strong> 拼进字符串，React 当普通文字输出，页面上直接显示出尖括号；现在用真正的元素渲染字段名。 */}
-            {step.result && (
-              <Clamp text={stepResultText(step.result)}>
-                <span>
-                  {Object.entries(step.result).map(([key, value], index) => (
-                    <Fragment key={key}>
-                      {index > 0 && " · "}
-                      <strong>{formatResultLabel(key)}</strong>：
-                      {stepResultValue(key, value)}
-                    </Fragment>
-                  ))}
-                </span>
-              </Clamp>
+      {traceSteps.map((step) => {
+        // 二次检查在写入图谱之后单独跑，不阻塞建图：有待处理的建议时只给一个入口，不标红也不标黄。
+        const review =
+          step.step_id === "graph_review" &&
+          step.result &&
+          "status" in step.result
+            ? (step.result as unknown as GraphReviewReport)
+            : null;
+        const reviewActive =
+          !!review &&
+          ["queued", "running", "rewriting"].includes(review.status);
+        const reviewPending =
+          review && !reviewActive && review.scan ? pendingCount(review) : 0;
+        if (step.step_id === "graph_check")
+          return (
+            <div className={`document-step ${step.status}`} key={step.step_id}>
+              <span className="document-step-icon">
+                {step.status === "completed"
+                  ? "✓"
+                  : step.status === "running"
+                    ? "·"
+                    : "○"}
+              </span>
+              <div className="document-step-copy">
+                <strong>{step.title}</strong>
+                <small className="document-step-inline">
+                  {step.detail}
+                  <button
+                    type="button"
+                    className={`${overview.pending > 0 ? "primary-button" : "secondary-button"} button-sm`}
+                    onClick={() => setCheckOpen(true)}
+                  >
+                    {overview.active
+                      ? "查看进度"
+                      : overview.pending > 0
+                        ? `去处理（${overview.pending} 项待处理）→`
+                        : overview.done
+                          ? "查看检查结果"
+                          : "打开图谱检查"}
+                  </button>
+                </small>
+              </div>
+            </div>
+          );
+        return (
+          <div className={`document-step ${step.status}`} key={step.step_id}>
+            <span className="document-step-icon">
+              {step.status === "completed"
+                ? "✓"
+                : step.status === "running"
+                  ? "·"
+                  : step.status === "pending" || step.status === "stopped"
+                    ? "○"
+                    : "!"}
+            </span>
+            {/* warning：步骤跑完了但结果有问题（安全扫描发现疑似注入），整行标红。 */}
+            <div className="document-step-copy">
+              <strong>{step.title}</strong>
+              {review ? (
+                // 说明和入口放一行：按钮用小号，不抢说明的位置。
+                <small className="document-step-inline">
+                  {step.detail}
+                  <button
+                    type="button"
+                    className={`${reviewPending > 0 ? "primary-button" : "secondary-button"} button-sm`}
+                    onClick={() => setReviewDetail(review)}
+                  >
+                    {reviewActive
+                      ? "查看进度"
+                      : reviewPending > 0
+                        ? `去处理（${reviewPending} 条待处理）→`
+                        : "查看检查过程和结果"}
+                  </button>
+                </small>
+              ) : (
+                <Clamp text={step.detail}>
+                  <small>{step.detail}</small>
+                </Clamp>
+              )}
+              {/* 以前把 <strong> 拼进字符串，React 当普通文字输出，页面上直接显示出尖括号；现在用真正的元素渲染字段名。 */}
+              {review || step.step_id === "graph_rewrite"
+                ? null
+                : step.result && (
+                    <Clamp text={stepResultText(step.result)}>
+                      <span>
+                        {Object.entries(step.result).map(
+                          ([key, value], index) => (
+                            <Fragment key={key}>
+                              {index > 0 && " · "}
+                              <strong>{formatResultLabel(key)}</strong>：
+                              {stepResultValue(key, value)}
+                            </Fragment>
+                          ),
+                        )}
+                      </span>
+                    </Clamp>
+                  )}
+            </div>
+            {step.duration_ms !== null && step.duration_ms !== undefined && (
+              <time title={durationTitle(step.duration_ms)}>
+                {formatDuration(step.duration_ms)}
+              </time>
             )}
+            {step.step_id === "graph_review" &&
+              onRetryReview &&
+              step.status !== "running" &&
+              !reviewActive && (
+                <button
+                  type="button"
+                  className="secondary-button button-sm document-step-retry"
+                  disabled={
+                    retryingReview ||
+                    traceSteps.some(
+                      (item) =>
+                        item.step_id.startsWith("graph_") &&
+                        item.status === "running",
+                    )
+                  }
+                  onClick={async () => {
+                    setRetryingReview(true);
+                    try {
+                      await onRetryReview();
+                    } finally {
+                      setRetryingReview(false);
+                    }
+                  }}
+                >
+                  {retryingReview ? "正在提交…" : "重试"}
+                </button>
+              )}
+            {step.step_id === "graph_extract" &&
+              (step.status === "failed" || step.status === "warning") &&
+              onRetryGraph && (
+                <button
+                  type="button"
+                  className="secondary-button button-sm document-step-retry"
+                  disabled={retryingGraph}
+                  onClick={async () => {
+                    setRetryingGraph(true);
+                    try {
+                      // 重试这一步记录的那次建图（每次建图写进步骤结果里的 build_id）。
+                      const buildId = step.result?.build_id;
+                      await onRetryGraph(
+                        typeof buildId === "string" ? buildId : undefined,
+                      );
+                    } finally {
+                      setRetryingGraph(false);
+                    }
+                  }}
+                >
+                  {retryingGraph ? "正在重试…" : "重试"}
+                </button>
+              )}
+            {step.step_id !== "graph_extract" &&
+              step.status === "failed" &&
+              onRetry && (
+                <button
+                  className="secondary-button button-sm document-step-retry"
+                  onClick={onRetry}
+                >
+                  重试
+                </button>
+              )}
+            {step.step_id === "context" &&
+              step.status === "completed" &&
+              missingContexts > 0 &&
+              onRetryContexts && (
+                <button
+                  className="secondary-button button-sm document-step-retry"
+                  onClick={onRetryContexts}
+                >
+                  补全 {missingContexts} 个
+                </button>
+              )}
           </div>
-          {step.duration_ms !== null && step.duration_ms !== undefined && (
-            <time title={durationTitle(step.duration_ms)}>
-              {formatDuration(step.duration_ms)}
-            </time>
-          )}
-          {step.status === "failed" && onRetry && (
-            <button
-              className="secondary-button document-step-retry"
-              onClick={onRetry}
-            >
-              重试
-            </button>
-          )}
-          {step.step_id === "context" &&
-            step.status === "completed" &&
-            missingContexts > 0 &&
-            onRetryContexts && (
-              <button
-                className="secondary-button document-step-retry"
-                onClick={onRetryContexts}
-              >
-                补全 {missingContexts} 个
-              </button>
-            )}
-        </div>
-      ))}
+        );
+      })}
+      {checkOpen && (
+        <DetailDialog
+          open
+          title="图谱检查"
+          className="gr-dialog"
+          onClose={() => setCheckOpen(false)}
+        >
+          <GraphCheckDialogBody
+            documentId={documentId}
+            onChanged={onReviewChanged}
+          />
+        </DetailDialog>
+      )}
+      {reviewDetail && (
+        <DetailDialog
+          open
+          title="检查漏合并 · 过程和结果"
+          className="gr-dialog"
+          onClose={() => setReviewDetail(null)}
+        >
+          <GraphReviewBody
+            documentId={documentId}
+            fallback={reviewDetail}
+            onChanged={onReviewChanged}
+          />
+        </DetailDialog>
+      )}
     </div>
   );
 }
 
 export default App;
+
+// 处理流程里合成一行「图谱检查」的步骤。
+const CHECK_STEP_IDS: [CheckStepName, string][] = [
+  ["glean", "graph_check_glean"],
+  ["relation", "graph_check_relation"],
+  ["type", "graph_check_type"],
+  ["split", "graph_check_split"],
+];
+const CHECK_ROW_IDS = new Set([
+  ...CHECK_STEP_IDS.map(([, id]) => id),
+  "graph_review",
+  "graph_rewrite",
+]);
+
+// 上传弹窗里的图检索选项：开启后处理完自动建图（可以选清单和模型）。
+// 上传新版本时不改就沿用上一版的设置；从列表上传、作为同名文档的新版本时上一版的设置由服务端沿用。
+function UploadGraphField({
+  value,
+  onChange,
+  previous,
+  asVersion,
+}: {
+  value: UploadGraphOption | null;
+  onChange: (value: UploadGraphOption | null) => void;
+  previous: UploadGraphOption | null;
+  asVersion: boolean;
+}) {
+  const enabled = value
+    ? value.enabled
+    : Boolean(asVersion && previous?.enabled);
+  const choice: GraphChoice = {
+    schema_id: value?.schema_id ?? previous?.schema_id ?? null,
+    provider: value?.provider ?? previous?.provider ?? null,
+    model: value?.model ?? previous?.model ?? null,
+  };
+  return (
+    <div className="upload-graph-field">
+      <label className="upload-graph-toggle">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(event) =>
+            onChange({ ...choice, enabled: event.target.checked })
+          }
+        />{" "}
+        图检索：处理完自动建图（抽取实体和关系，只影响「实体关系」和「知识图谱」页面）
+      </label>
+      {asVersion && value === null && (
+        <small className="graph-note">
+          不改就沿用上一版的设置
+          {previous ? `（${previous.enabled ? "开启" : "关闭"}）` : ""}
+        </small>
+      )}
+      {enabled && (
+        <GraphOptions
+          value={choice}
+          onChange={(next) => onChange({ ...next, enabled: true })}
+        />
+      )}
+    </div>
+  );
+}
+
+function AnswerSourceFilters({
+  sources,
+  relations,
+  answer,
+}: {
+  sources: Source[];
+  relations: ContextRelation[];
+  answer: string;
+}) {
+  const [kind, setKind] = useState("all");
+  const [citation, setCitation] = useState("all");
+  const cited = citedIds(answer);
+  const matches = (id: string | null | undefined) =>
+    citation === "all" ||
+    (citation === "cited"
+      ? cited.includes(id ?? "")
+      : !cited.includes(id ?? ""));
+  const visibleSources =
+    kind === "graph" ? [] : sources.filter((source) => matches(source.id));
+  const visibleRelations =
+    kind === "source"
+      ? []
+      : relations.filter((relation) => matches(relation.id));
+  return (
+    <>
+      <div className="answer-source-filters">
+        <div role="group" aria-label="来源类型">
+          {[
+            ["all", "全部"],
+            ["source", "检索分片"],
+            ["graph", "图谱关系"],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className="secondary-button button-sm"
+              aria-pressed={kind === value}
+              onClick={() => setKind(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div role="group" aria-label="引用状态">
+          {[
+            ["all", "全部状态"],
+            ["cited", "已引用"],
+            ["uncited", "未引用"],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className="secondary-button button-sm"
+              aria-pressed={citation === value}
+              onClick={() => setCitation(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {visibleSources.length === 0 && visibleRelations.length === 0 && (
+        <p>没有符合筛选条件的来源</p>
+      )}
+      <div className="answer-source-list">
+        {visibleSources.map((source) => (
+          <article className="answer-source" key={source.id}>
+            <strong>
+              {source.id} · {source.title}
+            </strong>
+            <small className="source-location">
+              {sourceLocation(
+                source.version,
+                source.page_start,
+                source.heading,
+              )}
+            </small>
+            <ContextDetail
+              title={`${source.id} · ${source.title}`}
+              label="查看原文"
+            >
+              <ChunkOriginalText text={source.text} />
+            </ContextDetail>
+          </article>
+        ))}
+      </div>
+      {/* 放进上下文的图谱关系（G 编号）：回答里引用了的标「已引用」，「原文」看出处分片。 */}
+      {visibleRelations.length > 0 && (
+        <>
+          <strong>图谱关系（{visibleRelations.length} 条）</strong>
+          <ContextRelationList relations={visibleRelations} cited={cited} />
+        </>
+      )}
+    </>
+  );
+}

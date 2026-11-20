@@ -1,7 +1,10 @@
 """汇总题的命名计分项：目标分片负责计分，摘录仅供展示。"""
+
 import hashlib
 import re
 import unicodedata
+
+from ..textnorm import fold_radicals
 
 
 def fingerprint(content):
@@ -11,15 +14,30 @@ def fingerprint(content):
 
 def legacy_groups(texts, catalog):
     """旧题只按原有证据定位分片，不推测或新增答案要点。"""
+
     def normalized(text):
-        return re.sub(r"\s+", "", unicodedata.normalize("NFKC", text or ""))
+        return re.sub(
+            r"\s+", "", fold_radicals(unicodedata.normalize("NFKC", text or ""))
+        )
+
     rows = [(row, normalized(row["quote"])) for row in catalog]
     result = []
     for index, text in enumerate(texts):
         pieces = [piece.strip() for piece in text.split("||") if piece.strip()]
         variants = [normalized(piece) for piece in pieces]
-        result.append({"label": pieces[0][:100] if pieces else f"要点 {index + 1}",
-            "targets": [row for row, content in rows if any(variant in content for variant in variants)]})
+        result.append(
+            {
+                "label": pieces[0][:100] if pieces else f"要点 {index + 1}",
+                "targets": [
+                    {
+                        key: row[key]
+                        for key in ("title", "position", "fingerprint", "quote")
+                    }
+                    for row, content in rows
+                    if any(variant in content for variant in variants)
+                ],
+            }
+        )
     return result
 
 
@@ -35,12 +53,27 @@ def bind_groups(texts, groups, catalog):
         for target in group["targets"]:
             row = indexed.get((target["title"], target["position"]))
             if not row or fingerprint(row["content"]) != target["fingerprint"]:
-                raise ValueError(f"计分项「{group['label']}」目标分片已变化或未导入，请重新标注后评测")
-            targets.append({"chunk_id": str(row["chunk_id"]), "position": row["position"],
-                "title": row["title"], "quote": target["quote"]})
+                raise ValueError(
+                    f"计分项「{group['label']}」目标分片已变化或未导入，请重新标注后评测"
+                )
+            targets.append(
+                {
+                    "chunk_id": str(row["chunk_id"]),
+                    "position": row["position"],
+                    "title": row["title"],
+                    "quote": target["quote"],
+                }
+            )
         if not targets:
             raise ValueError("汇总题计分项缺少目标分片")
-        evidence.append({"text": text, "label": group["label"], "targets": targets})
+        evidence.append(
+            {
+                "text": text,
+                "label": group["label"],
+                "targets": targets,
+                "relations": group.get("relations", []),
+            }
+        )
     return evidence
 
 
@@ -49,9 +82,11 @@ def evidence_fields(value):
 
 
 def validate_groups(groups, catalog):
-    if not isinstance(groups, list) or not 1 <= len(groups) <= 10:
-        raise ValueError("请填写 1 至 10 个计分项")
-    available = {(row["title"], row["position"], row["fingerprint"]): row for row in catalog}
+    if not isinstance(groups, list) or not groups:
+        raise ValueError("请至少填写 1 个计分项")
+    available = {
+        (row["title"], row["position"], row["fingerprint"]): row for row in catalog
+    }
     result = []
     for group in groups:
         label = group.get("label", "").strip()
@@ -65,24 +100,64 @@ def validate_groups(groups, catalog):
             if row is None:
                 raise ValueError(f"计分项「{label}」所选分片已变化，请重新选择")
             if key not in seen:
-                targets.append({name: row[name] for name in ("title", "position", "fingerprint", "quote")})
+                targets.append(
+                    {
+                        name: row[name]
+                        for name in ("title", "position", "fingerprint", "quote")
+                    }
+                )
                 seen.add(key)
-        result.append({"label": label, "targets": targets})
+        allowed = {
+            relation["relation_id"]: relation
+            for target in targets
+            for relation in available[
+                (target["title"], target["position"], target["fingerprint"])
+            ].get("relations", [])
+        }
+        relations = []
+        for relation in group.get("relations", []):
+            current = allowed.get(relation["relation_id"])
+            if current is None or current != relation:
+                raise ValueError(
+                    f"计分项「{label}」关系或图谱版本已变化，请重新选择关系证据"
+                )
+            if current not in relations:
+                relations.append(current)
+        result.append(
+            {
+                "label": label,
+                "targets": targets,
+                **({"relations": relations} if relations else {}),
+            }
+        )
     return result
 
 
 def match_evidence(candidates, evidence, chunk_texts, legacy_variants):
     """新计分项只看目标 ID；旧题兼容原文匹配。"""
-    variants = [None if isinstance(value, dict) else legacy_variants(value) for value in evidence]
+    variants = [
+        None if isinstance(value, dict) else legacy_variants(value)
+        for value in evidence
+    ]
     hits = {}
     for candidate in candidates:
         chunk_id = candidate["chunk_id"]
         found = []
         for index, value in enumerate(evidence):
-            matched = (any(target["chunk_id"] == chunk_id for target in value["targets"])
-                if isinstance(value, dict) else any(part in chunk_texts.get(chunk_id, "") for part in variants[index]))
+            matched = (
+                any(target["chunk_id"] == chunk_id for target in value["targets"])
+                if isinstance(value, dict)
+                else any(
+                    part in chunk_texts.get(chunk_id, "") for part in variants[index]
+                )
+            )
+            if "relation_id" in candidate:
+                matched = isinstance(value, dict) and any(
+                    relation["relation_id"] == candidate["relation_id"]
+                    for relation in value.get("relations", [])
+                )
             if matched:
                 found.append(index)
         if found:
-            hits[chunk_id] = found
+            hits[chunk_id] = sorted(set(hits.get(chunk_id, [])) | set(found))
     return hits

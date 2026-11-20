@@ -76,6 +76,11 @@ def test_eval_run_with_params(setup, eval_dir, monkeypatch, runtime):
     options = client.get("/eval/params", headers=headers()).json()
     assert [group["key"] for group in options["groups"]] == ["common", "fixed", "agent"]
     keys = {item["key"]: item for item in options["settings"]}
+    assert keys["graph_relation_grouping"]["eval"] == "common"
+    assert keys["graph_relation_grouping"]["value"] is True
+    assert runtime_config.check_overrides({"graph_relation_grouping": True}) == {
+        "graph_relation_grouping": True
+    }
     assert (
         keys["agent_rerank_min_score"]["eval"] == "agent"
         and keys["rerank_min_score"]["eval"] == "fixed"
@@ -86,6 +91,8 @@ def test_eval_run_with_params(setup, eval_dir, monkeypatch, runtime):
         "sufficiency",
         "answer",
         "agent",
+        "graph_keywords",
+        "memory_summary",
     }
     assert client.get("/eval/params", headers=headers("alice")).status_code == 403
 

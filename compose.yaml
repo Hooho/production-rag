@@ -18,6 +18,11 @@ services:
       args:
         NLTK_PROXY: ${HTTPS_PROXY:-}
         NLTK_DATA_BASE_URL: ${NLTK_DATA_BASE_URL:-https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages}
+        # pip 下载慢或超时时，在 .env 里设 PIP_MIRROR 换成镜像源；不设就用 PyPI。
+        PIP_MIRROR: ${PIP_MIRROR:-}
+        # pip 走代理（只给这一步用，apt 仍直连）：.env 里设 PIP_PROXY，例如和 HTTPS_PROXY 一样。
+        PIP_PROXY: ${PIP_PROXY:-}
+        APT_PROXY: ${APT_PROXY:-}
     command: ["alembic", "upgrade", "head"]
     env_file: .env
     environment:
@@ -36,6 +41,11 @@ services:
       args:
         NLTK_PROXY: ${HTTPS_PROXY:-}
         NLTK_DATA_BASE_URL: ${NLTK_DATA_BASE_URL:-https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages}
+        # pip 下载慢或超时时，在 .env 里设 PIP_MIRROR 换成镜像源；不设就用 PyPI。
+        PIP_MIRROR: ${PIP_MIRROR:-}
+        # pip 走代理（只给这一步用，apt 仍直连）：.env 里设 PIP_PROXY，例如和 HTTPS_PROXY 一样。
+        PIP_PROXY: ${PIP_PROXY:-}
+        APT_PROXY: ${APT_PROXY:-}
     env_file: .env
     environment:
       MYSQL_HOST: mysql
@@ -81,7 +91,13 @@ services:
       # 评测语料和初始题目（eval/seed）直接挂载仓库目录，改了不用重新构建镜像；题目和评测结果存在数据库里。
       - ./eval:/app/eval
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=20)"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=20)",
+        ]
       interval: 30s
       timeout: 25s
       retries: 3
@@ -94,6 +110,11 @@ services:
       args:
         NLTK_PROXY: ${HTTPS_PROXY:-}
         NLTK_DATA_BASE_URL: ${NLTK_DATA_BASE_URL:-https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages}
+        # pip 下载慢或超时时，在 .env 里设 PIP_MIRROR 换成镜像源；不设就用 PyPI。
+        PIP_MIRROR: ${PIP_MIRROR:-}
+        # pip 走代理（只给这一步用，apt 仍直连）：.env 里设 PIP_PROXY，例如和 HTTPS_PROXY 一样。
+        PIP_PROXY: ${PIP_PROXY:-}
+        APT_PROXY: ${APT_PROXY:-}
     command: ["python", "-m", "scripts.worker"]
     env_file: .env
     environment:
@@ -151,7 +172,11 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_PASSWORD mysql -h 127.0.0.1 -u rag -D rag -e 'SELECT 1'"]
+      test:
+        [
+          "CMD-SHELL",
+          "MYSQL_PWD=$$MYSQL_PASSWORD mysql -h 127.0.0.1 -u rag -D rag -e 'SELECT 1'",
+        ]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -174,11 +199,20 @@ services:
     image: redis:7.4-alpine
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?请填写 .env}
-    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes"]
+    command:
+      [
+        "sh",
+        "-c",
+        'exec redis-server --requirepass "$$REDIS_PASSWORD" --appendonly yes',
+      ]
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep -q PONG"]
+      test:
+        [
+          "CMD-SHELL",
+          "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep -q PONG",
+        ]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -242,7 +276,13 @@ services:
     expose:
       - "8090"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health', timeout=5)"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8090/health', timeout=5)",
+        ]
       interval: 10s
       timeout: 10s
       retries: 30
@@ -253,7 +293,13 @@ services:
     expose:
       - "8091"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8091/health', timeout=5)"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8091/health', timeout=5)",
+        ]
       interval: 10s
       timeout: 10s
       retries: 10
@@ -283,7 +329,13 @@ services:
     expose:
       - "8092"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8092/health', timeout=5)"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8092/health', timeout=5)",
+        ]
       interval: 10s
       timeout: 10s
       retries: 10

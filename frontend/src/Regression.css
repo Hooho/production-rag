@@ -1,523 +1,544 @@
 /* 回归集页签。颜色和巡检页保持一致。 */
 .rg-root {
-   display: flex;
-   flex-direction: column;
-   gap: 16px;
-   color: var(--t-1d3550);
-   font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  color: var(--t-1d3550);
+  font-size: 13px;
 }
 
 .rg-root label {
-   margin: 0;
-   letter-spacing: normal;
-   font-family: inherit;
-   text-transform: none;
+  margin: 0;
+  letter-spacing: normal;
+  font-family: inherit;
+  text-transform: none;
 }
 
 .rg-intro p {
-   margin: 0 0 6px;
-   color: var(--t-5e7a95);
-   line-height: 1.7;
+  margin: 0 0 6px;
+  color: var(--t-5e7a95);
+  line-height: 1.7;
 }
 
 .rg-intro .primary-button {
-   margin-top: 6px;
+  margin-top: 6px;
 }
 
 .rg-muted {
-   color: var(--t-7d95ac);
+  color: var(--t-7d95ac);
 }
 
 .rg-empty {
-   border: 1px dashed var(--t-d5e2ee);
-   border-radius: 6px;
-   padding: 24px;
-   color: var(--t-7d95ac);
-   text-align: center;
+  border: 1px dashed var(--t-d5e2ee);
+  border-radius: 6px;
+  padding: 24px;
+  color: var(--t-7d95ac);
+  text-align: center;
 }
 
 .rg-sets,
 .rg-items,
 .rg-result-list {
-   display: flex;
-   flex-direction: column;
-   gap: 8px;
-   margin: 0;
-   padding: 0;
-   list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .rg-set {
-   display: flex;
-   flex-direction: column;
-   align-items: flex-start;
-   gap: 4px;
-   width: 100%;
-   border: 1px solid var(--t-e3edf5);
-   border-radius: 6px;
-   background: #fff;
-   padding: 12px 16px;
-   color: inherit;
-   font: inherit;
-   text-align: left;
-   cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  border: 1px solid var(--t-e3edf5);
+  border-radius: 6px;
+  background: #fff;
+  padding: 12px 16px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .rg-set:hover {
-   border-color: var(--t-b9cde3);
+  border-color: var(--t-b9cde3);
 }
 
 .rg-set-name {
-   font-size: 15px;
-   font-weight: 700;
+  font-size: 15px;
+  font-weight: 700;
 }
 
 .rg-set-description {
-   color: var(--t-5e7a95);
+  color: var(--t-5e7a95);
 }
 
 .rg-set-meta,
 .rg-item-meta,
 .rg-summary {
-   display: flex;
-   flex-wrap: wrap;
-   align-items: center;
-   gap: 6px 14px;
-   color: var(--t-5e7a95);
-   font-size: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  color: var(--t-5e7a95);
+  font-size: 12px;
 }
 
 .rg-summary {
-   font-size: 13px;
+  font-size: 13px;
 }
 
 .is-pass {
-   color: #15803d;
+  color: #15803d;
 }
 
 .is-fail {
-   color: #b42318;
+  color: #b42318;
 }
 
+/* 表单整体：标签列宽度固定，所有控件共用同一条左、右边界。
+   名字、说明这类只有一两个短字段的小表单收在一个固定宽度里；
+   带计分项卡片网格的题目表单（is-wide）整块跟着页面宽度走。 */
 .rg-form {
-   display: flex;
-   flex-direction: column;
-   gap: 10px;
-   border: 1px solid var(--t-e3edf5);
-   border-radius: 6px;
-   background: #fbfdff;
-   padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 760px;
+  border: 1px solid var(--t-e3edf5);
+  border-radius: 6px;
+  background: #fbfdff;
+  padding: 16px 18px;
+}
+.rg-form.is-wide {
+  max-width: none;
 }
 
 .rg-field {
-   display: grid;
-   grid-template-columns: 72px 1fr;
-   align-items: center;
-   gap: 10px;
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
 }
 
 /* 全局 label 是小号字，这里和其他行统一成 13px。 */
 .rg-root .rg-field,
 .rg-root .rg-field > span {
-   font-size: 13px;
-   text-transform: none;
+  font-size: 13px;
+  text-transform: none;
 }
 
 .rg-field > span {
-   color: var(--t-5e7a95);
+  color: var(--t-5e7a95);
 }
 
-/* 输入框、下拉框和巡检页的备注框同一套样式：浅色边框、圆角、白底。 */
-.rg-field input:not([type="radio"]),
+/* 输入框、下拉框和巡检页的备注框同一套样式：浅色边框、圆角、白底；宽度跟着内容列走，不再单独限宽。 */
+.rg-field input:not([type="radio"]):not([type="checkbox"]),
 .rg-field textarea,
 .rg-field select {
-   box-sizing: border-box;
-   width: 100%;
-   max-width: 520px;
-   margin: 0;
-   border: 1px solid var(--t-cedfec);
-   border-radius: 6px;
-   background-color: #fff;
-   color: var(--t-1d3550);
-   padding: 6px 10px;
-   outline: 0;
-   font-family: inherit;
-   font-size: 13px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  color: var(--t-1d3550);
+  font-family: inherit;
 }
-
-.rg-field input:not([type="radio"]),
-.rg-field select {
-   height: 34px;
+/* 复选框、单选框按控件本身的大小显示并靠左对齐，不要被拉成整行宽度后居中。 */
+.rg-field input[type="checkbox"],
+.rg-field input[type="radio"] {
+  justify-self: start;
+  margin: 0;
 }
-
 .rg-field textarea {
-   resize: vertical;
+  resize: vertical;
 }
 
 .rg-field select {
-   appearance: none;
-   padding-right: 32px;
-   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%236c88a3' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-   background-position: right 10px center;
-   background-repeat: no-repeat;
-   cursor: pointer;
+  cursor: pointer;
 }
-
-.rg-field input:focus,
-.rg-field textarea:focus,
-.rg-field select:focus {
-   border-color: var(--t-2563eb);
-}
-
 .rg-field.is-top {
-   align-items: start;
+  align-items: start;
 }
 
 .rg-field.is-top > span {
-   padding-top: 7px;
+  padding-top: 7px;
 }
 
 .rg-form-title {
-   font-weight: 700;
+  font-weight: 700;
+}
+
+/* 前置对话是表单里的一块可选项，当成小节：标题一行，下面用细线和其他字段分开。 */
+.rg-form .eval-prelude-editor {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--t-e3edf5);
+}
+.rg-form .unified-eval-prelude-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.rg-form .unified-eval-prelude-heading strong {
+  font-size: 13px;
+}
+.rg-form .unified-eval-prelude-heading small {
+  color: var(--t-7d95ac);
+  font-size: 12px;
+}
+/* 表单变宽后，「添加一轮」跟着标题和说明排在一起，不要被推到最右端。 */
+.rg-form .unified-eval-prelude-heading button {
+  margin-left: 0;
+}
+.rg-form .eval-prelude-editor .eval-prelude-turn {
+  margin: 0;
+}
+.rg-form .eval-prelude-editor label {
+  margin: 0;
 }
 
 .rg-documents {
-   display: flex;
-   flex-wrap: wrap;
-   align-items: center;
-   gap: 6px;
-   max-width: 520px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  max-width: 520px;
 }
 
 .rg-documents select {
-   width: auto;
-   min-width: 200px;
-   flex: 1;
+  width: auto;
+  min-width: 200px;
+  flex: 1;
 }
 
 /* 已选的期望文档：方角标签，右边的 × 去掉。 */
 .rg-document {
-   display: inline-flex;
-   align-items: center;
-   gap: 2px;
-   border: 1px solid var(--t-cedfec);
-   border-radius: 3px;
-   background: var(--t-f3f7ff);
-   padding: 3px 4px 3px 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--t-cedfec);
+  border-radius: 3px;
+  background: var(--t-f3f7ff);
+  padding: 3px 4px 3px 6px;
 }
 
 .rg-document button {
-   border: 0;
-   background: none;
-   padding: 0 4px;
-   color: var(--t-6c88a3);
-   font-size: 14px;
-   line-height: 1;
-   cursor: pointer;
+  border: 0;
+  background: none;
+  padding: 0 4px;
+  color: var(--t-6c88a3);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .rg-document button:hover {
-   color: #b42318;
+  color: #b42318;
 }
 
 .rg-item-actions {
-   display: flex;
-   flex: none;
-   align-items: flex-start;
-   gap: 12px;
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  gap: 12px;
 }
 
 .rg-link.is-edit:hover {
-   color: var(--t-2563eb);
+  color: var(--t-2563eb);
 }
 
 .rg-radios {
-   display: flex;
-   gap: 16px;
+  display: flex;
+  gap: 16px;
 }
 
 .rg-radios label {
-   display: flex;
-   align-items: center;
-   gap: 6px;
-   color: var(--t-1d3550);
-   font-size: 13px;
-   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--t-1d3550);
+  font-size: 13px;
+  cursor: pointer;
 }
 
 .rg-radios input {
-   width: auto;
-   margin: 0;
+  width: auto;
+  margin: 0;
 }
 
 .rg-buttons {
-   display: flex;
-   flex-wrap: wrap;
-   justify-content: flex-end;
-   gap: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .rg-back,
 .rg-link {
-   align-self: flex-start;
-   border: 0;
-   background: none;
-   padding: 0;
-   color: var(--t-2563eb);
-   font: inherit;
-   cursor: pointer;
+  align-self: flex-start;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--t-2563eb);
+  font: inherit;
+  cursor: pointer;
 }
 
 .rg-link {
-   flex: none;
-   color: var(--t-7d95ac);
-   font-size: 12px;
+  flex: none;
+  color: var(--t-7d95ac);
+  font-size: 12px;
 }
 
 .rg-link:hover {
-   color: #b42318;
+  color: #b42318;
 }
 
 .rg-danger {
-   border: 1px solid #f3c4c0;
-   border-radius: 3px;
-   background: #fdecec;
-   padding: 8px 12px;
-   color: #b42318;
-   font: inherit;
-   cursor: pointer;
+  border: 1px solid #f3c4c0;
+  border-radius: 3px;
+  background: #fdecec;
+  padding: 8px 12px;
+  color: #b42318;
+  font: inherit;
+  cursor: pointer;
 }
 
 .rg-title {
-   display: flex;
-   flex-wrap: wrap;
-   align-items: flex-start;
-   justify-content: space-between;
-   gap: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .rg-title h3 {
-   margin: 0;
-   font-size: 18px;
+  margin: 0;
+  font-size: 18px;
 }
 
 .rg-title p {
-   margin: 4px 0 0;
-   color: var(--t-5e7a95);
+  margin: 4px 0 0;
+  color: var(--t-5e7a95);
 }
 
 .rg-launch {
-   display: flex;
-   flex-direction: column;
-   gap: 8px;
-   border: 1px solid var(--t-e3edf5);
-   border-radius: 6px;
-   background: #fff;
-   padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--t-e3edf5);
+  border-radius: 6px;
+  background: #fff;
+  padding: 12px 16px;
 }
 
 .rg-launch-option {
-   display: flex;
-   flex-wrap: wrap;
-   align-items: center;
-   gap: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
 }
 
 .rg-launch-option button {
-   min-width: 120px;
+  min-width: 120px;
 }
 
 .rg-launch-option span {
-   color: var(--t-5e7a95);
+  color: var(--t-5e7a95);
 }
 
 .rg-progress {
-   color: var(--t-2563eb);
+  color: var(--t-2563eb);
 }
 
 .rg-section h4 {
-   margin: 0 0 8px;
-   font-size: 14px;
+  margin: 0 0 8px;
+  font-size: 14px;
 }
 
 .rg-section-head {
-   display: flex;
-   align-items: center;
-   justify-content: space-between;
-   margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
 }
 
 .rg-section-head h4 {
-   margin: 0;
+  margin: 0;
 }
 
 .rg-runs {
-   display: flex;
-   flex-wrap: wrap;
-   gap: 8px;
-   margin-bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
 }
 
 /* 运行记录是方角的切换块，和圆角的状态标签区分开。 */
 .rg-run {
-   display: flex;
-   align-items: center;
-   gap: 8px;
-   border: 1px solid var(--t-e3edf5);
-   border-radius: 3px;
-   background: #fff;
-   padding: 6px 10px;
-   color: var(--t-1d3550);
-   font: inherit;
-   font-size: 12px;
-   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--t-e3edf5);
+  border-radius: 3px;
+  background: #fff;
+  padding: 6px 10px;
+  color: var(--t-1d3550);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .rg-run.is-selected {
-   border-color: var(--t-2563eb);
-   background: var(--t-f3f7ff);
+  border-color: var(--t-2563eb);
+  background: var(--t-f3f7ff);
 }
 
 .rg-results {
-   display: flex;
-   flex-direction: column;
-   gap: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .rg-item,
 .rg-result {
-   display: flex;
-   gap: 12px;
-   border: 1px solid var(--t-e3edf5);
-   border-radius: 6px;
-   background: #fff;
-   padding: 10px 14px;
+  display: flex;
+  gap: 12px;
+  border: 1px solid var(--t-e3edf5);
+  border-radius: 6px;
+  background: #fff;
+  padding: 10px 14px;
 }
 
 .rg-result {
-   flex-direction: column;
-   gap: 4px;
-   border-left-width: 3px;
+  flex-direction: column;
+  gap: 4px;
+  border-left-width: 3px;
 }
 
 .rg-result.is-ok {
-   border-left-color: #86d19f;
+  border-left-color: #86d19f;
 }
 
 .rg-result.is-bad {
-   border-left-color: #f0a19a;
+  border-left-color: #f0a19a;
 }
 
 .rg-item-main {
-   display: flex;
-   flex: 1;
-   flex-direction: column;
-   gap: 4px;
-   min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
 
 .rg-item-question,
 .rg-result-question {
-   font-weight: 600;
+  font-weight: 600;
 }
 
 .rg-result-head {
-   display: flex;
-   flex-wrap: wrap;
-   align-items: center;
-   gap: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 /* 期望结果用方角标签，和圆角的状态标签区分开。 */
 .rg-expect {
-   border-radius: 2px;
-   padding: 1px 6px;
-   font-size: 11px;
+  border-radius: 2px;
+  padding: 1px 6px;
+  font-size: 11px;
 }
 
 .rg-expect.is-answer {
-   background: #eaf1ff;
-   color: #1d4ed8;
+  background: #eaf1ff;
+  color: #1d4ed8;
 }
 
 .rg-expect.is-refuse {
-   background: var(--t-f1f3f6);
-   color: var(--t-475569);
+  background: var(--t-f1f3f6);
+  color: var(--t-475569);
 }
 
 .rg-details summary {
-   color: var(--t-2563eb);
-   font-size: 12px;
-   cursor: pointer;
+  color: var(--t-2563eb);
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .rg-text {
-   margin-top: 6px;
-   color: var(--t-334e68);
-   line-height: 1.7;
-   white-space: pre-wrap;
-   word-break: break-word;
+  margin-top: 6px;
+  color: var(--t-334e68);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .rg-error {
-   color: #b42318;
+  color: #b42318;
 }
 
 /* 提问人选择：输入框下方弹出可搜索的用户列表。 */
 .rg-picker {
-   position: relative;
-   width: 100%;
-   max-width: 520px;
+  position: relative;
+  width: 100%;
+  max-width: 520px;
 }
 
 .rg-picker-list {
-   position: absolute;
-   z-index: 20;
-   top: calc(100% + 4px);
-   left: 0;
-   right: 0;
-   max-height: 240px;
-   overflow-y: auto;
-   margin: 0;
-   border: 1px solid var(--t-cedfec);
-   border-radius: 6px;
-   background: #fff;
-   padding: 4px 0;
-   box-shadow: 0 8px 24px rgb(var(--t-173b5b-rgb) / 0.12);
-   list-style: none;
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 0;
+  border: 1px solid var(--t-cedfec);
+  border-radius: 6px;
+  background: #fff;
+  padding: 4px 0;
+  box-shadow: 0 8px 24px rgb(var(--t-173b5b-rgb) / 0.12);
+  list-style: none;
 }
 
 .rg-picker-list li {
-   display: flex;
-   align-items: baseline;
-   gap: 10px;
-   padding: 7px 12px;
-   cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 12px;
+  cursor: pointer;
 }
 
 .rg-picker-list li strong {
-   font-weight: 600;
+  font-weight: 600;
 }
 
 .rg-picker-list li span {
-   color: var(--t-7d95ac);
-   font-size: 12px;
+  color: var(--t-7d95ac);
+  font-size: 12px;
 }
 
 .rg-picker-list li.is-active {
-   background: var(--t-f3f7ff);
+  background: var(--t-f3f7ff);
 }
 
 .rg-picker-list li.is-selected strong {
-   color: var(--t-2563eb);
+  color: var(--t-2563eb);
 }
 
 .rg-picker-list li.rg-picker-empty {
-   color: var(--t-7d95ac);
-   cursor: default;
+  color: var(--t-7d95ac);
+  cursor: default;
 }
 
 /* 详情页的「题目 / 运行记录」页签，和评测页其他页签同一套样式。 */
 .rg-tabs {
-   margin: 4px 0 0;
+  margin: 4px 0 0;
 }

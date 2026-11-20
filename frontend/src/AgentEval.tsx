@@ -1,10 +1,28 @@
-import { Fragment, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import {
+  withEvalEvidence,
+  EvalEvidenceAnnotation,
+  EvalEvidenceFilter,
+  useEvalEvidenceFilter,
+} from "./EvalEvidenceAnnotation";
+import Table from "./Table";
+import "./EvalSearchModules.css";
+import { GraphRetrievalTrace } from "./GraphRetrievalTrace";
+import {
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from "react";
 import { ChunkOriginalDialog, type ChunkOriginal } from "./ChunkOriginalDialog";
 import { DetailDialog } from "./DetailDialog";
 import {
+  type ContextRelation,
   type EvalAgentCall,
   type EvalCompareKey,
   type EvalConfig,
+  type EvalGraphHits,
   type EvalMaterial,
   type EvalMode,
   type EvalParams,
@@ -16,6 +34,8 @@ import {
   type EvalSpecialSection,
   type EvalSummary,
 } from "./api";
+import { EvalRelationList } from "./EvalRelationList";
+import { MaterialListDialog, type MaterialEntry } from "./EvalMaterialList";
 import { AgentError } from "./AgentError";
 import { EvidenceFilterSummary } from "./EvidenceFilterSummary";
 import { ScoringItems } from "./ScoringItems";
@@ -221,6 +241,9 @@ type ModeCell = {
   note?: string;
   best?: boolean;
   custom?: boolean;
+  // 这组配置没开这个能力，这一格没有意义：数字显示「—」，整行变灰，鼠标停上去说原因。
+  disabled?: boolean;
+  reason?: string;
 };
 type ModeRow = {
   group: "result" | "process" | "config";
@@ -272,20 +295,119 @@ function agentMaterial(question: EvalQuestion): EvalMaterial | null {
   return question.agent?.material ?? null;
 }
 
-function MaterialLine({ material }: { material: EvalMaterial | null }) {
+function MaterialLine({
+  material,
+  relations,
+  relationReason,
+  entries,
+}: {
+  material: EvalMaterial | null;
+  // 这次检索放进回答上下文的图谱关系：数量写在这里，点开看每一条。
+  relations?: ContextRelation[];
+  relationReason?: string | null;
+  // 交给模型的每一段资料：点开看逐段明细。
+  entries?: MaterialEntry[];
+}) {
+  const [relationsOpen, setRelationsOpen] = useState(false);
+  const [materialOpen, setMaterialOpen] = useState(false);
   if (!material) return null;
+  const given = (relations ?? []).filter((row) => row.status === "context");
   return (
     <div className="ag-material">
-      <span className="ag-tool">交给模型的资料</span>
-      <span>
-        <b>{material.count}</b> 段 · {material.chars.toLocaleString()} 字 · 约{" "}
-        {material.tokens.toLocaleString()} token
-      </span>
+      <div className="ag-material-head">
+        <span className="ag-tool">交给模型的资料</span>
+        <span>
+          {material.chars.toLocaleString()} 字 · 约{" "}
+          {material.tokens.toLocaleString()} token
+        </span>
+      </div>
+      <ul className="ag-material-list">
+        <li>
+          <button
+            type="button"
+            className="link-button"
+            title="看逐段明细"
+            onClick={() => setMaterialOpen(true)}
+          >
+            {material.count} 段资料
+          </button>
+        </li>
+        {given.length > 0 && (
+          <li>
+            <button
+              type="button"
+              className="link-button"
+              title="看放进回答上下文的图谱关系"
+              onClick={() => setRelationsOpen(true)}
+            >
+              {given.length} 条关系
+            </button>
+          </li>
+        )}
+      </ul>
+      {materialOpen && (
+        <MaterialListDialog
+          material={material}
+          entries={entries ?? []}
+          onClose={() => setMaterialOpen(false)}
+        />
+      )}
+      {relationsOpen && (
+        <EvalRelationList
+          relations={relations ?? []}
+          reason={relationReason}
+          onClose={() => setRelationsOpen(false)}
+        />
+      )}
     </div>
   );
 }
 
+// Agent 的资料池：按编号顺序，每段记第一次拿到它的那次检索（同一分片再次命中沿用原编号）。
+function agentEntries(
+  agent: NonNullable<EvalQuestion["agent"]>,
+): MaterialEntry[] {
+  const seen = new Map<string, MaterialEntry>();
+  for (const call of agent.calls) {
+    for (const result of call.results ?? []) {
+      if (seen.has(result.evidence_id)) continue;
+      const parts = result.parent_chunk_ids ?? [];
+      const main = result.main_hits;
+      seen.set(result.evidence_id, {
+        id: result.evidence_id,
+        chunkId: result.chunk_id,
+        position: result.position,
+        extended: parts.filter((chunkId) => chunkId !== result.chunk_id).length,
+        from: `第 ${call.call} 次检索命中（第 ${call.round ?? "—"} 轮）`,
+        hits: result.hits,
+        extHits: main
+          ? result.hits.filter((index) => !main.includes(index))
+          : [],
+        source: {
+          key: result.evidence_id,
+          id: result.evidence_id,
+          title: result.title,
+          heading: result.heading ?? null,
+          text: result.text,
+          chunkId: result.chunk_id,
+          parts,
+          relevance: result.relevance,
+        },
+        evidence: result.hits.map((index) => ({
+          number: index + 1,
+          text: agent.evidence[index]?.text ?? "",
+        })),
+      });
+    }
+  }
+  return [...seen.values()].sort(
+    (a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)),
+  );
+}
+
 // 计分项命中情况：每个计分项一个结果标签（检索命中 / 父块扩展命中 / 读前后文拿到 / 被过滤 / 没召回 / 没拿到），后面写细节。
+// 关系命中用青色，和分片命中的绿、被过滤的红区分开。
+const RELATION_HIT_HUE = 190;
 type EvidenceStatusEntry = {
   label: string;
   tone: "success" | "danger" | "neutral" | "info";
@@ -299,6 +421,29 @@ type EvidenceStatusRow = EvidenceStatusEntry & {
   hitCount?: number;
 };
 
+export function GraphHitSummary({
+  enabled,
+  hits,
+}: {
+  enabled: boolean;
+  hits?: EvalGraphHits | null;
+}) {
+  if (!enabled) return null;
+  return (
+    <section className="ag-graph-hits" aria-label="图检索命中">
+      <strong>图检索命中</strong>
+      {hits ? (
+        <div>
+          实体关系独有 <b>{hits.entity_only}</b> · 全局关系独有{" "}
+          <b>{hits.global_only}</b> · 两路共同 <b>{hits.both}</b>
+        </div>
+      ) : (
+        <div>本次记录未保存命中路径，无法统计</div>
+      )}
+    </section>
+  );
+}
+
 // 卡片显示简洁摘要，完整计分项命中记录通过标题旁的详情按钮查看。
 function EvidenceStatus({
   question,
@@ -307,6 +452,7 @@ function EvidenceStatus({
   onToggle,
   children,
   agent = false,
+  graphEnabled = false,
 }: {
   question: EvalQuestion;
   rows: EvidenceStatusRow[];
@@ -314,8 +460,10 @@ function EvidenceStatus({
   onToggle: () => void;
   children?: ReactNode;
   agent?: boolean;
+  graphEnabled?: boolean;
 }) {
   const [detailOpen, setDetailOpen] = useState(false);
+  const graphHits = agent ? question.agent?.graph_hits : question.graph_hits;
   const itemName = (index: number) => {
     const label =
       question.agent?.evidence[index]?.label ||
@@ -345,7 +493,9 @@ function EvidenceStatus({
                   ? "is-filtered"
                   : row.tone === "neutral"
                     ? "is-missed"
-                    : "is-hit"
+                    : row.label === "关系命中"
+                      ? "is-hit is-relation-hit"
+                      : "is-hit"
               }
             >
               <span className="ag-evidence-icon" aria-hidden="true">
@@ -361,7 +511,9 @@ function EvidenceStatus({
               >
                 {row.label}
               </Tag>
-              {(row.tone === "danger" || row.tone === "neutral") &&
+              {(row.tone === "danger" ||
+                row.tone === "neutral" ||
+                row.label === "关系命中") &&
                 row.detail && <small>{row.detail}</small>}
             </li>
           ))}
@@ -369,6 +521,7 @@ function EvidenceStatus({
       ) : (
         <p className="ag-muted">没有答案的题，不看计分项。</p>
       )}
+      <GraphHitSummary enabled={graphEnabled} hits={graphHits} />
       {children}
       <button
         type="button"
@@ -460,11 +613,44 @@ function evidenceChunkLists(question: EvalQuestion) {
     ? (question.agent?.evidence ?? []).map((item) => item.chunk_ids ?? [])
     : (question.evidence ?? []).map((item, index) => [
         ...new Set(
-          [item.chunk_id, question.retry?.evidence?.[index]?.chunk_id].filter(
-            (id): id is string => Boolean(id),
-          ),
+          [
+            item.chunk_id,
+            ...(item.targets ?? []).map((target) => target.chunk_id),
+            question.retry?.evidence?.[index]?.chunk_id,
+            ...(question.retry?.evidence?.[index]?.targets ?? []).map(
+              (target) => target.chunk_id,
+            ),
+          ].filter((id): id is string => Boolean(id)),
         ),
       ]);
+}
+
+export function graphRelationFilter(
+  question: EvalQuestion,
+  index: number,
+  retry = false,
+): string | null {
+  const evidence = retry
+    ? question.retry?.evidence?.[index]
+    : question.evidence[index];
+  if (evidence?.graph_filter_reason) return evidence.graph_filter_reason;
+  const ids = new Set(
+    (evidence?.targets ?? []).map((target) => target.chunk_id),
+  );
+  if (evidence?.chunk_id) ids.add(evidence.chunk_id);
+  const diagnostics = retry
+    ? question.retry?.diagnostics
+    : question.diagnostics;
+  const relations = (diagnostics?.graph?.relation_candidates ?? []).filter(
+    (relation) => ids.has(relation.chunk_id),
+  );
+  if (!relations.length || relations.some((relation) => relation.kept))
+    return null;
+  return [
+    ...new Set(
+      relations.map((relation) => relation.reason || "关系筛选未保留"),
+    ),
+  ].join("；");
 }
 
 function fixedEvidenceRows(
@@ -504,7 +690,7 @@ function fixedEvidenceRows(
         );
         if (!sources.length) continue;
         matches.push({
-          label: direct ? "检索命中" : "扩展命中",
+          label: direct ? "分片命中" : "扩展命中",
           tone: "success",
           dashed: !direct,
           detail: sources
@@ -538,6 +724,34 @@ function fixedEvidenceRows(
       }
       return { ...matches[0], matches };
     }
+    const diagnostics = usedRetry ? retry?.diagnostics : question.diagnostics;
+    const relationIds = new Set(chunkIds);
+    const relationMatches =
+      (usedRetry ? retry?.relations : question.relations)?.filter(
+        (relation) => relation.chunk_id && relationIds.has(relation.chunk_id),
+      ) ?? [];
+    const contextMatches = (diagnostics?.context_relations?.items ?? []).filter(
+      (relation) =>
+        relation.status === "context" &&
+        relation.chunk_id &&
+        relationIds.has(relation.chunk_id),
+    );
+    if (
+      fixed?.via === "relation" ||
+      relationMatches.length ||
+      contextMatches.length
+    ) {
+      const chunkReason =
+        fixed?.status === "not_recalled"
+          ? "对应分片未召回到分片候选"
+          : mergeOutcome(fixed, false, config).text;
+      return {
+        label: "关系命中",
+        tone: "success",
+        hue: RELATION_HIT_HUE,
+        detail: `对应图谱关系已进入上下文；分片：${chunkReason}`,
+      };
+    }
     const row =
       usedRetry && !retry?.evidence
         ? {
@@ -545,7 +759,15 @@ function fixedEvidenceRows(
             tone: "danger" as const,
             detail: "补充检索未命中，历史记录未保存过滤原因",
           }
-        : lostRow(fixed, config);
+        : (fixed?.status === "not_recalled" ||
+              fixed?.status === "graph_relation_filtered") &&
+            graphRelationFilter(question, evidence, usedRetry)
+          ? {
+              label: "被过滤",
+              tone: "danger" as const,
+              detail: `图关系已召回，${graphRelationFilter(question, evidence, usedRetry)}`,
+            }
+          : lostRow(fixed, config);
     return retry && !usedRetry
       ? { ...row, detail: `${row.detail}；补充检索没采用` }
       : row;
@@ -671,6 +893,15 @@ function fixedHits(question: EvalQuestion) {
   );
 }
 
+function fixedRelationHits(question: EvalQuestion) {
+  if (question.cleared) return 0;
+  return (
+    question.relation_hits ??
+    question.evidence.filter((item) => item.given && item.via === "relation")
+      .length
+  );
+}
+
 function fixedExtHits(question: EvalQuestion) {
   if (question.cleared) return 0;
   return (
@@ -678,6 +909,74 @@ function fixedExtHits(question: EvalQuestion) {
     question.evidence.filter((item) => item.given && item.via === "extension")
       .length
   );
+}
+
+// 这组配置有没有开图检索：统一配置（版本 2）看 methods；旧记录的 methods 恒是 dense+keyword，
+// 只能看当时的全局开关 graph_retrieval。都拿不到返回 undefined（不知道，不置灰）。
+function graphOn(config?: EvalConfig): boolean | undefined {
+  if (config?.version === 2) return Boolean(config.methods?.includes("graph"));
+  const flag = (config?.settings as Record<string, unknown> | undefined)
+    ?.graph_retrieval;
+  return typeof flag === "boolean" ? flag : undefined;
+}
+
+// 父子扩展开没开：固定流程看 parent_context，Agent 有自己的一套 agent_parent_context。
+function parentOn(
+  config: EvalConfig | undefined,
+  mode: "fixed" | "agent",
+): boolean | undefined {
+  const settings = (config?.settings ?? {}) as Record<string, unknown>;
+  if (mode === "agent") {
+    const agent = config?.agent?.parent_context;
+    if (typeof agent === "boolean") return agent;
+    const value = settings.agent_parent_context;
+    return typeof value === "boolean" ? value : undefined;
+  }
+  const value = settings.parent_context;
+  return typeof value === "boolean" ? value : undefined;
+}
+
+// 这一行在这组配置下有没有意义：返回没有意义的原因（undefined = 有意义，照常显示）。
+// 没开图检索就没有关系命中，没开父子扩展就没有扩展命中，固定流程没有轮次和输入 token。
+function notApplicable(
+  label: string,
+  mode: "fixed" | "agent",
+  facts: {
+    graph?: boolean;
+    parent?: boolean;
+    rerankOff: boolean;
+    excellentOff: boolean;
+    sufficiencyOff: boolean;
+  },
+): string | undefined {
+  const parentOff =
+    mode === "agent" ? "这组配置没开 Agent 父子扩展" : "这组配置没开父子扩展";
+  switch (label) {
+    case "关系命中":
+      if (mode === "agent") return "Agent 模式不统计关系命中，只有固定流程有";
+      if (facts.graph === false) return "这组配置没开图检索，没有关系可命中";
+      return undefined;
+    case "扩展命中":
+      return facts.parent === false ? `${parentOff}，没有扩展命中` : undefined;
+    case "轮数":
+      return mode === "fixed" ? "固定流程没有轮次，只有 Agent 有" : undefined;
+    case "输入 token":
+      return mode === "fixed"
+        ? "固定流程没记录输入 token，只有 Agent 有"
+        : undefined;
+    case "重排模型":
+    case "重排候选":
+    case "重排阈值":
+      return facts.rerankOff ? "重排未启用" : undefined;
+    case "优秀阈值":
+      return facts.excellentOff ? "优秀阈值未启用" : undefined;
+    case "父块扩展":
+      return facts.parent === false ? parentOff : undefined;
+    case "充分性判断模型":
+      return facts.sufficiencyOff ? "这组配置没启用充分性判断" : undefined;
+    default:
+      return undefined;
+  }
 }
 
 function modeRows(
@@ -708,7 +1007,11 @@ function modeRows(
       hits: hits.reduce((sum, value) => sum + value, 0),
       ext: ran.reduce((sum, question) => sum + fixedExtHits(question), 0),
       direct: ran.reduce(
-        (sum, question, index) => sum + hits[index] - fixedExtHits(question),
+        (sum, question, index) =>
+          sum +
+          hits[index] -
+          fixedExtHits(question) -
+          fixedRelationHits(question),
         0,
       ),
       retried: questions.filter((question) => question.retry?.used).length,
@@ -906,6 +1209,25 @@ function modeRows(
         : noVia,
     ),
   });
+  if (hasFixed)
+    rows.push({
+      group: "result",
+      label: "关系命中",
+      ...pick(
+        {
+          value: ratio(
+            answerable.reduce(
+              (sum, question) => sum + fixedRelationHits(question),
+              0,
+            ),
+            evidenceTotal,
+          ),
+          note: "目标分片未返回，仅对应关系进入上下文",
+        },
+        // Agent 不记关系命中（后端只在固定流程统计），不是「没记录」。
+        { value: "—", note: "Agent 模式不统计关系命中" },
+      ),
+    });
   rows.push({
     group: "result",
     label: "扩展命中",
@@ -1287,6 +1609,31 @@ function modeRows(
       ...pick(mark(model.fixed, fixedKeys), mark(model.agent, agentKeys)),
     });
   }
+  // 这组配置没开的能力，这一行没有意义：数字换成「—」，整行变灰，鼠标停上去说原因。
+  // 优秀阈值：1（或没记）表示不启用；重排没开时相关几项都不适用。
+  const excellentOff = (side: "fixed" | "agent") => {
+    if (rerankOff) return true;
+    const value =
+      side === "fixed"
+        ? (settings.rerank_excellent_score as number | undefined)
+        : (agentConfig?.excellent_score ??
+          (settings.agent_excellent_score as number | undefined));
+    return value === undefined || value >= 1;
+  };
+  for (const row of rows) {
+    for (const side of ["fixed", "agent"] as const) {
+      const cell = row[side];
+      if (!cell) continue;
+      const reason = notApplicable(row.label, side, {
+        graph: graphOn(config),
+        parent: parentOn(config, side),
+        rerankOff,
+        excellentOff: excellentOff(side),
+        sufficiencyOff: Boolean(flow && !flow.sufficiency),
+      });
+      if (reason) row[side] = { ...cell, value: "—", disabled: true, reason };
+    }
+  }
   return rows;
 }
 
@@ -1324,7 +1671,8 @@ function ModeCards({
         return (
           <Fragment key={row.label}>
             <div
-              className={`ag-mode-row is-${row.group}${index > 0 && rows[index - 1].group !== row.group ? " is-break" : ""}`}
+              className={`ag-mode-row is-${row.group}${index > 0 && rows[index - 1].group !== row.group ? " is-break" : ""}${cell.disabled ? " is-disabled" : ""}`}
+              title={cell.reason}
             >
               <span className="ag-mode-label">{row.label}</span>
               <span className="ag-mode-value">
@@ -1412,50 +1760,51 @@ export function ComparePanel({ run }: { run: EvalRun }) {
       <div className="ev-section-title">
         按题目类型<small>得分和资料命中率</small>
       </div>
-      <div className="diag-table-wrap">
-        <table className="diag-table ev-table">
-          <thead>
-            <tr>
-              <th>题型</th>
-              <th className="num">题数</th>
-              <th className="num">固定流程得分</th>
-              <th className="num">Agent 得分</th>
-              <th className="num">固定流程命中率</th>
-              <th className="num">Agent 命中率</th>
-              <th className="num">固定流程资料</th>
-              <th className="num">Agent 资料</th>
-              <th className="num">Agent 平均检索次数</th>
+      <Table
+        containerProps={{ className: "diag-table-wrap" }}
+        className="diag-table ev-table"
+      >
+        <thead>
+          <tr>
+            <th>题型</th>
+            <th className="num">题数</th>
+            <th className="num">固定流程得分</th>
+            <th className="num">Agent 得分</th>
+            <th className="num">固定流程命中率</th>
+            <th className="num">Agent 命中率</th>
+            <th className="num">固定流程资料</th>
+            <th className="num">Agent 资料</th>
+            <th className="num">Agent 平均检索次数</th>
+          </tr>
+        </thead>
+        <tbody>
+          {Object.entries(run.by_type ?? {}).map(([type, row]) => (
+            <tr key={type}>
+              <td>{type}</td>
+              <td className="num">{row.count ?? row.agent_count ?? "—"}</td>
+              <td className="num">{formatPoints(row.score)}</td>
+              <td className="num">{formatPoints(row.agent_score)}</td>
+              <td className="num">
+                {percent(row.recall_given ?? row.recall_final)}
+              </td>
+              <td className="num">{percent(row.agent_recall)}</td>
+              <td className="num">
+                {row.material_avg_count === undefined ||
+                row.material_avg_count === null
+                  ? "—"
+                  : `${number(row.material_avg_count)} 段 · 约 ${Math.round(row.material_avg_tokens ?? 0).toLocaleString()} token`}
+              </td>
+              <td className="num">
+                {row.agent_material_avg_count === undefined ||
+                row.agent_material_avg_count === null
+                  ? "—"
+                  : `${number(row.agent_material_avg_count)} 段 · 约 ${Math.round(row.agent_material_avg_tokens ?? 0).toLocaleString()} token`}
+              </td>
+              <td className="num">{number(row.agent_avg_searches)}</td>
             </tr>
-          </thead>
-          <tbody>
-            {Object.entries(run.by_type ?? {}).map(([type, row]) => (
-              <tr key={type}>
-                <td>{type}</td>
-                <td className="num">{row.count ?? row.agent_count ?? "—"}</td>
-                <td className="num">{formatPoints(row.score)}</td>
-                <td className="num">{formatPoints(row.agent_score)}</td>
-                <td className="num">
-                  {percent(row.recall_given ?? row.recall_final)}
-                </td>
-                <td className="num">{percent(row.agent_recall)}</td>
-                <td className="num">
-                  {row.material_avg_count === undefined ||
-                  row.material_avg_count === null
-                    ? "—"
-                    : `${number(row.material_avg_count)} 段 · 约 ${Math.round(row.material_avg_tokens ?? 0).toLocaleString()} token`}
-                </td>
-                <td className="num">
-                  {row.agent_material_avg_count === undefined ||
-                  row.agent_material_avg_count === null
-                    ? "—"
-                    : `${number(row.agent_material_avg_count)} 段 · 约 ${Math.round(row.agent_material_avg_tokens ?? 0).toLocaleString()} token`}
-                </td>
-                <td className="num">{number(row.agent_avg_searches)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          ))}
+        </tbody>
+      </Table>
       <div className="ev-section-title">
         逐题<small>点开看两边的检索日志</small>
       </div>
@@ -1646,30 +1995,31 @@ export function AgentPanel({ run }: { run: EvalRun }) {
         />
       </div>
       <div className="ev-section-title">按题目类型</div>
-      <div className="diag-table-wrap">
-        <table className="diag-table ev-table">
-          <thead>
-            <tr>
-              <th>题型</th>
-              <th className="num">题数</th>
-              <th className="num">资料命中率</th>
-              <th className="num">平均检索次数</th>
-              <th className="num">平均耗时</th>
+      <Table
+        containerProps={{ className: "diag-table-wrap" }}
+        className="diag-table ev-table"
+      >
+        <thead>
+          <tr>
+            <th>题型</th>
+            <th className="num">题数</th>
+            <th className="num">资料命中率</th>
+            <th className="num">平均检索次数</th>
+            <th className="num">平均耗时</th>
+          </tr>
+        </thead>
+        <tbody>
+          {Object.entries(run.by_type ?? {}).map(([type, row]) => (
+            <tr key={type}>
+              <td>{type}</td>
+              <td className="num">{row.count ?? row.agent_count ?? "—"}</td>
+              <td className="num">{percent(row.agent_recall)}</td>
+              <td className="num">{number(row.agent_avg_searches)}</td>
+              <td className="num">{formatMs(row.agent_latency_avg_ms)}</td>
             </tr>
-          </thead>
-          <tbody>
-            {Object.entries(run.by_type ?? {}).map(([type, row]) => (
-              <tr key={type}>
-                <td>{type}</td>
-                <td className="num">{row.count ?? row.agent_count ?? "—"}</td>
-                <td className="num">{percent(row.agent_recall)}</td>
-                <td className="num">{number(row.agent_avg_searches)}</td>
-                <td className="num">{formatMs(row.agent_latency_avg_ms)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          ))}
+        </tbody>
+      </Table>
       <div className="ev-section-title">
         逐题<small>点开看 Agent 的检索日志</small>
       </div>
@@ -2081,6 +2431,20 @@ function FinalDelivery({
     }
     groups.set(item.id, rows);
   }
+  const evidenceFilter = useEvalEvidenceFilter(
+    [...groups.values()].flatMap((rows) => [...rows.values()]),
+    (row) => ({ chunkId: row.chunkId }),
+  );
+  const visibleRows = new Set(evidenceFilter.rows);
+  const visibleGroups = [...groups]
+    .map(
+      ([id, rows]) =>
+        [
+          id,
+          new Map([...rows].filter(([, row]) => visibleRows.has(row))),
+        ] as const,
+    )
+    .filter(([, rows]) => rows.size > 0);
   const directChunks = new Set(
     items
       .filter((item) => !item.key.startsWith("context-"))
@@ -2117,6 +2481,9 @@ function FinalDelivery({
           {groups.size} 条来源 · {chunks.size} 个分片（含扩展{" "}
           {expandedChunks.size} 片）
         </p>
+        {!unavailable && groups.size > 0 && (
+          <EvalEvidenceFilter filter={evidenceFilter} />
+        )}
         {unavailable ? (
           <p className="ag-muted">这次评测没有保存最终交付资料。</p>
         ) : groups.size === 0 ? (
@@ -2125,9 +2492,11 @@ function FinalDelivery({
               ? "资料已清空，没有最终交付。"
               : "没有最终交付资料。"}
           </p>
+        ) : visibleGroups.length === 0 ? (
+          <p className="ag-muted">没有符合筛选条件的分片。</p>
         ) : (
           <ul className="ag-delivery-groups">
-            {[...groups]
+            {visibleGroups
               .sort(([a], [b]) =>
                 a.localeCompare(b, undefined, { numeric: true }),
               )
@@ -2178,6 +2547,7 @@ function FinalDelivery({
                             ].join("、");
                             return (
                               <li key={key}>
+                                <EvalEvidenceAnnotation chunkId={row.chunkId} />
                                 <button
                                   type="button"
                                   className={`ag-delivery-row ${row.hits.length ? "" : "is-non-evidence"}`}
@@ -2336,8 +2706,31 @@ function SearchParams({ values }: { values: string[] }) {
   );
 }
 
-function fixedParams(config: EvalRun["config"] & { search_label?: string }) {
-  const parts = [config.search_label ?? "混合检索"];
+function fixedParams(
+  config: EvalRun["config"] & { search_label?: string },
+  diagnostics?: EvalQuestion["diagnostics"],
+) {
+  const dc = diagnostics?.config;
+  const methods = dc?.methods ?? config.methods;
+  const parts = [
+    methods?.length
+      ? methods
+          .map(
+            (method) =>
+              ({ dense: "向量检索", keyword: "关键词检索", graph: "图检索" })[
+                method
+              ] ?? method,
+          )
+          .join("＋")
+      : (config.search_label ?? "混合检索"),
+  ];
+  if (dc?.source_selection_mode === "tokens") {
+    parts.push(`原文预算 ${dc.source_token_budget ?? "未记录"} token`);
+    if (dc.reranked === false) parts.push("不重排");
+    else if (typeof dc.min_score === "number")
+      parts.push(`阈值 ${dc.min_score.toFixed(2)}`);
+    return parts;
+  }
   if (config.pool_size) parts.push(`候选池 ${config.pool_size}`);
   if (config.return_limit) parts.push(`返回 ${config.return_limit} 段`);
   if (config.reranked === false) parts.push("不重排");
@@ -2384,19 +2777,28 @@ function mergeOutcome(
       ? `重排分 ${fixed.rerank_probability.toFixed(2)}`
       : "";
   switch (fixed?.status) {
+    case "graph_relation_filtered":
+      return {
+        ok: false,
+        text: `图关系已召回，${fixed?.graph_filter_reason ?? "关系筛选未保留"}`,
+      };
     case "not_recalled":
     case undefined:
       return { ok: false, text: "每一路都没召回" };
     case "not_in_pool":
       return {
         ok: false,
-        text: `合并后排第 ${fixed.rrf_rank ?? "—"} 名，没进候选池（前 ${config.pool_size ?? "—"} 段）`,
+        text: config.methods?.includes("graph")
+          ? "未进入候选池：普通候选按融合排名筛选，图独有候选按图排名额外筛选"
+          : `合并后排第 ${fixed.rrf_rank ?? "—"} 名，没进候选池（前 ${config.pool_size ?? "—"} 段）`,
       };
     case "filtered_low_score":
       return {
         ok: false,
         text: `进了重排，${score ? `${score}，` : "重排分"}低于阈值 ${typeof config.min_score === "number" ? config.min_score.toFixed(2) : "—"}，被过滤`,
       };
+    case "beyond_budget":
+      return { ok: false, text: "超出剩余来源 token 预算，未单独入选" };
     case "beyond_limit":
       return {
         ok: false,
@@ -2438,13 +2840,18 @@ function QuestionDetail({
         {hasFixed && (
           <FixedLog question={question} params={params} config={config} />
         )}
-        {agent && <AgentLog question={question} />}
+        {agent && (
+          <AgentLog
+            question={question}
+            graphEnabled={config.methods?.includes("graph")}
+          />
+        )}
       </div>
     </div>
   );
 }
 
-function FixedSearchResults({
+export function FixedSearchResults({
   question,
   items,
   config,
@@ -2465,6 +2872,17 @@ function FixedSearchResults({
   sourcesAvailable?: boolean;
   retrySearch?: boolean;
 }) {
+  const diagnostics = retrySearch
+    ? question.retry?.diagnostics
+    : question.diagnostics;
+  const dc = diagnostics?.config;
+  const graph = diagnostics?.graph;
+  const candidates = diagnostics?.candidates ?? [];
+  const methods = dc?.methods ?? config.methods;
+  const normalSelected = methods
+    ? methods.some((method) => method === "dense" || method === "keyword")
+    : true;
+  const graphSelected = methods ? methods.includes("graph") : Boolean(graph);
   const total = question.answerable ? evidenceChunkLists(question).length : 0;
   const routes =
     queryRoutes == null
@@ -2481,7 +2899,7 @@ function FixedSearchResults({
         );
   return (
     <>
-      {queryRoutes == null && (
+      {normalSelected && queryRoutes == null && (
         <ul className="ag-query-list">
           {queries.map((query) => (
             <li key={query}>
@@ -2497,14 +2915,14 @@ function FixedSearchResults({
           ))}
         </ul>
       )}
-      {retryQuery && queryRoutes == null && (
+      {normalSelected && retryQuery && queryRoutes == null && (
         <p className="ag-muted">
           这条历史记录未保存补充检索的逐路召回与过滤详情，重新评测后可查看。
         </p>
       )}
       {/* 每一路检索词分别检索（和 Agent 同一轮同时发出的几次检索对应），再合并、重排、过滤成最后的结果。 */}
       {/* 只有 1 路时不再套一层「检索」框（外面已经是检索这一步），直接列这一路。 */}
-      {routes.length > 0 && (
+      {normalSelected && routes.length > 0 && (
         <div
           className={
             routes.length > 1 ? "ag-round is-parallel" : "ag-single-route"
@@ -2550,16 +2968,18 @@ function FixedSearchResults({
                       <li key={evidence} className="is-hit">
                         <b>✓</b>计分项 {evidence + 1}
                         <small>召回到了</small>
-                        {(best?.dense ?? 0) > 0 && (
-                          <Tag size="sm" tone="info" plain>
-                            向量第 {best?.dense} 名
-                          </Tag>
-                        )}
-                        {(best?.keyword ?? 0) > 0 && (
-                          <Tag size="sm" tone="warning" plain>
-                            关键词第 {best?.keyword} 名
-                          </Tag>
-                        )}
+                        {(!methods || methods.includes("dense")) &&
+                          (best?.dense ?? 0) > 0 && (
+                            <Tag size="sm" tone="info" plain>
+                              向量第 {best?.dense} 名
+                            </Tag>
+                          )}
+                        {(!methods || methods.includes("keyword")) &&
+                          (best?.keyword ?? 0) > 0 && (
+                            <Tag size="sm" tone="warning" plain>
+                              关键词第 {best?.keyword} 名
+                            </Tag>
+                          )}
                       </li>
                     ) : (
                       <li key={evidence} className="is-miss">
@@ -2574,58 +2994,305 @@ function FixedSearchResults({
           ))}
         </div>
       )}
-      <div className="ag-merge-label">
-        合并 → 前 {config.pool_size ?? "—"} 段进重排 → 过阈值{" "}
-        {typeof config.min_score === "number"
-          ? config.min_score.toFixed(2)
-          : "—"}{" "}
-        → 最多 {config.return_limit ?? "—"} 段交给模型
-      </div>
-      {mergedEvidence && mergedEvidence.length > 0 && (
-        <ul
-          className="ag-evidence-trace ag-merge-evidence"
-          aria-label="合并过滤后的计分项命中情况"
+      {graphSelected && (
+        <div
+          className="eval-search-module eval-search-graph"
+          aria-label="图检索"
         >
-          {mergedEvidence.map((row, index) => (
-            <li key={index}>
-              <span
-                className={`ag-evidence-name ${row.tone === "danger" || row.tone === "neutral" ? "is-missed" : ""}`}
-              >
-                计分项 {index + 1}
-              </span>
-              {(row.matches ?? [row]).map((match) => (
-                <span className="ag-evidence-match" key={match.label}>
-                  <Tag
-                    tone={match.tone}
-                    hue={match.hue}
-                    size="sm"
-                    outline={match.dashed}
-                    className={match.dashed ? "is-dashed" : undefined}
-                  >
-                    {match.label}
-                  </Tag>
-                  {match.detail && <small>{match.detail}</small>}
-                  {match.tone === "danger" &&
-                    (() => {
-                      const fixed = retrySearch
-                        ? question.retry?.evidence?.[index]
-                        : question.evidence[index];
-                      const ids = evidenceChunkLists(question)[index] ?? [];
-                      const candidates = !retrySearch
-                        ? question.diagnostics?.candidates.filter((candidate) =>
-                            ids.includes(candidate.chunk_id),
-                          )
-                        : undefined;
-                      const text = filteredRankingText(
-                        candidates?.length ? candidates : fixed ? [fixed] : [],
+          <header className="eval-search-module-head">
+            <strong>图检索</strong>
+            <span>
+              {graph
+                ? { ok: "已完成", skipped: "已跳过", failed: "失败" }[
+                    graph.status
+                  ]
+                : "未记录"}
+            </span>
+          </header>
+          {graph ? (
+            <>
+              {graph.status === "ok" && (
+                <>
+                  <p className="eval-search-summary">
+                    图独有召回{" "}
+                    {
+                      candidates.filter(
+                        (c) =>
+                          c.retrieval_methods.length === 1 &&
+                          c.retrieval_methods[0] === "graph",
+                      ).length
+                    }{" "}
+                    段
+                  </p>
+                  <ul className="ag-evidence-trace">
+                    {evidenceChunkLists(question).map((ids, index) => {
+                      const found = candidates.filter(
+                        (c) =>
+                          ids.includes(c.chunk_id) &&
+                          c.contributions.some((x) => x.method === "graph"),
                       );
-                      return text ? <small>{text}</small> : null;
-                    })()}
+                      const relationFiltered = graphRelationFilter(
+                        question,
+                        index,
+                        retrySearch,
+                      );
+                      const ranks = found.flatMap((c) =>
+                        c.contributions
+                          .filter((x) => x.method === "graph")
+                          .map((x) => x.rank),
+                      );
+                      return (
+                        <li
+                          key={index}
+                          className={
+                            found.length
+                              ? "is-hit"
+                              : relationFiltered
+                                ? "is-filtered"
+                                : "is-miss"
+                          }
+                        >
+                          <b>{found.length ? "✓" : "—"}</b>计分项 {index + 1}
+                          <small>
+                            {found.length
+                              ? `图检索第 ${Math.min(...ranks)} 名`
+                              : relationFiltered
+                                ? `图关系已召回，${relationFiltered}`
+                                : "图检索未召回"}
+                          </small>
+                          {found.some(
+                            (c) => c.retrieval_methods.length === 1,
+                          ) && (
+                            <Tag size="sm" outline plain>
+                              图独有
+                            </Tag>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </>
+              )}
+              <GraphRetrievalTrace graph={graph} />
+            </>
+          ) : (
+            <p className="ag-muted">这次检索未保存图检索诊断，无法还原过程。</p>
+          )}
+        </div>
+      )}
+      <div
+        className="eval-search-module eval-search-pool"
+        aria-label="候选入池与重排"
+      >
+        <header className="eval-search-module-head">
+          <strong>候选入池与重排</strong>
+          <span>合并后统一处理</span>
+        </header>
+        <div className="eval-search-pools">
+          {normalSelected && (
+            <div>
+              <span>融合排名入池</span>
+              <strong>
+                {diagnostics && candidates.some((c) => c.pool_via)
+                  ? candidates.filter((c) => c.pool_via === "rrf").length
+                  : "未记录"}
+                <small> 段</small>
+              </strong>
+              <small>
+                上限 {dc?.rerank_candidates ?? config.pool_size ?? "未记录"} 段
+              </small>
+            </div>
+          )}
+          {graphSelected && (
+            <div>
+              <span>{normalSelected ? "图独有额外入池" : "图候选入池"}</span>
+              <strong>
+                {dc?.graph_pool_count ?? "未记录"}
+                <small> 段</small>
+              </strong>
+              <small>
+                按图排名 · 上限 {dc?.graph_pool_size ?? "未记录"} 段
+              </small>
+            </div>
+          )}
+        </div>
+        <div className="eval-search-flow">
+          <span>{dc?.reranked === false ? "未重排" : "统一重排"}</span>
+          <i>→</i>
+          <span>
+            {dc?.reranked === false
+              ? "未做相关性过滤"
+              : `相关性阈值 ${dc?.min_score ?? config.min_score ?? "未记录"}`}
+          </span>
+          <i>→</i>
+          <span>
+            {dc?.source_selection_mode === "tokens"
+              ? `来源预算 ${dc.source_token_budget ?? "未记录"} token`
+              : `最多返回 ${dc?.return_limit ?? config.return_limit ?? "未记录"} 段`}
+          </span>
+        </div>
+      </div>
+      {graphSelected &&
+        dc &&
+        (dc.source_allocation_policy === "relations_first_v1" ? (
+          <div
+            className="eval-search-module eval-search-budget"
+            aria-label="资料预算"
+          >
+            <header className="eval-search-module-head">
+              <strong>资料预算</strong>
+              <span>
+                {dc.source_selection_mode === "tokens"
+                  ? `${dc.source_tokens_used ?? 0} / ${dc.source_token_budget ?? 0} token`
+                  : "按条数选择来源"}
+              </span>
+            </header>
+            {dc.source_selection_mode === "tokens" && (
+              <>
+                <div className="eval-search-budget-stats">
+                  <span>
+                    关系 {dc.source_graph_relation_count ?? 0} 条 ·{" "}
+                    {dc.source_graph_relation_tokens ?? 0} token
+                  </span>
+                  <span>直接原文 {dc.source_direct_tokens ?? 0} token</span>
+                  <span>父子扩展 {dc.source_expansion_tokens ?? 0} token</span>
+                </div>
+                <p className="eval-search-note">
+                  关系优先交付，所有原文按统一重排结果使用余额，最后补充父子扩展。
+                </p>
+                {diagnostics?.context_relations?.reason && (
+                  <p className="eval-search-note">
+                    {diagnostics.context_relations.reason}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        ) : (
+          <div
+            className="eval-search-module eval-search-budget"
+            aria-label="图保底预算"
+          >
+            <header className="eval-search-module-head">
+              <strong>图保底预算</strong>
+              <span>
+                {dc.source_selection_mode === "tokens"
+                  ? `${Math.round((dc.source_graph_budget_ratio ?? 0) * 100)}% 预留额度`
+                  : "未启用"}
+              </span>
+            </header>
+            {dc.source_selection_mode === "tokens" ? (
+              <>
+                <div className="eval-search-budget-stats">
+                  <span>
+                    实际使用 <b>{dc.source_graph_budget_used ?? 0}</b> /{" "}
+                    {dc.source_graph_budget_reserved ?? 0} token
+                  </span>
+                  <span>
+                    关系 <b>{dc.source_graph_relation_count ?? 0}</b> 条 ·{" "}
+                    {dc.source_graph_relation_tokens ?? 0} token
+                  </span>
+                  <span>
+                    图独有分片 <b>{dc.source_graph_budget_count ?? 0}</b> 段
+                  </span>
+                </div>
+                <p className="eval-search-note">
+                  先放关系，再放通过相关性过滤的图独有分片；剩余额度归还公共预算。
+                </p>
+                {diagnostics?.context_relations?.reason && (
+                  <p className="eval-search-note">
+                    {diagnostics.context_relations.reason}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="eval-search-note">
+                本次未记录 token 预算图保底，或按条数选择来源。
+              </p>
+            )}
+          </div>
+        ))}
+      {mergedEvidence && mergedEvidence.length > 0 && (
+        <div className="eval-search-module eval-search-results">
+          <header className="eval-search-module-head">
+            <strong>最终计分项去向</strong>
+            <span>{mergedEvidence.length} 个计分项</span>
+          </header>
+          <ul
+            className="ag-evidence-trace ag-merge-evidence"
+            aria-label="合并过滤后的计分项命中情况"
+          >
+            {mergedEvidence.map((row, index) => (
+              <li key={index}>
+                <span
+                  className={`ag-evidence-name ${row.tone === "danger" || row.tone === "neutral" ? "is-missed" : ""}`}
+                >
+                  计分项 {index + 1}
                 </span>
-              ))}
-            </li>
-          ))}
-        </ul>
+                {!retrySearch &&
+                  (() => {
+                    const ids = evidenceChunkLists(question)[index] ?? [];
+                    const found = candidates.filter((c) =>
+                      ids.includes(c.chunk_id),
+                    );
+                    return (
+                      <>
+                        {found.some((c) => c.pool_via === "rrf") && (
+                          <Tag size="sm" outline plain>
+                            融合排名入池
+                          </Tag>
+                        )}
+                        {found.some((c) => c.pool_via === "graph") && (
+                          <Tag size="sm" outline plain>
+                            图独有额外入池
+                          </Tag>
+                        )}
+                        {found.some((c) => c.graph_budget_guaranteed) && (
+                          <Tag size="sm" outline plain>
+                            图保底入选
+                          </Tag>
+                        )}
+                      </>
+                    );
+                  })()}
+                {(row.matches ?? [row]).map((match) => (
+                  <span className="ag-evidence-match" key={match.label}>
+                    <Tag
+                      tone={match.tone}
+                      hue={match.hue}
+                      size="sm"
+                      outline={match.dashed}
+                      className={match.dashed ? "is-dashed" : undefined}
+                    >
+                      {match.label}
+                    </Tag>
+                    {match.detail && <small>{match.detail}</small>}
+                    {match.tone === "danger" &&
+                      (() => {
+                        const fixed = retrySearch
+                          ? question.retry?.evidence?.[index]
+                          : question.evidence[index];
+                        const ids = evidenceChunkLists(question)[index] ?? [];
+                        const candidates = !retrySearch
+                          ? question.diagnostics?.candidates.filter(
+                              (candidate) => ids.includes(candidate.chunk_id),
+                            )
+                          : undefined;
+                        const text = filteredRankingText(
+                          candidates?.length
+                            ? candidates
+                            : fixed
+                              ? [fixed]
+                              : [],
+                        );
+                        return text ? <small>{text}</small> : null;
+                      })()}
+                  </span>
+                ))}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
       {sourcesAvailable && (
         <ChunkTabs question={question} items={items} empty="过滤后没有分块。" />
@@ -2708,9 +3375,18 @@ function FixedLog({
   const sufficiency = question.sufficiency;
   const searches = 1 + (sufficiency?.retried ? 1 : 0);
   const usedRetry = Boolean(sufficiency?.retry_used);
+  // 放进回答上下文的图谱关系：补充检索被采用时用补充检索那次的，否则用第一次的。
+  const relationDiagnostics = usedRetry
+    ? retry?.diagnostics
+    : question.diagnostics;
+  const contextRelations = relationDiagnostics?.context_relations?.items ?? [];
   // 每个计分项所在的分片（Agent 记的所在分块，旧记录用固定流程命中的分片），用来算每次检索命中了第几个计分项。
   const evidenceLists = evidenceChunkLists(question);
   const total = question.answerable ? evidenceLists.length : 0;
+  // 计分项的正文：打开原文时标出命中的是哪几条，和 evidenceLists 的下标一一对应。
+  const evidenceTexts = question.agent?.evidence?.length
+    ? question.agent.evidence
+    : (question.evidence ?? []);
   const queries = question.queries ?? [];
   // 按扩展查询里的顺序排每一路（旧记录没有 query_routes 时是空的，退回只列检索词）。
   const routes = [...(question.query_routes ?? [])].sort(
@@ -2739,7 +3415,8 @@ function FixedLog({
     { ...question, retry: undefined, sufficiency: undefined, cleared: false },
     config,
   );
-  return (
+  return withEvalEvidence(
+    question.evidence ?? [],
     <section className="ag-log">
       <div className="ag-log-title">
         固定流程
@@ -2752,6 +3429,9 @@ function FixedLog({
       <EvidenceStatus
         question={question}
         rows={fixedEvidenceRows(question, config)}
+        graphEnabled={Boolean(
+          config.methods?.includes("graph") || question.graph_hits,
+        )}
         expanded={expanded}
         onToggle={() => setExpanded(!expanded)}
       >
@@ -2769,6 +3449,7 @@ function FixedLog({
         title="固定流程 · 检索详情"
         onClose={() => setExpanded(false)}
         className="ag-retrieval-dialog"
+        size="table"
       >
         <div className="ag-retrieval-content">
           {expanded && (
@@ -2846,7 +3527,13 @@ function FixedLog({
                     </Tag>
                   )}
                 </div>
-                <SearchParams values={params} />
+                <SearchParams
+                  values={
+                    question.diagnostics
+                      ? fixedParams(config, question.diagnostics)
+                      : params
+                  }
+                />
                 <FixedSearchResults
                   question={question}
                   items={items}
@@ -2876,7 +3563,13 @@ function FixedLog({
                       {usedRetry ? "采用了" : "没变好，沿用第一次的"}
                     </Tag>
                   </div>
-                  <SearchParams values={params} />
+                  <SearchParams
+                    values={
+                      retry.diagnostics
+                        ? fixedParams(config, retry.diagnostics)
+                        : fixedParams(config)
+                    }
+                  />
                   <FixedSearchResults
                     question={question}
                     items={retryItems}
@@ -2901,12 +3594,61 @@ function FixedLog({
                   判断资料不足，已清空：线上会直接拒答。
                 </div>
               )}
-              <MaterialLine material={fixedMaterial(question)} />
+              <MaterialLine
+                material={fixedMaterial(question)}
+                relations={contextRelations}
+                relationReason={
+                  relationDiagnostics?.context_relations?.reason ?? null
+                }
+                entries={
+                  question.cleared
+                    ? []
+                    : (usedRetry ? retryItems : items).map((item) => {
+                        const hits = Array.from(
+                          { length: total },
+                          (_, index) => index,
+                        ).filter((index) =>
+                          (item.parts ?? []).some((chunkId) =>
+                            evidenceLists[index]?.includes(chunkId),
+                          ),
+                        );
+                        return {
+                          id: item.id,
+                          chunkId: item.chunkId ?? null,
+                          position: item.position,
+                          extended: extendedParts(item).length,
+                          from: usedRetry ? "补充检索命中" : "第 1 次检索命中",
+                          hits,
+                          extHits: hits.filter(
+                            (index) =>
+                              !(
+                                item.chunkId &&
+                                evidenceLists[index]?.includes(item.chunkId)
+                              ),
+                          ),
+                          source: {
+                            key: item.key,
+                            id: item.id,
+                            title: item.title,
+                            heading: item.heading,
+                            text: item.text ?? "",
+                            chunkId: item.chunkId,
+                            parts: item.parts,
+                            relevance: item.relevance,
+                          },
+                          evidence: hits.map((index) => ({
+                            number: index + 1,
+                            text: evidenceTexts[index]?.text ?? "",
+                          })),
+                        };
+                      })
+                }
+              />
             </>
           )}
         </div>
       </DetailDialog>
-    </section>
+    </section>,
   );
 }
 
@@ -2984,7 +3726,13 @@ function SufficiencySteps({
 }
 
 // （资料池逐段列表已去掉，只显示段数；计分项怎么拿到的看「计分项命中情况」。）
-function AgentLog({ question }: { question: EvalQuestion }) {
+function AgentLog({
+  question,
+  graphEnabled = false,
+}: {
+  question: EvalQuestion;
+  graphEnabled?: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [selectedStep, setSelectedStep] = useState(0);
   const [reasoningDetail, setReasoningDetail] = useState<{
@@ -3023,7 +3771,20 @@ function AgentLog({ question }: { question: EvalQuestion }) {
   const evidenceChunks = new Set<string>();
   for (const item of agent.evidence ?? [])
     for (const chunkId of item.chunk_ids ?? []) evidenceChunks.add(chunkId);
-  return (
+  // 放进回答上下文的图谱关系：Agent 每次检索留下的关系累加，同一条只算一次（放进过上下文的算放进过）。
+  const relationMap = new Map<string, ContextRelation>();
+  for (const call of agent.calls) {
+    for (const row of call.retrieval_diagnostics?.context_relations?.items ??
+      []) {
+      const exists = relationMap.get(row.relation_id);
+      if (!exists) relationMap.set(row.relation_id, row);
+      else if (exists.status !== "context" && row.status === "context")
+        relationMap.set(row.relation_id, row);
+    }
+  }
+  const contextRelations = [...relationMap.values()];
+  return withEvalEvidence(
+    agent.evidence,
     <section className="ag-log">
       <div className="ag-log-title">
         Agent
@@ -3041,6 +3802,12 @@ function AgentLog({ question }: { question: EvalQuestion }) {
         question={question}
         agent
         rows={agentEvidenceRows(question)}
+        graphEnabled={
+          graphEnabled ||
+          agent.calls.some(
+            (call) => call.retrieval_diagnostics?.graph !== undefined,
+          )
+        }
         expanded={expanded}
         onToggle={() => setExpanded(!expanded)}
       >
@@ -3051,6 +3818,7 @@ function AgentLog({ question }: { question: EvalQuestion }) {
         title="Agent · 检索详情"
         onClose={() => setExpanded(false)}
         className="ag-retrieval-dialog"
+        size="table"
       >
         <div className="ag-retrieval-content">
           {expanded && (
@@ -3090,7 +3858,9 @@ function AgentLog({ question }: { question: EvalQuestion }) {
                 ))}
                 <button
                   type="button"
-                  className={activeStep === rounds.length + 1 ? "is-active" : ""}
+                  className={
+                    activeStep === rounds.length + 1 ? "is-active" : ""
+                  }
                   aria-current={
                     activeStep === rounds.length + 1 ? "step" : undefined
                   }
@@ -3204,7 +3974,11 @@ function AgentLog({ question }: { question: EvalQuestion }) {
                   ),
               )}
               {activeStep === rounds.length + 1 && (
-                <MaterialLine material={agentMaterial(question)} />
+                <MaterialLine
+                  material={agentMaterial(question)}
+                  relations={contextRelations}
+                  entries={agentEntries(agent)}
+                />
               )}
             </>
           )}
@@ -3218,7 +3992,7 @@ function AgentLog({ question }: { question: EvalQuestion }) {
       >
         <div className="ag-round-text">{reasoningDetail?.text}</div>
       </DetailDialog>
-    </section>
+    </section>,
   );
 }
 
@@ -3928,6 +4702,7 @@ function fromSpecial(
     retry: question.retry,
     cleared: question.cleared,
     flow_latency_ms: question.flow_latency_ms,
+    graph_hits: question.graph_hits,
     material: question.material,
     sufficiency: question.sufficiency ?? undefined,
     query_routes: question.query_routes,
@@ -4153,6 +4928,8 @@ export type BatchColumn = {
   key: string;
   title: string;
   mode: EvalMode;
+  kind?: EvalRun["kind"];
+  summary?: EvalSummary | null;
   config?: EvalConfig;
   // 这组配置单独指定的参数，卡片上标「自定义」。
   params?: EvalParams;
@@ -4223,8 +5000,10 @@ export function batchColumns(
         );
         columns.push({
           key: `${arm.id}:${mode}`,
-          title: `${arm.label} · ${MODE_NAMES[mode]}`,
+          title: `${arm.label} · ${run.kind === "generation" ? "生成评测 · " : ""}${MODE_NAMES[mode]}`,
           mode,
+          kind: run.kind,
+          summary: run.summary,
           config: run.config,
           params: run.params,
           questions,
@@ -4254,6 +5033,12 @@ function leadingNumber(text: string) {
 // 汇总卡片：和单次报告的「固定流程 / Agent」卡片一样，一列一张。
 export function BatchModeCards({ columns }: { columns: BatchColumn[] }) {
   const [detailOpen, setDetailOpen] = useState(false);
+  // 每份配置一套浅色，和下面「按类型」的表对应（同一份配置同一套颜色）。
+  const configIds = [
+    ...new Set(columns.map((column) => column.key.split(":")[0])),
+  ];
+  const colorOf = (column: BatchColumn) =>
+    `batch-color-${configIds.indexOf(column.key.split(":")[0]) % 4}`;
   const cards = columns.map((column) => {
     const questions = [...column.questions.values()];
     const rows = modeRows(
@@ -4263,6 +5048,24 @@ export function BatchModeCards({ columns }: { columns: BatchColumn[] }) {
       column.mode === "agent",
       column.params,
     );
+    if (column.kind === "generation") {
+      const generationRows: ModeRow[] = (
+        [
+          ["correctness", "答案正确性"],
+          ["faithfulness", "忠实度"],
+          ["citation_validity", "引用有效性"],
+          ["refusal_accuracy", "拒答正确率"],
+        ] as const
+      ).map(([key, label]) => ({
+        label,
+        group: "result",
+        [column.mode]: {
+          value: percent(column.summary?.[key]),
+          note: "按生成评测规则统计",
+        },
+      }));
+      rows.unshift(...generationRows);
+    }
     return { column, questions, rows };
   });
   const best = new Map<string, number>();
@@ -4284,13 +5087,16 @@ export function BatchModeCards({ columns }: { columns: BatchColumn[] }) {
       </p>
       <div className="ag-batch-scroll">
         <div
-          className={`ag-mode-cards ag-batch-cards${detailOpen ? "" : " is-collapsed"}`}
+          className={`ag-mode-cards ag-batch-cards batch-config-colors${detailOpen ? "" : " is-collapsed"}`}
           style={{
             gridTemplateColumns: `repeat(${cards.length}, minmax(300px, 1fr))`,
           }}
         >
           {cards.map(({ column, questions, rows }) => (
-            <section className="ag-mode-card" key={column.key}>
+            <section
+              className={`ag-mode-card ${colorOf(column)}`}
+              key={column.key}
+            >
               <h4>{column.title}</h4>
               {rows.map((row, index) => {
                 const cell = row[column.mode];
@@ -4301,7 +5107,8 @@ export function BatchModeCards({ columns }: { columns: BatchColumn[] }) {
                 return (
                   <Fragment key={row.label}>
                     <div
-                      className={`ag-mode-row is-${row.group}${index > 0 && rows[index - 1].group !== row.group ? " is-break" : ""}`}
+                      className={`ag-mode-row is-${row.group}${index > 0 && rows[index - 1].group !== row.group ? " is-break" : ""}${cell.disabled ? " is-disabled" : ""}`}
+                      title={cell.reason}
                     >
                       <span className="ag-mode-label">{row.label}</span>
                       <span className="ag-mode-value">
@@ -4386,7 +5193,7 @@ function columnTypeStats(column: BatchColumn, keys: string[]) {
       stat.hits += hits;
       stat.total += question.answerable ? question.evidence_count : 0;
       stat.extension += extension;
-      stat.direct += hits - extension;
+      stat.direct += hits - extension - fixedRelationHits(question);
       if (
         question.answerable &&
         question.evidence_count > 0 &&
@@ -4440,6 +5247,11 @@ export function BatchTypeStats({
   columns: BatchColumn[];
   order: string[];
 }) {
+  const configIds = [
+    ...new Set(columns.map((column) => column.key.split(":")[0])),
+  ];
+  const columnColor = (column: BatchColumn) =>
+    `batch-color-${configIds.indexOf(column.key.split(":")[0]) % 4}`;
   const types: string[] = [];
   const byType = new Map<string, string[]>();
   for (const key of order) {
@@ -4510,11 +5322,11 @@ export function BatchTypeStats({
     isTotal = false,
   ) => (
     <tr key={rowKey} className={isTotal ? "is-total" : ""}>
-      <td>{label}</td>
-      <td className="num">{keys.length}</td>
+      <td className="is-sticky-type">{label}</td>
+      <td className="num is-sticky-count">{keys.length}</td>
       {columns.map((column) => {
         const stat = columnTypeStats(column, keys);
-        const side = column.mode === "fixed" ? "is-fixed" : "is-agent";
+        const side = `${column.mode === "fixed" ? "is-fixed" : "is-agent"} ${columnColor(column)}`;
         return (
           <Fragment key={column.key}>
             <td className={`num ${side} is-col-start`}>{score(stat.scores)}</td>
@@ -4533,52 +5345,57 @@ export function BatchTypeStats({
     </tr>
   );
   return (
-    <div className="diag-table-wrap type-stats-wrap ag-batch-scroll">
-      <table className="diag-table ev-table type-stats">
-        <thead>
-          <tr>
-            <th rowSpan={2}>类型</th>
-            <th className="num" rowSpan={2}>
-              题数
+    <Table
+      containerProps={{
+        className: "diag-table-wrap type-stats-wrap ag-batch-scroll",
+      }}
+      className="diag-table ev-table type-stats batch-config-colors"
+    >
+      <thead>
+        <tr>
+          <th rowSpan={2} className="is-sticky-type">
+            类型
+          </th>
+          <th className="num is-sticky-count" rowSpan={2}>
+            题数
+          </th>
+          {columns.map((column) => (
+            <th
+              key={column.key}
+              colSpan={5}
+              className={`${columnColor(column)} is-group is-col-start`}
+            >
+              {column.title}
             </th>
-            {columns.map((column) => (
-              <th
-                key={column.key}
-                colSpan={5}
-                className={`${column.mode === "fixed" ? "is-fixed" : "is-agent"} is-group is-col-start`}
-              >
-                {column.title}
-              </th>
-            ))}
-          </tr>
-          <tr>
-            {columns.map((column) => {
-              const side = column.mode === "fixed" ? "is-fixed" : "is-agent";
-              return (
-                <Fragment key={column.key}>
-                  <th className={`num ${side} is-col-start`}>得分</th>
-                  <th className={`num ${side}`}>通过</th>
-                  <th className={`num ${side}`}>证据命中率</th>
-                  <th
-                    className={`num ${side}`}
-                    title="直接检索命中的证据数 / 全部证据数，不计扩展和读前后文"
-                  >
-                    纯检索命中率
-                  </th>
-                  <th className={`num ${side}`}>交给模型的资料</th>
-                </Fragment>
-              );
-            })}
-          </tr>
-        </thead>
-        <tbody>
-          {types.map((type) =>
-            row(type, <TypeTag type={type} hues={hues} />, byType.get(type)!),
-          )}
-          {types.length > 1 && row("合计", "合计", order, true)}
-        </tbody>
-      </table>
-    </div>
+          ))}
+        </tr>
+        <tr>
+          {columns.map((column) => {
+            const side = `${column.mode === "fixed" ? "is-fixed" : "is-agent"} ${columnColor(column)}`;
+            return (
+              <Fragment key={column.key}>
+                <th className={`num ${side} is-col-start`}>得分</th>
+                <th className={`num ${side}`}>通过</th>
+                <th className={`num ${side}`}>证据命中率</th>
+                <th
+                  className={`num ${side}`}
+                  title="直接检索命中的证据数 / 全部证据数，不计扩展和读前后文"
+                >
+                  纯检索命中率
+                </th>
+                <th className={`num ${side}`}>交给模型的资料</th>
+              </Fragment>
+            );
+          })}
+        </tr>
+      </thead>
+      <tbody>
+        {types.map((type) =>
+          row(type, <TypeTag type={type} hues={hues} />, byType.get(type)!),
+        )}
+        {types.length > 1 && row("合计", "合计", order, true)}
+      </tbody>
+    </Table>
   );
 }
 
@@ -4604,6 +5421,19 @@ export function BatchQuestionList({
   const verdictOf = (column: BatchColumn, key: string) => {
     const question = columnQuestion(column, key);
     if (!question) return null;
+    if (column.kind === "generation") {
+      const judgement = question.judgement;
+      if (!judgement) return { key: "none", label: "尚未评分" };
+      return {
+        key:
+          judgement.correctness === 1
+            ? "good"
+            : judgement.correctness > 0
+              ? "warn"
+              : "bad",
+        label: `回答${judgement.correctness === 1 ? "正确" : judgement.correctness > 0 ? "部分正确" : "未通过"} · ${judgement.correctness * 100} 分`,
+      };
+    }
     return column.mode === "fixed"
       ? fixedVerdict(question)
       : agentVerdict(question);
@@ -4708,6 +5538,25 @@ export function BatchQuestionList({
                 </button>
                 {open && (
                   <div className="ev-question-body">
+                    {question.prelude?.length ? (
+                      <details>
+                        <summary>
+                          前置对话（{question.prelude.length} 轮）
+                        </summary>
+                        {question.prelude.map((turn, index) => (
+                          <div key={index}>
+                            <p>
+                              <strong>问：</strong>
+                              {turn.question}
+                            </p>
+                            <p>
+                              <strong>答：</strong>
+                              {turn.answer}
+                            </p>
+                          </div>
+                        ))}
+                      </details>
+                    ) : null}
                     {question.answerable ? (
                       <ScoringItems items={texts} />
                     ) : (
@@ -4731,17 +5580,54 @@ export function BatchQuestionList({
                             {!item ? (
                               <p className="ev-muted-note">这一列没跑这题。</p>
                             ) : column.mode === "fixed" ? (
-                              <FixedLog
-                                question={item}
-                                params={
-                                  column.config
-                                    ? fixedParams(column.config)
-                                    : []
-                                }
-                                config={
-                                  (column.config ?? {}) as EvalRun["config"]
-                                }
-                              />
+                              <>
+                                {column.kind === "generation" && (
+                                  <section className="ag-evidence-card">
+                                    <h4>生成回答</h4>
+                                    <p style={{ whiteSpace: "pre-wrap" }}>
+                                      {item.answer || "尚无回答"}
+                                    </p>
+                                    {item.reference_answer && (
+                                      <details>
+                                        <summary>参考答案</summary>
+                                        <p>{item.reference_answer}</p>
+                                      </details>
+                                    )}
+                                    {item.judgement && (
+                                      <dl>
+                                        {(
+                                          [
+                                            ["correctness", "答案正确性"],
+                                            ["faithfulness", "忠实度"],
+                                            ["citation", "引用有效性"],
+                                          ] as const
+                                        ).map(([key, label]) => (
+                                          <div key={key}>
+                                            <dt>
+                                              {label}：
+                                              {item.judgement![key] * 100}%
+                                            </dt>
+                                            <dd>
+                                              {item.judgement![`${key}_reason`]}
+                                            </dd>
+                                          </div>
+                                        ))}
+                                      </dl>
+                                    )}
+                                  </section>
+                                )}
+                                <FixedLog
+                                  question={item}
+                                  params={
+                                    column.config
+                                      ? fixedParams(column.config)
+                                      : []
+                                  }
+                                  config={
+                                    (column.config ?? {}) as EvalRun["config"]
+                                  }
+                                />
+                              </>
                             ) : (
                               <>
                                 {item.agent?.error && (
@@ -4750,7 +5636,12 @@ export function BatchQuestionList({
                                     message={item.agent.error}
                                   />
                                 )}
-                                <AgentLog question={item} />
+                                <AgentLog
+                                  question={item}
+                                  graphEnabled={column.config?.methods?.includes(
+                                    "graph",
+                                  )}
+                                />
                               </>
                             )}
                           </div>

@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { getEvalChunkOriginal, type EvalChunkOriginal } from "./api";
+import { ChunkOriginalText } from "./ChunkOriginalText";
 import { DetailDialog } from "./DetailDialog";
 import { evidenceRanges } from "./evidenceRanges";
+import type { HighlightGroup } from "./HighlightedText";
 import { SourceTag, Tag } from "./Tag";
 
 export type ChunkOriginalSource = {
@@ -23,6 +25,8 @@ export type ChunkOriginal = {
   note?: string;
   sources: ChunkOriginalSource[];
   evidence: { number: number; text: string }[];
+  // 打开原文时高亮的词（例如搜索框里输入的内容）。
+  highlight?: string[];
 };
 
 export function ChunkOriginalDialog({
@@ -87,6 +91,10 @@ export function ChunkOriginalDialog({
   if (!value) return null;
   const current = loaded?.id === requestKey ? loaded : null;
   const target = value.context === "target";
+  // 搜索词高亮：这次要看的名字用 entity 样式（浅蓝底 + 下划线）。
+  const highlightGroups: HighlightGroup[] = value.highlight?.length
+    ? [{ kind: "entity", texts: value.highlight }]
+    : [];
   if (target)
     return (
       <DetailDialog open title={`${value.label} · 原文`} onClose={onClose}>
@@ -102,15 +110,19 @@ export function ChunkOriginalDialog({
             </p>
           )}
           {current?.data?.map((chunk) => (
-            <OriginalText
+            <ChunkOriginalText
               key={chunk.chunk_id}
               text={chunk.content}
-              evidence={[]}
+              groups={highlightGroups}
             />
           ))}
           {!chunkId &&
             value.sources.map((source) => (
-              <OriginalText key={source.key} text={source.text} evidence={[]} />
+              <ChunkOriginalText
+                key={source.key}
+                text={source.text}
+                groups={highlightGroups}
+              />
             ))}
         </div>
       </DetailDialog>
@@ -187,9 +199,15 @@ export function ChunkOriginalDialog({
                   ?.relevance?.toFixed(2)}
               </p>
             )}
-            <OriginalText
+            <ChunkOriginalText
               text={chunk.content}
-              evidence={value.evidence.map((quote) => quote.text)}
+              evidenceHint={false}
+              groups={[
+                {
+                  kind: "evidence",
+                  texts: value.evidence.map((quote) => quote.text),
+                },
+              ]}
             />
           </section>
         );
@@ -204,45 +222,18 @@ export function ChunkOriginalDialog({
             {item.snapshotNote && (
               <p className="ag-muted">{item.snapshotNote}</p>
             )}
-            <OriginalText
+            <ChunkOriginalText
               text={item.text}
-              evidence={value.evidence.map((quote) => quote.text)}
+              evidenceHint={false}
+              groups={[
+                {
+                  kind: "evidence",
+                  texts: value.evidence.map((quote) => quote.text),
+                },
+              ]}
             />
           </section>
         ))}
     </DetailDialog>
-  );
-}
-
-function OriginalText({
-  text,
-  evidence,
-}: {
-  text: string;
-  evidence: string[];
-}) {
-  const ranges = evidenceRanges(text, evidence);
-  ranges.sort((a, b) => a[0] - b[0]);
-  const merged: [number, number][] = [];
-  for (const range of ranges) {
-    const last = merged[merged.length - 1];
-    if (last && range[0] <= last[1]) last[1] = Math.max(last[1], range[1]);
-    else merged.push([...range]);
-  }
-  let end = 0;
-  return (
-    <div className="ag-delivery-text">
-      {merged.map(([start, to]) => {
-        const prefix = text.slice(end, start);
-        end = to;
-        return (
-          <span key={start}>
-            {prefix}
-            <mark>{text.slice(start, to)}</mark>
-          </span>
-        );
-      })}
-      {text.slice(end)}
-    </div>
   );
 }

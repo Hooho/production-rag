@@ -1,14 +1,4 @@
-"""评测语料库：评测检索的文档。
-
-以前评测语料就是仓库 eval/corpus 下的 .md 文件，所有评测共用，想加一份文档只能往目录里放文件，
-放进去以后每个评测都会检索到它，旧题的结果跟着变；删掉文件，评测账号里导入过的文档也还在。
-现在只有一种方式：在评测页维护语料库（表 eval_corpus）。
-- 管理员上传 Markdown / 文本文件，文件存上传目录的 eval_corpus 下，表里记标题、文件名、指纹和字数；
-- 初始语料放在 eval/seed/corpus（和初始题目 eval/seed 一样只用来初始化）：第一次用到语料库时复制一份进来，
-  和上传的完全一样，之后不再自动登记，删了也不会回来；
-- 评测开跑时勾选用哪几份（不勾就是全部）：只导入、只检索勾选的（见 app/tools/search.py 的 limit_titles）；
-- 删除语料时，评测账号里导入过的这份文档、上传目录里的文件一起删掉。
-"""
+"""评测语料使用知识库文档引用；旧文件存储函数保留用于后续清理。"""
 
 from hashlib import sha256
 import os
@@ -111,7 +101,7 @@ def entry_view(row):
 
 
 # 语料库里的全部语料（不带正文），按标题排序。
-def list_entries(engine):
+def legacy_list_entries(engine):
     ensure_seeded(engine)
     with engine.connect() as connection:
         rows = (
@@ -123,17 +113,16 @@ def list_entries(engine):
 
 
 def get_entry(engine, entry_id):
-    ensure_seeded(engine)
-    with engine.connect() as connection:
-        row = (
-            connection.execute(select(eval_corpus).where(eval_corpus.c.id == entry_id))
-            .mappings()
-            .first()
-        )
-    return entry_view(row) if row else None
+    return next((item for item in list_entries(engine) if item["id"] == entry_id), None)
 
 
 def read_content(entry):
+    if "document_id" in entry:
+        from .document_refs import rows
+
+        return "\n\n".join(
+            row[3] or row[2] for row in rows(bound_engine()) if row[1] == entry["title"]
+        )
     path = Path(entry["path"])
     if not path.is_file():
         raise CorpusError(f"语料《{entry['title']}》的文件不存在：{path.name}")
@@ -145,20 +134,17 @@ def documents_for(titles=None, engine=None):
     engine = engine or bound_engine()
     if engine is None:
         raise CorpusError("评测语料库存在数据库里，没有连接数据库")
+    from .document_refs import rows
+
     wanted = set(titles) if titles is not None else None
-    items = []
-    for entry in list_entries(engine):
-        if wanted is not None and entry["title"] not in wanted:
-            continue
-        items.append(
-            {
-                "id": entry["id"],
-                "title": entry["title"],
-                "filename": entry["filename"],
-                "content": read_content(entry),
-            }
-        )
-    return items
+    grouped = {}
+    for row in rows(engine):
+        if wanted is None or row[1] in wanted:
+            grouped.setdefault(row[1], []).append(row[3] or row[2])
+    return [
+        {"id": title, "title": title, "filename": title, "content": "\n\n".join(parts)}
+        for title, parts in grouped.items()
+    ]
 
 
 # 上传一份语料：只收 UTF-8 的 Markdown / 文本，标题用文件名（去掉扩展名），同名或内容完全相同的不收。
@@ -294,3 +280,9 @@ def delete_entry(store, entry_id):
     except ValueError:
         pass
     return entry
+
+
+def list_entries(engine):
+    from .document_refs import entries
+
+    return entries(engine)

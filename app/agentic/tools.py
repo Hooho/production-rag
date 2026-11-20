@@ -25,9 +25,10 @@ from ..tools.data_query import AGGREGATES, OPERATORS, ROW_LIMIT, DataQueryTool
 from ..tools.orders import OrderTool
 from ..tools.search import DocumentSearchTool
 
-# 检索方式对应 DocumentSearchTool 的召回方式：hybrid 向量 + BM25，keyword 只用 BM25，vector 只用向量。
+# 检索方式对应 DocumentSearchTool 的召回方式：hybrid 向量 + BM25（设置页打开图检索时再加上图），
+# keyword 只用 BM25，vector 只用向量。hybrid 写 None 表示用 DocumentSearchTool 的默认召回方式。
 SEARCH_MODES = {
-    "hybrid": ("dense", "keyword"),
+    "hybrid": None,
     "keyword": ("keyword",),
     "vector": ("dense",),
 }
@@ -37,7 +38,7 @@ CONTEXT_COUNT_MAX = 3
 
 
 class EvidencePool:
-    """一次问答里所有工具返回的资料，统一编号：S 知识库、O 订单、D 业务数据。
+    """一次问答里所有工具返回的资料，统一编号：S 知识库、O 订单、D 业务数据、G 图谱关系。
 
     Agent 会多次调用工具，固定流程里每次检索都从 S1 开始编号，这里改成整次问答连续编号，
     回答里的 [S3] 才能唯一对应到一条资料。同一个分片被不同检索词再次命中时沿用原来的编号，不重复给模型。
@@ -45,7 +46,7 @@ class EvidencePool:
 
     def __init__(self):
         self.items = {}
-        self.counters = {"S": 0, "O": 0, "D": 0}
+        self.counters = {"S": 0, "O": 0, "D": 0, "G": 0}
         self.chunks = {}
 
     def add(self, prefix, item, chunk_id=None):
@@ -87,6 +88,8 @@ def invalid(message):
 # ---------- search_knowledge ----------
 
 
+# 图检索对 Agent 是透明的：Agent 只管写检索词，打开图检索时 hybrid 模式在工具内部多走一路图，
+# 关键词由图检索自己从 query 里提取（graph_keywords）。工具定义和 Agent 提示词都不随开关变化。
 def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
     if not isinstance(query, str) or not query.strip():
         return invalid("query 不能为空")
@@ -95,6 +98,7 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
     if isinstance(top_k, bool) or not isinstance(top_k, int):
         return invalid("top_k 应为整数")
     settings = runtime_snapshot()
+    budget_mode = settings.get("agent_source_selection_mode", "count") == "tokens"
     cap = settings["agent_return_limit"]
     requested = top_k
     top_k = max(1, min(top_k, cap))
@@ -112,15 +116,18 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
         parent=settings["agent_parent_context"],
         return_limit=cap,
         excellent_score=settings["agent_excellent_score"],
+        graph_question_source="Agent 的检索词",
+        source_selection_mode=settings.get("agent_source_selection_mode", "count"),
+        source_token_budget=settings.get("agent_source_token_budget", 8000),
     )
     # 过了相关度阈值的资料，最多给 agent_return_limit 条；模型要得更少（top_k）就再少取，不能绕过阈值。
     # 不低于 Agent 优秀阈值的资料全部给，不受模型自己要的 top_k 限制（检索那边也已经不受上限限制）。
     stats = retrieval.get("stats") or {}
     given = max(top_k, stats.get("excellent", 0))
-    sources = retrieval["sources"][:given]
+    sources = retrieval["sources"] if budget_mode else retrieval["sources"][:given]
     # 过了阈值却没给模型的条数：超出上限被截掉的，加上模型自己要得少没取的。以前不说，模型以为拿到的就是全部。
     hidden = len(retrieval["sources"]) - len(sources) + stats.get("beyond_limit", 0)
-    if not sources:
+    if not sources and not retrieval.get("relations"):
         return result(
             "没有找到相关资料。可以换一种问法，或者用 keyword 模式搜索名称、编号等原话。",
             query=query,
@@ -130,6 +137,23 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
             evidence_ids=[],
             retrieval=retrieval,
         )
+    delivered = {
+        cid
+        for source in sources
+        for cid in source.get("parent_chunk_ids", [source["chunk_id"]])
+    }
+    for table in (
+        retrieval.get("diagnostics", {}).get("graph", {}).get("tables", {})
+    ).values():
+        for row in table:
+            if (
+                row.get("delivery_status") == "returned"
+                and row["chunk_id"] not in delivered
+            ):
+                row.update(
+                    delivery_status="filtered",
+                    delivery_reason="超出 Agent 本次请求段数",
+                )
     blocks = []
     evidence_ids = []
     repeated = []
@@ -147,19 +171,45 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
             )
             continue
         blocks.append(format_source(evidence_id, source))
+    # 图谱关系（token 预算模式、打开图检索时才有）：同一条关系再次出现时沿用原来的 G 编号，不重复给模型。
+    relation_blocks = []
+    relation_ids = []
+    for relation in retrieval.get("relations") or []:
+        item = {key: value for key, value in relation.items() if key != "id"}
+        relation_id, is_new = ctx.evidence.add(
+            "G",
+            {"type": "relation", **item},
+            chunk_id=f"relation:{relation['relation_id']}",
+        )
+        relation_ids.append(relation_id)
+        if is_new:
+            relation_blocks.append(f"[{relation_id}] {relation['text']}")
+        else:
+            relation_blocks.append(
+                f"[{relation_id}] 和前面返回的 {relation_id} 是同一条关系，见上文。"
+            )
+    if relation_blocks:
+        blocks.append(
+            "图谱关系（由模型从原文抽取，可能有误；和知识库资料冲突时以知识库资料为准）：\n"
+            + "\n".join(relation_blocks)
+        )
     # 这次返回的资料前面全都给过：明确告诉模型这次检索没有新资料。原来只逐条写“同一段资料”，模型要自己比对编号，
     # 评测里常见换几种说法反复拿回同一批资料（无新增检索）。这里只给信息、不强制停，查不查由模型决定。
-    if len(repeated) == len(evidence_ids):
+    if evidence_ids and len(repeated) == len(evidence_ids) and not relation_blocks:
         blocks.insert(
             0,
             f"这次检索没有新资料：返回的 {'、'.join(repeated)} 前面都已经给过。"
             "换说法再查大多还是拿回同一批资料；已有资料能回答用户的问题就直接回答，"
             "还缺某一部分时，只针对缺的那部分换一个角度查，或者用 keyword 模式查名称、编号、原话。",
         )
-    truncated = truncation_note(
-        requested, top_k, cap, hidden, len(sources), stats.get("excellent_score")
+    truncated = (
+        ""
+        if budget_mode
+        else truncation_note(
+            requested, top_k, cap, hidden, len(sources), stats.get("excellent_score")
+        )
     )
-    if truncated:
+    if truncated and not budget_mode:
         blocks.insert(0, truncated)
     return result(
         "\n\n".join(blocks),
@@ -170,15 +220,18 @@ def search_knowledge(ctx, query, mode="hybrid", top_k=TOP_K_DEFAULT):
         given=len(sources),
         hidden=hidden,
         evidence_ids=evidence_ids,
+        relation_ids=relation_ids,
         retrieval=retrieval,
-        no_new=len(repeated) == len(evidence_ids),
+        no_new=bool(evidence_ids)
+        and len(repeated) == len(evidence_ids)
+        and not relation_blocks,
     )
 
 
 # 还有过了相关度阈值、没给模型的资料时，告诉它没给全、为什么没给全，下一步怎么做由它自己决定。
 # given 比 top_k 多：多出来的是相关性不低于优秀阈值（excellent）的资料，也告诉模型为什么比它要的多。
 def truncation_note(requested, top_k, cap, hidden, given=None, excellent=None):
-    if given is not None and given > top_k:
+    if given is not None and given > top_k and excellent is not None:
         note = f"你要了 {top_k} 条，相关性 {excellent:.2f} 以上的资料有 {given} 条，都给你了。"
         if hidden > 0:
             note += f"另有 {hidden} 条相关性低一些、过了相关度线没有返回；需要时换一个更具体的说法再查。"
@@ -349,7 +402,12 @@ def tool_definitions(ctx):
         function(
             "search_knowledge",
             "在知识库中检索资料（制度、政策、说明文档等）。内部会做召回、融合、重排和相关性过滤，"
-            "返回带编号的资料 [S1]、[S2]…。",
+            "返回带编号的资料 [S1]、[S2]…。"
+            + (
+                f"每次检索资料预算约 {runtime_snapshot().get('agent_source_token_budget', 8000)} token，包含原文和图关系，不按段数截断。"
+                if runtime_snapshot().get("agent_source_selection_mode") == "tokens"
+                else ""
+            ),
             {
                 "query": {
                     "type": "string",
@@ -361,12 +419,18 @@ def tool_definitions(ctx):
                     "enum": list(SEARCH_MODES),
                     "description": "检索方式，默认 hybrid。",
                 },
-                "top_k": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": cap,
-                    "description": f"最多返回几条，默认 {min(TOP_K_DEFAULT, cap)}，最多 {cap}。",
-                },
+                **(
+                    {}
+                    if runtime_snapshot().get("agent_source_selection_mode") == "tokens"
+                    else {
+                        "top_k": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": cap,
+                            "description": f"最多返回几条，默认 {min(TOP_K_DEFAULT, cap)}，最多 {cap}。",
+                        }
+                    }
+                ),
                 "query_explanation": QUERY_EXPLANATION_SCHEMA,
             },
             ["query", "query_explanation"],

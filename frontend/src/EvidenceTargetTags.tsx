@@ -14,10 +14,13 @@ export function EvidenceTargetTags({
   targets,
   number,
   buttonLabel,
+  highlight,
 }: {
   targets: EvidenceTarget[];
   number: number;
   buttonLabel?: string;
+  // 打开原文时高亮的词（例如搜索框里输入的内容）。
+  highlight?: string[];
 }) {
   const [selected, setSelected] = useState<EvidenceTarget | null>(null);
   const [original, setOriginal] = useState<ChunkOriginal | null>(null);
@@ -29,6 +32,7 @@ export function EvidenceTargetTags({
         selected.position == null ? "分片" : `第 ${selected.position + 1} 片`,
       sources: [],
       evidence: [{ number, text: selected.quote }],
+      highlight: highlight?.map((item) => item.trim()).filter(Boolean),
     };
     if (selected.chunk_id) {
       setOriginal({ ...base, chunkId: selected.chunk_id });
