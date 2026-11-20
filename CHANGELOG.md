@@ -1,5 +1,371 @@
 # Changelog
 
+## 1.1.0 - 2026-11-21
+
+### 新增
+
+- feat: export graph data for static demo v2
+- feat: open qualified relation list with rerank scores
+- feat: unify graph header search beside title and exclusive recall filters
+- feat: isolate retrieval stage details and filter recall origins
+- feat: add persisted graph extraction experiments with dry-run merge and comparison
+- feat: show extraction data tables directly in chunk flow
+- feat: display chunk extraction as an expandable step flow
+- feat: separate Agent source selection and token budgets
+- feat: reorder evaluation configurations by dragging
+- feat: show relation chunk references and document chunk filter tags
+- feat: simplify relation evidence and filter selection by chunk
+- feat(eval): select explicit relation evidence for scoring items
+- feat: disable individual questions within evaluation suites
+- feat(eval): filter relations and chunks by scoring evidence
+- feat(eval): annotate relation and chunk scoring evidence
+- feat: show graph chunk delivery outcomes with colored tags
+- feat(eval): 汇总卡片里这组配置没开的指标置灰，hover 说明原因
+- feat(eval): report entity and global graph hit contributions
+- feat(eval): 历史列表批次行加「重跑」，沿用原配置整批重跑一份
+- feat(ui): 删除操作一律二次确认，规则写进 AGENTS.md
+- feat: replace graph budget guarantee with relation-first allocation
+- feat(graph): 取分片的表格里写明是第几片
+- feat: add optional grouped graph relation selection and trace step
+- feat: score graph context relations and preserve chunk filter reasons
+- feat(eval): 分段明细里的分片可以点开看正文
+- feat: separate entity filtering into its own graph retrieval step
+- feat(eval): 交给模型的资料改成「顶行 + 两个可点条目」
+- feat(eval): 评测里列出交给模型的图谱关系
+- feat(ui): 图检索明细表加前端搜索框
+- feat(eval): 选择目标分片时，原文高亮搜索词
+- feat(eval): 按类型表左侧「类型/题数」两列固定，横向滚动时不动
+- feat: queue evaluation submissions behind active runs
+- feat: expand evaluation template rows to show configuration details
+- feat: persist and manage evaluation configuration templates
+- feat(eval): 保存一份配置后表单重置，接着填下一组
+- feat: reference knowledge base documents and graphs in evaluations
+- feat: edit evaluation parameters directly with system value shortcuts
+- feat: disambiguate entity candidates using full question scores
+- feat(ui): 抽出原文三段展示的共享组件
+- feat: show supporting relations in retrieval chunk tables
+- feat(chat): 会话消息分页读取，历史对话列表改由后端按会话返回
+- feat: filter answer sources by type and citation status
+- feat(settings): grey out settings that are not in effect and say why
+- feat(settings): declare when each runtime setting takes effect
+- feat: explain the split rerank pool in diagnostics and settings
+- feat: send graph-only chunks to rerank by graph rank instead of a quota
+- feat: show graph relations placed in the answer context
+- feat: include graph relations in agent search_knowledge results
+- feat: put graph relations into the fixed-flow answer context
+- feat: reserve configurable graph evidence token budget
+- feat: unify answer table dialog widths through shared size prop
+- feat(eval): 新增「图检索题」专项——18 道按计分项标注的汇总题
+- feat: add configurable source token budget before parent expansion
+- feat: configure shared table presentation states and pagination via props
+- feat: share table scroll container with edge shadows
+- feat: open originals from candidate chunk links
+- feat: share retrieval filters across diagnostic lists
+- feat: filter candidate chunks by retrieval method
+- feat: add serial numbers to hybrid retrieval chunk tables
+- feat: number graph retrieval relation table rows
+- feat: show relation retrieval stage progression
+- feat: explain graph relation selection results with actual thresholds
+- feat: inspect graph retrieval stages with paginated evidence
+- feat: add hybrid relation retrieval and graph reranking
+- feat(eval): 参数组改成点开在就近弹气泡里
+- feat(eval): 前置对话每一轮可折叠，确认后自动收起
+- feat(eval): 确认后的前置对话改成只读展示
+- feat: 图检索「合计 N 个分片」可点开看完整清单
+- feat(eval): unify configuration editor and batch reports
+- feat(eval): edit confirmed context on existing questions
+- feat: 图检索明细加「按结果」筛选
+- feat: 分片列表把来源单列一列，正文列只显示这一片的正文
+- feat(eval): unify configurations and freeze batch execution
+- feat: 漏斗里三行的数字可点开看具体分片
+- feat: 「被哪几路找到」的分片数量可点开看具体分片
+- feat: 图检索诊断说明「关系相似度」是拿什么和什么比
+- feat: 图检索实体路径加相似度阈值
+- feat: 混合检索里 RRF 的分数列出算式
+- feat: 关系图加关系类型筛选
+- feat: 点实体后把它移到画布中间
+- feat: 关系图横向铺开，顶部列出实体可只看它的关系
+- feat: 检索漏斗下加「查看最终返回」入口，点开看最终留下的分片
+- feat: 本步结果的两个数字可点开看具体分片
+- feat: 融合段加「交给重排的 N 个」入口，看这批分片各路排第几
+- feat: 图检索诊断里关系按「起点→类型→终点」显示，实体名字可点开看详情
+- feat: 排名表的来源列显示原文预览，可以点开看全文
+- feat: ② 找实体里显示名字向量是用哪段文字算的
+- feat: 诊断里写明图检索是按哪个问题、哪条流程提的关键词
+- feat: 候选明细弹窗里可以按召回方式过滤分片
+- feat: 添加“全部不采纳”按钮一次性拒绝所有待处理项
+- feat: 图检索找实体加字面匹配，每个关键词只留前几个实体
+- feat: 向量进度改成横向步骤条；建图任务每行可以单独算向量
+- feat: 建图任务里显示每份文档的图检索向量进度，点开看进度条和明细
+- feat: 检索诊断记下每一步、每一路的耗时；图检索排名表带上分片正文
+- feat: Agent 的 search_knowledge 接入图检索——可以自己传 entities / themes，不传由图检索提取
+- feat: 混合检索接入图检索——设置页打开后三路一起用，两张图排名表进入 RRF
+- feat: 图检索模块 app/graph/retrieve.py——提关键词、找实体、一跳取关系、找关系、取分片
+- feat: 图检索的名字向量、关系向量——写入图谱版本时计算，支持补算
+- feat: 图谱检查每一步可以「全部重新判断」
+- feat: 图谱检查可以选 AI 判断用的模型；自动检查从第 1 步开始逐步进行
+- feat: 图谱检查前 4 步的页面——补抽、关系核对、类型核对、拆分
+- feat: 图谱检查前 4 步的后端——补抽、关系核对、类型核对、拆分
+- feat: 图谱检查分两段——「开始检查」只找可疑项，确认要调用模型几次后再判断
+- feat: 二次检查合并改为「图谱检查」：5 步箭头步骤条、手动开始、进度条、可停止和继续
+- feat: 二次检查的合并改为「改名」：名字改成选定的标准名和类型，再按身份归属，跨文档共用
+- feat: 图谱版本——每次写入存成一个版本，手动选择生效的版本
+- feat: 二次检查确认页只列出有变化的合并，已写入且没有变化的折叠起来
+- feat: 合并记录区分二次检查合并的来源（人工确认 / 人工添加），用不同颜色显示
+- feat: 二次检查确认页按实体重叠对比上次写入，标出扩大/缩小/接成/拆出/改名
+- feat(ui): 合并结果的「加入新实体」浮窗：组内卡片 + 搜索加入（标手动加入）+ 底部确认；人工合并不再放进第 3 步
+- feat(ui): 第 4 步「查看组内实体」和「新建人工合并」，第 3 步显示人工添加的合并
+- feat: 二次检查支持人工合并（搜索实体、手动加入合并结果）
+- feat: 合并记录里可以标记撤销二次检查的合并，攒到确认页一起写入
+- feat: 新增按钮旁的二次确认气泡 ConfirmPopover，替换全部 window.confirm；弹窗和二次确认规则写入 AGENTS.md
+- feat: 抽出公共 Toast 组件，二次检查的操作反馈改用 Toast；操作反馈约束写入 AGENTS.md
+- feat: 二次检查发给模型的实体改用短编号，支持重试全部失败的组
+- feat: 二次检查合并的提示词纳入提示词管理（graph_review）
+- feat: 二次检查找候选改为全连接分组（不补查）
+- feat: 二次检查改为写入图谱后的独立步骤，确认后按结果重写图谱
+- feat: 二次检查改为向量相似成对找候选，支持单条/批量记录决定，确认前汇总将要执行的合并
+- feat: add secondary entity review with mandatory human approval
+- feat: add graph relayout action and remove redundant center button
+- feat: search and highlight entities within selected graph relations
+- feat: add graph back navigation with view restoration
+- feat: split graph edges by relation category
+- feat: use stable category colors for graph labels and relations
+- feat: highlight graph relations by selected category
+- feat: 建图状态显示动态计时并在结束后固定总用时
+- feat: 支持停止建图并隔离旧任务迟到结果
+- feat: 建图状态增加逐片抽取详情与失败原因筛选
+- feat: 区分文档内与跨文档实体合并并分别统计
+- feat: 建图流程独立记录写入图谱步骤及失败阶段
+- feat: 点击图谱关系线查看原文证据与来源
+- feat: 点击分片实体名字查看文档范围内的详情
+
+### 修复
+
+- fix: separate entity recall from filtering diagnostics
+- fix: present extraction experiment results by processing stage
+- fix: dispatch and recover graph experiment queue jobs
+- fix: allow comparison content to expand vertically
+- fix: contain scrolling within evaluation comparison region
+- fix: align merged relation grouping stage numbers
+- fix: avoid Agent token budget crash and report execution errors
+- fix: format model JSON output for readable display
+- fix: load selected evaluation template without confirmation
+- fix: prevent repeated evidence catalog requests and chunk label flicker
+- fix: size scoring cards independently per grid row
+- fix(eval): preserve 12px evidence labels in detail dialogs
+- fix(graph): 「来源」那一行跟着改用 .grt-secondary
+- fix(graph): 图检索每一步去掉重复的 margin-top
+- fix(graph): 关系列表里的描述和原文引用真的缩到 12px
+- fix: enable graph relation grouping by default
+- fix: distinguish filtered graph relations from unrecalled evidence
+- fix: show evaluation retrieval stages only for enabled methods
+- fix: hide inactive graph budget in evaluation summaries
+- fix(eval): 固定列底色改为不透明，悬停时不再透出后面的列
+- fix: normalize scoring target search and refresh chunk catalog
+- fix(ui): 分片明细的关系列按块展示并固定列宽
+- fix: remove evaluation scoring item count limits
+- fix(ui): 计分项卡片不再把分片标签拉高
+- fix: allow saving evaluation templates while runs are active
+- fix(ui): 评测返回按钮在纵向容器里靠左
+- fix: restore delete action for evaluation batch reports
+- fix: keep parameter controls inline and limit system fill to inputs
+- fix: link evaluation source options to selection mode and graph method
+- fix: prevent dialog section margins from spacing evaluation modules
+- fix: keep graph relation category labels inline
+- fix: preserve and display evaluation suite names
+- fix: 文案更新
+- fix: expose graph retrieval and reserved admission in evaluation
+- fix: display literal entity similarity and match tags
+- fix: align context relation dialog with shared table dimensions
+- fix(ui): 弹窗里表格不满一屏时不再留一大片空白
+- fix: use the table dialog width for graph relations
+- fix: group graph retrieval edges and label relation counts
+- fix: show graph relations in the answer sources dialog
+- fix: open answer sources summaries and history in dialogs
+- fix: show model context details in shared dialogs
+- fix: graph budget only reserves graph-only chunks
+- fix: constrain popover table dialogs to internal table scrolling
+- fix: center retrieval status icons with consistent SVG geometry
+- fix: unify table dialog sizing and fill available height
+- fix: remove redundant retrieval method column from candidate pool
+- fix: keep ranking table header pinned in shared scroll container
+- fix: anchor table shadows outside scrolling content
+- fix: preserve readable snippet and source column widths
+- fix: render table loading placeholders per row and column
+- fix: match retrieval filter colors to methods
+- fix: unify graph evidence chunks and RRF contributions
+- fix: extend chat lock lifetime and log preflight timing
+- fix(eval): 点「自定义」不再撑高整行
+- fix: batch reranking requests and hide zero-degree graph filters
+- fix(eval): 前置对话标题行的问题摘要和标题对齐
+- fix(eval): 前置对话的标签和输入框之间补上间距
+- fix: 文案更新
+- fix(eval): freeze data when retrying initialization failures
+- fix: 并入父块的分片不占返回名额
+- fix: 检索诊断的分片 ID 只显示序号段，返回条数按来源数算
+- fix: 关系图顶部的实体列表只列 ② 找到的实体
+- fix: 候选池区分 RRF 名前几个和图检索名额补进来的
+- fix: 图检索详情弹窗里的表格，表头吸在弹窗顶部
+- fix: 弹窗里表格的表头吸在弹窗内边缘，不再留一条透出内容的缝
+- fix: 图检索带回的分片进不了重排——加图检索名额；每实体关系 30 条并按另一端去重；字面包含只认关键词包含名字
+- fix: 图检索向量集合加载超时——建集合、建索引、加载分开，加载用 120 秒超时
+- fix: 文案更新
+- fix: 图谱检查采纳完还没写入时不算完成、不跳到下一步；确认写入页可以移除单项
+- fix: 建图「重试」带上要重试的那次建图 id，不再靠猜「最近一次」
+- fix: 建图「重试」补的是最近一次建图，写入失败时也能重试
+- fix: 部首字换回汉字之前解析的 PDF，重新上传同一个文件不算重复
+- fix: 文档解析时把 PDF 里的部首字换回汉字
+- fix: 部首字导致建图写入时实体合并键重复、建图失败
+- fix: 建图抽取的输出上限从 16384 降到 6000（可用 GRAPH_EXTRACT_MAX_TOKENS 调）
+- fix: 图谱检查的 AI 判断逐项存表，判断时不再整份重写报告
+- fix: 文案更新
+- fix: 补抽时可能是已有实体另一种写法的不再自动去掉，只标出来
+- fix: 补抽结果先由程序过滤，提示词收紧，不再补原文里没有的实体
+- fix: 文案更新
+- fix: 文案更新
+- fix: 文案更新
+- fix: 样式修改
+- fix: 请求体是 JSON 字符串时自动带上 Content-Type
+- fix: 二次检查忽略模型单独列出的实体，不再整组判为失败
+- fix: 读取文档处理步骤时在 Python 里排序，避免大 JSON 结果触发 1038 Out of sort memory
+- fix: 图谱查询不在 MySQL 里对带 JSON/TEXT 的行排序，避免 1038 Out of sort memory
+- fix: pin graph workspace when scrolling past its top
+- fix: preserve graph canvas height without entity selection
+- fix: pin complete graph and detail panes within viewport
+- fix: keep graph back controls and entity heading sticky
+- fix: relayout only highlighted graph elements
+- fix: rebalance expanded graph layout and fit displayed nodes
+- fix: show remaining graph neighbors for the selected category
+- fix: expand graph neighbors using selected relation category
+- fix: show loading state for pending graph chunks
+- fix: contain scrolling within graph detail panels
+- fix: open graph source chunks in detail dialogs
+- fix: show extraction details in dialogs and allow retrying failed chunks
+- fix: 分片详情筛选翻页保留内容避免闪动
+- fix: MiniMax-M3 建图抽取关闭思考并隔离旧缓存
+- fix: 提高图谱抽取输出上限并保留截断诊断
+- fix: 抽取分片完成即保存结果和更新建图进度
+- fix: 图谱抽取单独延长请求超时至120秒
+- fix: 建图批次和重试固定使用提示词与清单快照
+- fix: 校验图谱实体可见出处并隔离私有描述
+- fix: 通用化图谱 V1 抽取提示词和默认清单
+
+### 改进
+
+- Merge pull request #1 from Hooho/feature/graph-retrieval
+- Add local database browser compose service
+- revert(eval): 去掉 suites.json 里的「图检索题」，改为通过接口导入
+- ui: remove redundant row numbers from ranked retrieval tables
+- ui: show source rankings below graph relation scores
+- ui: 分片列表的来源列挪到最后
+- ui: 图检索里的关系类型用图谱的分类色
+- 分片表「来自哪些关系」的关系类型移到中间
+- 图检索关系表头「相似度」改为「关系相似度」
+- ui: 候选池表格去掉「原文」列，按钮放在分片文字末尾
+- ui: 检索诊断的表格补上外框
+- ui: 检索诊断的表格加竖向分隔线
+- ui: 实体详情弹窗只显示实体本身，不列关系和具体分片
+- ui: 排名表拆成来源（书名）和分片（原文）两列
+- ui: 原始排名表收进弹窗，用标签切换，表格固定高度并翻页
+- ui: 弹窗里的表格固定高度，只在表格框里滚动
+- ui: 候选明细每页改成 6 条
+- ui: 候选明细改成点开在弹窗里看
+- ui: 关系图的边只写关系类别，点关系在弹窗里看详情
+- ui: 原始排名表改成点标题在弹窗里看
+- ui: 图检索「发给模型的提示词和原始输出」改成点击弹窗
+- ui: 图检索明细的「结果」加颜色：留下绿色、去掉红色，带浅底色
+- ui: 详情抽屉默认列出全部匹配项、文字 14px；步骤展开后的内容统一 12px
+- ui: ② 找实体直接列出留下的实体（每个关键词最多 6 个），字面命中的标「字面」
+- ui: 图检索过程只列数量和类型，名字、关系、分片明细放进「详情」抽屉分页看
+- ui: 检索过程里向量、关键词、图检索三个模块各占一行，不再并排
+- ui: 向量步骤条改回横排，每步的标题和剩余时间上下排
+- ui: 向量进度抽屉的步骤条改成竖排，去掉外面的灰色底框
+- ui: 检索过程拆成「权限范围 / 混合检索 / 重排与过滤」三步，混合检索里分向量、关键词、图检索三个模块
+- prompt: 新增图检索提示词 graph_keywords——从问题里提具体关键词和概括关键词
+- ui: 打开原文时统一高亮相关的实体和原文引用，写入前端交互约束
+- ui: 确认写入页已经写入的项收起，只列新增和要撤掉的
+- ui: 确认写入页已经写入过、采纳没变时不再显示「确认写入」按钮
+- ui: 补抽卡片的「程序过滤」只在真的去掉了东西时才显示
+- ui: 最近一次建图失败时在「实体关系」页签顶部提示，不再只藏在折叠的建图记录里
+- ui: 补抽卡片用引用样式写明程序过滤查了什么、去掉了什么
+- rename: 「二次检查合并」统一改叫「检查漏合并」
+- prompt: 建图抽取只抽分片原文里写到的实体，上下文只用来理解
+- ui: 图谱检查的步骤条固定一行、不再横向滚动，字号和高度缩小
+- ui: 图谱版本下拉框有备注时显示备注
+- ui: 补抽结果里补出的关系不再是整行灰色小字
+- ui: 图谱检查每一步的说明下面加一个例子；第 5 步改名「检查漏合并」
+- ui: 补抽的说法改清楚，已完成的小步骤文字变绿，列表底部留出间距
+- ui: 图谱检查步骤条里已完成的步骤改成绿色
+- ui: 图谱检查的可疑项列表翻页浏览，卡片紧凑，原文改成跟在说明后面的文字按钮、点开弹窗
+- ui: 处理流程里图谱检查合成一行「图谱检查」，显示 5 步各自的状态
+- ui: 合并这一步里面的小步骤改成竖直步骤条，放在内容左边
+- ui: 合并这一步里面也用箭头步骤条，找可疑项和 AI 判断各自一步
+- ui: 关系表列名写明「AI 基于原文的总结（小字为原文引用）」，图谱表格里的实体名左对齐
+- ui: 文字按钮字号纳入按钮规范；浮窗里的「原文」改为跟随气泡（InfoPopover），和二次确认共用定位逻辑
+- ui: 搜索结果里已在组内（新建时已选）的实体卡片置灰
+- ui: 统一表单控件（输入框、下拉框、多行文本）样式，参考 Ant Design；去掉各页面的覆盖，规范写入 AGENTS.md
+- ui: 实体关系切换页签、翻页、搜索时显示占位骨架；约束写入 AGENTS.md
+- ui: 合并记录的方法列加宽，标签和撤销上下排，不再压到「出现在」列
+- ui: 二次检查卡片上标出实体编号 e1、e2
+- ui: 按钮加载图标缩小（默认 9px、紧凑 8px，线条 1.5px）
+- ui: 按钮发请求时显示加载图标，加载状态约束写入 AGENTS.md
+- ui: 二次检查第 4 步确认时可以移除单个合并结果
+- ui: 二次检查第 3 步去掉勾选和批量操作，只保留逐条合并 / 不合并
+- ui: 二次检查的模型结论改用「建议合并 / 建议不合并」
+- ui: 二次检查改成五步页签，每步只显示自己的内容
+- ui: 统一按钮样式，按钮规范写入 AGENTS.md
+- ui: 二次检查顶部的步骤卡片可以点击，跳到对应内容
+- ui: 处理过程里二次检查入口改为小按钮，和说明放在一行
+- ui: 二次检查每一步标注执行者（系统规则/大模型/人工/系统）
+- ui: 二次检查合并改为逐组卡片+分页+原文弹窗，处理过程里也能直接人工确认
+- perf: 文档列表的处理步骤不带详细结果，打开详情时再读
+- ui: move secondary review into graph actions and add trace retry
+- ui: compact secondary review entry and show review stage for legacy graphs
+- Compact graph controls and remove hop count from origin card
+- Add non-disruptive graph hop origin and shortest-distance labels
+- ui: reduce graph entity search control height
+- ui: compact graph relation search and expand available canvas height
+- ui: remove redundant graph center action
+- Space graph pagination and prevent close button wrapping
+- Distinguish merge categories by color and narrow source column
+- Pin graph table headers and detail panels during page scroll
+- Keep entity summary pinned above sticky relation filters
+- List entity creation first then rank name matches by count
+- Show relation source text in movable shared dialog
+- Frame and zoom highlighted graph relations
+- Match relation filter sizes to inline tags
+- Scope entity relations to visible graph and link list highlighting
+- Color relation table categories and prevent narrow column wrapping
+- Add expanding glow rings around selected graph entities
+- Align graph focus toggle with uniformly sized search controls
+- Wrap compact graph exploration cards side by side
+- Add viewport-filling graph focus mode
+- Present graph exploration actions in compact card rows
+- Use neighbors in graph expansion guidance
+- Clarify repeated double-click neighbor expansion
+- Explain chunk graph link actions on hover
+- Number graph entity and relation lists and tables
+- Match relation filter colors to relation tags
+- Add sticky relation category filters to entity details
+- Reduce selected entity centering zoom
+- Restore graph filter select base styling
+- Add selected entity center and zoom control
+- Add focused one-hop graph exploration with paged neighbors
+- Show click and double-click guidance inside graph canvas
+- Improve graph curves and size nodes by unique neighbors
+- ui: 关系表通过按钮查看完整原文并高亮证据
+- ui: 分片实体关系改为双Tab表格展示
+- ui: 分片原文提示词和模型输出改用嵌套详情浮窗
+- 知识图谱：建图对话框改紧凑排版，清单内容和如何匹配改用抽屉弹窗
+- 知识图谱：画图换成 Cytoscape.js（cose 布局，节点可拖动，双击展开邻居）
+- 知识图谱：实体类型固定配色、滚轮缩放不带动页面、上传弹窗的图检索选项样式
+- 知识图谱：文档「实体关系」页签、全局「知识图谱」页面和建图对话框
+- 知识图谱：分块列表显示每片的抽取结果，可按抽取状态筛选
+- 知识图谱：建图任务和接口（预估、建图、批量、补跑、上传时开启、新版本自动重建）
+- 知识图谱：按规则把名字归到全局实体（规范化、模型标准名、别名表）
+- 知识图谱：新增实体关系抽取提示词和逐片抽取
+- 知识图谱：新增 8 张表（迁移 0020）和内置默认清单
+
 ## 1.0.0 - 2026-11-21
 
 ### 新增
